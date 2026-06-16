@@ -1,6 +1,12 @@
-# Claudible
+<p align="center">
+  <img src="assets/logo.png" alt="Claudible logo" width="200">
+</p>
 
-### The ultimate command center for Claude Code — a sleek interface, live telemetry, and hands-free voice, in one.
+<h1 align="center">Claudible</h1>
+
+<p align="center"><b>The ultimate command center for Claude Code — a sleek interface, live telemetry, and hands-free voice, in one.</b></p>
+
+---
 
 Claude Code is brilliant — but it lives in a bare terminal. **Claudible wraps it in a real interface** — an obsidian-dark UI with one-click controls, a live meter for context, cost, and tokens, and a guardrail that flips amber → red with a one-tap `/compact` before you blow the window. The actual Claude Code TUI runs inside, untouched — Claudible gives it a face, a dashboard, and a voice.
 
