@@ -1,0 +1,320 @@
+// Claudible V2 — renderer controller.
+'use strict';
+const $ = (id) => document.getElementById(id);
+const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
+const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
+
+// ---------- embedded live TUI ----------
+const term = new Terminal({
+  fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
+  fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
+  theme: { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8',
+           selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
+});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open($('terminal'));
+
+let ptyStarted = false;
+function sync() {
+  try {
+    fit.fit();
+    if (!ptyStarted) { ptyStarted = true; cv2.ptyStart(term.cols, term.rows); } // spawn Claude at the EXACT fitted size
+    else cv2.ptyResize(term.cols, term.rows);
+    updateScrollbar();
+  } catch {}
+}
+term.onData((d) => cv2.ptyInput(d));
+// Auto-scroll ONLY when already at the bottom, so scrolling up to read isn't yanked back down.
+cv2.onPtyData((d) => {
+  const b = term.buffer.active;
+  const wasAtBottom = b.viewportY >= b.baseY - 1;
+  term.write(d, () => { if (wasAtBottom) term.scrollToBottom(); updateScrollbar(); });
+});
+
+// ---------- custom scroll gutter (lives in the UI, never covers terminal text) ----------
+const sc = $('scroll'), thumb = $('scroll-thumb');
+function updateScrollbar() {
+  const b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
+  const trackH = sc.clientHeight;
+  if (baseY <= 0 || total <= rows || trackH <= 0) { thumb.style.opacity = '0'; return; }
+  const thumbH = Math.max(26, trackH * (rows / total));
+  const top = (trackH - thumbH) * (b.viewportY / baseY);
+  thumb.style.opacity = '1';
+  thumb.style.height = thumbH + 'px';
+  thumb.style.transform = 'translateY(' + top + 'px)';
+}
+term.onScroll(() => updateScrollbar());
+setInterval(updateScrollbar, 120);   // poll so the thumb tracks the live scroll position even when onScroll is sparse
+
+let dragging = false, grabDY = 0;
+function thumbTop() { return thumb.getBoundingClientRect().top - sc.getBoundingClientRect().top; }
+function scrollToFrac(frac) {
+  const baseY = term.buffer.active.baseY;
+  term.scrollToLine(Math.round(Math.max(0, Math.min(1, frac)) * baseY));
+}
+thumb.addEventListener('pointerdown', (e) => {
+  dragging = true; grabDY = e.clientY - thumbTop(); thumb.classList.add('drag');
+  thumb.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
+});
+window.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const trackH = sc.clientHeight, thumbH = thumb.offsetHeight;
+  const top = Math.max(0, Math.min(trackH - thumbH, e.clientY - sc.getBoundingClientRect().top - grabDY));
+  scrollToFrac((trackH - thumbH) > 0 ? top / (trackH - thumbH) : 0);
+});
+window.addEventListener('pointerup', () => { if (dragging) { dragging = false; thumb.classList.remove('drag'); } });
+sc.addEventListener('pointerdown', (e) => {           // click the gutter to jump
+  if (e.target === thumb) return;
+  scrollToFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
+});
+new ResizeObserver(sync).observe($('terminal'));
+window.addEventListener('resize', sync);
+setTimeout(sync, 180);
+setTimeout(() => term.focus(), 350);   // keyboard ready in the terminal on launch
+
+// After ANY panel button click, hand keyboard focus back to the terminal so the next
+// keystroke (e.g. choosing an effort level after /effort) lands in Claude — not the button.
+document.querySelectorAll('.panel button').forEach((b) =>
+  b.addEventListener('click', () => setTimeout(() => term.focus(), 0)));
+
+// ---------- meta / health ----------
+(async () => {
+  const ep = await cv2.endpoints();
+  $('meta').textContent = ep.whisper.replace('http://', '') + ' · ' + ep.kokoro.replace('http://', '');
+  setDot('d-pty', ep.pty ? 'ok' : 'bad');
+  $('sb-whisper').textContent = 'whisper ' + ep.whisper.split(':').pop();
+  $('sb-kokoro').textContent = 'kokoro ' + ep.kokoro.split(':').pop();
+})();
+
+// ---------- session tracker ----------
+// Claude Code's statusLine reports CUMULATIVE cost/tokens for the (persisted, --continue'd)
+// conversation. We want THIS session's usage, so we subtract a baseline captured at launch and
+// re-baseline on /clear or any upstream reset. Baseline resets every app launch (fresh process).
+const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n);
+let baseCost = null, sessTok = 0, lastUsageKey = null, sessionLog = [];
+function resetStats() {
+  baseCost = null; sessTok = 0; lastUsageKey = null; sessionLog.length = 0;
+  $('trk-cost').textContent = '$0.00';
+  $('trk-tokens').textContent = '0';
+}
+cv2.onStatus((s) => {
+  // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
+  if (typeof s.ctxPct === 'number') {
+    const pct = s.ctxPct;
+    $('trk-ctx').textContent = pct + '%';
+    $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
+    const bar = $('trk-ctxbar');
+    bar.classList.toggle('warn', pct >= 70 && pct < 85);
+    bar.classList.toggle('crit', pct >= 85);
+    bar.title = pct >= 70 ? `context ${pct}% — click to /compact` : 'context window used';
+  }
+  // session cost — statusLine cost is cumulative for the continued conversation; show delta since launch
+  if (typeof s.costUsd === 'number' && s.costUsd >= 0) {
+    if (baseCost === null && s.costUsd > 0) baseCost = s.costUsd;        // baseline at launch
+    if (baseCost !== null && s.costUsd < baseCost) baseCost = s.costUsd; // upstream reset (e.g. /clear)
+    $('trk-cost').textContent = '$' + (baseCost === null ? 0 : Math.max(0, s.costUsd - baseCost)).toFixed(2);
+  }
+  // session tokens — accumulate genuinely-NEW (non-cache) tokens per turn (current_usage changes each turn).
+  // Skip the FIRST key seen this launch: on a --continue session it's the PRE-launch turn's usage, which must
+  // not be counted (mirrors the cost baseline above so tokens and cost both start at 0 for the app session).
+  if (s.usageKey != null && s.usageKey !== lastUsageKey) {
+    if (lastUsageKey !== null) sessTok += (s.newTok || 0);
+    lastUsageKey = s.usageKey;
+    $('trk-tokens').textContent = fmtK(sessTok);
+  }
+});
+
+// ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Right-Ctrl push-to-talk hold) ----------
+let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false;
+function talkUI(on) { $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on); }
+
+async function startRecording() {
+  if (recording) return;
+  recording = true; discardClip = false;   // claim synchronously — blocks double-trigger re-entry
+  stopSpeech();                            // barge-in: stop any TTS the instant the user starts talking
+  talkUI(true); setDot('d-stt', 'work'); $('stt-out').textContent = 'listening…'; $('stt-out').className = 'out';
+  try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) {
+    recording = false; talkUI(false);
+    setDot('d-stt', 'bad'); $('stt-out').textContent = 'mic blocked: ' + e.message + ' — enable Windows mic for desktop apps'; $('stt-out').className = 'out';
+    return;
+  }
+  if (!recording) { micStream.getTracks().forEach((t) => t.stop()); return; }   // released during the async mic-grant gap
+  const mt = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+  mediaRecorder = new MediaRecorder(micStream, { mimeType: mt }); chunks = [];
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  mediaRecorder.onstop = async () => {
+    micStream.getTracks().forEach((t) => t.stop());
+    if (discardClip) { setDot('d-stt', 'ok'); $('stt-out').textContent = ''; $('stt-out').className = 'out'; return; }  // false-start: combo key or too short to be speech
+    const blob = new Blob(chunks, { type: 'audio/webm' });
+    setDot('d-stt', 'work'); $('stt-out').textContent = 'transcribing…'; $('stt-out').className = 'out';
+    const j = await cv2.stt(await blob.arrayBuffer());
+    if (j.error) { setDot('d-stt', 'bad'); $('stt-out').textContent = 'STT error: ' + j.error; return; }
+    // drop non-speech markers Whisper emits for silence/noise/music: [BLANK_AUDIO], (chiming), (music)…
+    const text = (j.text || '').replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text) { setDot('d-stt', 'bad'); $('stt-out').textContent = 'no speech detected — try again'; $('stt-out').className = 'out'; return; }
+    setDot('d-stt', 'ok'); $('stt-out').textContent = 'sent to Claude'; $('stt-out').className = 'out live';
+    $('stt-transcript').textContent = text;        // temp: last message only, replaced each time, never written to disk
+    cv2.ptyInput(text + '\r');                      // drive Claude in the terminal
+  };
+  mediaRecorder.start();                   // no timeslice -> valid webm header on stop
+}
+function stopRecording(opts) {
+  if (!recording) return;
+  discardClip = !!(opts && opts.discard);
+  recording = false; talkUI(false);
+  try { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch {}
+}
+$('talk').addEventListener('click', () => { recording ? stopRecording() : startRecording(); });
+
+// ---------- Push-to-talk: HOLD Right Ctrl ----------
+// Right Ctrl is chosen because it produces NO character (safe to swallow) and is rarely bound.
+// Start immediately on press (so the speech onset isn't clipped); on release, discard the clip if it
+// was actually a modifier combo (e.g. Right-Ctrl+C) or a tap too short to be speech. Capture phase so
+// xterm never receives the Right-Ctrl keydown — and a Ctrl+<key> combo still works because the other
+// key's event still carries ctrlKey=true.
+let pttHeld = false, pttStart = 0, pttCombo = false;
+const pttHint = document.querySelector('.ptt-hint');
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'ControlRight') {
+    e.preventDefault(); e.stopPropagation();
+    if (pttHeld) return;                   // ignore auto-repeat while held
+    pttHeld = true; pttCombo = false; pttStart = Date.now();
+    if (pttHint) pttHint.classList.add('live');
+    startRecording();
+    return;
+  }
+  if (pttHeld) pttCombo = true;            // another key pressed while held => it's a combo, not push-to-talk
+}, true);
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'ControlRight' && pttHeld) {
+    e.preventDefault(); e.stopPropagation();
+    pttHeld = false;
+    if (pttHint) pttHint.classList.remove('live');
+    stopRecording({ discard: pttCombo || (Date.now() - pttStart) < 250 });
+  }
+}, true);
+// if focus is lost mid-hold (alt-tab), the keyup never arrives — end the recording and keep the speech
+window.addEventListener('blur', () => {
+  if (!pttHeld) return;
+  pttHeld = false;
+  if (pttHint) pttHint.classList.remove('live');
+  stopRecording({ discard: (Date.now() - pttStart) < 250 });
+});
+
+// ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
+let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = false, ttsUrl = null, speakGen = 0;
+function stripForSpeech(t) {
+  return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
+          .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 600);
+}
+function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? 'Stop Speech' : 'Speak'; b.classList.toggle('live', on); }
+function stopSpeech() {
+  speakGen++;                                         // invalidate any in-flight speak()
+  ttsBusy = false;
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  if (ttsUrl) { URL.revokeObjectURL(ttsUrl); ttsUrl = null; }   // no object-URL leak on barge-in/stop
+  setSpeakBtn(false); setActive('lbl-out', false);
+}
+async function speak(text) {
+  if (!text) return;
+  stopSpeech();                                       // cancel anything currently playing
+  const myGen = ++speakGen;                           // claim this generation (latest speak wins)
+  ttsBusy = true; setSpeakBtn(true); setActive('lbl-out', true);
+  setDot('d-tts', 'work'); $('tts-out').textContent = 'synthesizing…'; $('tts-out').className = 'out';
+  const r = await cv2.tts(text, selectedVoice);
+  if (myGen !== speakGen) return;                     // superseded by a newer speak()/stop — drop this one
+  if (r.error) { setDot('d-tts', 'bad'); $('tts-out').textContent = 'TTS error: ' + JSON.stringify(r.error); stopSpeech(); return; }
+  ttsUrl = URL.createObjectURL(new Blob([new Uint8Array(r.audio)], { type: 'audio/mpeg' }));
+  ttsAudio = new Audio(ttsUrl);
+  ttsAudio.onended = () => { if (ttsUrl) { URL.revokeObjectURL(ttsUrl); ttsUrl = null; } ttsAudio = null; ttsBusy = false; setSpeakBtn(false); setActive('lbl-out', false); setDot('d-tts', 'ok'); $('tts-out').textContent = 'ready'; };
+  ttsAudio.play();
+  setDot('d-tts', 'ok'); $('tts-out').textContent = 'speaking…'; $('tts-out').className = 'out live';
+}
+$('speak').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else speak($('tts-in').value.trim()); });
+
+// voice selector pills
+document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('.vpill').forEach((x) => x.classList.remove('on'));
+  p.classList.add('on'); selectedVoice = p.dataset.voice;
+}));
+// collapse / expand the voice-out text box
+$('tts-collapse').addEventListener('click', () => {
+  $('tts-wrap').classList.toggle('min');
+  $('tts-collapse').classList.toggle('min');
+});
+// collapse / expand the voice-in last-transcript
+$('stt-collapse').addEventListener('click', () => {
+  $('stt-wrap').classList.toggle('min');
+  $('stt-collapse').classList.toggle('min');
+});
+// Always Speak: auto-voice every Claude reply in the selected voice
+$('always-speak').addEventListener('change', (e) => {
+  alwaysSpeak = e.target.checked;
+  $('always-toggle').classList.toggle('on', alwaysSpeak);
+  setTimeout(() => term.focus(), 0);
+});
+
+// ---------- commands ----------
+// Robust even when switching between commands: ESC closes any open menu (e.g. the /effort
+// selector) / clears partial input, then type the command + Enter, then refocus the terminal.
+// mousedown + preventDefault => the FIRST press registers even while the terminal holds focus
+// (avoids the focus-war "click twice" problem).
+const send = (cmd) => {
+  cv2.ptyInput('\x1b');                                   // close prior menu / clear input
+  setTimeout(() => cv2.ptyInput(cmd + '\r'), 120);        // then run the command
+  setTimeout(() => term.focus(), 150);                    // keyboard back in the terminal
+};
+[['cmd-effort', '/effort'], ['cmd-advisor', '/advisor'], ['cmd-model', '/model'],
+ ['cmd-compact', '/compact'], ['cmd-clear', '/clear'], ['cmd-status', '/status']].forEach(([id, cmd]) =>
+  $(id).addEventListener('mousedown', (e) => { e.preventDefault(); send(cmd); if (cmd === '/clear') resetStats(); }));
+
+// Context guardrail: the ctx bar becomes a one-tap /compact shortcut only once it's in the warn/crit zone.
+$('trk-ctxbar').addEventListener('mousedown', (e) => {
+  const bar = $('trk-ctxbar');
+  if (bar.classList.contains('warn') || bar.classList.contains('crit')) { e.preventDefault(); send('/compact'); }
+});
+
+// ---------- Claude's reply -> VOICE OUT (via the Stop hook) ----------
+cv2.onHookLine((line) => {
+  let o; try { o = JSON.parse(line); } catch { return; }
+  if (o.hook_event_name === 'UserPromptSubmit' && o.prompt) {
+    sessionLog.push({ role: 'you', text: String(o.prompt) });           // captures typed AND voice turns
+  } else if (o.hook_event_name === 'Stop' && o.last_assistant_message) {
+    sessionLog.push({ role: 'claude', text: String(o.last_assistant_message) });
+    const reply = stripForSpeech(o.last_assistant_message);
+    $('tts-in').value = reply;            // populate the (collapsible) box for manual Speak
+    if (alwaysSpeak) speak(reply);        // auto-speak the reply in the selected voice
+    else setDot('d-tts', 'ok');
+  }
+});
+
+// ---------- Save Session (pop-out tab) ----------
+function buildTranscript() {
+  const head = 'Claudible session — ' + new Date().toLocaleString() + '\n' + '='.repeat(48) + '\n\n';
+  const body = sessionLog.map((t) => `[${t.role}]\n${t.text}\n`).join('\n');
+  return head + (body || '(no turns recorded this session yet)') + '\n';
+}
+$('savetab').addEventListener('click', async () => {
+  const lbl = $('savetab').querySelector('.lbl');
+  const r = await cv2.saveSession(buildTranscript());
+  if (r && r.saved) { lbl.textContent = 'saved ✓'; setTimeout(() => { lbl.textContent = 'save session'; }, 1800); }
+  else if (r && r.error) { lbl.textContent = 'save failed'; setTimeout(() => { lbl.textContent = 'save session'; }, 1800); }
+});
+
+// ---------- Clear input (pop-out tab, bottom-right) ----------
+// One click wipes whatever you've typed/dictated in Claude's prompt box — no holding backspace.
+// Sequence = space + Esc-Esc (empirically the ONLY thing that clears every input state: single-line
+// cursor-anywhere AND multi-line). The leading space is a guard: Esc-Esc on an EMPTY field opens
+// Claude's "Rewind" picker, so we inject one throwaway char first => Esc-Esc always takes the
+// clear-draft path, then clears the space too. Sent RAW (not via send(), which would append Enter
+// and submit). Note: if clicked WHILE Claude is generating, the Esc interrupts the reply (and may
+// leave a stray space) — harmless and recoverable; clear is meant for the idle/just-dictated case.
+$('cleartab').addEventListener('click', () => {
+  cv2.ptyInput('\x20\x1b\x1b');
+  setTimeout(() => term.focus(), 0);
+  const lbl = $('cleartab').querySelector('.lbl');
+  lbl.textContent = 'cleared ✓'; setTimeout(() => { lbl.textContent = 'clear input'; }, 1200);
+});

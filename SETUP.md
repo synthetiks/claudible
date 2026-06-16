@@ -1,0 +1,46 @@
+# Setup
+
+Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it embeds the real Claude Code CLI running inside WSL, plus two local voice services (speech-to-text + text-to-speech).
+
+## 1. Prerequisites
+- **WSL2 + Ubuntu** — `wsl --install` (in an admin PowerShell), then reboot.
+- **Claude Code CLI inside WSL** — `claude` must be on your WSL PATH. See the Claude Code docs.
+- **Node.js 20+ on Windows.**
+- Inside WSL: `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
+  ```bash
+  sudo apt update && sudo apt install -y git cmake build-essential ffmpeg python3
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+## 2. Get it
+```powershell
+git clone https://github.com/<you>/claudible
+cd claudible
+npm install
+```
+`npm install` runs `patch-package`, which reapplies a tiny node-pty fix (the ConPTY guard that stops the embedded terminal from crashing under Electron).
+
+## 3. Install the voice services
+```powershell
+npm run setup
+```
+Installs **Whisper** (STT, port 2022) and **Kokoro** (TTS, port 8880) under `~/.claudible/voice` in WSL, and downloads a ~150 MB speech model. If you already have a [Voicemode](https://github.com/mbailey/voicemode) install at `~/.voicemode`, it's reused automatically and setup is instant.
+
+## 4. Run
+```powershell
+npm start
+```
+Optional Desktop shortcut: `powershell -ExecutionPolicy Bypass -File launch\make-shortcut.ps1`
+
+## Enable the microphone
+Windows → **Settings → Privacy & security → Microphone** → allow desktop apps to access the mic.
+
+## Troubleshooting
+- **Embedded terminal shows a `node-pty` / native-module error** — the module needs rebuilding for your Electron version:
+  ```powershell
+  npm run rebuild
+  ```
+  This needs **Visual Studio Build Tools** with the *Desktop development with C++* workload.
+- **No voice in or out** — confirm the services bound. In WSL: `bash wsl/services.sh` should print `whisper up :2022` and `kokoro up :8880`. Logs live in `~/.claudible/logs/`.
+- **"mic blocked"** — see *Enable the microphone* above.
+- **Point at your own STT/TTS** — set `CV2_WHISPER` / `CV2_KOKORO` to any OpenAI-compatible audio endpoint.

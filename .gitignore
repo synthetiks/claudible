@@ -1,0 +1,18 @@
+# dependencies (reinstalled with `npm install`)
+node_modules/
+
+# live session state — ephemeral; may contain personal paths / session names / cost
+/runtime/
+
+# logs
+*.log
+/logs/
+
+# debug captures / screenshots (root-level only — keep renderer/logo.png)
+/*.png
+cp1-render.png
+/debug/
+
+# OS cruft
+.DS_Store
+Thumbs.db

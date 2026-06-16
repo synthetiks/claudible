@@ -1,0 +1,23 @@
+{
+  "name": "claudible",
+  "version": "0.1.0",
+  "description": "Local, private voice-control cockpit for Claude Code — talk to an embedded Claude Code terminal and hear it reply. Windows + WSL2.",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "setup": "wsl.exe -e bash setup/setup.sh",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "electron": "42.4.0",
+    "patch-package": "^8.0.0"
+  }
+}

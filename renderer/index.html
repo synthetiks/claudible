@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claudible</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+  <style>
+    :root{
+      --bg:#070809;
+      --terminal-bg:#0a0b0d;
+      --panel:#0d0f12;
+      --raised:#16181d;
+      --raised-hi:#1c1f25;
+      --hairline:#2b2f37;          /* brighter outline */
+      --hairline-soft:#1c1f25;
+      --sheen:rgba(255,255,255,.07);
+      --ink:#e7eaef;
+      --ink-dim:#9097a1;
+      --ink-faint:#565c66;
+      --silver:#cfd6df;
+      --steel:#8493a6;
+      --live:#e5564b;              /* active-speaker red */
+      --live-soft:#cf625a;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;display:grid;grid-template-rows:52px 1fr 26px;
+      background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
+      color:var(--ink);
+      font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",Consolas,monospace;
+      font-size:13px;-webkit-font-smoothing:antialiased;
+      user-select:none;-webkit-user-select:none;cursor:default;
+    }
+    /* keep the terminal + readable text copyable; chrome (labels/buttons) is not selectable */
+    #terminal,.out,input,.transcript,.trk{user-select:text;-webkit-user-select:text;cursor:auto}
+    /* faint grain/vignette for smoky depth */
+    body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+      background:radial-gradient(120% 120% at 50% 40%, transparent 60%, rgba(0,0,0,.35) 100%);}
+    /* top bar */
+    .top{display:flex;align-items:center;gap:12px;padding:0 16px;
+      border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,#0d0f13,#090a0c)}
+    .logo{height:32px;width:auto;display:inline-block;margin-right:4px;
+      mix-blend-mode:lighten;image-rendering:pixelated}
+    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14px;color:var(--silver)}
+    .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
+    /* session tracker */
+    .trk{margin-left:auto;display:flex;align-items:center;gap:20px}
+    .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
+    .trk-item b{font-size:15px;font-weight:700;color:var(--silver);letter-spacing:.01em}
+    .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
+    .ctxbar{position:relative;width:126px;height:30px;border-radius:8px;overflow:hidden;
+      background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline);transition:box-shadow .25s ease}
+    .ctxfill{position:absolute;left:0;top:0;bottom:0;width:0;
+      background:linear-gradient(90deg,#2f6b50,#5fb487);transition:width .45s ease,background .4s ease}
+    /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives color + pulse + click */
+    .ctxbar.warn .ctxfill{background:linear-gradient(90deg,#8a6a23,#e0a93b)}
+    .ctxbar.crit .ctxfill{background:linear-gradient(90deg,#7d2f2a,#e5564b)}
+    .ctxbar.warn,.ctxbar.crit{cursor:pointer}
+    .ctxbar.warn{animation:ctxpulse-amber 2.4s ease-in-out infinite}
+    .ctxbar.crit{animation:ctxpulse-red 1.7s ease-in-out infinite}
+    .ctxbar.warn:hover{box-shadow:inset 0 0 0 1px rgba(224,169,59,.85)}
+    .ctxbar.crit:hover{box-shadow:inset 0 0 0 1px rgba(229,86,75,.95)}
+    @keyframes ctxpulse-amber{0%,100%{box-shadow:inset 0 0 0 1px rgba(224,169,59,.30)}
+      50%{box-shadow:inset 0 0 0 1px rgba(224,169,59,.7),0 0 9px -1px rgba(224,169,59,.45)}}
+    @keyframes ctxpulse-red{0%,100%{box-shadow:inset 0 0 0 1px rgba(229,86,75,.4)}
+      50%{box-shadow:inset 0 0 0 1px rgba(229,86,75,.9),0 0 12px -1px rgba(229,86,75,.6)}}
+    /* faint divider every 10% so the fill level reads at a glance (sits above fill, below the %) */
+    .ctxticks{position:absolute;inset:0;pointer-events:none;border-radius:8px;
+      background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),
+        rgba(255,255,255,.11) calc(10% - 1px),rgba(255,255,255,.11) 10%)}
+    .ctxpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      font-size:15px;font-weight:700;color:var(--silver);text-shadow:0 1px 3px #000,0 0 2px #000}
+    /* push-to-talk hint under the Talk button — <kbd> rendered as a physical key cap */
+    .ptt-hint{margin-top:7px;display:flex;align-items:center;justify-content:center;gap:6px;
+      font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint)}
+    .ptt-hint.live{color:var(--live)}
+    kbd{font-family:inherit;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:var(--silver);
+      background:linear-gradient(180deg,#1c1f25,#0f1115);border:1px solid var(--hairline);
+      border-bottom-color:#05060a;border-radius:5px;padding:3px 7px;line-height:1;text-transform:none;
+      box-shadow:inset 0 1px 0 var(--sheen),0 1.5px 0 #05060a,0 2px 3px -1px #000}
+    .ptt-hint.live kbd{color:var(--live);border-color:rgba(229,86,75,.5);
+      box-shadow:inset 0 1px 0 var(--sheen),0 0 10px -2px rgba(229,86,75,.6)}
+    /* body */
+    .body{display:grid;grid-template-columns:1fr 7px 358px;gap:11px;padding:14px;min-height:0}
+    #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
+      padding:10px 12px;min-height:0;overflow:hidden;position:relative;
+      box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
+    /* hide xterm's built-in scrollbar — we render our own in the gutter */
+    #terminal .xterm-viewport{scrollbar-width:none}
+    #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
+    /* custom scroll gutter: lives in the UI, outside the terminal, never covers text */
+    .scroll{position:relative;width:7px;align-self:stretch;border-radius:7px;
+      background:linear-gradient(180deg,#101216,#0b0d10);box-shadow:inset 0 0 0 1px var(--hairline-soft)}
+    .scroll .thumb{position:absolute;left:0;right:0;top:0;min-height:26px;border-radius:7px;
+      background:linear-gradient(180deg,#3a414c,#262b32);box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
+      cursor:grab;opacity:0;transition:background .15s,opacity .2s;will-change:transform,height}
+    .scroll:hover .thumb{background:linear-gradient(180deg,#49515d,#30353d)}
+    .scroll .thumb.drag{cursor:grabbing;background:linear-gradient(180deg,var(--silver),#8a929b)}
+    /* control column */
+    .panel{display:flex;flex-direction:column;min-height:0;position:relative}
+    /* Save-session tab: tucked at the panel's left edge, pops out LEFT over the terminal on hover */
+    /* sleek tabs floating in the terminal corners; label expands LEFT on hover.
+       .tr = top-right (save) · .br = bottom-right (clear input) */
+    .termtab{position:absolute;right:8px;z-index:20;
+      width:auto;display:flex;align-items:center;height:30px;padding:0 9px;overflow:hidden;
+      border:1px solid var(--hairline);border-radius:9px;color:var(--ink-dim);cursor:pointer;
+      background:linear-gradient(180deg,#16181d,#0f1115);
+      box-shadow:inset 0 1px 0 var(--sheen),0 3px 14px -6px #000;transition:all .18s ease}
+    .termtab.tr{top:8px}
+    .termtab.br{bottom:8px}
+    .termtab .lbl{max-width:0;opacity:0;overflow:hidden;white-space:nowrap;font-size:11px;letter-spacing:.08em;
+      text-transform:uppercase;transition:max-width .2s ease,opacity .2s ease,margin .2s ease}
+    .termtab .ico{width:16px;height:16px;flex:none}
+    .termtab:hover{color:var(--ink);border-color:rgba(255,255,255,.22);
+      box-shadow:inset 0 1px 0 var(--sheen),0 4px 18px -6px rgba(150,180,220,.35)}
+    .termtab:hover .lbl{max-width:140px;opacity:1;margin-right:8px}
+    .termtab:active{transform:translateY(1px)}
+    .sec{padding:15px 4px;border-bottom:1px solid var(--hairline-soft)}
+    .sec:last-child{border-bottom:0}
+    .label{display:flex;align-items:center;gap:9px;margin-bottom:12px;
+      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .label .ico{width:15px;height:15px;color:var(--ink-faint);transition:color .2s, filter .2s;flex:none}
+    .label.active .ico{color:var(--live);filter:drop-shadow(0 0 6px var(--live))}
+    .label.active{color:var(--ink)}
+    .dot{width:7px;height:7px;border-radius:50%;background:#2a2e35;flex:none;transition:.25s;margin-left:auto}
+    .dot.ok{background:var(--silver);box-shadow:0 0 8px -1px var(--silver)}
+    .dot.work{background:var(--steel);box-shadow:0 0 8px -1px var(--steel)}
+    .dot.bad{background:var(--live);box-shadow:0 0 8px -1px var(--live)}
+    button{width:100%;font-family:inherit;font-size:12px;letter-spacing:.06em;color:var(--ink-dim);
+      background:linear-gradient(180deg,#191c22,#101216);border:1px solid var(--hairline);
+      border-radius:9px;padding:13px 14px;cursor:pointer;transition:all .16s ease;
+      box-shadow:inset 0 1px 0 var(--sheen)}
+    button:hover{border-color:rgba(255,255,255,.22);color:var(--ink);
+      box-shadow:inset 0 1px 0 var(--sheen),0 2px 16px -8px rgba(180,200,230,.25)}
+    button:active{transform:translateY(1px)}
+    button.primary{color:var(--ink);font-size:13px;padding:15px}
+    button.live{color:#fff;border-color:var(--live);
+      background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 22px -6px var(--live),inset 0 1px 0 rgba(255,255,255,.06)}
+    .cmds{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .cmds button{padding:10px 8px;font-size:11px;letter-spacing:.02em}
+    /* voice selector pills */
+    .voices{display:flex;gap:6px;margin-bottom:10px}
+    .vpill{flex:1;width:auto;padding:8px 4px;font-size:11px;letter-spacing:.03em;color:var(--ink-dim);
+      background:#101216;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:all .14s;
+      display:flex;align-items:center;justify-content:center;gap:5px;box-shadow:none}
+    .vpill i{font-style:normal;font-size:10px;opacity:.55}
+    .vpill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
+    .vpill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
+    .vpill.on i{opacity:.7}
+    /* sleek collapse chevron + collapsible text box */
+    .collapse{width:auto;padding:0 3px;background:none;border:none;box-shadow:none;color:var(--ink-dim);
+      font-size:17px;line-height:1;cursor:pointer;transition:transform .2s ease,color .15s}
+    .collapse:hover{color:var(--ink);border:none;box-shadow:none;background:none}
+    .collapse.min{transform:rotate(-90deg)}
+    .collapsible{max-height:180px;overflow:hidden;opacity:1;transition:max-height .24s ease,opacity .18s ease,margin .2s}
+    .collapsible.min{max-height:0;opacity:0;margin:0}
+    .transcript{font-size:12px;line-height:1.5;color:var(--ink-dim);background:#0a0b0d;
+      border:1px solid var(--hairline-soft);border-radius:8px;padding:9px 11px;
+      white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto}
+    /* Always-Speak slide toggle */
+    .speakrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px}
+    .speakrow .out{margin:0;font-size:11px;color:var(--ink-faint);text-align:right;min-height:0}
+    .toggle{display:flex;align-items:center;gap:9px;cursor:pointer;
+      font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);transition:color .15s}
+    .toggle input{display:none}
+    .toggle .sw{width:34px;height:18px;border-radius:999px;background:#181b20;
+      border:1px solid var(--hairline);position:relative;transition:.18s;flex:none}
+    .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
+      background:linear-gradient(180deg,#9aa3ae,#5f656d);transition:.18s}
+    .toggle input:checked + .sw{background:linear-gradient(90deg,#2f6b50,#5fb487);border-color:transparent}
+    .toggle input:checked + .sw::after{transform:translateX(16px);background:linear-gradient(180deg,#eef5ef,#cfe6d8)}
+    .toggle.on{color:var(--ink)}
+    .out{margin-top:11px;font-size:12px;color:var(--ink-dim);min-height:17px;line-height:1.5;
+      white-space:pre-wrap;word-break:break-word;transition:color .2s}
+    .out.live{color:var(--ink)}
+    .lat{color:var(--steel)}
+    input[type=text]{width:100%;font-family:inherit;font-size:12px;color:var(--ink);
+      background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color .16s}
+    input[type=text]:focus{outline:none;border-color:rgba(255,255,255,.24)}
+    .devrow{display:flex;align-items:center;gap:10px;margin-top:2px}
+    .devrow button{width:auto;padding:7px 11px;font-size:10px;color:var(--ink-faint)}
+    /* status bar */
+    .status{display:flex;align-items:center;gap:18px;padding:0 16px;
+      border-top:1px solid var(--hairline);font-size:10px;letter-spacing:.1em;color:var(--ink-faint);
+      background:linear-gradient(0deg,#0c0e11,#090a0c)}
+    .status .s{display:flex;align-items:center;gap:7px}
+    .status .s .dot{margin-left:0}
+    .status .end{margin-left:auto;color:var(--ink-faint)}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <img class="logo" src="logo.png" alt="Claudible logo" />
+    <span class="wordmark">claudible</span><span class="tag">v2</span>
+    <span class="trk" title="session usage">
+      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">—</span></span>
+      <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>
+      <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
+    </span>
+  </div>
+
+  <div class="body">
+    <div id="terminal">
+      <button class="termtab tr" id="savetab" title="Save session">
+        <span class="lbl">save session</span>
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      </button>
+      <button class="termtab br" id="cleartab" title="Clear what you've typed in the input box">
+        <span class="lbl">clear input</span>
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+      </button>
+    </div>
+    <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
+    <div class="panel">
+      <div class="sec">
+        <div class="label" id="lbl-in">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          voice in <span class="dot" id="d-stt"></span>
+          <button class="collapse min" id="stt-collapse" title="show / hide last transcript">▾</button>
+        </div>
+        <button id="talk" class="primary" title="click to start · click again to stop · or hold Right Ctrl">Talk</button>
+        <div class="ptt-hint">hold <kbd>Right&nbsp;Ctrl</kbd> to talk</div>
+        <div class="out" id="stt-out"></div>
+        <div class="collapsible min" id="stt-wrap">
+          <div class="transcript" id="stt-transcript">your last message will appear here</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="label" id="lbl-out">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 8a5 5 0 0 1 0 8"/></svg>
+          voice out <span class="dot" id="d-tts"></span>
+          <button class="collapse min" id="tts-collapse" title="show / hide text box">▾</button>
+        </div>
+        <div class="voices">
+          <button class="vpill on" data-voice="af_bella">Bella<i>♀</i></button>
+          <button class="vpill" data-voice="af_heart">Heart<i>♀</i></button>
+          <button class="vpill" data-voice="am_michael">Michael<i>♂</i></button>
+        </div>
+        <div class="collapsible min" id="tts-wrap">
+          <input type="text" id="tts-in" value="Type here, then hit Speak to test how this voice sounds." placeholder="Type a line to test the selected voice…" />
+        </div>
+        <button id="speak">Speak</button>
+        <div class="speakrow">
+          <label class="toggle" id="always-toggle">
+            <input type="checkbox" id="always-speak" />
+            <span class="sw"></span>
+            <span class="tlabel">Always Speak</span>
+          </label>
+          <span class="out" id="tts-out"></span>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="label">commands</div>
+        <div class="cmds">
+          <button id="cmd-effort">/effort</button>
+          <button id="cmd-advisor">/advisor</button>
+          <button id="cmd-model">/model</button>
+          <button id="cmd-compact">/compact</button>
+          <button id="cmd-clear">/clear</button>
+          <button id="cmd-status">/status</button>
+        </div>
+      </div>
+
+
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="s"><span class="dot" id="d-pty"></span> <span id="pty-note">terminal</span></span>
+    <span class="s" id="sb-whisper">whisper</span>
+    <span class="s" id="sb-kokoro">kokoro</span>
+    <span class="end" id="meta">connecting…</span>
+  </div>
+
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

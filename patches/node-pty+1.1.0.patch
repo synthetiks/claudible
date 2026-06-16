@@ -1,0 +1,19 @@
+diff --git a/node_modules/node-pty/lib/conpty_console_list_agent.js b/node_modules/node-pty/lib/conpty_console_list_agent.js
+index 8c4fca9..c3a3be5 100644
+--- a/node_modules/node-pty/lib/conpty_console_list_agent.js
++++ b/node_modules/node-pty/lib/conpty_console_list_agent.js
+@@ -10,7 +10,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ var utils_1 = require("./utils");
+ var getConsoleProcessList = utils_1.loadNativeModule('conpty_console_list').module.getConsoleProcessList;
+ var shellPid = parseInt(process.argv[2], 10);
+-var consoleProcessList = getConsoleProcessList(shellPid);
+-process.send({ consoleProcessList: consoleProcessList });
++// PATCH (claudible): AttachConsole can fail under Electron and crashed the whole app.
++// Guard it — fall back to just the shell pid so node-pty's kill path still works.
++var consoleProcessList;
++try { consoleProcessList = getConsoleProcessList(shellPid); }
++catch (e) { consoleProcessList = [shellPid]; }
++try { process.send({ consoleProcessList: consoleProcessList }); } catch (e) {}
+ process.exit(0);
+ //# sourceMappingURL=conpty_console_list_agent.js.map
+\ No newline at end of file
