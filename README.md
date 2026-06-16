@@ -1,18 +1,20 @@
 # Claudible
 
-**Talk to Claude Code. Hear it talk back.**
+### The ultimate command center for Claude Code — a sleek interface, live telemetry, and hands-free voice, in one.
 
-Claudible is a local, private, voice-control desktop cockpit that wraps the **real Claude Code CLI** in an embedded terminal. You speak — your words are typed into the live Claude Code session; Claude's replies are read back aloud. No cloud speech, no telemetry, nothing recorded.
+Claude Code is brilliant — but it lives in a bare terminal. **Claudible wraps it in a real interface** — an obsidian-dark UI with one-click controls, a live meter for context, cost, and tokens, and a guardrail that flips amber → red with a one-tap `/compact` before you blow the window. The actual Claude Code TUI runs inside, untouched — Claudible gives it a face, a dashboard, and a voice.
 
-> **Windows 11 + WSL2 only** (today). See [Platform support](#platform-support).
+And when you want to go hands-free, **full voice control** is built in: hold a key, speak, and your words drop into the live session; replies are read back in a natural voice. **Not a reskin — a control surface.** And it's **100% local**: no cloud, no telemetry, nothing recorded.
+
+> **Windows 11 + WSL2** · fully local · MIT
 
 ## Features
-- 🎙️ **Push-to-talk** (hold **Right-Ctrl**) or click **Talk** → local Whisper transcribes → typed into the live Claude Code TUI
-- 🔊 Claude's replies **spoken** via local Kokoro TTS (voice picker, "always speak" toggle)
-- 🖥️ The **real Claude Code terminal**, embedded (xterm.js) — full TUI, scrollback, your own session
-- 📊 Live session **meter** — context %, cost, tokens — with a **context guardrail** (the bar turns amber→red and becomes a one-tap `/compact`)
-- 🧹 One-click **clear input** and **save session**
-- 🔒 **Fully local** — speech never leaves your machine
+- 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js) with full scrollback, dressed in a sleek obsidian-dark UI. Your session, untouched.
+- 📊 **Live telemetry** — context %, cost, and tokens at a glance, with a **context guardrail** that turns amber → red and offers a one-tap `/compact` before you run out of room.
+- 🎛️ **One-click controls** — clear the input, save the session, and fire `/effort`, `/compact`, `/status` & friends from buttons — no commands to memorize.
+- 🎙️ **Hands-free voice in** — push-to-talk (hold **Right-Ctrl**) or click **Talk**; your speech is transcribed locally and typed straight into the live session.
+- 🔊 **Spoken replies** — Claude's answers read back in a natural voice (voice picker + "always speak" toggle).
+- 🔒 **100% local** — Whisper + Kokoro run on your machine. No cloud, no telemetry, nothing recorded.
 
 ## Prerequisites
 - **Windows 11 + WSL2** (Ubuntu)
@@ -46,3 +48,7 @@ Windows 11 + WSL2 today — it spawns `wsl.exe` and embeds Claude Code running i
 
 ## License
 [MIT](LICENSE).
+
+---
+
+*Built by the_crazydev with Claude.*
