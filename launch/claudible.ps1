@@ -1,4 +1,4 @@
-# Claudible launcher — bring up the local voice services in WSL, then open the cockpit.
+# Claudible launcher - bring up the local voice services in WSL, then open the cockpit.
 $ErrorActionPreference = "SilentlyContinue"
 $app = Split-Path -Parent $PSScriptRoot           # repo root (this script lives in <repo>\launch)
 # forward slashes: single backslashes get stripped crossing into WSL, so a raw C:\... reaches wslpath mangled

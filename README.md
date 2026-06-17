@@ -29,15 +29,25 @@ When you want to go hands-free, **full voice control** is built in. Hold a key, 
 - Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 
 ## Install & run
-> ⚠️ **Run these in Windows PowerShell — not inside WSL.** Clone onto your **Windows drive** (e.g. `C:\Users\you\claudible`), not your WSL home. Claudible's app is a *Windows* Electron app that embeds Claude Code running in WSL; running `npm start` from inside WSL installs the Linux Electron and fails with `libnspr4.so: cannot open shared object file`. Only `npm run setup` reaches into WSL, and it does that for you.
+**Run in Windows PowerShell, not inside WSL.** (Claudible's app is a *Windows* Electron app that embeds Claude Code running in WSL; running it from inside WSL installs the Linux Electron and dies on `libnspr4.so`.) During beta the repo is **private — you must be added as a collaborator first**, and you need **WSL2** + a **signed-in Claude Code** inside it (see [Prerequisites](#prerequisites)).
+
+**One line** — clones, installs everything, and launches:
+```powershell
+git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
+```
+`install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL — installing their Linux deps for you (it may ask for your WSL sudo password) — then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again — it resumes.
+
+<details><summary>Prefer to run the steps by hand?</summary>
+
 ```powershell
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
-npm install        # installs deps + reapplies the small node-pty fix (patch-package)
-npm run setup      # installs the local voice services in WSL (first run downloads ~150 MB Whisper + ~327 MB Kokoro models)
-npm start          # opens the cockpit (and brings the voice services up if they aren't already)
+npm install        # deps + the small node-pty patch
+npm run setup      # builds the WSL voice services (installs their deps; ~480 MB models on first run)
+npm start          # opens the cockpit
 ```
-Optional Desktop shortcut: `powershell -ExecutionPolicy Bypass -File launch\make-shortcut.ps1`
+Optional Desktop shortcut: `powershell -NoProfile -ExecutionPolicy Bypass -File launch\make-shortcut.ps1`
+</details>
 
 Full steps + troubleshooting: **[SETUP.md](SETUP.md)**.
 

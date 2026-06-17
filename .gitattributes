@@ -1,0 +1,4 @@
+# WSL/bash scripts and the node-pty patch MUST stay LF, even when cloned on Windows with
+# core.autocrlf=true — CRLF would break `bash` (\r errors) and stop patch-package from applying.
+*.sh    text eol=lf
+*.patch text eol=lf

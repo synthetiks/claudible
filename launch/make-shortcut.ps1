@@ -1,5 +1,5 @@
 # Creates a Desktop shortcut that launches Claudible. Paths derive from this script's location,
-# so it works for any user/install dir — no hardcoded home.
+# so it works for any user/install dir - no hardcoded home.
 $app = Split-Path -Parent $PSScriptRoot            # repo root (this script lives in <repo>\launch)
 $ws = New-Object -ComObject WScript.Shell
 $desktop = [Environment]::GetFolderPath('Desktop')

@@ -12,14 +12,23 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 
-## 2. Get it
-> **Do this in Windows PowerShell, not inside WSL** — and clone onto your Windows drive (e.g. `C:\Users\you\claudible`), not your WSL home. The Electron app is the Windows side; it reaches into WSL itself. (Cloning/running inside WSL installs the Linux Electron, which fails with `libnspr4.so: cannot open shared object file`.)
+## 2. Get it — one line (does steps 2–4 for you)
+> **Run in Windows PowerShell, not inside WSL** (the Electron app is the Windows side; it reaches into WSL itself — running it inside WSL fails with `libnspr4.so`). The repo is **private during beta, so you must be added as a collaborator first**; your first clone will prompt you to sign in to GitHub.
+
+```powershell
+git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
+```
+`install.ps1` checks/installs Windows **Node 22.12+**, runs `npm install`, builds the voice services in WSL (installing their deps — may ask for your WSL sudo password), makes a Desktop shortcut, and launches. First run downloads ~480 MB of models (10–20 min); re-run the line if interrupted.
+
+<details><summary>Or do it by hand (steps 2–4 below).</summary>
+
 ```powershell
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
 npm install
 ```
-`npm install` runs `patch-package`, which reapplies a tiny node-pty fix (the ConPTY guard that stops the embedded terminal from crashing under Electron). It also needs **Node 22.12+ for Windows** installed (not just WSL's Node).
+`npm install` runs `patch-package` (the tiny node-pty ConPTY fix) and needs **Node 22.12+ for Windows** (not just WSL's Node). Then continue with steps 3–4.
+</details>
 
 ## 3. Install the voice services
 ```powershell
