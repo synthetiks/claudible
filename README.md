@@ -18,7 +18,7 @@ When you want to go hands-free, **full voice control** is built in. Hold a key, 
 - 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js) with full scrollback, dressed in a sleek obsidian-dark UI. Your session, untouched.
 - 📊 **Live telemetry** — context %, cost, and tokens at a glance, with a **context guardrail** that turns amber → red and offers a one-tap `/compact` before you run out of room.
 - 🎛️ **One-click controls** — clear the input, save the session, and fire `/effort`, `/compact`, `/status` & friends from buttons — no commands to memorize.
-- 🎙️ **Hands-free voice in** — push-to-talk (hold **Right-Ctrl**) or click **Talk**; your speech is transcribed locally and typed straight into the live session.
+- 🎙️ **Hands-free voice in** — push-to-talk (hold **Left-Ctrl**) or click **Talk**; your speech is transcribed locally and typed straight into the live session.
 - 🔊 **Spoken replies** — Claude's answers read back in a natural voice (voice picker + "always speak" toggle).
 - 🔒 **Local voice** — Whisper + Kokoro run on your machine; Claudible adds no telemetry. (Claude Code itself still talks to Anthropic — that's how it works.)
 

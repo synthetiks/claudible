@@ -122,7 +122,7 @@ function pollHooks() {
       hookOffset = st.size; hookBuf += buf.toString('utf8');
       let i; while ((i = hookBuf.indexOf('\n')) >= 0) { const l = hookBuf.slice(0, i).trim(); hookBuf = hookBuf.slice(i + 1); if (l) win.webContents.send('hook:line', l); }
     } catch {}
-  }, 600);
+  }, 80);   // poll often so a finished reply reaches the renderer (and TTS) with minimal lag
 }
 ipcMain.handle('hook:test', async () => {
   const ts = Date.now();
@@ -145,7 +145,7 @@ ipcMain.handle('tts', async (e, text, voice) => {
   try {
     const r = await fetch(`${KOKORO}/v1/audio/speech`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'kokoro', input: text, voice: voice || 'af_bella', response_format: 'mp3', speed: 1.0 }),
+      body: JSON.stringify({ model: 'kokoro', input: text, voice: voice || 'af_bella', response_format: 'mp3', speed: 1.05 }),
     });
     const ct = r.headers.get('content-type') || '';
     if (!r.ok || ct.includes('application/json')) {

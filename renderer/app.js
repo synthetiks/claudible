@@ -125,7 +125,7 @@ claudible.onStatus((s) => {
   }
 });
 
-// ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Right-Ctrl push-to-talk hold) ----------
+// ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Left-Ctrl push-to-talk hold) ----------
 let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false;
 function talkUI(on) { $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on); }
 
@@ -156,9 +156,15 @@ async function startRecording() {
     if (!text) { setDot('d-stt', 'bad'); $('stt-out').textContent = 'no speech detected — try again'; $('stt-out').className = 'out'; return; }
     setDot('d-stt', 'ok'); $('stt-out').textContent = 'sent to Claude'; $('stt-out').className = 'out live';
     $('stt-transcript').textContent = text;        // temp: last message only, replaced each time, never written to disk
-    claudible.ptyInput(text + '\r');                      // drive Claude in the terminal
+    // Insert the transcript via BRACKETED PASTE, then submit with a separate Enter. Sending raw text +\r
+    // let Claude Code's TUI treat a long burst as a paste and swallow the \r as a newline, so long
+    // dictations stuck in the input box. Wrapping in ESC[200~ … ESC[201~ makes Claude finalize the paste
+    // deterministically on the end-marker (no timing guess); the standalone Enter then always submits.
+    claudible.ptyInput('\x1b[200~' + text + '\x1b[201~');   // paste the transcript into the live TUI
+    setTimeout(() => claudible.ptyInput('\r'), 120);        // …then submit it
   };
-  mediaRecorder.start();                   // no timeslice -> valid webm header on stop
+  mediaRecorder.start(1000);               // 1s timeslice: collect data incrementally so LONG recordings
+                                           // capture reliably (concatenated webm chunks decode fine via ffmpeg)
 }
 function stopRecording(opts) {
   if (!recording) return;
@@ -168,39 +174,47 @@ function stopRecording(opts) {
 }
 $('talk').addEventListener('click', () => { recording ? stopRecording() : startRecording(); });
 
-// ---------- Push-to-talk: HOLD Right Ctrl ----------
-// Right Ctrl is chosen because it produces NO character (safe to swallow) and is rarely bound.
-// Start immediately on press (so the speech onset isn't clipped); on release, discard the clip if it
-// was actually a modifier combo (e.g. Right-Ctrl+C) or a tap too short to be speech. Capture phase so
-// xterm never receives the Right-Ctrl keydown — and a Ctrl+<key> combo still works because the other
-// key's event still carries ctrlKey=true.
-let pttHeld = false, pttStart = 0, pttCombo = false;
+// ---------- Push-to-talk: HOLD Left Ctrl ----------
+// Left Ctrl is also the terminal's busiest modifier (Ctrl+C/R/D/…), so we DON'T fire the mic on a
+// quick press. A ~150ms hold-debounce means only a deliberate hold (with no other key) starts
+// recording; a quick Ctrl+<key> shortcut cancels the timer and never touches the mic — and still
+// works, because we only swallow the lone Ctrl keydown while the other key's event still carries
+// ctrlKey=true. Capture phase so xterm never sees the lone Ctrl. Trade-off: speech onset begins
+// ~150ms after you press (press, then speak — natural for push-to-talk).
+const PTT_HOLD_MS = 150;
+let pttHeld = false, pttStart = 0, pttCombo = false, pttTimer = null;
 const pttHint = document.querySelector('.ptt-hint');
+function pttCancelTimer() { if (pttTimer) { clearTimeout(pttTimer); pttTimer = null; } }
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'ControlRight') {
+  if (e.code === 'ControlLeft') {
     e.preventDefault(); e.stopPropagation();
     if (pttHeld) return;                   // ignore auto-repeat while held
     pttHeld = true; pttCombo = false; pttStart = Date.now();
-    if (pttHint) pttHint.classList.add('live');
-    startRecording();
+    pttTimer = setTimeout(() => {          // held long enough alone => it's a deliberate talk, start the mic
+      pttTimer = null;
+      if (pttHeld && !pttCombo) { if (pttHint) pttHint.classList.add('live'); startRecording(); }
+    }, PTT_HOLD_MS);
     return;
   }
-  if (pttHeld) pttCombo = true;            // another key pressed while held => it's a combo, not push-to-talk
+  if (pttHeld) { pttCombo = true; pttCancelTimer(); }   // another key while held => a shortcut, never start the mic
 }, true);
 window.addEventListener('keyup', (e) => {
-  if (e.code === 'ControlRight' && pttHeld) {
+  if (e.code === 'ControlLeft' && pttHeld) {
     e.preventDefault(); e.stopPropagation();
-    pttHeld = false;
+    pttHeld = false; pttCancelTimer();
     if (pttHint) pttHint.classList.remove('live');
-    stopRecording({ discard: pttCombo || (Date.now() - pttStart) < 250 });
+    // Discard ONLY a too-short clip. We don't discard on pttCombo here: the debounce already stops quick
+    // Ctrl+<key> shortcuts from ever starting the mic, so once recording is underway a later stray
+    // keypress must NOT nuke a long dictation.
+    if (recording) stopRecording({ discard: (Date.now() - pttStart) < (PTT_HOLD_MS + 250) });
   }
 }, true);
 // if focus is lost mid-hold (alt-tab), the keyup never arrives — end the recording and keep the speech
 window.addEventListener('blur', () => {
   if (!pttHeld) return;
-  pttHeld = false;
+  pttHeld = false; pttCancelTimer();
   if (pttHint) pttHint.classList.remove('live');
-  stopRecording({ discard: (Date.now() - pttStart) < 250 });
+  if (recording) stopRecording({ discard: (Date.now() - pttStart) < (PTT_HOLD_MS + 200) });
 });
 
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
@@ -217,20 +231,57 @@ function stopSpeech() {
   if (ttsUrl) { URL.revokeObjectURL(ttsUrl); ttsUrl = null; }   // no object-URL leak on barge-in/stop
   setSpeakBtn(false); setActive('lbl-out', false);
 }
+// Split a reply into sentence-ish chunks (grouped up to ~160 chars) so synthesis of the FIRST chunk
+// is quick and audio can start almost immediately, instead of waiting for the whole reply to render.
+function chunkForSpeech(text) {
+  const sentences = text.match(/[^.!?…]+[.!?…]+\s*|[^.!?…]+$/g) || [text];
+  const out = []; let buf = '';
+  const cap = () => (out.length === 0 ? 40 : 180);     // keep the FIRST chunk tiny so audio starts fast
+  for (const s of sentences) {
+    if (buf && (buf + s).length > cap()) { out.push(buf.trim()); buf = ''; }
+    buf += s;
+    while (buf.length > cap()) {                        // a single oversized sentence: break at a space
+      let cut = buf.lastIndexOf(' ', cap());
+      if (cut <= 0) cut = cap();
+      out.push(buf.slice(0, cut).trim()); buf = buf.slice(cut);
+    }
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out;
+}
+// Play one synthesized chunk; resolves when it finishes OR is stopped (pause), so the pipeline never hangs.
+function playBlob(arrayBuf, myGen) {
+  return new Promise((resolve) => {
+    if (myGen !== speakGen) return resolve();
+    const url = URL.createObjectURL(new Blob([new Uint8Array(arrayBuf)], { type: 'audio/mpeg' }));
+    ttsUrl = url; const a = new Audio(url); ttsAudio = a;
+    let done = false;
+    const fin = () => { if (done) return; done = true; URL.revokeObjectURL(url); if (ttsUrl === url) ttsUrl = null; resolve(); };
+    a.onended = fin; a.onerror = fin; a.onpause = fin;   // onpause catches stopSpeech()'s pause
+    a.play().catch(fin);
+  });
+}
 async function speak(text) {
   if (!text) return;
   stopSpeech();                                       // cancel anything currently playing
   const myGen = ++speakGen;                           // claim this generation (latest speak wins)
   ttsBusy = true; setSpeakBtn(true); setActive('lbl-out', true);
   setDot('d-tts', 'work'); $('tts-out').textContent = 'synthesizing…'; $('tts-out').className = 'out';
-  const r = await claudible.tts(text, selectedVoice);
-  if (myGen !== speakGen) return;                     // superseded by a newer speak()/stop — drop this one
-  if (r.error) { setDot('d-tts', 'bad'); $('tts-out').textContent = 'TTS error: ' + JSON.stringify(r.error); stopSpeech(); return; }
-  ttsUrl = URL.createObjectURL(new Blob([new Uint8Array(r.audio)], { type: 'audio/mpeg' }));
-  ttsAudio = new Audio(ttsUrl);
-  ttsAudio.onended = () => { if (ttsUrl) { URL.revokeObjectURL(ttsUrl); ttsUrl = null; } ttsAudio = null; ttsBusy = false; setSpeakBtn(false); setActive('lbl-out', false); setDot('d-tts', 'ok'); $('tts-out').textContent = 'ready'; };
-  ttsAudio.play();
-  setDot('d-tts', 'ok'); $('tts-out').textContent = 'speaking…'; $('tts-out').className = 'out live';
+  const chunks = chunkForSpeech(text);
+  // Pipeline: kick off synthesis of the next chunk while the current one plays, so time-to-first-audio
+  // is just the first sentence — not the entire reply.
+  let nextP = claudible.tts(chunks[0], selectedVoice);
+  for (let i = 0; i < chunks.length; i++) {
+    const r = await nextP;
+    if (myGen !== speakGen) return;                   // superseded by a newer speak()/stop
+    if (i + 1 < chunks.length) nextP = claudible.tts(chunks[i + 1], selectedVoice);
+    if (r.error) { setDot('d-tts', 'bad'); $('tts-out').textContent = 'TTS error: ' + JSON.stringify(r.error); stopSpeech(); return; }
+    if (i === 0) { setDot('d-tts', 'ok'); $('tts-out').textContent = 'speaking…'; $('tts-out').className = 'out live'; }
+    await playBlob(r.audio, myGen);
+    if (myGen !== speakGen) return;
+  }
+  ttsAudio = null;                                    // playback finished — reset so Speak isn't stuck in "stop" mode
+  ttsBusy = false; setSpeakBtn(false); setActive('lbl-out', false); setDot('d-tts', 'ok'); $('tts-out').textContent = 'ready';
 }
 $('speak').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else speak($('tts-in').value.trim()); });
 
