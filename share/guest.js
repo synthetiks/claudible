@@ -9,15 +9,12 @@ var STORE_KEY = 'claudible_resume';
 var resume = null;
 try { var s = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); if (s && s.t === token && s.r) resume = s.r; } catch (e) {}
 
-// Detect phone-sized / touch screens and tag <body class="mobile"> — a belt-and-suspenders companion
-// to the CSS @media rules (some in-app browsers/webviews mis-report viewport width).
+// Tag <body class="mobile"> for PHONE-width screens only (matches the CSS @media breakpoint). Tablets,
+// desktops and wide views are "non-mobile": side-by-side layout + scale-to-fill (see recomputeFit).
+function vpWidth() { return (window.visualViewport && window.visualViewport.width) || window.innerWidth || 390; }
 function flagMobile() {
-  var small = window.matchMedia('(max-width: 760px)').matches;
-  // coarse PRIMARY pointer + no hover = a touch device (phone/tablet, incl. large phones in landscape that
-  // report >900px). Laptops/desktops have a fine primary pointer, so they never match and stay byte-identical.
-  var coarse = window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(hover: none)').matches;
-  document.body.classList.toggle('mobile', small || coarse);
-  scheduleFit();                                  // re-fit when crossing the mobile/desktop boundary (rotate, resize)
+  document.body.classList.toggle('mobile', vpWidth() <= 760);
+  scheduleFit();                                  // re-fit when crossing a breakpoint (rotate, resize)
 }
 flagMobile();
 window.addEventListener('resize', flagMobile);
@@ -39,32 +36,48 @@ function showOverlay(show, title, body, bad) {
   if (body != null) $('ov-body').textContent = body;
   $('card').classList.toggle('bad', !!bad);
 }
-function applySize(c, r) { if (c) hostCols = c; try { term.resize(c, r); } catch (e) {} scheduleFit(); }
+function applySize(c, r) { if (c) hostCols = c; if (r) hostRows = r; try { term.resize(c, r); } catch (e) {} scheduleFit(); }
 
-// ---- fit the mirrored terminal to the phone width (mobile only) ----
-// The host runs a fixed-width grid (hostCols x rows). To make ALL columns fit a phone we shrink the FONT
-// (never reflow — that shatters the TUI box-drawing). Crucially the size is computed straight from the
-// SCREEN WIDTH and the column count (monospace advance ≈ 0.6 × fontSize), NOT by measuring the rendered
-// DOM — DOM measurement was mis-reporting on real devices so Fit appeared to do nothing. Deterministic:
-// one rule, fits all. 1:1 keeps the full font and lets the (screen-capped) pane scroll.
+// ---- size the mirrored terminal to the viewport ----
+// The host runs a fixed grid (hostCols x hostRows). PHONES: default to readable text that scrolls inside the
+// screen-capped pane (Fit pill shrinks all columns instead). TABLET / DESKTOP / WIDE: scale the WHOLE grid to
+// FILL the pane — so you see everything the host sees, as large as the screen allows, adapting to any size.
+// Font is computed from geometry (monospace advance ≈ 0.6 × fontSize, cell height ≈ 1.18 × fontSize), never
+// by reflowing columns.
 var BASE_FONT = 13;                                // matches Terminal({fontSize}) above
-var FIT_KEY = 'claudible_fitmode';                 // 'fit' (default) | '1to1'
-var fitMode = '1to1';                              // default: readable font, lines scroll inside the screen-capped pane
-try { if (sessionStorage.getItem(FIT_KEY) === 'fit') fitMode = 'fit'; } catch (e) {}   // opt-in to shrink-all-columns
-var hostCols = 120;                                // host's reported column count (set in applySize)
+var FIT_KEY = 'claudible_fitmode';                 // phone only: 'fit' (shrink all cols) | '1to1' (readable + scroll)
+var fitMode = '1to1';
+try { if (sessionStorage.getItem(FIT_KEY) === 'fit') fitMode = 'fit'; } catch (e) {}
+var hostCols = 120, hostRows = 32;                 // host's reported grid (set in applySize)
 function isMobile() { return document.body.classList.contains('mobile'); }
 function recomputeFit() {
+  var t = $('terminal'); if (!t) return;
+  var wrap = t.closest('.wrap'); if (!wrap) return;
   var cur = term.options.fontSize || BASE_FONT;
-  document.body.classList.toggle('term1to1', fitMode === '1to1');
-  document.body.classList.toggle('can-fit', isMobile());       // show the Fit/1:1 pill on phones
-  if (!isMobile() || fitMode === '1to1') {                     // desktop, or user chose full-size + scroll
-    if (cur !== BASE_FONT) term.options.fontSize = BASE_FONT;
+  var phone = isMobile();
+  document.body.classList.toggle('can-fit', phone);           // the Fit/1:1 pill is a phone-only control
+  document.body.classList.toggle('term1to1', phone && fitMode === '1to1');
+  if (phone) {
+    if (fitMode === '1to1') { if (cur !== BASE_FONT) term.options.fontSize = BASE_FONT; return; }   // readable + scroll
+    var availP = vpWidth() - 26;
+    var tP = Math.max(4, Math.min(BASE_FONT, Math.floor(availP / (Math.max(1, hostCols) * 0.6))));
+    if (tP !== cur) term.options.fontSize = tP;
     return;
   }
-  var vpW = (window.visualViewport && window.visualViewport.width) || window.innerWidth || 390;
-  var avail = vpW - 26;                                        // terminal padding + borders + a hair
-  // monospace cell advance ≈ 0.6 × fontSize → pick the largest size where hostCols columns span ≤ avail
-  var target = Math.max(4, Math.min(BASE_FONT, Math.floor(avail / (Math.max(1, hostCols) * 0.6))));
+  // tablet / desktop / wide: scale the whole grid to fill the pane (see everything, as large as it fits).
+  var cs = getComputedStyle(wrap), tcs = getComputedStyle(t);
+  var pw = wrap.clientWidth
+    - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0)
+    - parseFloat(tcs.paddingLeft || 0) - parseFloat(tcs.paddingRight || 0)
+    - parseFloat(tcs.borderLeftWidth || 0) - parseFloat(tcs.borderRightWidth || 0) - 2;
+  var ph = wrap.clientHeight
+    - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0)
+    - parseFloat(tcs.paddingTop || 0) - parseFloat(tcs.paddingBottom || 0)
+    - parseFloat(tcs.borderTopWidth || 0) - parseFloat(tcs.borderBottomWidth || 0) - 2;
+  if (pw <= 0 || ph <= 0) return;
+  var wFont = pw / (Math.max(1, hostCols) * 0.6);            // largest size whose columns fit the width
+  var hFont = ph / (Math.max(1, hostRows) * 1.18);          // …and whose rows fit the height
+  var target = Math.max(5, Math.min(40, Math.floor(Math.min(wFont, hFont))));   // contain → see everything, biggest that fits
   if (target !== cur) term.options.fontSize = target;
 }
 // xterm renders on rAF → reading size synchronously right after term.resize() is stale. Measure on double-rAF.
