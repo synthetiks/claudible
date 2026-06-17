@@ -62,8 +62,25 @@ cd "$SDIR"
 # non-alphanumeric char (incl. '_', spaces, etc. — not just '/' and '.') to a single '-'.
 PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
 FRESH=(claude --dangerously-skip-permissions --add-dir "$HOME")
+# The app's session switcher passes a choice in CLAUDIBLE_SESSION: 'new' (fresh), a specific
+# <session-id> (resume exactly that), or empty (default = resume most recent — the original behavior).
+SEL="${CLAUDIBLE_SESSION:-}"
+
+if [ "$SEL" = "new" ]; then
+  exec "${FRESH[@]}"
+fi
+
+if [ -n "$SEL" ]; then
+  # Resume a SPECIFIC session picked in the switcher (same fast-exit fallback as the default path).
+  START=$(date +%s)
+  claude --dangerously-skip-permissions --resume "$SEL" --add-dir "$HOME"
+  [ $(( $(date +%s) - START )) -ge 4 ] && exit 0
+  echo "[claudible] couldn't resume that session — starting a fresh one."
+  exec "${FRESH[@]}"
+fi
+
 if ls "$PROJ"/*.jsonl >/dev/null 2>&1; then
-  # Try to resume the previous conversation. Some Claude builds refuse to resume a given session
+  # Default: resume the previous conversation. Some Claude builds refuse to resume a given session
   # (e.g. one that ended mid-tool-call) — they print an error and exit IMMEDIATELY instead of opening
   # the interactive TUI. A real resumed session blocks until you quit it, so a return after only a
   # couple of seconds means resume failed; fall back to a fresh session so the terminal is never left

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <!-- Guest viewer for a shared Claudible terminal. Assets are served same-origin by share/server.js;
+       the only network it touches is its own host (the static libs + the WebSocket). -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; object-src 'none'; base-uri 'none'" />
+  <title>Claudible — shared session</title>
+  <link rel="stylesheet" href="/xterm.css" />
+  <style>
+    :root{ --bg:#070809; --ink:#e7eaef; --ink-dim:#9097a1; --ink-faint:#565c66; --silver:#cfd6df;
+      --hairline:#2b2f37; --live:#e5564b; --ok:#5fb487; --amber:#e0a93b; --sheen:rgba(255,255,255,.07); }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow-x:hidden}
+    body{background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
+      color:var(--ink);font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
+      display:grid;grid-template-rows:52px 1fr 22px}
+    /* top bar — mirrors the Claudable cockpit */
+    .bar{display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--hairline);
+      background:linear-gradient(180deg,#0d0f13,#090a0c);font-size:12px;letter-spacing:.04em}
+    .bar .logo{height:30px;width:auto;mix-blend-mode:lighten;image-rendering:pixelated}
+    .bar .name{font-weight:500;letter-spacing:.3em;text-transform:uppercase;color:var(--silver);font-size:14px}
+    .bar .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
+    .pill{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
+      border:1px solid var(--hairline);border-radius:7px;padding:3px 8px}
+    .pill.ro{color:var(--amber);border-color:rgba(224,169,59,.4)}
+    /* session tracker (same look as host) */
+    .trk{margin-left:auto;display:flex;align-items:center;gap:20px}
+    .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
+    .trk-item b{font-size:15px;font-weight:700;color:var(--silver)}
+    .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
+    .ctxbar{position:relative;width:120px;height:30px;border-radius:8px;overflow:hidden;background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline)}
+    .ctxfill{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#2f6b50,#5fb487);transition:width .45s ease,background .4s ease}
+    .ctxbar.warn .ctxfill{background:linear-gradient(90deg,#8a6a23,#e0a93b)}
+    .ctxbar.crit .ctxfill{background:linear-gradient(90deg,#7d2f2a,#e5564b)}
+    .ctxpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--silver);text-shadow:0 1px 3px #000}
+    .st{display:flex;align-items:center;gap:8px;color:var(--ink-dim)}
+    .dot{width:8px;height:8px;border-radius:50%;background:#565c66;transition:.2s}
+    .dot.ok{background:var(--ok);box-shadow:0 0 8px -1px var(--ok)}
+    .dot.bad{background:var(--live);box-shadow:0 0 8px -1px var(--live)}
+    .dot.work{background:var(--amber);box-shadow:0 0 8px -1px var(--amber)}
+    /* bottom status strip */
+    .foot{display:flex;align-items:center;gap:10px;padding:0 16px;border-top:1px solid var(--hairline);
+      font-size:10px;letter-spacing:.1em;color:var(--ink-faint);background:linear-gradient(0deg,#0c0e11,#090a0c)}
+    .main{display:flex;min-height:0;min-width:0}
+    /* min-width:0 lets the wide (mirrored) terminal scroll INSIDE .wrap instead of stretching the whole
+       page — without it the body grows past the viewport and mobile browsers zoom out, so the phone
+       breakpoints never match. */
+    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:14px;overflow:auto;-webkit-overflow-scrolling:touch}
+    .gchat{min-width:0}
+    /* guest chat — human↔human side channel with the host */
+    .gchat{flex:none;width:300px;display:flex;flex-direction:column;min-height:0;margin:14px 14px 14px 0;
+      background:#0d0f12;border:1px solid var(--hairline);border-radius:11px;overflow:hidden}
+    .gchat-head{display:flex;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--hairline);
+      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .gchat-head .gchat-sub{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-faint);text-transform:none}
+    .gchat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+    .chat-msg{max-width:88%;padding:7px 10px;border-radius:9px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+    .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
+    .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6}
+    .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink)}
+    .chat-empty{margin:auto;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
+    .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
+    /* name gate — viewer picks a display name before joining */
+    .nameover{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(5,6,8,.94)}
+    .nameover .card{max-width:360px}
+    .nameover input{width:100%;margin:14px 0 16px;font-family:inherit;font-size:16px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:9px;padding:11px 12px}
+    .nameover input:focus{outline:none;border-color:rgba(255,255,255,.28)}
+    .nameover button{font-family:inherit;font-size:13px;color:var(--ink);background:linear-gradient(180deg,#1c2a22,#142019);
+      border:1px solid #294a39;border-radius:9px;padding:11px 26px;cursor:pointer}
+    .gchat-input{display:flex;gap:7px;padding:10px;border-top:1px solid var(--hairline)}
+    .gchat-input input{flex:1;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:9px;padding:10px 11px}
+    .gchat-input input:focus{outline:none;border-color:rgba(255,255,255,.24)}
+    .gchat-input button{font-family:inherit;font-size:12px;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,#101216);
+      border:1px solid var(--hairline);border-radius:9px;padding:0 14px;cursor:pointer}
+    .gchat-input button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    #terminal{background:#0a0b0d;border:1px solid var(--hairline);border-radius:11px;padding:10px 12px;
+      box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
+    /* faint vignette for depth — same premium feel as the host cockpit */
+    body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+      background:radial-gradient(120% 120% at 50% 40%, transparent 62%, rgba(0,0,0,.32) 100%)}
+    /* live-session chip in the top bar — shows the viewer which session this is */
+    .sesschip{display:flex;align-items:center;gap:7px;max-width:32vw;padding:5px 11px;border:1px solid var(--hairline);
+      border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);box-shadow:inset 0 1px 0 var(--sheen)}
+    .sesschip .sd{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px -1px var(--ok);flex:none}
+    .sesschip b{font-weight:600;color:var(--silver);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* overlay shown while waiting for host approval / when denied */
+    .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+      background:rgba(5,6,8,.78);backdrop-filter:blur(2px);z-index:5}
+    .overlay.show{display:flex}
+    .card{max-width:380px;text-align:center;padding:26px 28px;border:1px solid var(--hairline);border-radius:14px;
+      background:linear-gradient(180deg,#101216,#0b0d10);box-shadow:0 18px 50px rgba(0,0,0,.55)}
+    .card h2{margin:0 0 8px;font-size:15px;letter-spacing:.04em;color:var(--ink)}
+    .card p{margin:0;font-size:12.5px;line-height:1.55;color:var(--ink-dim)}
+    .spin{width:26px;height:26px;margin:0 auto 16px;border-radius:50%;border:2px solid var(--hairline);
+      border-top-color:var(--amber);animation:sp 0.9s linear infinite}
+    .card.bad .spin{display:none}
+    .card.bad h2{color:var(--live)}
+    @keyframes sp{to{transform:rotate(360deg)}}
+    /* ---- mobile / small screens: stack terminal over chat, trim the chrome ---- */
+    @media (max-width: 760px){
+      body{grid-template-rows:46px 1fr auto}
+      .bar{gap:9px;padding:0 11px}
+      .bar .logo{height:24px}
+      .bar .name{font-size:12px;letter-spacing:.16em}
+      .main{flex-direction:column}                  /* terminal on top, chat below */
+      .wrap{flex:1;padding:9px;align-items:flex-start;justify-content:flex-start}   /* anchor so panning reaches the start */
+      .gchat{width:auto;height:32vh;min-height:118px;margin:0 9px 9px}
+      .gchat-input input{font-size:16px}            /* 16px stops iOS auto-zoom on focus */
+      #terminal{padding:8px}
+      .card{padding:22px 20px;max-width:88vw}
+    }
+    @media (max-width: 540px){
+      .bar .tag,.trk{display:none}                  /* the wide usage tracker doesn't fit a phone */
+      .sesschip{max-width:56vw}
+      .foot span:last-child{display:none}
+    }
+    /* JS-driven fallback: the .mobile class is set by matchMedia/touch detection, so even a webview
+       that mis-reports its width still gets the stacked phone layout. Mirrors the @media rules above. */
+    body.mobile .main{flex-direction:column}
+    body.mobile .wrap{align-items:flex-start;justify-content:flex-start;padding:9px}
+    body.mobile .gchat{width:auto;height:32vh;min-height:118px;margin:0 9px 9px}
+    body.mobile .gchat-input input{font-size:16px}
+    body.mobile .bar .tag,body.mobile .trk{display:none}
+    body.mobile .sesschip{max-width:56vw}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <img class="logo" src="/logo.png" alt="" />
+    <span class="name">claudible</span><span class="tag">shared</span>
+    <span class="pill ro" id="ro" style="display:none">read-only</span>
+    <span class="sesschip" id="sess-chip" title="The session you're viewing" style="display:none"><span class="sd"></span><b id="sess-chip-text"></b></span>
+    <span class="trk" title="host session usage">
+      <span class="ctxbar" id="ctxbar"><span class="ctxfill" id="ctxfill"></span><span class="ctxpct" id="ctxpct">—</span></span>
+      <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>
+      <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
+    </span>
+  </div>
+  <div class="main">
+    <div class="wrap">
+      <div id="terminal"></div>
+      <div class="overlay" id="overlay">
+        <div class="card" id="card">
+          <div class="spin"></div>
+          <h2 id="ov-title">Waiting for the host to let you in…</h2>
+          <p id="ov-body">The host needs to approve your connection. Keep this tab open.</p>
+        </div>
+      </div>
+    </div>
+    <div class="gchat">
+      <div class="gchat-head"><span>chat</span><span class="gchat-sub">with the host</span></div>
+      <div class="gchat-log" id="chat-log"></div>
+      <div class="gchat-input">
+        <input type="text" id="chat-in" placeholder="message the host…" maxlength="2000" />
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="st"><span class="dot" id="dot"></span> <span id="stxt">connecting…</span></span>
+    <span style="margin-left:auto">viewing — host controls the session</span>
+  </div>
+
+  <div class="nameover" id="name-overlay">
+    <div class="card">
+      <h2>Join the shared session</h2>
+      <p>Enter a display name so the host knows who you are.</p>
+      <input id="name-in" type="text" maxlength="40" placeholder="Your name" />
+      <button id="name-go">Join</button>
+    </div>
+  </div>
+
+  <script src="/xterm.js"></script>
+  <script src="/addon-fit.js"></script>
+  <script src="/guest.js"></script>
+</body>
+</html>
