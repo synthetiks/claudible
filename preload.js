@@ -17,4 +17,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   saveSession: (text) => ipcRenderer.invoke('save-session', text),
+  // clipboard (handled in main so it works regardless of web clipboard permissions)
+  clipWrite: (text) => ipcRenderer.invoke('clip:write', text),
+  clipRead: () => ipcRenderer.invoke('clip:read'),
 });

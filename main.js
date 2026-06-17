@@ -5,7 +5,7 @@
 //  • reads runtime/status.json (session tracker) + runtime/hooks.ndjson (Claude hook events)
 //    from the WINDOWS FS natively (no flaky 9P watch)
 //  • STT/TTS fetches run here (no renderer CORS)
-const { app, BrowserWindow, ipcMain, session, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, session, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
@@ -156,6 +156,10 @@ ipcMain.handle('tts', async (e, text, voice) => {
   } catch (err) { return { error: String(err) }; }
 });
 ipcMain.handle('endpoints', () => ({ whisper: WHISPER, kokoro: KOKORO, pty: !!nodePty, ptyErr }));
+
+// clipboard for the right-click menu (works regardless of renderer clipboard permissions)
+ipcMain.handle('clip:write', (e, text) => { try { clipboard.writeText(String(text ?? '')); } catch {} });
+ipcMain.handle('clip:read', () => { try { return clipboard.readText(); } catch { return ''; } });
 
 // save the current session transcript -> a .txt the user picks (defaults to Desktop)
 ipcMain.handle('save-session', async (e, text) => {

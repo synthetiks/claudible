@@ -369,3 +369,50 @@ $('cleartab').addEventListener('click', () => {
   const lbl = $('cleartab').querySelector('.lbl');
   lbl.textContent = 'cleared ✓'; setTimeout(() => { lbl.textContent = 'clear input'; }, 1200);
 });
+
+// ---------- right-click menu: Copy / Paste / Select All (terminal + selectable UI text) ----------
+// Electron ships no default context menu and xterm copies nothing on its own, so wire one up. Copy uses
+// the xterm selection inside the terminal and the DOM selection elsewhere; the clipboard is handled in
+// the main process so it works regardless of renderer clipboard permissions.
+const ctxmenu = $('ctxmenu');
+const hideCtx = () => { ctxmenu.style.display = 'none'; };
+window.addEventListener('mousedown', (e) => { if (!ctxmenu.contains(e.target)) hideCtx(); }, true);
+window.addEventListener('blur', hideCtx);
+window.addEventListener('scroll', hideCtx, true);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtx(); });
+
+function insertIntoField(el, text) {
+  el.focus();
+  const s = el.selectionStart ?? el.value.length, end = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, s) + text + el.value.slice(end);
+  const pos = s + text.length; try { el.setSelectionRange(pos, pos); } catch {}
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+window.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const inTerm = !!e.target.closest('#terminal');
+  const field = e.target.closest('input, textarea');
+  const sel = inTerm ? term.getSelection() : String(window.getSelection() || '');
+  const items = [];
+  if (sel && sel.trim()) items.push({ label: 'Copy', act: () => claudible.clipWrite(sel) });
+  if (inTerm || field) items.push({ label: 'Paste', act: async () => {
+    const t = await claudible.clipRead(); if (!t) return;
+    if (inTerm) { claudible.ptyInput('\x1b[200~' + t + '\x1b[201~'); term.focus(); }   // bracketed paste, no auto-submit
+    else insertIntoField(field, t);
+  } });
+  if (inTerm || field) items.push({ label: 'Select All', act: () => { if (inTerm) term.selectAll(); else field.select(); } });
+  if (!items.length) return;                                  // nothing actionable here
+
+  ctxmenu.innerHTML = '';
+  for (const it of items) {
+    const d = document.createElement('div');
+    d.className = 'ctxitem'; d.textContent = it.label;
+    d.addEventListener('mousedown', (ev) => { ev.preventDefault(); Promise.resolve(it.act()).catch(() => {}); hideCtx(); });
+    ctxmenu.appendChild(d);
+  }
+  ctxmenu.style.display = 'block';                            // measure, then clamp into the viewport
+  const r = ctxmenu.getBoundingClientRect();
+  ctxmenu.style.left = Math.min(e.clientX, window.innerWidth - r.width - 6) + 'px';
+  ctxmenu.style.top = Math.min(e.clientY, window.innerHeight - r.height - 6) + 'px';
+});
