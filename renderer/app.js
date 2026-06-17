@@ -92,16 +92,21 @@ document.querySelectorAll('.panel button').forEach((b) =>
 // conversation. We want THIS session's usage, so we subtract a baseline captured at launch and
 // re-baseline on /clear or any upstream reset. Baseline resets every app launch (fresh process).
 const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n);
-let baseCost = null, sessTok = 0, lastUsageKey = null, sessionLog = [];
+let baseCost = null, sessTok = 0, lastUsageKey = null, sessionLog = [], curCtxPct = null, curSessionLabel = '';
+// Mirror the tracker (and which session is live) to any shared guests. Guests render these verbatim.
+function pushTracker() {
+  try { claudible.shareTracker({ ctxPct: curCtxPct, cost: $('trk-cost').textContent, tokens: $('trk-tokens').textContent, session: curSessionLabel }); } catch {}
+}
 function resetStats() {
-  baseCost = null; sessTok = 0; lastUsageKey = null; sessionLog.length = 0;
+  baseCost = null; sessTok = 0; lastUsageKey = null; sessionLog.length = 0; curCtxPct = null;
   $('trk-cost').textContent = '$0.00';
   $('trk-tokens').textContent = '0';
+  pushTracker();
 }
 claudible.onStatus((s) => {
   // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
   if (typeof s.ctxPct === 'number') {
-    const pct = s.ctxPct;
+    const pct = s.ctxPct; curCtxPct = pct;
     $('trk-ctx').textContent = pct + '%';
     $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
     const bar = $('trk-ctxbar');
@@ -123,11 +128,16 @@ claudible.onStatus((s) => {
     lastUsageKey = s.usageKey;
     $('trk-tokens').textContent = fmtK(sessTok);
   }
+  pushTracker();   // mirror the freshly-updated tracker to shared guests
 });
 
 // ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Left-Ctrl push-to-talk hold) ----------
 let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false;
-function talkUI(on) { $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on); }
+function talkUI(on) {
+  $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on);
+  // Top-bar indicator — always visible (even with the Settings drawer closed) so you can see you're talking.
+  const mi = $('mic-ind'); if (mi) { mi.classList.toggle('live', on); $('mic-txt').textContent = on ? 'talking…' : 'mic ready'; }
+}
 
 async function startRecording() {
   if (recording) return;
@@ -183,10 +193,17 @@ $('talk').addEventListener('click', () => { recording ? stopRecording() : startR
 // ~150ms after you press (press, then speak — natural for push-to-talk).
 const PTT_HOLD_MS = 150;
 let pttHeld = false, pttStart = 0, pttCombo = false, pttTimer = null;
+let pttKey = 'AltLeft', pttCapturing = false;   // default push-to-talk key (configurable); Alt frees Ctrl for copy/paste
 const pttHint = document.querySelector('.ptt-hint');
 function pttCancelTimer() { if (pttTimer) { clearTimeout(pttTimer); pttTimer = null; } }
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'ControlLeft') {
+  if (pttCapturing) {                      // rebinding: the next key becomes the new push-to-talk key
+    e.preventDefault(); e.stopPropagation();
+    if (e.key !== 'Escape') setPttKey(e.code);   // Escape cancels without changing it
+    stopCapture();
+    return;
+  }
+  if (e.code === pttKey) {
     e.preventDefault(); e.stopPropagation();
     if (pttHeld) return;                   // ignore auto-repeat while held
     pttHeld = true; pttCombo = false; pttStart = Date.now();
@@ -199,7 +216,7 @@ window.addEventListener('keydown', (e) => {
   if (pttHeld) { pttCombo = true; pttCancelTimer(); }   // another key while held => a shortcut, never start the mic
 }, true);
 window.addEventListener('keyup', (e) => {
-  if (e.code === 'ControlLeft' && pttHeld) {
+  if (e.code === pttKey && pttHeld) {
     e.preventDefault(); e.stopPropagation();
     pttHeld = false; pttCancelTimer();
     if (pttHint) pttHint.classList.remove('live');
@@ -216,6 +233,25 @@ window.addEventListener('blur', () => {
   if (pttHint) pttHint.classList.remove('live');
   if (recording) stopRecording({ discard: (Date.now() - pttStart) < (PTT_HOLD_MS + 200) });
 });
+// push-to-talk key: friendly label + click-to-rebind (persisted with the other prefs)
+function keyLabel(code) {
+  const map = { ControlLeft: 'Left Ctrl', ControlRight: 'Right Ctrl', AltLeft: 'Left Alt', AltRight: 'Right Alt',
+    ShiftLeft: 'Left Shift', ShiftRight: 'Right Shift', Space: 'Space', Tab: 'Tab', CapsLock: 'Caps Lock',
+    Enter: 'Enter', Backquote: '`', MetaLeft: 'Left Win', MetaRight: 'Right Win' };
+  if (map[code]) return map[code];
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  if (/^F\d{1,2}$/.test(code)) return code;
+  return code || '—';
+}
+function applyPttKey() {
+  const kbd = $('ptt-kbd'); if (kbd) kbd.textContent = keyLabel(pttKey);
+  const btn = $('ptt-key-btn'); if (btn && !pttCapturing) btn.textContent = keyLabel(pttKey);
+}
+function setPttKey(code) { pttKey = code; savePrefs({ pttKey: code }); applyPttKey(); }
+function startCapture() { pttCapturing = true; const b = $('ptt-key-btn'); if (b) { b.textContent = 'press a key…'; b.classList.add('capturing'); } }
+function stopCapture() { pttCapturing = false; const b = $('ptt-key-btn'); if (b) b.classList.remove('capturing'); applyPttKey(); }
+if ($('ptt-key-btn')) $('ptt-key-btn').addEventListener('click', () => { pttCapturing ? stopCapture() : startCapture(); });
 
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
 let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0;
@@ -290,6 +326,7 @@ document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown
   e.preventDefault();
   document.querySelectorAll('.vpill').forEach((x) => x.classList.remove('on'));
   p.classList.add('on'); selectedVoice = p.dataset.voice;
+  savePrefs({ voice: selectedVoice });
 }));
 // collapse / expand the voice-out text box
 $('tts-collapse').addEventListener('click', () => {
@@ -305,6 +342,7 @@ $('stt-collapse').addEventListener('click', () => {
 $('always-speak').addEventListener('change', (e) => {
   alwaysSpeak = e.target.checked;
   $('always-toggle').classList.toggle('on', alwaysSpeak);
+  savePrefs({ alwaysSpeak: alwaysSpeak });
   setTimeout(() => term.focus(), 0);
 });
 
@@ -416,3 +454,289 @@ window.addEventListener('contextmenu', (e) => {
   ctxmenu.style.left = Math.min(e.clientX, window.innerWidth - r.width - 6) + 'px';
   ctxmenu.style.top = Math.min(e.clientY, window.innerHeight - r.height - 6) + 'px';
 });
+
+// ---------- live terminal sharing ----------
+// Start/stop a local share server (+ cloudflared tunnel) that streams THIS terminal to a remote
+// colleague over a ONE-TIME link. The server runs in the main process; here we drive the lifecycle,
+// the link, and the approve-guest prompt. Two controls protect access: (1) you approve each new guest
+// before any data flows, (2) the link is consumed once that guest is approved.
+let sharing = false;
+const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out'), shareNew = $('share-newlink');
+function shareUI(on) {
+  shareBtn.textContent = on ? 'Stop sharing' : 'Share session';
+  shareBtn.classList.toggle('live', on);
+  setActive('lbl-share', on);
+  setDot('d-share', on ? 'ok' : '');
+  $('share-ro').disabled = on;                 // mode is fixed for the life of a session
+  shareNew.style.display = on ? 'block' : 'none';
+  document.querySelector('.body').classList.toggle('sharing', on);   // reveal/hide the chat column
+  if (on) chatReset();
+}
+function showLink(url) {
+  shareLink.value = url; shareLink.style.display = 'block'; shareLink.style.opacity = '1';
+  shareLink.title = 'Click to copy';
+}
+let hostDisplayName = 'Host';
+shareBtn.addEventListener('click', async () => {
+  if (sharing) {
+    shareBtn.disabled = true;
+    await claudible.shareStop();
+    sharing = false; shareUI(false);
+    shareLink.style.display = 'none'; shareLink.value = '';
+    shareOut.textContent = 'sharing stopped'; shareOut.className = 'out';
+    shareBtn.disabled = false;
+    return;
+  }
+  // ask the host for a display name before sharing (prefilled from last time)
+  $('host-name-in').value = loadPrefs().hostName || '';
+  $('namemodal').classList.add('show');
+  setTimeout(() => $('host-name-in').focus(), 30);
+});
+async function doStartSharing() {
+  hostDisplayName = ($('host-name-in').value || '').trim().slice(0, 40) || 'Host';
+  savePrefs({ hostName: hostDisplayName });
+  $('namemodal').classList.remove('show');
+  shareBtn.disabled = true;
+  shareOut.textContent = 'starting tunnel…'; shareOut.className = 'out';
+  setDot('d-share', 'work');
+  const readOnly = $('share-ro').checked;
+  let r; try { r = await claudible.shareStart({ readOnly, name: hostDisplayName }); } catch (e) { r = { ok: false, error: String(e) }; }
+  shareBtn.disabled = false;
+  if (!r || !r.ok) {
+    setDot('d-share', 'bad'); shareOut.textContent = 'share failed: ' + ((r && r.error) || 'unknown'); shareOut.className = 'out';
+    return;
+  }
+  sharing = true; shareUI(true);
+  showLink(r.url);
+  const mode = readOnly ? ' · view-only' : '';
+  shareOut.textContent = (r.remote === false)
+    ? 'local link only (tunnel off)' + mode + ' — ' + (r.note || '')
+    : 'invite link — share with your team' + mode;
+  shareOut.className = 'out live';
+}
+$('name-start').addEventListener('click', doStartSharing);
+$('host-name-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doStartSharing(); } });
+$('name-cancel').addEventListener('click', () => $('namemodal').classList.remove('show'));
+// click the link to copy it (clipboard handled in main, so it works regardless of web perms)
+shareLink.addEventListener('click', () => {
+  if (!shareLink.value) return;
+  shareLink.select(); claudible.clipWrite(shareLink.value);
+  const prev = shareOut.textContent;
+  shareOut.textContent = 'link copied ✓';
+  setTimeout(() => { if (sharing) shareOut.textContent = prev; }, 1200);
+});
+// rotate the invite link — the old one stops working for NEW joins; people already in stay connected
+shareNew.addEventListener('click', async () => {
+  shareNew.disabled = true;
+  let r; try { r = await claudible.shareNewLink(); } catch (e) { r = null; }
+  shareNew.disabled = false;
+  if (r && r.ok) { showLink(r.url); shareOut.textContent = 'fresh invite link — the old one is now dead'; shareOut.className = 'out live'; }
+  else { shareOut.textContent = 'could not make a new link'; }
+});
+// reflect connected viewers while sharing
+claudible.onShareGuests((n) => {
+  if (!sharing) return;
+  shareOut.textContent = n > 0 ? (n + ' viewer' + (n === 1 ? '' : 's') + ' connected') : 'waiting for people to join';
+  shareOut.className = 'out live';
+  if (n > 0) pushTracker();   // make sure a just-joined guest sees the current tracker
+});
+
+// ---------- approve-guest prompt ----------
+// No one attaches to the terminal until you approve here. Requests are queued (one prompt at a time).
+const approveEl = $('approve'), approveMsg = $('approve-msg');
+let approveQueue = [], approveCur = null;
+function showNextApproval() {
+  if (approveCur || !approveQueue.length) return;
+  approveCur = approveQueue.shift();
+  approveMsg.textContent = (approveCur.name ? '“' + approveCur.name + '”' : 'Someone') +
+    ' wants to join your terminal. Approve only if you recognise them — they’ll see your session (and can type, unless view-only).';
+  approveEl.classList.add('show');
+}
+function decideApproval(ok) {
+  if (!approveCur) return;
+  claudible.shareApprove(approveCur.id, ok);
+  approveCur = null; approveEl.classList.remove('show');
+  setTimeout(showNextApproval, 60);
+}
+claudible.onShareApproval((info) => { approveQueue.push(info); showNextApproval(); });
+claudible.onShareApprovalCancel((id) => {     // guest gave up before you decided
+  approveQueue = approveQueue.filter((x) => x.id !== id);
+  if (approveCur && approveCur.id === id) { approveCur = null; approveEl.classList.remove('show'); setTimeout(showNextApproval, 60); }
+});
+$('approve-yes').addEventListener('click', () => decideApproval(true));
+$('approve-no').addEventListener('click', () => decideApproval(false));
+
+// ---------- settings drawer ----------
+// The voice + command + share controls now live in a slide-in drawer to free the main area.
+const drawer = $('drawer'), drawerScrim = $('drawer-scrim');
+function openDrawer(open) {
+  drawer.classList.toggle('open', open);
+  drawerScrim.classList.toggle('open', open);
+  drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (!open) setTimeout(() => term.focus(), 0);
+}
+$('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
+$('drawer-close').addEventListener('click', () => openDrawer(false));
+drawerScrim.addEventListener('click', () => openDrawer(false));
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) openDrawer(false); });
+
+// ---------- viewer chat (human↔human side channel; never reaches Claude/terminal) ----------
+const chatLog = $('chat-log'), chatIn = $('chat-in');
+function chatReset() {
+  chatLog.innerHTML = '<div class="chat-empty" id="chat-empty">Messages here go only between you and your viewer — Claude never sees them.</div>';
+}
+function addChat(who, text, mine) {
+  const empty = $('chat-empty'); if (empty) empty.remove();
+  const d = document.createElement('div');
+  d.className = 'chat-msg ' + (mine ? 'me' : 'them');
+  const w = document.createElement('span'); w.className = 'who'; w.textContent = who;
+  const body = document.createElement('div'); body.textContent = text;   // textContent → no HTML injection
+  d.appendChild(w); d.appendChild(body); chatLog.appendChild(d);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+function addSystemChat(text) {
+  const empty = $('chat-empty'); if (empty) empty.remove();
+  const d = document.createElement('div'); d.className = 'chat-sys'; d.textContent = text;
+  chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
+}
+function sendChat() {
+  const text = chatIn.value.trim(); if (!text) return;
+  addChat(hostDisplayName, text, true);
+  claudible.shareSendChat(text);
+  chatIn.value = '';
+}
+$('chat-send').addEventListener('click', sendChat);
+chatIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+claudible.onShareChat((m) => {
+  if (!m) return;
+  if (m.role === 'system') addSystemChat(m.text);          // "X joined" / "X left"
+  else if (m.text) addChat(m.name || 'viewer', m.text, false);
+});
+chatReset();
+
+// ---------- persisted preferences (voice + Always Speak) ----------
+// Stored in the renderer's localStorage (kept in Electron's userData), so they survive app restarts.
+const PREFS_KEY = 'claudible_prefs';
+function loadPrefs() { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch { return {}; } }
+function savePrefs(patch) { try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(loadPrefs(), patch))); } catch {} }
+(function applyPrefs() {
+  const p = loadPrefs();
+  if (p.voice && document.querySelector('.vpill[data-voice="' + p.voice + '"]')) {
+    selectedVoice = p.voice;
+    document.querySelectorAll('.vpill').forEach((x) => x.classList.toggle('on', x.dataset.voice === p.voice));
+  }
+  if (typeof p.alwaysSpeak === 'boolean') {
+    alwaysSpeak = p.alwaysSpeak;
+    $('always-speak').checked = p.alwaysSpeak;
+    $('always-toggle').classList.toggle('on', p.alwaysSpeak);
+  }
+  if (p.pttKey) pttKey = p.pttKey;
+  applyPttKey();   // render the current push-to-talk key (default or saved)
+})();
+
+// ---------- sessions sidebar (switch between Claude conversations, like Claude Code) ----------
+const sessListEl = $('sess-list');
+const bodyEl = document.querySelector('.body');
+let activeSession = null;
+function relTime(sec) {
+  if (!sec) return '';
+  const d = Math.max(0, Date.now() / 1000 - sec);
+  if (d < 60) return 'just now';
+  if (d < 3600) return Math.floor(d / 60) + 'm ago';
+  if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+  return Math.floor(d / 86400) + 'd ago';
+}
+async function refreshSessions() {
+  sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';
+  let list = []; try { list = await claudible.sessionList(); } catch {}
+  if (!Array.isArray(list) || !list.length) {
+    sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
+    return;
+  }
+  if (!activeSession) activeSession = list[0].id;   // a default launch resumes the most recent
+  const act = list.find((s) => s.id === activeSession);
+  if (act && !curSessionLabel) { curSessionLabel = act.preview; pushTracker(); }   // tell guests which session is live
+  sessListEl.innerHTML = '';
+  list.forEach((s) => {
+    const b = document.createElement('button');
+    b.className = 'sess' + (s.id === activeSession ? ' active' : '');
+    const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = s.preview;
+    const m = document.createElement('div'); m.className = 'sess-meta';
+    m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
+    b.appendChild(p); b.appendChild(m);
+    b.addEventListener('click', () => openSession(s.id, s.preview));
+    sessListEl.appendChild(b);
+  });
+}
+// The sidebar is DOCKED (a left column of .body) — toggling .with-sessions slides the layout, it
+// never covers the terminal/chat. The terminal auto-refits via its ResizeObserver when the column changes.
+function openSidebar(open) {
+  bodyEl.classList.toggle('with-sessions', open);
+  if (open) refreshSessions();
+}
+async function openSession(id, label) {
+  if (id !== 'new' && id === activeSession) return;   // already on this one
+  activeSession = (id === 'new') ? null : id;
+  curSessionLabel = (id === 'new') ? 'New session' : (label || '');   // mirrored to guests
+  refreshSessions();                                  // re-highlight without collapsing (stays docked)
+  term.reset();                                       // clear the old conversation from view
+  resetStats();                                       // reset tracker baselines + push label to guests
+  try { await claudible.sessionOpen(id); } catch {}
+  setTimeout(() => term.focus(), 150);
+}
+$('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
+$('sidebar-close').addEventListener('click', () => openSidebar(false));
+$('new-session').addEventListener('click', () => openSession('new'));
+refreshSessions();   // open by default → populate the list on launch
+
+// ---------- desktop clipboard shortcuts (Ctrl on Win/Linux, ⌘ on Mac) ----------
+// In the TERMINAL: Ctrl/⌘+C copies the selection (or passes through as interrupt/SIGINT when nothing
+// is selected, like Windows Terminal), Ctrl/⌘+V pastes (bracketed, no auto-submit), Ctrl/⌘+A selects
+// all, and Backspace deletes the marked text (sends that many backspaces — reliable when the selection
+// ends at your input cursor; with no selection it's a normal one-char backspace). In text fields
+// (chat / voice box) the same combos act on the field. Clipboard goes through main so it works
+// regardless of web clipboard permissions. Capture phase so we intercept before xterm.
+const isMac = /mac/i.test(navigator.platform || navigator.userAgent || '');
+window.addEventListener('keydown', (e) => {
+  const mod = isMac ? (e.metaKey && !e.ctrlKey && !e.altKey) : (e.ctrlKey && !e.metaKey && !e.altKey);
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const inTerm = e.target && e.target.closest && e.target.closest('#terminal');
+  const field = e.target && e.target.closest && e.target.closest('input, textarea');
+
+  if (inTerm) {
+    if (mod && k === 'c') {
+      const sel = term.getSelection();
+      if (sel && sel.length) { e.preventDefault(); e.stopPropagation(); claudible.clipWrite(sel); }
+      return;                                   // empty selection → let Ctrl+C through as interrupt
+    }
+    if (mod && k === 'v') {
+      e.preventDefault(); e.stopPropagation();
+      claudible.clipRead().then((t) => { if (t) { claudible.ptyInput('\x1b[200~' + t + '\x1b[201~'); term.focus(); } });
+      return;
+    }
+    if (mod && k === 'a') { e.preventDefault(); e.stopPropagation(); term.selectAll(); return; }
+    if (k === 'Backspace' && !mod) {
+      const sel = term.getSelection();
+      if (sel && sel.length) {
+        e.preventDefault(); e.stopPropagation();
+        claudible.ptyInput('\x7f'.repeat(sel.length));   // delete the marked text
+        term.clearSelection();
+      }
+      return;                                   // no selection → normal single-char backspace
+    }
+    return;
+  }
+  if (field) {
+    if (mod && k === 'a') { e.preventDefault(); field.select(); return; }
+    if (mod && k === 'c') {
+      const s = (field.value || '').substring(field.selectionStart || 0, field.selectionEnd || 0);
+      if (s) { e.preventDefault(); claudible.clipWrite(s); }
+      return;
+    }
+    if (mod && k === 'v') {
+      e.preventDefault();
+      claudible.clipRead().then((t) => { if (t) insertIntoField(field, t); });
+      return;
+    }
+  }
+}, true);

@@ -9,8 +9,19 @@ const { app, BrowserWindow, ipcMain, session, dialog, clipboard } = require('ele
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
+const { createShareServer } = require('./share/server');
+const { startCloudflared } = require('./share/cloudflared');
 
 let win, ptyProc, trustDone = false;
+// Live terminal sharing: server runs locally (loopback); cloudflared carries the last hop. See share/.
+let cloudflaredProc = null, ptyCols = 120, ptyRows = 32, shareBaseUrl = null, pendingSession = '';
+const share = createShareServer({
+  onInput: (d) => { try { ptyProc && ptyProc.write(d); } catch {} },   // a guest typed → into the live pty
+  onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
+  onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
+  onApprovalCancel: (id) => { try { win && win.webContents.send('share:approval-cancel', id); } catch {} },
+  onChat: (m) => { try { win && win.webContents.send('share:chat', m); } catch {} },   // guest → host chat
+});
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
 const RT = path.join(__dirname, 'runtime');
@@ -24,9 +35,15 @@ let APPDIR_WSL = null;
 try { APPDIR_WSL = cp.execFileSync('wsl.exe', ['wslpath', '-u', __dirname.replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); }
 catch (e) { console.error('[claudible] wslpath failed:', e.message); }
 // session.sh receives the app dir as $1 so it writes runtime/ to the SAME Windows folder this process reads.
-const BOOT = APPDIR_WSL
-  ? `bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`
-  : 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
+// A session choice ('new' | a <session-id> | '') is passed via CLAUDIBLE_SESSION on the command line
+// (env vars don't cross the Windows→WSL boundary without WSLENV, so we inline it). The id is sanitised
+// to [A-Za-z0-9-] so it can't break out of the quoted command.
+function buildBoot(session) {
+  if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
+  const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '');
+  const prefix = sel ? `CLAUDIBLE_SESSION='${sel}' ` : '';
+  return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
+}
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
 
 // Bring up the local voice services (Whisper/Kokoro) on launch. services.sh is idempotent (it checks
@@ -75,22 +92,92 @@ function spawnPty(cols, rows) {
     return;
   }
   try {
-    ptyProc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', BOOT], {
+    const proc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(pendingSession)], {
       name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
       // ConPTY (default on Win11) — preserves full ANSI incl. the dim attribute (winpty strips it).
       // Its console-list agent crash ("AttachConsole failed") is neutralized by the guard patch in
       // node_modules/node-pty/lib/conpty_console_list_agent.js + the uncaughtException net below.
     });
-    ptyProc.onData(d => {
+    ptyProc = proc; pendingSession = '';                   // consume the one-shot session selection
+    ptyCols = cols || 120; ptyRows = rows || 32; trustDone = false;
+    share.resetRing(); share.resetStatus(); share.setSize(ptyCols, ptyRows);   // fresh session → drop stale replay/tracker, tell guests the size
+    // Handlers are guarded by `ptyProc === proc` so a soon-to-die OLD pty (during a session switch)
+    // can't stomp the NEW one's stream or null it out.
+    proc.onData(d => {
+      if (ptyProc !== proc) return;
       win.webContents.send('pty:data', d);
-      if (!trustDone && /trust this folder/i.test(d)) { trustDone = true; setTimeout(() => { try { ptyProc.write('\r'); } catch {} }, 250); }
+      share.broadcast(d);                                  // tee the SAME stream to any connected guests
+      if (!trustDone && /trust this folder/i.test(d)) { trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
     });
-    ptyProc.onExit(() => { win.webContents.send('pty:data', '\r\n[claudible] session ended\r\n'); ptyProc = null; });
+    proc.onExit(() => {
+      if (ptyProc !== proc) return;                        // an intentional switch already replaced us
+      const msg = '\r\n[claudible] session ended\r\n';
+      win.webContents.send('pty:data', msg); share.broadcast(msg); share.resetRing(); ptyProc = null;
+    });
   } catch (e) { win.webContents.send('pty:data', `\r\n[claudible] pty spawn failed: ${e.message}\r\n`); }
+}
+// Switch the embedded terminal to a chosen session ('new' | <session-id>). Kills the current pty
+// (its guarded handlers go quiet) and respawns with the selection.
+function respawnPty(session) {
+  pendingSession = session || '';
+  const old = ptyProc; ptyProc = null;
+  if (old) { try { old.kill(); } catch {} }
+  spawnPty(ptyCols, ptyRows);
 }
 ipcMain.on('pty:start', (e, { cols, rows }) => spawnPty(cols, rows));
 ipcMain.on('pty:input', (e, d) => { if (ptyProc) ptyProc.write(d); });
-ipcMain.on('pty:resize', (e, { cols, rows }) => { try { ptyProc && ptyProc.resize(cols, rows); } catch {} });
+ipcMain.on('pty:resize', (e, { cols, rows }) => {
+  ptyCols = cols || ptyCols; ptyRows = rows || ptyRows;
+  try { ptyProc && ptyProc.resize(cols, rows); } catch {}
+  share.setSize(ptyCols, ptyRows);                         // keep guests' xterm matched to the host pty size
+});
+
+// ---- live terminal sharing (local server + cloudflared tunnel) ----
+ipcMain.handle('share:start', async (e, opts) => {
+  try {
+    const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
+    share.setSize(ptyCols, ptyRows);
+    let base = `http://127.0.0.1:${port}`, remote = false, note = null;
+    try {
+      const { proc, url } = await startCloudflared(port);
+      cloudflaredProc = proc;
+      cloudflaredProc.on('exit', () => { cloudflaredProc = null; });
+      base = url; remote = true;                       // public link
+    } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN
+    shareBaseUrl = base;
+    const st = share.status();
+    return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, readOnly: st.readOnly };
+  } catch (err) { return { ok: false, error: String(err.message || err) }; }
+});
+ipcMain.handle('share:stop', async () => {
+  try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
+  cloudflaredProc = null; shareBaseUrl = null;
+  share.stop();
+  return { ok: true };
+});
+ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time link (re-invite)
+  if (!share.status().running || !shareBaseUrl) return { ok: false, error: 'not sharing' };
+  const t = share.regenerateLink();
+  return { ok: true, url: `${shareBaseUrl}/?t=${t}` };
+});
+ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, !!(arg && arg.ok)));   // host's verdict
+
+// ---- sessions (list / switch) ----
+function listSessions() {
+  return new Promise((resolve) => {
+    if (!APPDIR_WSL) return resolve([]);
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/sessions.sh'`],
+      { maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+        if (err) { console.error('[claudible] sessions.sh:', err.message); return resolve([]); }
+        try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+      });
+  });
+}
+ipcMain.handle('session:list', () => listSessions());
+ipcMain.handle('session:open', (e, id) => { respawnPty(id); return { ok: true }; });   // 'new' | <session-id>
+ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests
+ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } catch {} });   // host → guests chat
+ipcMain.handle('share:status', () => share.status());
 
 // ---- session tracker: poll runtime/status.json (Windows FS, native read) ----
 let lastStatus = '';
@@ -180,4 +267,9 @@ process.on('uncaughtException', (e) => console.error('[claudible] uncaughtExcept
 process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
 
 app.whenReady().then(createWindow);
-app.on('window-all-closed', () => { try { ptyProc && ptyProc.kill(); } catch {} app.quit(); });
+app.on('window-all-closed', () => {
+  try { ptyProc && ptyProc.kill(); } catch {}
+  try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
+  try { share.stop(); } catch {}
+  app.quit();
+});

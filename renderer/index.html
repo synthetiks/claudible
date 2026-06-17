@@ -88,7 +88,10 @@
     .ptt-hint.live kbd{color:var(--live);border-color:rgba(229,86,75,.5);
       box-shadow:inset 0 1px 0 var(--sheen),0 0 10px -2px rgba(229,86,75,.6)}
     /* body */
-    .body{display:grid;grid-template-columns:1fr 7px 358px;gap:11px;padding:14px;min-height:0}
+    .body{display:grid;grid-template-columns:1fr 7px;gap:11px;padding:14px;min-height:0}
+    .body.sharing{grid-template-columns:1fr 7px 312px}                       /* + chat (right) while sharing */
+    .body.with-sessions{grid-template-columns:244px 1fr 7px}                 /* + docked sessions (left) */
+    .body.with-sessions.sharing{grid-template-columns:244px 1fr 7px 312px}   /* both */
     #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
       padding:10px 12px;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
@@ -201,12 +204,119 @@
       font-size:12.5px;color:var(--ink);cursor:pointer;white-space:nowrap}
     .ctxitem:hover{background:var(--raised-hi)}
     .ctxitem .k{color:var(--ink-faint);font-size:11px}
+    /* push-to-talk indicator (top bar) — always visible so you can see when you're talking */
+    .mic-ind{display:flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--hairline);border-radius:9px;
+      font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);transition:all .2s}
+    .mic-dot{width:9px;height:9px;border-radius:50%;background:#3a3f47;transition:.2s}
+    .mic-ind.live{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 16px -5px var(--live)}
+    .mic-ind.live .mic-dot{background:var(--live);box-shadow:0 0 9px 0 var(--live);animation:micpulse 1s ease-in-out infinite}
+    @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.3}}
+    /* push-to-talk rebind row (in the Settings drawer) */
+    .ptt-key-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;
+      font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+    .keycap-btn{width:auto;padding:6px 12px;font-size:11px;color:var(--silver);letter-spacing:.04em;cursor:pointer;
+      background:linear-gradient(180deg,#1c1f25,#0f1115);border:1px solid var(--hairline);border-bottom-color:#05060a;border-radius:6px}
+    .keycap-btn:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
+    .keycap-btn.capturing{color:var(--live);border-color:var(--live);box-shadow:0 0 12px -4px var(--live)}
+    /* sessions hamburger (top bar) + the left session sidebar */
+    .iconbtn{width:auto;padding:7px 11px;font-size:15px;line-height:1;color:var(--ink-dim);
+      background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);border-radius:9px;
+      cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all .15s}
+    .iconbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    .iconbtn:active{transform:translateY(1px)}
+    /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
+    .sidebar{display:none;flex-direction:column;min-height:0;background:var(--panel);
+      border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
+    .body.with-sessions .sidebar{display:flex}
+    .newsess{width:auto;margin:12px 14px;color:var(--ink)}
+    .sess-list{flex:1;overflow:auto;padding:0 12px 14px;display:flex;flex-direction:column;gap:7px}
+    .sess{width:auto;text-align:left;padding:10px 11px;border:1px solid var(--hairline);border-radius:9px;
+      background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer}
+    .sess:hover{border-color:rgba(255,255,255,.2)}
+    .sess.active{border-color:var(--live);box-shadow:0 0 14px -7px var(--live)}
+    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
+    /* share dock pinned at the bottom of the sessions sidebar */
+    .share-dock{flex:none;border-top:1px solid var(--hairline);padding:12px 13px 13px;display:flex;flex-direction:column;gap:8px}
+    .sharelbl{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}
+    .sharelbl .ico{width:14px;height:14px;color:var(--ink-faint);flex:none;transition:color .2s,filter .2s}
+    .sharelbl.active{color:var(--ink)}
+    .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
+    .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
+    .share-dock .out{margin-top:0;font-size:10.5px;line-height:1.45}
+    .share-dock input[type=text]{margin-bottom:0;font-size:11px;padding:9px 10px}
+    .share-btn{width:100%}
+    /* settings drawer — slimmer, tighter, less clunky */
+    .drawer{width:338px}
+    .drawer .panel{padding:4px 16px 18px}
+    .drawer .sec{padding:13px 2px}
+    .drawer .label{margin-bottom:10px;font-size:10.5px}
+    .drawer button.primary{padding:12px;font-size:12.5px}
+    .drawer #speak{padding:11px}
+    .drawer .voices{margin-bottom:9px}
+    .drawer .cmds{gap:7px}
+    .drawer .cmds button{padding:9px 6px}
+    /* Settings button (top bar) — opens the slide-in drawer holding voice/commands/share */
+    .settingsbtn{width:auto;padding:8px 12px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--ink-dim);background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);
+      border-radius:9px;cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all .15s}
+    .settingsbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    .settingsbtn:active{transform:translateY(1px)}
+    /* drawer + scrim */
+    .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity .2s}
+    .drawer-scrim.open{opacity:1;pointer-events:auto}
+    .drawer{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:384px;max-width:92vw;display:flex;flex-direction:column;
+      transform:translateX(102%);transition:transform .22s ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
+      border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
+    .drawer.open{transform:translateX(0)}
+    .drawer-head{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;border-bottom:1px solid var(--hairline);
+      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .drawer-head button{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
+    .drawer-head button:hover{color:var(--ink)}
+    .drawer .panel{flex:1;overflow:auto;padding:2px 16px 18px}
+    /* viewer chat (only shown while sharing) */
+    .chat{display:none;flex-direction:column;min-height:0;background:var(--panel);
+      border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
+    .body.sharing .chat{display:flex}
+    .chat-head{display:flex;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--hairline-soft);
+      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .chat-head .chat-sub{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-faint);text-transform:none}
+    .chat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+    .chat-msg{max-width:88%;padding:7px 10px;border-radius:9px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+    .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
+    .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6}
+    .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink)}
+    .chat-empty{margin:auto;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
+    .chat-input{display:flex;gap:7px;padding:10px;border-top:1px solid var(--hairline-soft)}
+    .chat-input input{margin:0;flex:1}
+    .chat-input button{width:auto;padding:0 14px}
+    /* approve-guest prompt: a viewer can't attach to the terminal until you say yes here */
+    .approve{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;
+      background:rgba(5,6,8,.62);backdrop-filter:blur(2px)}
+    .approve.show{display:flex}
+    .approve .box{width:344px;max-width:90vw;padding:22px 22px 18px;text-align:center;
+      border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0c0e11);
+      box-shadow:0 20px 60px rgba(0,0,0,.6)}
+    .approve .box h3{margin:0 0 9px;font-size:14px;letter-spacing:.03em;color:var(--ink)}
+    .approve .box p{margin:0 0 17px;font-size:12px;line-height:1.55;color:var(--ink-dim)}
+    .approve .row{display:flex;gap:10px}
+    .approve .row button{margin:0}
+    .approve input{width:100%;margin:2px 0 16px;font-family:inherit;font-size:13px;color:var(--ink);
+      background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px}
+    .approve input:focus{outline:none;border-color:rgba(255,255,255,.24)}
+    .approve .ghost{background:none;border-color:var(--hairline-soft);color:var(--ink-dim)}
+    /* system chat lines ("X joined" / "X left") */
+    .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
   </style>
 </head>
 <body>
   <div class="top">
+    <button class="iconbtn" id="sessions-btn" title="Sessions">☰</button>
     <img class="logo" src="../assets/logo.png" alt="Claudible logo" />
     <span class="wordmark">claudible</span><span class="tag">v2</span>
+    <button class="settingsbtn" id="settings-btn" title="Voice, commands &amp; sharing">⚙ Settings</button>
+    <span class="mic-ind" id="mic-ind" title="Push-to-talk status"><span class="mic-dot"></span><span class="mic-txt" id="mic-txt">mic ready</span></span>
     <span class="trk" title="session usage">
       <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">—</span></span>
       <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>
@@ -214,7 +324,23 @@
     </span>
   </div>
 
-  <div class="body">
+  <div class="body with-sessions">
+    <aside class="sidebar" id="sidebar">
+      <div class="drawer-head"><span>sessions</span><button id="sidebar-close" title="Hide sessions">‹</button></div>
+      <button class="newsess" id="new-session">+ New session</button>
+      <div class="sess-list" id="sess-list"></div>
+      <div class="share-dock">
+        <div class="sharelbl" id="lbl-share">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
+          <span>share</span><span class="dot" id="d-share"></span>
+          <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
+        </div>
+        <button id="share-btn" class="share-btn">Share session</button>
+        <input type="text" id="share-link" readonly placeholder="invite link" style="display:none" title="Click to copy" />
+        <button id="share-newlink" style="display:none">New link</button>
+        <div class="out share-out" id="share-out">live, one-time invite link</div>
+      </div>
+    </aside>
     <div id="terminal">
       <button class="termtab tr" id="savetab" title="Save session">
         <span class="lbl">save session</span>
@@ -226,6 +352,19 @@
       </button>
     </div>
     <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
+    <div class="chat" id="chat">
+      <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><span class="chat-sub">just you &amp; your viewer</span></div>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chat-input">
+        <input type="text" id="chat-in" placeholder="message your viewer — Claude won't see this" maxlength="2000" />
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer-scrim" id="drawer-scrim"></div>
+  <div class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head"><span>settings</span><button id="drawer-close" title="Close">×</button></div>
     <div class="panel">
       <div class="sec">
         <div class="label" id="lbl-in">
@@ -233,8 +372,9 @@
           voice in <span class="dot" id="d-stt"></span>
           <button class="collapse min" id="stt-collapse" title="show / hide last transcript">▾</button>
         </div>
-        <button id="talk" class="primary" title="Click to start, click again (■ Stop) to send — it won't stop on its own. Or hold Left-Ctrl to talk and release to send.">Talk</button>
-        <div class="ptt-hint">hold <kbd>Left&nbsp;Ctrl</kbd> to talk</div>
+        <button id="talk" class="primary" title="Click to start, click again (■ Stop) to send — it won't stop on its own. Or hold the push-to-talk key to talk and release to send.">Talk</button>
+        <div class="ptt-hint">hold <kbd id="ptt-kbd">Left&nbsp;Alt</kbd> to talk</div>
+        <div class="ptt-key-row"><span>push-to-talk key</span><button id="ptt-key-btn" class="keycap-btn">Left Alt</button></div>
         <div class="out" id="stt-out"></div>
         <div class="collapsible min" id="stt-wrap">
           <div class="transcript" id="stt-transcript">your last message will appear here</div>
@@ -277,8 +417,6 @@
           <button id="cmd-status">/status</button>
         </div>
       </div>
-
-
     </div>
   </div>
 
@@ -290,6 +428,29 @@
   </div>
 
   <div id="ctxmenu" class="ctxmenu"></div>
+
+  <div class="approve" id="approve">
+    <div class="box">
+      <h3>Someone wants to join</h3>
+      <p id="approve-msg">A viewer opened your link and is asking to join your terminal. Only approve if it’s the person you gave the link to.</p>
+      <div class="row">
+        <button id="approve-yes">Approve</button>
+        <button id="approve-no" class="live">Reject</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="approve" id="namemodal">
+    <div class="box">
+      <h3>Share this session</h3>
+      <p>Pick a display name so the people you invite know it's you.</p>
+      <input type="text" id="host-name-in" maxlength="40" placeholder="Your name" />
+      <div class="row">
+        <button id="name-start">Start sharing</button>
+        <button id="name-cancel" class="ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="app.js"></script>
