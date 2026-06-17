@@ -4,13 +4,13 @@
 
 <h1 align="center">Claudible</h1>
 
-<p align="center"><b>The ultimate command center for Claude Code — a sleek interface, live telemetry, and hands-free voice, in one.</b></p>
+<p align="center"><b>A command center for Claude Code: a sleek interface, live telemetry, and hands-free voice, all in one.</b></p>
 
 ---
 
-Claude Code is brilliant — but it lives in a bare terminal. **Claudible wraps it in a real interface** — an obsidian-dark UI with one-click controls, a live meter for context, cost, and tokens, and a guardrail that flips amber → red with a one-tap `/compact` before you blow the window. The actual Claude Code TUI runs inside, untouched — Claudible gives it a face, a dashboard, and a voice.
+Claude Code is brilliant, but it lives in a bare terminal. **Claudible wraps it in a real interface:** an obsidian-dark UI with one-click controls, a live meter for context, cost, and tokens, and a guardrail that turns from amber to red and offers a one-tap `/compact` before you run out of room. The actual Claude Code TUI runs inside untouched, so you keep everything it does and gain a face, a dashboard, and a voice.
 
-And when you want to go hands-free, **full voice control** is built in: hold a key, speak, and your words drop into the live session; replies are read back in a natural voice. **Not a reskin — a control surface.** And it's **100% local**: no cloud, no telemetry, nothing recorded.
+When you want to go hands-free, **full voice control** is built in. Hold a key, speak, and your words drop straight into the live session, with replies read back in a natural voice. It's not a reskin, it's a control surface, and it stays **100% local**: no cloud, no telemetry, nothing recorded.
 
 > **Windows 11 + WSL2** · fully local · MIT
 
