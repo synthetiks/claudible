@@ -24,7 +24,7 @@ When you want to go hands-free, **full voice control** is built in. Hold a key, 
 
 ## Prerequisites
 - **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
-- **Claude Code CLI** installed inside WSL (`claude` on your PATH)
+- **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first — Claudible embeds your already-authenticated session)
 - **Node.js 22.12+** on Windows (Electron 42 requires it)
 - Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 

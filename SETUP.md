@@ -4,7 +4,7 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
 
 ## 1. Prerequisites
 - **WSL2 + Ubuntu** — `wsl --install` (in an admin PowerShell), then reboot.
-- **Claude Code CLI inside WSL** — `claude` must be on your WSL PATH. See the Claude Code docs.
+- **Claude Code CLI inside WSL** — `claude` must be on your WSL PATH **and signed in**. Run `claude` once in WSL and complete login *before* launching Claudible (it embeds your existing session and doesn't handle first-time login specially). See the Claude Code docs.
 - **Node.js 22.12+ on Windows.** (Electron 42 and its build tooling require it; older Node prints `EBADENGINE` warnings on install.)
 - Inside WSL: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
   ```bash
@@ -36,6 +36,7 @@ Optional Desktop shortcut: `powershell -ExecutionPolicy Bypass -File launch\make
 Windows → **Settings → Privacy & security → Microphone** → allow desktop apps to access the mic.
 
 ## Troubleshooting
+- **Embedded terminal shows a Claude login / sign-in prompt** — you're not signed in to Claude Code yet. Complete the login right there in the terminal, or (better) run `claude` once in WSL, finish login, then relaunch Claudible.
 - **Embedded terminal shows a `node-pty` / native-module error** — the module needs rebuilding for your Electron version:
   ```powershell
   npm run rebuild
