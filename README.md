@@ -29,6 +29,7 @@ When you want to go hands-free, **full voice control** is built in. Hold a key, 
 - Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 
 ## Install & run
+> ⚠️ **Run these in Windows PowerShell — not inside WSL.** Clone onto your **Windows drive** (e.g. `C:\Users\you\claudible`), not your WSL home. Claudible's app is a *Windows* Electron app that embeds Claude Code running in WSL; running `npm start` from inside WSL installs the Linux Electron and fails with `libnspr4.so: cannot open shared object file`. Only `npm run setup` reaches into WSL, and it does that for you.
 ```powershell
 git clone https://github.com/thecrazydev1/claudible
 cd claudible

@@ -13,12 +13,13 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
   ```
 
 ## 2. Get it
+> **Do this in Windows PowerShell, not inside WSL** — and clone onto your Windows drive (e.g. `C:\Users\you\claudible`), not your WSL home. The Electron app is the Windows side; it reaches into WSL itself. (Cloning/running inside WSL installs the Linux Electron, which fails with `libnspr4.so: cannot open shared object file`.)
 ```powershell
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
 npm install
 ```
-`npm install` runs `patch-package`, which reapplies a tiny node-pty fix (the ConPTY guard that stops the embedded terminal from crashing under Electron).
+`npm install` runs `patch-package`, which reapplies a tiny node-pty fix (the ConPTY guard that stops the embedded terminal from crashing under Electron). It also needs **Node 22.12+ for Windows** installed (not just WSL's Node).
 
 ## 3. Install the voice services
 ```powershell
@@ -36,6 +37,7 @@ Optional Desktop shortcut: `powershell -ExecutionPolicy Bypass -File launch\make
 Windows → **Settings → Privacy & security → Microphone** → allow desktop apps to access the mic.
 
 ## Troubleshooting
+- **`npm start` fails with `libnspr4.so: cannot open shared object file` (or another `error while loading shared libraries`)** — you're running it **inside WSL**. Claudible's Electron app is the Windows side. Clone onto your Windows drive and run `npm install` / `npm start` from **Windows PowerShell** (you can delete the WSL copy under `~/…`). Only `npm run setup` runs in WSL.
 - **Embedded terminal shows a Claude login / sign-in prompt** — you're not signed in to Claude Code yet. Complete the login right there in the terminal, or (better) run `claude` once in WSL, finish login, then relaunch Claudible.
 - **Embedded terminal shows a `node-pty` / native-module error** — the module needs rebuilding for your Electron version:
   ```powershell
