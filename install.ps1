@@ -11,17 +11,25 @@ function Die($m) { Write-Host "`n$m" -ForegroundColor Yellow; exit 1 }
 Write-Host "=== Claudible installer ===" -ForegroundColor Cyan
 
 # Node 22.12+ on Windows - required to run the Electron app.
-$okNode = $false
-$nc = Get-Command node -ErrorAction SilentlyContinue
-if ($nc) { try { $okNode = [version](((& node -v) -replace '^v','').Trim()) -ge [version]'22.12.0' } catch {} }
-if (-not $okNode) {
-  if (Get-Command winget -ErrorAction SilentlyContinue) {
-    Step 'Node' 'Installing Node.js LTS for Windows via winget...'
-    winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
-    if ($LASTEXITCODE -ne 0) { Die "winget could not install Node. Install Node 22.12+ from https://nodejs.org , then re-run the line below." }
-    Die "Node installed. Open a NEW PowerShell (so Node is on PATH) and run:`n  powershell -NoProfile -ExecutionPolicy Bypass -File `"$app\install.ps1`""
+function Test-Node {
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $false }
+  try { return [version](((& node -v) -replace '^v','').Trim()) -ge [version]'22.12.0' } catch { return $false }
+}
+if (-not (Test-Node)) {
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Die "Node 22.12+ for Windows is required. Install it from https://nodejs.org , then re-run this installer."
   }
-  Die "Node 22.12+ for Windows is required. Install it from https://nodejs.org , then run:`n  powershell -NoProfile -ExecutionPolicy Bypass -File `"$app\install.ps1`""
+  Step 'Node' 'Installing Node.js LTS for Windows via winget...'
+  winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+  if ($LASTEXITCODE -ne 0) { Die "winget could not install Node. Install Node 22.12+ from https://nodejs.org , then re-run this installer." }
+  # Refresh PATH in THIS session (winget updates the registry, not the live process) so we keep going
+  # in the same run instead of making the user reopen PowerShell.
+  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+  if (Test-Path "$env:ProgramFiles\nodejs\node.exe") { $env:Path = "$env:ProgramFiles\nodejs;$env:Path" }
+  if (-not (Test-Node)) {
+    Die "Node installed but isn't visible in this window yet. Open a NEW PowerShell and run:`n  powershell -NoProfile -ExecutionPolicy Bypass -File `"$app\install.ps1`""
+  }
+  Write-Host "  Node ready - continuing." -ForegroundColor Green
 }
 
 Step '1/4' 'Installing dependencies (npm install)...'
