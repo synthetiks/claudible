@@ -233,11 +233,32 @@
     .ctxitem:hover{background:var(--raised-hi)}
     .ctxitem .k{color:var(--ink-faint);font-size:11px}
     /* push-to-talk indicator (top bar) — always visible so you can see when you're talking */
-    .mic-ind{display:flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--hairline);border-radius:9px;
-      font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);transition:all .2s}
-    .mic-dot{width:9px;height:9px;border-radius:50%;background:#3a3f47;transition:.2s}
-    .mic-ind.live{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 16px -5px var(--live)}
-    .mic-ind.live .mic-dot{background:var(--live);box-shadow:0 0 9px 0 var(--live);animation:micpulse 1s ease-in-out infinite}
+    /* top-bar voice boxes — equal-height with the Settings button. Voice In = mic; Voice Out = TTS + controls */
+    .vgroup{display:flex;align-items:center;gap:8px}
+    .vbox{display:flex;align-items:center;gap:7px;height:33px;width:auto;padding:0 11px;border:1px solid var(--hairline);
+      border-radius:9px;background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 1px 0 var(--sheen);
+      font-size:11px;letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}
+    .vbox .vdot{width:8px;height:8px;border-radius:50%;background:#3a3f47;flex:none;transition:.2s}
+    .vbox .vlbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    /* Voice In — click to talk; lights red while recording */
+    .vin{cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s,color .16s}
+    .vin:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
+    .vin.live{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 16px -5px var(--live)}
+    .vin.live .vdot{background:var(--live);box-shadow:0 0 9px 0 var(--live);animation:micpulse 1s ease-in-out infinite}
+    .vin.live .vstat{color:#fff}
+    /* Voice Out — voice name (click to cycle), red stop, always-speak toggle */
+    .vout .vname{width:auto;padding:3px 8px;border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;
+      color:var(--silver);font-size:10.5px;cursor:pointer;box-shadow:none}
+    .vout .vname:hover{border-color:rgba(255,255,255,.22);color:#fff}
+    .vout .vstop{width:auto;display:flex;align-items:center;justify-content:center;height:21px;padding:0 8px;
+      border:1px solid rgba(229,86,75,.4);border-radius:6px;background:rgba(229,86,75,.12);color:var(--live-soft);
+      font-size:9px;cursor:pointer;box-shadow:none;opacity:.5;transition:opacity .16s,background .16s,color .16s,border-color .16s}
+    .vout.speaking .vstop{opacity:1}
+    .vout .vstop:hover{opacity:1;color:#fff;background:rgba(229,86,75,.28);border-color:var(--live)}
+    .vout .vauto{width:auto;height:21px;padding:0 9px;border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;
+      color:var(--ink-faint);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:none;transition:.15s}
+    .vout .vauto.on{color:#0a0b0d;background:linear-gradient(180deg,var(--silver),#9aa3ae);border-color:transparent;font-weight:700}
+    .vout.speaking .vdot{background:#5fb487;box-shadow:0 0 9px 0 #5fb487;animation:micpulse 1s ease-in-out infinite}
     @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.3}}
     /* push-to-talk rebind row (in the Settings drawer) */
     .ptt-key-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;
@@ -358,7 +379,17 @@
     <img class="logo" src="../assets/logo.png" alt="Claudible logo" />
     <span class="wordmark">claudible</span><span class="tag">v2</span>
     <button class="settingsbtn" id="settings-btn" title="Voice, commands &amp; sharing">⚙ Settings</button>
-    <span class="mic-ind" id="mic-ind" title="Push-to-talk status"><span class="mic-dot"></span><span class="mic-txt" id="mic-txt">mic ready</span></span>
+    <div class="vgroup">
+      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
+        <span class="vdot"></span><span class="vlbl">Voice In</span><span class="vstat" id="vin-stat">ready</span>
+      </button>
+      <div class="vbox vout" id="voice-out" title="Claude's voice output">
+        <span class="vdot" id="vout-dot"></span><span class="vlbl">Voice Out</span>
+        <button class="vname" id="vout-name" title="Click to change voice">Bella</button>
+        <button class="vstop" id="vout-stop" title="Stop Claude speaking">■ STOP</button>
+        <button class="vauto on" id="vout-auto" aria-pressed="true" title="Always speak Claude's replies">auto</button>
+      </div>
+    </div>
     <span class="trk" title="session usage">
       <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">—</span></span>
       <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>

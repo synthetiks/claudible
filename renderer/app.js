@@ -135,8 +135,8 @@ claudible.onStatus((s) => {
 let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false;
 function talkUI(on) {
   $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on);
-  // Top-bar indicator — always visible (even with the Settings drawer closed) so you can see you're talking.
-  const mi = $('mic-ind'); if (mi) { mi.classList.toggle('live', on); $('mic-txt').textContent = on ? 'talking…' : 'mic ready'; }
+  // Top-bar Voice In box — always visible (even with the drawer closed) so you can see you're talking.
+  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'listening…' : 'ready'; }
 }
 
 async function startRecording() {
@@ -183,6 +183,8 @@ function stopRecording(opts) {
   try { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch {}
 }
 $('talk').addEventListener('click', () => { recording ? stopRecording() : startRecording(); });
+// Top-bar Voice In box doubles as a Talk button (so you can talk without opening the drawer).
+$('voice-in').addEventListener('click', () => { recording ? stopRecording() : startRecording(); });
 
 // ---------- Push-to-talk: HOLD Left Ctrl ----------
 // Left Ctrl is also the terminal's busiest modifier (Ctrl+C/R/D/…), so we DON'T fire the mic on a
@@ -259,7 +261,7 @@ function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
           .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 600);
 }
-function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? 'Stop Speech' : 'Speak'; b.classList.toggle('live', on); }
+function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? 'Stop Speech' : 'Speak'; b.classList.toggle('live', on); const vo = $('voice-out'); if (vo) vo.classList.toggle('speaking', on); }
 function stopSpeech() {
   speakGen++;                                         // invalidate any in-flight speak()
   ttsBusy = false;
@@ -321,13 +323,24 @@ async function speak(text) {
 }
 $('speak').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else speak($('tts-in').value.trim()); });
 
-// voice selector pills
-document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown', (e) => {
-  e.preventDefault();
-  document.querySelectorAll('.vpill').forEach((x) => x.classList.remove('on'));
-  p.classList.add('on'); selectedVoice = p.dataset.voice;
-  savePrefs({ voice: selectedVoice });
-}));
+// ---- voice selection + Voice Out top-bar controls, kept in sync with the drawer ----
+const VOICE_NAMES = { af_bella: 'Bella', af_heart: 'Heart', am_michael: 'Michael' };
+const VOICE_ORDER = ['af_bella', 'af_heart', 'am_michael'];
+function syncVoiceUI() {
+  document.querySelectorAll('.vpill').forEach((x) => x.classList.toggle('on', x.dataset.voice === selectedVoice));
+  const n = $('vout-name'); if (n) n.textContent = VOICE_NAMES[selectedVoice] || selectedVoice;
+  const a = $('vout-auto'); if (a) { a.classList.toggle('on', alwaysSpeak); a.setAttribute('aria-pressed', String(alwaysSpeak)); }
+  const t = $('always-toggle'); if (t) t.classList.toggle('on', alwaysSpeak);
+  const cb = $('always-speak'); if (cb) cb.checked = alwaysSpeak;
+}
+function setVoice(v) { selectedVoice = v; savePrefs({ voice: v }); syncVoiceUI(); }
+function setAlways(on) { alwaysSpeak = !!on; savePrefs({ alwaysSpeak: alwaysSpeak }); syncVoiceUI(); }
+// drawer voice pills
+document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown', (e) => { e.preventDefault(); setVoice(p.dataset.voice); }));
+// top-bar Voice Out: voice name cycles voices, ■ stops Claude speaking, auto = always-speak toggle
+if ($('vout-name')) $('vout-name').addEventListener('click', () => { const i = VOICE_ORDER.indexOf(selectedVoice); setVoice(VOICE_ORDER[(i + 1) % VOICE_ORDER.length]); });
+if ($('vout-stop')) $('vout-stop').addEventListener('click', () => stopSpeech());
+if ($('vout-auto')) $('vout-auto').addEventListener('click', () => setAlways(!alwaysSpeak));
 // collapse / expand the voice-out text box
 $('tts-collapse').addEventListener('click', () => {
   $('tts-wrap').classList.toggle('min');
@@ -340,9 +353,7 @@ $('stt-collapse').addEventListener('click', () => {
 });
 // Always Speak: auto-voice every Claude reply in the selected voice
 $('always-speak').addEventListener('change', (e) => {
-  alwaysSpeak = e.target.checked;
-  $('always-toggle').classList.toggle('on', alwaysSpeak);
-  savePrefs({ alwaysSpeak: alwaysSpeak });
+  setAlways(e.target.checked);
   setTimeout(() => term.focus(), 0);
 });
 
@@ -671,6 +682,7 @@ function savePrefs(patch) { try { localStorage.setItem(PREFS_KEY, JSON.stringify
   }
   if (p.pttKey) pttKey = p.pttKey;
   applyPttKey();   // render the current push-to-talk key (default or saved)
+  syncVoiceUI();   // reflect saved voice + always-speak in the top-bar Voice Out box
 })();
 
 // ---------- sessions sidebar (switch between Claude conversations, like Claude Code) ----------
