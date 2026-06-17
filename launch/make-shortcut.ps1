@@ -8,8 +8,9 @@ $lnk = $ws.CreateShortcut($path)
 $lnk.TargetPath = 'powershell.exe'
 $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$app\launch\claudible.ps1`""
 $lnk.WorkingDirectory = $app
-$icon = Join-Path $app 'node_modules\electron\dist\electron.exe'
-if (Test-Path $icon) { $lnk.IconLocation = "$icon,0" }
+$icon = Join-Path $app 'assets\claudible.ico'        # the Claudible logo (headphones + mic)
+if (Test-Path $icon) { $lnk.IconLocation = $icon }
+else { $fallback = Join-Path $app 'node_modules\electron\dist\electron.exe'; if (Test-Path $fallback) { $lnk.IconLocation = "$fallback,0" } }
 $lnk.Description = 'Claudible voice cockpit'
 $lnk.Save()
 Write-Output ("SHORTCUT -> " + $path)

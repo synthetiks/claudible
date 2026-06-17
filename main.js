@@ -50,6 +50,7 @@ if (!nodePty) console.error('[claudible] no pty backend available');
 function createWindow() {
   win = new BrowserWindow({
     width: 1320, height: 860, backgroundColor: '#070809',
+    icon: path.join(__dirname, 'assets', 'claudible.ico'),   // window + taskbar branding (the headphones/mic guy)
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   // Grant ONLY the microphone (needed for push-to-talk); deny every other permission request.
