@@ -13,8 +13,11 @@ try { var s = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); if (s && 
 // to the CSS @media rules (some in-app browsers/webviews mis-report viewport width).
 function flagMobile() {
   var small = window.matchMedia('(max-width: 760px)').matches;
-  var coarse = window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 900;
+  // coarse PRIMARY pointer + no hover = a touch device (phone/tablet, incl. large phones in landscape that
+  // report >900px). Laptops/desktops have a fine primary pointer, so they never match and stay byte-identical.
+  var coarse = window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(hover: none)').matches;
   document.body.classList.toggle('mobile', small || coarse);
+  scheduleFit();                                  // re-fit when crossing the mobile/desktop boundary (rotate, resize)
 }
 flagMobile();
 window.addEventListener('resize', flagMobile);
@@ -36,7 +39,76 @@ function showOverlay(show, title, body, bad) {
   if (body != null) $('ov-body').textContent = body;
   $('card').classList.toggle('bad', !!bad);
 }
-function applySize(c, r) { try { term.resize(c, r); } catch (e) {} }
+function applySize(c, r) { try { term.resize(c, r); } catch (e) {} scheduleFit(); }
+
+// ---- fit-to-width scaling (phones only; desktop & 1:1 are no-ops) ----
+// The guest mirrors the host at its exact cols x rows, so on a phone the terminal is far wider than the
+// screen. We DON'T reflow columns (would shatter Claude Code's TUI box-drawing) and we DON'T CSS-transform
+// the terminal (that desyncs xterm's tap/selection coordinate mapping — its cell metrics come from font
+// measurement, not the scaled DOM). Instead we shrink the FONT SIZE: cols x rows stay fixed, xterm
+// re-measures so pointer/selection stay correct, and the whole terminal narrows to fit. Pinch-zoom
+// (maximum-scale=5) stays available for reading fine detail.
+var BASE_FONT = 13;                                // MUST match the Terminal({fontSize}) above
+var FIT_KEY = 'claudible_fitmode';                 // 'fit' (default) | '1to1'  (per-tab, like resume/name)
+var fitMode = 'fit';
+try { if (sessionStorage.getItem(FIT_KEY) === '1to1') fitMode = '1to1'; } catch (e) {}
+function isMobile() { return document.body.classList.contains('mobile'); }
+function recomputeFit() {
+  var t = $('terminal'); if (!t) return;
+  var wrap = t.closest('.wrap'); if (!wrap) return;
+  var active = (fitMode === 'fit' && isMobile());
+  document.body.classList.toggle('term1to1', !active);
+  var cur = term.options.fontSize || BASE_FONT;
+  if (!active) {                                    // desktop or 1:1 → restore base font (desktop never differs → no-op)
+    if (cur !== BASE_FONT) term.options.fontSize = BASE_FONT;
+    return;
+  }
+  var screen = t.querySelector('.xterm-screen') || t.querySelector('.xterm');
+  if (!screen) return;
+  var natW = screen.offsetWidth;                    // current grid width = cols x cell(curFont); layout-box, transform-free
+  if (!natW || natW <= 0) return;                   // pre-paint race → a later trigger retries
+  var cs = getComputedStyle(wrap), tcs = getComputedStyle(t);
+  var avail = wrap.clientWidth
+    - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0)
+    - parseFloat(tcs.paddingLeft || 0) - parseFloat(tcs.paddingRight || 0)
+    - parseFloat(tcs.borderLeftWidth || 0) - parseFloat(tcs.borderRightWidth || 0) - 1;
+  if (avail <= 0) return;
+  // Cell width scales ~linearly with font size, so this ratio self-corrects from ANY current font and
+  // converges to the largest size that fits (floor → never overflow). Clamp to [5px, base].
+  var target = Math.max(5, Math.min(BASE_FONT, Math.floor(cur * avail / natW)));
+  if (target !== cur) term.options.fontSize = target;
+}
+// xterm renders on rAF → reading size synchronously right after term.resize() is stale. Measure on double-rAF.
+function scheduleFit() { requestAnimationFrame(function () { requestAnimationFrame(recomputeFit); }); }
+window.addEventListener('orientationchange', function () { setTimeout(recomputeFit, 250); }); // dims settle after rotate
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);            // monospace FOUT → wrong char width
+if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleFit);      // reliable in in-app webviews
+scheduleFit();                                                                                 // first attempt at boot
+
+// read-only viewers can't type — neutralize xterm's hidden helper textarea so a tap can't raise the keyboard
+function applyReadOnlyInput() {
+  if (!readOnly) return;                            // NEVER touch interactive viewers (would kill their keyboard)
+  var ta = $('terminal').querySelector('.xterm-helper-textarea');
+  if (!ta) return;
+  ta.setAttribute('readonly', 'readonly');
+  ta.setAttribute('inputmode', 'none');             // Android/iOS: a tap won't surface the soft keyboard
+  ta.setAttribute('aria-hidden', 'true');
+  ta.tabIndex = -1;
+}
+
+// Fit / 1:1 toggle (CSP-safe: wired here, no inline handler). Labels the CURRENT state; dot color matches.
+(function fitToggle() {
+  var btn = $('fitbtn'); if (!btn) return;
+  var lbl = $('fitbtn-l');
+  function paint() { if (lbl) lbl.textContent = (fitMode === '1to1') ? '1:1' : 'Fit'; btn.setAttribute('aria-pressed', String(fitMode === 'fit')); }
+  btn.addEventListener('click', function () {
+    fitMode = (fitMode === '1to1') ? 'fit' : '1to1';
+    try { sessionStorage.setItem(FIT_KEY, fitMode); } catch (e) {}
+    paint(); recomputeFit();
+    if (fitMode === '1to1') { var w = $('terminal').closest('.wrap'); if (w) w.scrollLeft = 0; }   // pan from column 0
+  });
+  paint();
+})();
 // Mirror the host's session tracker (context %, cost, tokens) — values arrive pre-formatted.
 function applyStatus(s) {
   if (!s) return;
@@ -72,11 +144,13 @@ function connect() {
         readOnly = !!msg.readOnly;
         if (msg.host) hostName = msg.host;
         $('ro').style.display = readOnly ? '' : 'none';
+        applyReadOnlyInput();                                 // read-only: a tap won't raise the soft keyboard
         if (msg.resume) { resume = msg.resume; try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ t: token, r: resume })); } catch (e) {} }
         showOverlay(false);
+        document.body.classList.add('connected');             // reveal the mobile Fit/1:1 pill only once actually viewing
         setStatus('connected', 'ok');
         applySize(msg.cols, msg.rows);
-        term.focus();
+        if (!isMobile() && !readOnly) term.focus();           // don't pop the on-screen keyboard on phones / read-only viewers
       } else if (msg.type === 'pending') {
         setStatus('waiting for approval', 'work');
         showOverlay(true, 'Waiting for the host to let you in…', 'The host needs to approve your connection. Keep this tab open.', false);

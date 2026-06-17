@@ -356,9 +356,42 @@ const send = (cmd) => {
   setTimeout(() => claudible.ptyInput(cmd + '\r'), 120);        // then run the command
   setTimeout(() => term.focus(), 150);                    // keyboard back in the terminal
 };
-[['cmd-effort', '/effort'], ['cmd-context', '/context'], ['cmd-model', '/model'],
- ['cmd-compact', '/compact'], ['cmd-clear', '/clear'], ['cmd-status', '/status']].forEach(([id, cmd]) =>
-  $(id).addEventListener('mousedown', (e) => { e.preventDefault(); send(cmd); if (cmd === '/clear') resetStats(); }));
+// Command bar: 5 pills visible, the rest reached by horizontal scroll/drag in the same width.
+// Fire on pointer-UP (so a drag scrolls instead of triggering); preventDefault on pointer-DOWN
+// holds focus in the terminal (keeps the click-twice focus-war fix above).
+const cmdscroll = $('cmdscroll'), cmdwrap = cmdscroll.parentElement;
+let cdrag = null;
+function cmdEdges() {                                          // fade the side(s) that have more off-screen
+  const max = cmdscroll.scrollWidth - cmdscroll.clientWidth;
+  cmdwrap.classList.toggle('more-l', cmdscroll.scrollLeft > 2);
+  cmdwrap.classList.toggle('more-r', cmdscroll.scrollLeft < max - 2);
+}
+cmdscroll.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  cdrag = { x: e.clientX, sl: cmdscroll.scrollLeft, moved: false, pill: e.target.closest('.cmdpill'), pid: e.pointerId };
+  try { cmdscroll.setPointerCapture(e.pointerId); } catch {}
+});
+cmdscroll.addEventListener('pointermove', (e) => {
+  if (!cdrag) return;
+  const dx = e.clientX - cdrag.x;
+  if (Math.abs(dx) > 4) cdrag.moved = true;
+  cmdscroll.scrollLeft = cdrag.sl - dx; cmdEdges();
+});
+const cmdUp = () => {
+  if (!cdrag) return;
+  const { moved, pill, pid } = cdrag; cdrag = null;
+  try { cmdscroll.releasePointerCapture(pid); } catch {}
+  if (!moved && pill && pill.dataset.cmd) { send(pill.dataset.cmd); if (pill.dataset.cmd === '/clear') resetStats(); }
+};
+cmdscroll.addEventListener('pointerup', cmdUp);
+cmdscroll.addEventListener('pointercancel', cmdUp);
+cmdscroll.addEventListener('wheel', (e) => {                   // vertical wheel → horizontal scroll over the bar
+  if (!e.deltaY) return;
+  cmdscroll.scrollLeft += e.deltaY; e.preventDefault(); cmdEdges();
+}, { passive: false });
+cmdscroll.addEventListener('scroll', cmdEdges);
+new ResizeObserver(cmdEdges).observe(cmdscroll);              // recompute on width changes (sharing/sessions toggles)
 
 // Context guardrail: the ctx bar becomes a one-tap /compact shortcut only once it's in the warn/crit zone.
 $('trk-ctxbar').addEventListener('mousedown', (e) => {
@@ -427,9 +460,14 @@ function insertIntoField(el, text) {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function selectNodeText(node) {                                // select a whole DOM node's text (for Copy on non-input regions)
+  const r = document.createRange(); r.selectNodeContents(node);
+  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
 window.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const inTerm = !!e.target.closest('#terminal');
+  const chatLog = e.target.closest('#chat-log');                // right-clicked inside the viewer chat log
   const field = e.target.closest('input, textarea');
   const sel = inTerm ? term.getSelection() : String(window.getSelection() || '');
   const items = [];
@@ -440,6 +478,7 @@ window.addEventListener('contextmenu', (e) => {
     else insertIntoField(field, t);
   } });
   if (inTerm || field) items.push({ label: 'Select All', act: () => { if (inTerm) term.selectAll(); else field.select(); } });
+  else if (chatLog) items.push({ label: 'Select All', act: () => selectNodeText(chatLog) });   // then right-click → Copy
   if (!items.length) return;                                  // nothing actionable here
 
   ctxmenu.innerHTML = '';

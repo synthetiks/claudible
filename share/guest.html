@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
   <!-- Guest viewer for a shared Claudible terminal. Assets are served same-origin by share/server.js;
        the only network it touches is its own host (the static libs + the WebSocket). -->
   <meta http-equiv="Content-Security-Policy"
@@ -13,7 +13,9 @@
     :root{ --bg:#070809; --ink:#e7eaef; --ink-dim:#9097a1; --ink-faint:#565c66; --silver:#cfd6df;
       --hairline:#2b2f37; --live:#e5564b; --ok:#5fb487; --amber:#e0a93b; --sheen:rgba(255,255,255,.07); }
     *{box-sizing:border-box}
-    html,body{height:100%;margin:0;overflow-x:hidden}
+    html,body{height:100%;margin:0;overflow-x:hidden}      /* 100% = universal fallback for old iOS/Samsung/webviews */
+    html{background:#070809}                                /* masks the gap exposed when the URL bar retracts (no flash) */
+    body{height:100svh}                                    /* svh = smallest viewport (bar shown) → foot/chat never hide under the URL bar */
     body{background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
       color:var(--ink);font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
       display:grid;grid-template-rows:52px 1fr 22px}
@@ -80,6 +82,23 @@
     .gchat-input button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     #terminal{background:#0a0b0d;border:1px solid var(--hairline);border-radius:11px;padding:10px 12px;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
+    /* ---- fit-to-width is done in guest.js by scaling the FONT SIZE (cols x rows unchanged) so xterm's cell
+       metrics stay consistent with the DOM and tap/selection coordinates stay correct. Desktop never touches
+       the font (gated behind body.mobile) so it stays byte-identical. Only the toggle needs CSS. ---- */
+    /* floating Fit / 1:1 toggle — phones only, revealed once connected, floats above the stacked chat */
+    .fitbtn{display:none}
+    body.mobile.connected .fitbtn{display:inline-flex;align-items:center;gap:7px;position:fixed;z-index:40;
+      right:calc(12px + env(safe-area-inset-right,0px));
+      bottom:calc(32vh + 30px + env(safe-area-inset-bottom,0px));    /* fallback for engines without svh */
+      bottom:calc(32svh + 30px + env(safe-area-inset-bottom,0px));   /* clears the 32svh chat panel + foot */
+      font-family:inherit;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--ink-dim);background:linear-gradient(180deg,#16181d,#0f1115);
+      border:1px solid var(--hairline);border-radius:999px;padding:8px 13px;cursor:pointer;
+      box-shadow:0 6px 18px rgba(0,0,0,.5),inset 0 1px 0 var(--sheen);
+      -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+    .fitbtn:active{transform:scale(.96)}
+    .fitbtn .ic{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px -1px var(--ok)}   /* green = fit */
+    body.term1to1 .fitbtn .ic{background:var(--amber);box-shadow:0 0 7px -1px var(--amber)}                       /* amber = 1:1/pan */
     /* faint vignette for depth — same premium feel as the host cockpit */
     body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
       background:radial-gradient(120% 120% at 50% 40%, transparent 62%, rgba(0,0,0,.32) 100%)}
@@ -109,7 +128,7 @@
       .bar .name{font-size:12px;letter-spacing:.16em}
       .main{flex-direction:column}                  /* terminal on top, chat below */
       .wrap{flex:1;padding:9px;align-items:flex-start;justify-content:flex-start}   /* anchor so panning reaches the start */
-      .gchat{width:auto;height:32vh;min-height:118px;margin:0 9px 9px}
+      .gchat{width:auto;height:32vh;height:32svh;min-height:118px;margin:0 9px 9px}
       .gchat-input input{font-size:16px}            /* 16px stops iOS auto-zoom on focus */
       #terminal{padding:8px}
       .card{padding:22px 20px;max-width:88vw}
@@ -123,7 +142,7 @@
        that mis-reports its width still gets the stacked phone layout. Mirrors the @media rules above. */
     body.mobile .main{flex-direction:column}
     body.mobile .wrap{align-items:flex-start;justify-content:flex-start;padding:9px}
-    body.mobile .gchat{width:auto;height:32vh;min-height:118px;margin:0 9px 9px}
+    body.mobile .gchat{width:auto;height:32vh;height:32svh;min-height:118px;margin:0 9px 9px}
     body.mobile .gchat-input input{font-size:16px}
     body.mobile .bar .tag,body.mobile .trk{display:none}
     body.mobile .sesschip{max-width:56vw}
@@ -174,6 +193,10 @@
       <button id="name-go">Join</button>
     </div>
   </div>
+
+  <button class="fitbtn" id="fitbtn" type="button" aria-pressed="true" aria-label="Toggle fit to width">
+    <span class="ic"></span><span id="fitbtn-l">Fit</span>
+  </button>
 
   <script src="/xterm.js"></script>
   <script src="/addon-fit.js"></script>

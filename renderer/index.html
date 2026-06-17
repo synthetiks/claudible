@@ -39,7 +39,7 @@
       user-select:none;-webkit-user-select:none;cursor:default;
     }
     /* keep the terminal + readable text copyable; chrome (labels/buttons) is not selectable */
-    #terminal,.out,input,.transcript,.trk{user-select:text;-webkit-user-select:text;cursor:auto}
+    #terminal,.out,input,.transcript,.trk,.chat-log{user-select:text;-webkit-user-select:text;cursor:auto}
     /* faint grain/vignette for smoky depth */
     body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
       background:radial-gradient(120% 120% at 50% 40%, transparent 60%, rgba(0,0,0,.35) 100%);}
@@ -88,12 +88,15 @@
     .ptt-hint.live kbd{color:var(--live);border-color:rgba(229,86,75,.5);
       box-shadow:inset 0 1px 0 var(--sheen),0 0 10px -2px rgba(229,86,75,.6)}
     /* body */
-    .body{display:grid;grid-template-columns:1fr 7px;gap:11px;padding:14px;min-height:0}
-    .body.sharing{grid-template-columns:1fr 7px 312px}                       /* + chat (right) while sharing */
-    .body.with-sessions{grid-template-columns:244px 1fr 7px}                 /* + docked sessions (left) */
-    .body.with-sessions.sharing{grid-template-columns:244px 1fr 7px 312px}   /* both */
+    .body{display:grid;grid-template-columns:1fr;gap:11px;padding:14px;min-height:0}
+    .body.sharing{grid-template-columns:1fr 312px}                       /* + chat (right) while sharing */
+    .body.with-sessions{grid-template-columns:244px 1fr}                 /* + docked sessions (left) */
+    .body.with-sessions.sharing{grid-template-columns:244px 1fr 312px}   /* both */
+    /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
+    .center{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
+    .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0}
     #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
-      padding:10px 12px;min-height:0;overflow:hidden;position:relative;
+      padding:10px 12px;flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
     #terminal .xterm-viewport{scrollbar-width:none}
@@ -106,6 +109,33 @@
       cursor:grab;opacity:0;transition:background .15s,opacity .2s;will-change:transform,height}
     .scroll:hover .thumb{background:linear-gradient(180deg,#49515d,#30353d)}
     .scroll .thumb.drag{cursor:grabbing;background:linear-gradient(180deg,var(--silver),#8a929b)}
+    /* command bar — 5 commands visible; scroll or drag horizontally for the rest */
+    .cmdbar{display:flex;align-items:center;gap:10px;flex:none;position:relative;
+      padding:9px 11px;border:1px solid var(--hairline);border-radius:11px;
+      background:linear-gradient(180deg,#0e1014,#0a0b0d);
+      box-shadow:inset 0 1px 0 var(--sheen),0 0 0 1px rgba(0,0,0,.4)}
+    /* viewport: clips the track; edge fades cue that there's more to scroll */
+    .cmdscroll-wrap{position:relative;flex:1;min-width:0}
+    .cmdscroll-wrap::before,.cmdscroll-wrap::after{content:'';position:absolute;top:0;bottom:0;width:30px;
+      pointer-events:none;z-index:2;opacity:0;transition:opacity .2s}
+    .cmdscroll-wrap::before{left:0;background:linear-gradient(90deg,#0b0d10,transparent)}
+    .cmdscroll-wrap::after{right:0;background:linear-gradient(270deg,#0b0d10,transparent)}
+    .cmdscroll-wrap.more-l::before{opacity:1}
+    .cmdscroll-wrap.more-r::after{opacity:1}
+    /* track: 10 equal columns sized so EXACTLY 5 fit the viewport (4 inner gaps of 8px) */
+    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px) / 5);gap:8px;
+      overflow-x:auto;overflow-y:hidden;scrollbar-width:none;cursor:grab;touch-action:pan-x}
+    .cmdscroll:active{cursor:grabbing}
+    .cmdscroll::-webkit-scrollbar{height:0;width:0}
+    .cmdscroll .cmdpill{min-width:0;width:auto;padding:8px 10px;
+      font-size:11.5px;letter-spacing:.02em;color:var(--ink-dim);white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis;text-align:center;
+      background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline-soft);
+      border-radius:8px;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s,color .15s;
+      box-shadow:inset 0 1px 0 var(--sheen)}
+    .cmdscroll .cmdpill:hover{color:var(--ink);border-color:rgba(255,255,255,.22);
+      box-shadow:inset 0 1px 0 var(--sheen),0 4px 18px -8px rgba(150,180,220,.45)}
+    .cmdscroll .cmdpill:active{transform:translateY(1px)}
     /* control column */
     .panel{display:flex;flex-direction:column;min-height:0;position:relative}
     /* Save-session tab: tucked at the panel's left edge, pops out LEFT over the terminal on hover */
@@ -146,8 +176,6 @@
     button.primary{color:var(--ink);font-size:13px;padding:15px}
     button.live{color:#fff;border-color:var(--live);
       background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 22px -6px var(--live),inset 0 1px 0 rgba(255,255,255,.06)}
-    .cmds{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-    .cmds button{padding:10px 8px;font-size:11px;letter-spacing:.02em}
     /* voice selector pills */
     .voices{display:flex;gap:6px;margin-bottom:10px}
     .vpill{flex:1;width:auto;padding:8px 4px;font-size:11px;letter-spacing:.03em;color:var(--ink-dim);
@@ -255,8 +283,6 @@
     .drawer button.primary{padding:12px;font-size:12.5px}
     .drawer #speak{padding:11px}
     .drawer .voices{margin-bottom:9px}
-    .drawer .cmds{gap:7px}
-    .drawer .cmds button{padding:9px 6px}
     /* Settings button (top bar) — opens the slide-in drawer holding voice/commands/share */
     .settingsbtn{width:auto;padding:8px 12px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
       color:var(--ink-dim);background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);
@@ -341,7 +367,9 @@
         <div class="out share-out" id="share-out">live, one-time invite link</div>
       </div>
     </aside>
-    <div id="terminal">
+    <div class="center">
+      <div class="termrow">
+      <div id="terminal">
       <button class="termtab tr" id="savetab" title="Save session">
         <span class="lbl">save session</span>
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -351,7 +379,25 @@
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
       </button>
     </div>
-    <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
+      <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
+      </div><!-- /termrow -->
+      <div class="cmdbar" title="One-tap commands — runs in the live terminal · scroll or drag for more">
+        <div class="cmdscroll-wrap">
+          <div class="cmdscroll" id="cmdscroll">
+            <button class="cmdpill" data-cmd="/model">/model</button>
+            <button class="cmdpill" data-cmd="/effort">/effort</button>
+            <button class="cmdpill" data-cmd="/compact">/compact</button>
+            <button class="cmdpill" data-cmd="/clear">/clear</button>
+            <button class="cmdpill" data-cmd="/loop">/loop</button>
+            <button class="cmdpill" data-cmd="/context">/context</button>
+            <button class="cmdpill" data-cmd="/status">/status</button>
+            <button class="cmdpill" data-cmd="/resume">/resume</button>
+            <button class="cmdpill" data-cmd="/cost">/cost</button>
+            <button class="cmdpill" data-cmd="/help">/help</button>
+          </div>
+        </div>
+      </div>
+    </div><!-- /center -->
     <div class="chat" id="chat">
       <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><span class="chat-sub">just you &amp; your viewer</span></div>
       <div class="chat-log" id="chat-log"></div>
@@ -406,17 +452,6 @@
         </div>
       </div>
 
-      <div class="sec">
-        <div class="label">commands</div>
-        <div class="cmds">
-          <button id="cmd-effort">/effort</button>
-          <button id="cmd-context">/context</button>
-          <button id="cmd-model">/model</button>
-          <button id="cmd-compact">/compact</button>
-          <button id="cmd-clear">/clear</button>
-          <button id="cmd-status">/status</button>
-        </div>
-      </div>
     </div>
   </div>
 
