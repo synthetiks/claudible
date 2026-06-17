@@ -28,6 +28,35 @@ var term = new Terminal({
 });
 term.open($('terminal'));
 
+// custom scroll gutter (ported from the cockpit) — drives the terminal's scrollback so no native
+// scrollbar sits over the text. Desktop/tablet only (CSS hides it on phones, where touch scrolls).
+(function gutter() {
+  var sc = $('gutter'), thumb = $('gthumb'); if (!sc || !thumb) return;
+  function upd() {
+    var b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length, trackH = sc.clientHeight;
+    if (baseY <= 0 || total <= rows || trackH <= 0) { thumb.style.opacity = '0'; return; }
+    var thumbH = Math.max(26, trackH * (rows / total));
+    thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
+    thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (b.viewportY / baseY)) + 'px)';
+  }
+  term.onScroll(upd); setInterval(upd, 150);
+  var dragging = false, grabDY = 0;
+  function thumbTop() { return thumb.getBoundingClientRect().top - sc.getBoundingClientRect().top; }
+  function toFrac(f) { term.scrollToLine(Math.round(Math.max(0, Math.min(1, f)) * term.buffer.active.baseY)); }
+  thumb.addEventListener('pointerdown', function (e) {
+    dragging = true; grabDY = e.clientY - thumbTop(); thumb.classList.add('drag');
+    try { thumb.setPointerCapture(e.pointerId); } catch (x) {} e.preventDefault(); e.stopPropagation();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var th = sc.clientHeight, hh = thumb.offsetHeight;
+    var top = Math.max(0, Math.min(th - hh, e.clientY - sc.getBoundingClientRect().top - grabDY));
+    toFrac((th - hh) > 0 ? top / (th - hh) : 0);
+  });
+  window.addEventListener('pointerup', function () { if (dragging) { dragging = false; thumb.classList.remove('drag'); } });
+  sc.addEventListener('pointerdown', function (e) { if (e.target === thumb) return; toFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight); });
+})();
+
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
 function setStatus(txt, cls) { $('stxt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
 function showOverlay(show, title, body, bad) {
