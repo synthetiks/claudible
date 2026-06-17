@@ -49,8 +49,8 @@ function applySize(c, r) { if (c) hostCols = c; try { term.resize(c, r); } catch
 // one rule, fits all. 1:1 keeps the full font and lets the (screen-capped) pane scroll.
 var BASE_FONT = 13;                                // matches Terminal({fontSize}) above
 var FIT_KEY = 'claudible_fitmode';                 // 'fit' (default) | '1to1'
-var fitMode = 'fit';                               // default: shrink so the whole width fits the phone
-try { if (sessionStorage.getItem(FIT_KEY) === '1to1') fitMode = '1to1'; } catch (e) {}
+var fitMode = '1to1';                              // default: readable font, lines scroll inside the screen-capped pane
+try { if (sessionStorage.getItem(FIT_KEY) === 'fit') fitMode = 'fit'; } catch (e) {}   // opt-in to shrink-all-columns
 var hostCols = 120;                                // host's reported column count (set in applySize)
 function isMobile() { return document.body.classList.contains('mobile'); }
 function recomputeFit() {
