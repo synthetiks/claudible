@@ -685,27 +685,110 @@ function relTime(sec) {
   if (d < 86400) return Math.floor(d / 3600) + 'h ago';
   return Math.floor(d / 86400) + 'd ago';
 }
+// Render order is a STABLE saved list (in prefs), not live mtime — so clicking/resuming a session (which
+// bumps its .jsonl mtime) never reshuffles the list. New/unseen sessions are inserted at top, newest-first
+// (chronological default); drag rewrites the order; delete removes from it.
+function mergeSessionOrder(saved, list) {
+  saved = Array.isArray(saved) ? saved : [];
+  const ids = new Set(list.map((s) => s.id));
+  const savedSet = new Set(saved);
+  const kept = saved.filter((id) => ids.has(id));                                   // keep saved order; drop deleted
+  const fresh = list.filter((s) => !savedSet.has(s.id))
+                    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))                // new ones: chronological, newest first
+                    .map((s) => s.id);
+  return [...fresh, ...kept];
+}
+const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+let sessIndex = {};                                                                 // id -> session record (labels/preview)
+function renderSessionRow(s) {
+  const row = document.createElement('div');
+  row.className = 'sess' + (s.id === activeSession ? ' active' : '');
+  row.dataset.id = s.id; row.setAttribute('role', 'button'); row.tabIndex = 0;
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = s.preview;
+  const m = document.createElement('div'); m.className = 'sess-meta';
+  m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
+  row.appendChild(p); row.appendChild(m);
+  const del = document.createElement('button');
+  del.className = 'sess-del'; del.title = 'Delete session'; del.setAttribute('aria-label', 'Delete session');
+  del.innerHTML = TRASH_SVG;
+  del.addEventListener('click', (e) => { e.stopPropagation(); row.classList.add('confirming'); });
+  const conf = document.createElement('div'); conf.className = 'sess-confirm';
+  const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'Delete?';
+  const yes = document.createElement('button'); yes.className = 'sess-yes'; yes.textContent = 'Delete';
+  const no = document.createElement('button'); no.className = 'sess-no'; no.textContent = 'Cancel';
+  yes.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id); });
+  no.addEventListener('click', (e) => { e.stopPropagation(); row.classList.remove('confirming'); });
+  conf.appendChild(lbl); conf.appendChild(yes); conf.appendChild(no);
+  row.appendChild(del); row.appendChild(conf);
+  row.addEventListener('pointerdown', (e) => onSessPointerDown(e, row, s));
+  row.addEventListener('pointermove', onSessPointerMove);
+  row.addEventListener('pointerup', onSessPointerUp);
+  row.addEventListener('pointercancel', onSessPointerUp);
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openSession(s.id, s.preview); } });
+  return row;
+}
+// pointer-drag reorder with a movement threshold: a plain click opens; a drag past 5px reorders the DOM
+// live and persists the new order. A press on the trash / confirm controls never starts a drag or open.
+let sdrag = null;
+function onSessPointerDown(e, row, s) {
+  if (e.button !== 0) return;
+  if (e.target.closest('.sess-del') || e.target.closest('.sess-confirm') || row.classList.contains('confirming')) return;
+  sdrag = { id: s.id, label: s.preview, row, startY: e.clientY, moved: false, pid: e.pointerId };
+  try { row.setPointerCapture(e.pointerId); } catch {}
+}
+function onSessPointerMove(e) {
+  if (!sdrag) return;
+  if (!sdrag.moved) { if (Math.abs(e.clientY - sdrag.startY) < 5) return; sdrag.moved = true; sdrag.row.classList.add('dragging'); }
+  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess')).filter((r) => r !== sdrag.row);
+  let before = null;
+  for (let i = 0; i < rows.length; i++) { const r = rows[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { before = rows[i]; break; } }
+  if (before) sessListEl.insertBefore(sdrag.row, before); else sessListEl.appendChild(sdrag.row);
+  const lr = sessListEl.getBoundingClientRect();                                    // gentle auto-scroll near the edges
+  if (e.clientY < lr.top + 22) sessListEl.scrollTop -= 10;
+  else if (e.clientY > lr.bottom - 22) sessListEl.scrollTop += 10;
+}
+function onSessPointerUp() {
+  if (!sdrag) return;
+  const d = sdrag; sdrag = null;
+  try { d.row.releasePointerCapture(d.pid); } catch {}
+  d.row.classList.remove('dragging');
+  if (d.moved) {
+    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess')).map((r) => r.dataset.id);
+    savePrefs({ sessionOrder: order });                                            // manual order persists
+  } else {
+    openSession(d.id, d.label);                                                    // plain click → open
+  }
+}
+const deletingIds = new Set();                                                     // hide rows mid-delete so they can't flash back as "fresh"
+async function deleteSession(id) {
+  if (deletingIds.has(id)) return;
+  deletingIds.add(id);
+  const order = (loadPrefs().sessionOrder || []).filter((x) => x !== id);
+  savePrefs({ sessionOrder: order });
+  if (id === activeSession) {                                                       // switch the pty OFF it BEFORE deleting the open file
+    const next = order[0] || 'new';
+    await openSession(next, next === 'new' ? '' : (sessIndex[next] && sessIndex[next].preview));
+  }
+  try { await claudible.sessionDelete(id); } catch {} finally { deletingIds.delete(id); }
+  refreshSessions();
+}
 async function refreshSessions() {
   sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';
   let list = []; try { list = await claudible.sessionList(); } catch {}
+  if (Array.isArray(list) && deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));   // hide rows being deleted
   if (!Array.isArray(list) || !list.length) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
-  if (!activeSession) activeSession = list[0].id;   // a default launch resumes the most recent
-  const act = list.find((s) => s.id === activeSession);
-  if (act && !curSessionLabel) { curSessionLabel = act.preview; pushTracker(); }   // tell guests which session is live
+  const order = mergeSessionOrder(loadPrefs().sessionOrder, list);
+  savePrefs({ sessionOrder: order });
+  sessIndex = {}; list.forEach((s) => { sessIndex[s.id] = s; });
+  const ordered = order.map((id) => sessIndex[id]).filter(Boolean);
+  if (!activeSession) activeSession = ordered[0].id;                                // a default launch resumes the top of the list
+  const act = sessIndex[activeSession];
+  if (act && !curSessionLabel) { curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
   sessListEl.innerHTML = '';
-  list.forEach((s) => {
-    const b = document.createElement('button');
-    b.className = 'sess' + (s.id === activeSession ? ' active' : '');
-    const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = s.preview;
-    const m = document.createElement('div'); m.className = 'sess-meta';
-    m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
-    b.appendChild(p); b.appendChild(m);
-    b.addEventListener('click', () => openSession(s.id, s.preview));
-    sessListEl.appendChild(b);
-  });
+  ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
 }
 // The sidebar is DOCKED (a left column of .body) — toggling .with-sessions slides the layout, it
 // never covers the terminal/chat. The terminal auto-refits via its ResizeObserver when the column changes.

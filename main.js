@@ -175,6 +175,17 @@ function listSessions() {
 }
 ipcMain.handle('session:list', () => listSessions());
 ipcMain.handle('session:open', (e, id) => { respawnPty(id); return { ok: true }; });   // 'new' | <session-id>
+// Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
+// switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.
+ipcMain.handle('session:delete', (e, id) => new Promise((resolve) => {
+  const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
+  if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/delete-session.sh' '${sid}'`],
+    { encoding: 'utf8' }, (err, stdout) => {
+      if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
+      try { resolve(JSON.parse((stdout || '').trim() || '{}')); } catch { resolve({ ok: true }); }
+    });
+}));
 ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests
 ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } catch {} });   // host → guests chat
 ipcMain.handle('share:status', () => share.status());

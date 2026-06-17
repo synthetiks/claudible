@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // sessions (switcher)
   sessionList: () => ipcRenderer.invoke('session:list'),
   sessionOpen: (id) => ipcRenderer.invoke('session:open', id),
+  sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
   // audio
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
