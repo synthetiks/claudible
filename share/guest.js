@@ -50,29 +50,38 @@ function applySize(c, r) { try { term.resize(c, r); } catch (e) {} scheduleFit()
 // (maximum-scale=5) stays available for reading fine detail.
 var BASE_FONT = 13;                                // MUST match the Terminal({fontSize}) above
 var FIT_KEY = 'claudible_fitmode';                 // 'fit' (default) | '1to1'  (per-tab, like resume/name)
-var fitMode = 'fit';
-try { if (sessionStorage.getItem(FIT_KEY) === '1to1') fitMode = '1to1'; } catch (e) {}
+var fitMode = '1to1';                               // default: readable font, scroll the capped pane (you said font's fine)
+try { if (sessionStorage.getItem(FIT_KEY) === 'fit') fitMode = 'fit'; } catch (e) {}
 function isMobile() { return document.body.classList.contains('mobile'); }
 function recomputeFit() {
   var t = $('terminal'); if (!t) return;
   var wrap = t.closest('.wrap'); if (!wrap) return;
-  var active = (fitMode === 'fit' && isMobile());
-  document.body.classList.toggle('term1to1', !active);
-  var cur = term.options.fontSize || BASE_FONT;
-  if (!active) {                                    // desktop or 1:1 → restore base font (desktop never differs → no-op)
-    if (cur !== BASE_FONT) term.options.fontSize = BASE_FONT;
-    return;
-  }
   var screen = t.querySelector('.xterm-screen') || t.querySelector('.xterm');
   if (!screen) return;
+  var cur = term.options.fontSize || BASE_FONT;
   var natW = screen.offsetWidth;                    // current grid width = cols x cell(curFont); layout-box, transform-free
   if (!natW || natW <= 0) return;                   // pre-paint race → a later trigger retries
   var cs = getComputedStyle(wrap), tcs = getComputedStyle(t);
-  var avail = wrap.clientWidth
+  // Clamp the pane to the ACTUAL visible viewport. On some mobile browsers the wide mirrored terminal
+  // inflates wrap.clientWidth to its own ~960px, so we'd wrongly think it already fits. The real screen
+  // (visualViewport / innerWidth) is the true ceiling — fit to whichever is smaller.
+  var vpW = (window.visualViewport && window.visualViewport.width) || window.innerWidth || wrap.clientWidth;
+  var paneW = Math.min(wrap.clientWidth || vpW, vpW);
+  var avail = paneW
     - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0)
     - parseFloat(tcs.paddingLeft || 0) - parseFloat(tcs.paddingRight || 0)
     - parseFloat(tcs.borderLeftWidth || 0) - parseFloat(tcs.borderRightWidth || 0) - 1;
   if (avail <= 0) return;
+  // Decide by OVERFLOW, not by mobile-detection: if the grid (at full font) is wider than the pane, fit it.
+  // This engages on any phone/webview even when matchMedia mis-reports, and leaves a roomy pane untouched.
+  var natAtBase = natW * (BASE_FONT / cur);         // width the grid would be at full font
+  var overflows = natAtBase > avail + 0.5;
+  document.body.classList.toggle('can-fit', overflows);        // the Fit/1:1 pill only matters when it overflows
+  document.body.classList.toggle('term1to1', fitMode === '1to1');
+  if (fitMode === '1to1' || !overflows) {           // 1:1 = pan at full size; or it already fits → full font
+    if (cur !== BASE_FONT) term.options.fontSize = BASE_FONT;
+    return;
+  }
   // Cell width scales ~linearly with font size, so this ratio self-corrects from ANY current font and
   // converges to the largest size that fits (floor → never overflow). Clamp to [5px, base].
   var target = Math.max(5, Math.min(BASE_FONT, Math.floor(cur * avail / natW)));
