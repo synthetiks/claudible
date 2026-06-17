@@ -14,7 +14,7 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
 
 ## 2. Get it
 ```powershell
-git clone https://github.com/<you>/claudible
+git clone https://github.com/thecrazydev1/claudible
 cd claudible
 npm install
 ```

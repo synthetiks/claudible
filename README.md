@@ -30,7 +30,7 @@ And when you want to go hands-free, **full voice control** is built in: hold a k
 
 ## Install & run
 ```powershell
-git clone https://github.com/<you>/claudible
+git clone https://github.com/thecrazydev1/claudible
 cd claudible
 npm install        # installs deps + reapplies the small node-pty fix (patch-package)
 npm run setup      # installs the local voice services in WSL (first run pulls a ~150 MB model)
