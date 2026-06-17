@@ -4,15 +4,21 @@ node_modules/
 # live session state — ephemeral; may contain personal paths / session names / cost
 /runtime/
 
-# logs
+# logs (incl. electron-out.log / electron-err.log when launched via cmd)
 *.log
 /logs/
 
-# debug captures / screenshots (root-level only — keep renderer/logo.png)
+# debug captures / screenshots (root-level only; assets/ and renderer/ images are tracked)
 /*.png
-cp1-render.png
 /debug/
 
 # OS cruft
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# editor / IDE
+.vscode/
+.idea/
+*.swp
+*~

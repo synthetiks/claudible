@@ -1,4 +1,4 @@
-// Claudible V2 — renderer controller.
+// Claudible — renderer controller.
 'use strict';
 const $ = (id) => document.getElementById(id);
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
@@ -19,14 +19,14 @@ let ptyStarted = false;
 function sync() {
   try {
     fit.fit();
-    if (!ptyStarted) { ptyStarted = true; cv2.ptyStart(term.cols, term.rows); } // spawn Claude at the EXACT fitted size
-    else cv2.ptyResize(term.cols, term.rows);
+    if (!ptyStarted) { ptyStarted = true; claudible.ptyStart(term.cols, term.rows); } // spawn Claude at the EXACT fitted size
+    else claudible.ptyResize(term.cols, term.rows);
     updateScrollbar();
   } catch {}
 }
-term.onData((d) => cv2.ptyInput(d));
+term.onData((d) => claudible.ptyInput(d));
 // Auto-scroll ONLY when already at the bottom, so scrolling up to read isn't yanked back down.
-cv2.onPtyData((d) => {
+claudible.onPtyData((d) => {
   const b = term.buffer.active;
   const wasAtBottom = b.viewportY >= b.baseY - 1;
   term.write(d, () => { if (wasAtBottom) term.scrollToBottom(); updateScrollbar(); });
@@ -80,7 +80,7 @@ document.querySelectorAll('.panel button').forEach((b) =>
 
 // ---------- meta / health ----------
 (async () => {
-  const ep = await cv2.endpoints();
+  const ep = await claudible.endpoints();
   $('meta').textContent = ep.whisper.replace('http://', '') + ' · ' + ep.kokoro.replace('http://', '');
   setDot('d-pty', ep.pty ? 'ok' : 'bad');
   $('sb-whisper').textContent = 'whisper ' + ep.whisper.split(':').pop();
@@ -98,7 +98,7 @@ function resetStats() {
   $('trk-cost').textContent = '$0.00';
   $('trk-tokens').textContent = '0';
 }
-cv2.onStatus((s) => {
+claudible.onStatus((s) => {
   // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
   if (typeof s.ctxPct === 'number') {
     const pct = s.ctxPct;
@@ -149,14 +149,14 @@ async function startRecording() {
     if (discardClip) { setDot('d-stt', 'ok'); $('stt-out').textContent = ''; $('stt-out').className = 'out'; return; }  // false-start: combo key or too short to be speech
     const blob = new Blob(chunks, { type: 'audio/webm' });
     setDot('d-stt', 'work'); $('stt-out').textContent = 'transcribing…'; $('stt-out').className = 'out';
-    const j = await cv2.stt(await blob.arrayBuffer());
+    const j = await claudible.stt(await blob.arrayBuffer());
     if (j.error) { setDot('d-stt', 'bad'); $('stt-out').textContent = 'STT error: ' + j.error; return; }
     // drop non-speech markers Whisper emits for silence/noise/music: [BLANK_AUDIO], (chiming), (music)…
     const text = (j.text || '').replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) { setDot('d-stt', 'bad'); $('stt-out').textContent = 'no speech detected — try again'; $('stt-out').className = 'out'; return; }
     setDot('d-stt', 'ok'); $('stt-out').textContent = 'sent to Claude'; $('stt-out').className = 'out live';
     $('stt-transcript').textContent = text;        // temp: last message only, replaced each time, never written to disk
-    cv2.ptyInput(text + '\r');                      // drive Claude in the terminal
+    claudible.ptyInput(text + '\r');                      // drive Claude in the terminal
   };
   mediaRecorder.start();                   // no timeslice -> valid webm header on stop
 }
@@ -204,7 +204,7 @@ window.addEventListener('blur', () => {
 });
 
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
-let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = false, ttsUrl = null, speakGen = 0;
+let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0;
 function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
           .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 600);
@@ -223,7 +223,7 @@ async function speak(text) {
   const myGen = ++speakGen;                           // claim this generation (latest speak wins)
   ttsBusy = true; setSpeakBtn(true); setActive('lbl-out', true);
   setDot('d-tts', 'work'); $('tts-out').textContent = 'synthesizing…'; $('tts-out').className = 'out';
-  const r = await cv2.tts(text, selectedVoice);
+  const r = await claudible.tts(text, selectedVoice);
   if (myGen !== speakGen) return;                     // superseded by a newer speak()/stop — drop this one
   if (r.error) { setDot('d-tts', 'bad'); $('tts-out').textContent = 'TTS error: ' + JSON.stringify(r.error); stopSpeech(); return; }
   ttsUrl = URL.createObjectURL(new Blob([new Uint8Array(r.audio)], { type: 'audio/mpeg' }));
@@ -263,11 +263,11 @@ $('always-speak').addEventListener('change', (e) => {
 // mousedown + preventDefault => the FIRST press registers even while the terminal holds focus
 // (avoids the focus-war "click twice" problem).
 const send = (cmd) => {
-  cv2.ptyInput('\x1b');                                   // close prior menu / clear input
-  setTimeout(() => cv2.ptyInput(cmd + '\r'), 120);        // then run the command
+  claudible.ptyInput('\x1b');                                   // close prior menu / clear input
+  setTimeout(() => claudible.ptyInput(cmd + '\r'), 120);        // then run the command
   setTimeout(() => term.focus(), 150);                    // keyboard back in the terminal
 };
-[['cmd-effort', '/effort'], ['cmd-advisor', '/advisor'], ['cmd-model', '/model'],
+[['cmd-effort', '/effort'], ['cmd-context', '/context'], ['cmd-model', '/model'],
  ['cmd-compact', '/compact'], ['cmd-clear', '/clear'], ['cmd-status', '/status']].forEach(([id, cmd]) =>
   $(id).addEventListener('mousedown', (e) => { e.preventDefault(); send(cmd); if (cmd === '/clear') resetStats(); }));
 
@@ -278,7 +278,7 @@ $('trk-ctxbar').addEventListener('mousedown', (e) => {
 });
 
 // ---------- Claude's reply -> VOICE OUT (via the Stop hook) ----------
-cv2.onHookLine((line) => {
+claudible.onHookLine((line) => {
   let o; try { o = JSON.parse(line); } catch { return; }
   if (o.hook_event_name === 'UserPromptSubmit' && o.prompt) {
     sessionLog.push({ role: 'you', text: String(o.prompt) });           // captures typed AND voice turns
@@ -299,7 +299,7 @@ function buildTranscript() {
 }
 $('savetab').addEventListener('click', async () => {
   const lbl = $('savetab').querySelector('.lbl');
-  const r = await cv2.saveSession(buildTranscript());
+  const r = await claudible.saveSession(buildTranscript());
   if (r && r.saved) { lbl.textContent = 'saved ✓'; setTimeout(() => { lbl.textContent = 'save session'; }, 1800); }
   else if (r && r.error) { lbl.textContent = 'save failed'; setTimeout(() => { lbl.textContent = 'save session'; }, 1800); }
 });
@@ -313,7 +313,7 @@ $('savetab').addEventListener('click', async () => {
 // and submit). Note: if clicked WHILE Claude is generating, the Esc interrupts the reply (and may
 // leave a stray space) — harmless and recoverable; clear is meant for the idle/just-dictated case.
 $('cleartab').addEventListener('click', () => {
-  cv2.ptyInput('\x20\x1b\x1b');
+  claudible.ptyInput('\x20\x1b\x1b');
   setTimeout(() => term.focus(), 0);
   const lbl = $('cleartab').querySelector('.lbl');
   lbl.textContent = 'cleared ✓'; setTimeout(() => { lbl.textContent = 'clear input'; }, 1200);

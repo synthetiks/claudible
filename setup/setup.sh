@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Claudible — one-command local voice setup (run inside WSL, normally via `npm run setup`).
 # Installs Whisper (STT) + Kokoro (TTS) under ~/.claudible/voice, OR reuses an existing
-# ~/.voicemode install. No Docker. First run downloads a ~150 MB speech model.
+# ~/.voicemode install. No Docker. First run downloads speech models (~150 MB Whisper + ~327 MB Kokoro).
 #
-# NOTE (v0.1): the "reuse existing ~/.voicemode" path is tested. The from-scratch install below
-# follows each upstream project's standard steps — verify it on a clean machine before relying on it.
+# NOTE (v0.1): the "reuse existing ~/.voicemode" path is exercised regularly. The from-scratch install
+# below clones + builds whisper.cpp and Kokoro and downloads their models from GitHub releases, so it
+# needs network access and a few GB of disk; it is the less-travelled path, so report anything that
+# trips on a clean machine.
 set -euo pipefail
 
 VOICE="${CLAUDIBLE_VOICE:-$HOME/.claudible/voice}"
@@ -22,7 +24,7 @@ MISSING=""
 for c in git cmake make ffmpeg python3 uv; do command -v "$c" >/dev/null 2>&1 || MISSING="$MISSING $c"; done
 if [ -n "$MISSING" ]; then
   say "Missing prerequisites:$MISSING"
-  echo "  sudo apt install -y git cmake build-essential ffmpeg python3"
+  echo "  sudo apt install -y git cmake build-essential ffmpeg python3 espeak-ng"
   echo "  curl -LsSf https://astral.sh/uv/install.sh | sh   # for uv"
   exit 1
 fi
@@ -45,9 +47,23 @@ if [ ! -d "$VOICE/kokoro" ]; then
   say "Installing Kokoro (TTS)…"
   git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI "$VOICE/kokoro"
   # CPU install only — do NOT run the project's CUDA start script (it reinstalls a CUDA torch that segfaults here).
-  ( cd "$VOICE/kokoro" && uv sync )
+  # --extra cpu pulls torch==2.6.0+cpu from the pytorch-cpu index. A bare `uv sync` instead resolves torch
+  # (a transitive dep of kokoro) from default PyPI, which on Linux is the ~731MB CUDA wheel + ~2GB of nvidia-*
+  # packages — the exact CUDA torch this comment warns against.
+  ( cd "$VOICE/kokoro" && uv sync --extra cpu )
 else
   say "Kokoro already installed."
+fi
+
+# 3b. Kokoro model weights (~327 MB) — the repo gitignores *.pth, so a clone has NO model.
+# Without this the server exits at warmup (FileNotFoundError) and :8880 never binds. Idempotent:
+# download_model.py skips itself if the file already exists. Kept outside the dir guard above so a
+# checkout that somehow lacks the model still gets repaired on a re-run.
+if [ ! -f "$VOICE/kokoro/api/src/models/v1_0/kokoro-v1_0.pth" ]; then
+  say "Downloading Kokoro model weights (~327 MB)…"
+  ( cd "$VOICE/kokoro" && uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0 )
+else
+  say "Kokoro model already present."
 fi
 
 say "Done. Start Claudible with:  npm start"

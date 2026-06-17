@@ -1,9 +1,32 @@
 {
   "name": "claudible",
   "version": "0.1.0",
-  "description": "Local, private voice-control cockpit for Claude Code — talk to an embedded Claude Code terminal and hear it reply. Windows + WSL2.",
+  "description": "Local, private voice-control cockpit for Claude Code: talk to an embedded Claude Code terminal and hear it reply. Windows + WSL2.",
   "license": "MIT",
+  "author": "the_crazydev",
+  "homepage": "https://github.com/thecrazydev1/claudible#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thecrazydev1/claudible.git"
+  },
+  "bugs": {
+    "url": "https://github.com/thecrazydev1/claudible/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "voice",
+    "speech-to-text",
+    "text-to-speech",
+    "electron",
+    "wsl",
+    "terminal",
+    "tui"
+  ],
   "main": "main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "electron .",
     "setup": "wsl.exe -e bash setup/setup.sh",

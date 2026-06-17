@@ -1,7 +1,8 @@
 # Claudible launcher — bring up the local voice services in WSL, then open the cockpit.
 $ErrorActionPreference = "SilentlyContinue"
 $app = Split-Path -Parent $PSScriptRoot           # repo root (this script lives in <repo>\launch)
-$appWsl = (wsl.exe wslpath -u "$app").Trim()      # e.g. /mnt/c/Users/you/claudible
+# forward slashes: single backslashes get stripped crossing into WSL, so a raw C:\... reaches wslpath mangled
+$appWsl = (wsl.exe wslpath -u ($app -replace '\\','/')).Trim()   # e.g. /mnt/c/Users/you/claudible
 
 # 1. ensure WSL voice services (Kokoro + Whisper) are running
 wsl.exe -e bash -lc "bash '$appWsl/wsl/services.sh'"

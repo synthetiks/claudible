@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Local-only app: scripts/styles are bundled, audio plays from in-memory blobs, and the renderer
+       makes no remote requests (all STT/TTS go through the main process over IPC). connect-src 'self'
+       blocks any phone-home; object-src 'none' blocks plugins. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'" />
   <title>Claudible</title>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <style>
@@ -192,7 +197,7 @@
 </head>
 <body>
   <div class="top">
-    <img class="logo" src="logo.png" alt="Claudible logo" />
+    <img class="logo" src="../assets/logo.png" alt="Claudible logo" />
     <span class="wordmark">claudible</span><span class="tag">v2</span>
     <span class="trk" title="session usage">
       <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">—</span></span>
@@ -244,8 +249,8 @@
         </div>
         <button id="speak">Speak</button>
         <div class="speakrow">
-          <label class="toggle" id="always-toggle">
-            <input type="checkbox" id="always-speak" />
+          <label class="toggle on" id="always-toggle">
+            <input type="checkbox" id="always-speak" checked />
             <span class="sw"></span>
             <span class="tlabel">Always Speak</span>
           </label>
@@ -257,7 +262,7 @@
         <div class="label">commands</div>
         <div class="cmds">
           <button id="cmd-effort">/effort</button>
-          <button id="cmd-advisor">/advisor</button>
+          <button id="cmd-context">/context</button>
           <button id="cmd-model">/model</button>
           <button id="cmd-compact">/compact</button>
           <button id="cmd-clear">/clear</button>

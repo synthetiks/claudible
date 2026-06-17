@@ -1,7 +1,7 @@
-// Claudible V2 — preload (context-isolated bridge)
+// Claudible — preload (context-isolated bridge)
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('cv2', {
+contextBridge.exposeInMainWorld('claudible', {
   // terminal
   ptyStart: (cols, rows) => ipcRenderer.send('pty:start', { cols, rows }),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, d) => cb(d)),

@@ -11,37 +11,56 @@ const fs = require('fs');
 const cp = require('child_process');
 
 let win, ptyProc, trustDone = false;
-const WHISPER = process.env.CV2_WHISPER || 'http://localhost:2022';
-const KOKORO  = process.env.CV2_KOKORO  || 'http://localhost:8880';
+const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
+const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
 const RT = path.join(__dirname, 'runtime');
 const STATUS = path.join(RT, 'status.json');
 const HOOKS  = path.join(RT, 'hooks.ndjson');
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 let APPDIR_WSL = null;
-try { APPDIR_WSL = cp.execFileSync('wsl.exe', ['wslpath', '-u', __dirname], { encoding: 'utf8' }).trim(); }
-catch (e) { console.error('[cv2] wslpath failed:', e.message); }
+// NB: pass forward slashes — single backslashes get stripped crossing the Windows->WSL arg boundary, so
+// a raw `C:\Users\...` reaches wslpath as `C:Users...`. wslpath accepts forward slashes natively.
+try { APPDIR_WSL = cp.execFileSync('wsl.exe', ['wslpath', '-u', __dirname.replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); }
+catch (e) { console.error('[claudible] wslpath failed:', e.message); }
 // session.sh receives the app dir as $1 so it writes runtime/ to the SAME Windows folder this process reads.
 const BOOT = APPDIR_WSL
   ? `bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`
-  : 'echo "[cv2] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
+  : 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
+
+// Bring up the local voice services (Whisper/Kokoro) on launch. services.sh is idempotent (it checks
+// the ports first), so this is safe whether the user runs `npm start` directly or via the .ps1 launcher
+// (which also calls it). Async execFile so the ~5s port-wait never blocks window creation.
+function startVoiceServices() {
+  if (!APPDIR_WSL) return;
+  try {
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/services.sh'`],
+      (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh:', err.message, stderr || ''); });
+  } catch (e) { console.error('[claudible] failed to start voice services:', e.message); }
+}
 
 let nodePty = null, ptyErr = null;
 for (const mod of ['node-pty', 'node-pty-prebuilt-multiarch']) {
-  try { nodePty = require(mod); ptyErr = null; console.log('[cv2] pty loaded via', mod); break; }
-  catch (e) { console.error(`[cv2] require('${mod}') failed:`, e.message); ptyErr = `${mod}: ${e.message}`; }
+  try { nodePty = require(mod); ptyErr = null; console.log('[claudible] pty loaded via', mod); break; }
+  catch (e) { console.error(`[claudible] require('${mod}') failed:`, e.message); ptyErr = `${mod}: ${e.message}`; }
 }
-if (!nodePty) console.error('[cv2] no pty backend available');
+if (!nodePty) console.error('[claudible] no pty backend available');
 
 function createWindow() {
   win = new BrowserWindow({
     width: 1320, height: 860, backgroundColor: '#070809',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
+  // Grant ONLY the microphone (needed for push-to-talk); deny every other permission request.
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media'));
+  // Lock the window down: it only ever loads our local renderer. Block navigation away and any
+  // attempt to open new windows — defense-in-depth for distributed Electron software.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.loadFile('renderer/index.html');
   win.webContents.on('did-finish-load', () => {
+    startVoiceServices();   // idempotent; ensures STT/TTS are up even when launched via `npm start`
     pollStatus(); pollHooks();
     // spawn-on-size fallback: if the renderer never reports a size, start at a default
     setTimeout(() => { if (!ptyProc) spawnPty(120, 32); }, 1800);
@@ -51,7 +70,7 @@ function createWindow() {
 // ---- embedded live Claude TUI ----
 function spawnPty(cols, rows) {
   if (ptyProc || !nodePty) {
-    if (!nodePty && win) win.webContents.send('pty:data', `\r\n[cv2] node-pty unavailable (${ptyErr})\r\n`);
+    if (!nodePty && win) win.webContents.send('pty:data', `\r\n[claudible] node-pty unavailable (${ptyErr})\r\n`);
     return;
   }
   try {
@@ -65,8 +84,8 @@ function spawnPty(cols, rows) {
       win.webContents.send('pty:data', d);
       if (!trustDone && /trust this folder/i.test(d)) { trustDone = true; setTimeout(() => { try { ptyProc.write('\r'); } catch {} }, 250); }
     });
-    ptyProc.onExit(() => { win.webContents.send('pty:data', '\r\n[cv2] session ended\r\n'); ptyProc = null; });
-  } catch (e) { win.webContents.send('pty:data', `\r\n[cv2] pty spawn failed: ${e.message}\r\n`); }
+    ptyProc.onExit(() => { win.webContents.send('pty:data', '\r\n[claudible] session ended\r\n'); ptyProc = null; });
+  } catch (e) { win.webContents.send('pty:data', `\r\n[claudible] pty spawn failed: ${e.message}\r\n`); }
 }
 ipcMain.on('pty:start', (e, { cols, rows }) => spawnPty(cols, rows));
 ipcMain.on('pty:input', (e, d) => { if (ptyProc) ptyProc.write(d); });
@@ -152,8 +171,8 @@ ipcMain.handle('save-session', async (e, text) => {
 });
 
 // Safety net: never let a stray error from a pty/agent take the whole cockpit down.
-process.on('uncaughtException', (e) => console.error('[cv2] uncaughtException:', e && e.message));
-process.on('unhandledRejection', (e) => console.error('[cv2] unhandledRejection:', e && (e.message || e)));
+process.on('uncaughtException', (e) => console.error('[claudible] uncaughtException:', e && e.message));
+process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { try { ptyProc && ptyProc.kill(); } catch {} app.quit(); });

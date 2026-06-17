@@ -41,10 +41,10 @@ chmod +x "$SDIR/.claude/hook.sh"
 
 cat > "$SDIR/.claude/settings.json" <<EOF
 {
-  "statusLine": { "type": "command", "command": "bash $SDIR/.claude/statusline.sh" },
+  "statusLine": { "type": "command", "command": "bash '$SDIR/.claude/statusline.sh'" },
   "hooks": {
-    "Stop":             [{"hooks":[{"type":"command","command":"bash $SDIR/.claude/hook.sh"}]}],
-    "UserPromptSubmit": [{"hooks":[{"type":"command","command":"bash $SDIR/.claude/hook.sh"}]}]
+    "Stop":             [{"hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
+    "UserPromptSubmit": [{"hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}]
   }
 }
 EOF
@@ -54,8 +54,23 @@ cd "$SDIR"
 # scrollback, so the mouse wheel can't scroll. Verified: Claude Code uses the NORMAL buffer
 # (+ bracketed paste) and does NOT grab the mouse, so xterm.js scrollback gives clean basic scroll.
 # Persistence WITHOUT tmux: resume the most recent conversation if one exists, else start fresh.
-if ls "$HOME/.claude/projects/"*claudible*session*/*.jsonl >/dev/null 2>&1; then
-  exec claude --dangerously-skip-permissions --continue --add-dir "$HOME"
-else
-  exec claude --dangerously-skip-permissions --add-dir "$HOME"
+# Gate on THIS session dir's own project history only. Claude stores each cwd's conversations under
+# projects/<cwd with every non-alphanumeric character replaced by '-'>; a broad *claudible*session*
+# glob also matches other installs (e.g. a claudible-v2 dir), which would pass --continue with nothing
+# here to continue and exit with "No conversation found to continue". Deriving the exact dir from $SDIR
+# keeps the check de-hardcoded. The char class must match Claude's encoder exactly: it maps EVERY
+# non-alphanumeric char (incl. '_', spaces, etc. — not just '/' and '.') to a single '-'.
+PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+FRESH=(claude --dangerously-skip-permissions --add-dir "$HOME")
+if ls "$PROJ"/*.jsonl >/dev/null 2>&1; then
+  # Try to resume the previous conversation. Some Claude builds refuse to resume a given session
+  # (e.g. one that ended mid-tool-call) — they print an error and exit IMMEDIATELY instead of opening
+  # the interactive TUI. A real resumed session blocks until you quit it, so a return after only a
+  # couple of seconds means resume failed; fall back to a fresh session so the terminal is never left
+  # dead. (Run un-exec'd precisely so we can detect that fast exit.)
+  START=$(date +%s)
+  claude --dangerously-skip-permissions --continue --add-dir "$HOME"
+  [ $(( $(date +%s) - START )) -ge 4 ] && exit 0   # resumed and used, then quit normally — done
+  echo "[claudible] couldn't resume the previous conversation — starting a fresh one."
 fi
+exec "${FRESH[@]}"

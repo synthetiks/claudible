@@ -5,10 +5,10 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
 ## 1. Prerequisites
 - **WSL2 + Ubuntu** — `wsl --install` (in an admin PowerShell), then reboot.
 - **Claude Code CLI inside WSL** — `claude` must be on your WSL PATH. See the Claude Code docs.
-- **Node.js 20+ on Windows.**
-- Inside WSL: `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
+- **Node.js 22.12+ on Windows.** (Electron 42 and its build tooling require it; older Node prints `EBADENGINE` warnings on install.)
+- Inside WSL: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
   ```bash
-  sudo apt update && sudo apt install -y git cmake build-essential ffmpeg python3
+  sudo apt update && sudo apt install -y git cmake build-essential ffmpeg python3 espeak-ng
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 
@@ -24,7 +24,7 @@ npm install
 ```powershell
 npm run setup
 ```
-Installs **Whisper** (STT, port 2022) and **Kokoro** (TTS, port 8880) under `~/.claudible/voice` in WSL, and downloads a ~150 MB speech model. If you already have a [Voicemode](https://github.com/mbailey/voicemode) install at `~/.voicemode`, it's reused automatically and setup is instant.
+Installs **Whisper** (STT, port 2022) and **Kokoro** (TTS, port 8880) under `~/.claudible/voice` in WSL, and downloads their models (~150 MB Whisper + ~327 MB Kokoro). If you already have a full [Voicemode](https://github.com/mbailey/voicemode) install at `~/.voicemode`, it's reused automatically and setup is instant.
 
 ## 4. Run
 ```powershell
@@ -43,4 +43,4 @@ Windows → **Settings → Privacy & security → Microphone** → allow desktop
   This needs **Visual Studio Build Tools** with the *Desktop development with C++* workload.
 - **No voice in or out** — confirm the services bound. In WSL: `bash wsl/services.sh` should print `whisper up :2022` and `kokoro up :8880`. Logs live in `~/.claudible/logs/`.
 - **"mic blocked"** — see *Enable the microphone* above.
-- **Point at your own STT/TTS** — set `CV2_WHISPER` / `CV2_KOKORO` to any OpenAI-compatible audio endpoint.
+- **Point at your own STT/TTS** — set `CLAUDIBLE_WHISPER` / `CLAUDIBLE_KOKORO` to any OpenAI-compatible audio endpoint.
