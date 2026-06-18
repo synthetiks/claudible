@@ -99,7 +99,7 @@
     .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0;position:relative}
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
     .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:3px;border-radius:9px;
-      background:rgba(13,15,18,.85);border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
+      background:#14171c;border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
     .termseg button{width:auto;padding:4px 11px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
       background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all .15s}
     .termseg button:hover{color:var(--ink-dim)}
@@ -108,7 +108,7 @@
       background:var(--live);box-shadow:0 0 6px -1px var(--live);display:none}
     .termseg button.has-badge .agent-badge{display:block}
     #agents-pane{position:absolute;inset:0;z-index:16;display:none;flex-direction:column;overflow:auto;
-      background:linear-gradient(180deg,#0c0e12,#0a0b0d);border:1px solid var(--hairline);border-radius:11px;padding:46px 14px 14px}
+      background:#0c0e12;border:1px solid var(--hairline);border-radius:11px;padding:46px 14px 14px}
     #agents-pane.show{display:flex}
     .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
     .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.6;max-width:300px}
