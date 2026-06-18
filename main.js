@@ -308,21 +308,6 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
     });
 }));
-// Git push/pull for the active repo workspace. Commit message is base64'd so free text can't break the
-// bash -lc string; the wsl script decodes it. push = stage-all + commit + push; pull = fast-forward only.
-ipcMain.handle('git:op', (e, payload) => new Promise((resolve) => {
-  const op = ['push', 'pull', 'status'].includes(payload && payload.op) ? payload.op : '';
-  if (!op) return resolve({ ok: false, error: 'bad op' });
-  if (!activeWorkspace || activeWorkspace.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
-  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
-  const msgB64 = op === 'push' ? Buffer.from(String((payload && payload.message) || '')).toString('base64') : '';
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/git.sh' '${op}' '${msgB64}'`],
-    { encoding: 'utf8', timeout: 120000 }, (err, stdout) => {
-      if (err) { console.error('[claudible] git:', err.message); return resolve({ ok: false, error: 'git command failed' }); }
-      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-      resolve(r && r.ok ? r : { ok: false, error: (r && r.error) || 'git command failed' });
-    });
-}));
 // ---- skills + plugins (manage Claude Code extensions from the cockpit) ----
 ipcMain.handle('skills:list', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve([]);
