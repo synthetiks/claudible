@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionList: () => ipcRenderer.invoke('session:list'),
   sessionOpen: (id) => ipcRenderer.invoke('session:open', id),
   sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
+  // workspaces (the library a session lives in: legacy / local folder / private repo)
+  workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  workspaceCreate: (kind, name) => ipcRenderer.invoke('workspace:create', { kind, name }),
+  workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
   // audio
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),

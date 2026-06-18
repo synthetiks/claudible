@@ -39,13 +39,38 @@ catch (e) { console.error('[claudible] wslpath failed:', e.message); }
 // A session choice ('new' | a <session-id> | '') is passed via CLAUDIBLE_SESSION on the command line
 // (env vars don't cross the Windows→WSL boundary without WSLENV, so we inline it). The id is sanitised
 // to [A-Za-z0-9-] so it can't break out of the quoted command.
-function buildBoot(session) {
+// Inline the active workspace as env (kind + strict-allowlisted slug) so the wsl scripts run in THAT
+// workspace's own cwd. slug is re-sanitised here too (defense in depth) since it's interpolated into bash.
+function wsEnv(ws) {
+  const kind = ws && ['local', 'repo', 'legacy'].includes(ws.kind) ? ws.kind : 'legacy';
+  const slug = String((ws && ws.slug) || '').replace(/[^A-Za-z0-9-]/g, '');
+  return `CLAUDIBLE_WS_KIND='${kind}'` + (slug ? ` CLAUDIBLE_WS_SLUG='${slug}'` : '');
+}
+function buildBoot(session, ws) {
   if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '');
-  const prefix = sel ? `CLAUDIBLE_SESSION='${sel}' ` : '';
+  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + wsEnv(ws) + ' ';
   return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
 }
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
+
+// ---- workspaces registry (each workspace = a directory the sessions live in) ----
+// App-maintained source of truth (we NEVER blanket-scan ~/.claude/projects). A 'legacy' entry points at
+// the original single session dir so existing history keeps showing. Persisted on the Windows FS (native read).
+const WORKSPACES = path.join(RT, 'workspaces.json');
+function loadRegistry() {
+  let reg = { activeId: 'legacy', workspaces: [] };
+  try { const r = JSON.parse(fs.readFileSync(WORKSPACES, 'utf8')); if (r && typeof r === 'object') reg = r; } catch {}
+  if (!Array.isArray(reg.workspaces)) reg.workspaces = [];
+  reg.workspaces = reg.workspaces.filter((w) => w && typeof w === 'object' && w.id);   // drop malformed entries (no launch crash)
+  if (!reg.workspaces.some((w) => w && w.id === 'legacy'))
+    reg.workspaces.unshift({ id: 'legacy', label: 'My sessions', kind: 'legacy', slug: '', createdAt: 0 });
+  if (!reg.activeId || !reg.workspaces.some((w) => w.id === reg.activeId)) reg.activeId = 'legacy';
+  return reg;
+}
+function saveRegistry() { try { fs.writeFileSync(WORKSPACES, JSON.stringify(registry, null, 2)); } catch (e) { console.error('[claudible] workspaces.json:', e.message); } }
+let registry = loadRegistry();
+let activeWorkspace = registry.workspaces.find((w) => w.id === registry.activeId) || registry.workspaces[0];
 
 // Bring up the local voice services (Whisper/Kokoro) on launch. services.sh is idempotent (it checks
 // the ports first), so this is safe whether the user runs `npm start` directly or via the .ps1 launcher
@@ -93,7 +118,7 @@ function spawnPty(cols, rows) {
     return;
   }
   try {
-    const proc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(pendingSession)], {
+    const proc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(pendingSession, activeWorkspace)], {
       name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
       // ConPTY (default on Win11) — preserves full ANSI incl. the dim attribute (winpty strips it).
       // Its console-list agent crash ("AttachConsole failed") is neutralized by the guard patch in
@@ -167,7 +192,7 @@ ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, 
 function listSessions() {
   return new Promise((resolve) => {
     if (!APPDIR_WSL) return resolve([]);
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/sessions.sh'`],
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/sessions.sh'`],
       { maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
         if (err) { console.error('[claudible] sessions.sh:', err.message); return resolve([]); }
         try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
@@ -181,10 +206,48 @@ ipcMain.handle('session:open', (e, id) => { respawnPty(id); return { ok: true };
 ipcMain.handle('session:delete', (e, id) => new Promise((resolve) => {
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/delete-session.sh' '${sid}'`],
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/delete-session.sh' '${sid}'`],
     { encoding: 'utf8' }, (err, stdout) => {
       if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
       try { resolve(JSON.parse((stdout || '').trim() || '{}')); } catch { resolve({ ok: true }); }
+    });
+}));
+// ---- workspaces (the library a session belongs to: legacy / local folder / private repo) ----
+ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspaces: registry.workspaces }));
+// Switch the active workspace: subsequent session list/open/delete scope to its cwd; resume its latest convo.
+ipcMain.handle('workspace:open', (e, id) => {
+  const ws = registry.workspaces.find((w) => w.id === id);
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  activeWorkspace = ws; registry.activeId = id; saveRegistry();
+  respawnPty('');                                                  // '' = resume most-recent conversation in that cwd
+  return { ok: true };
+});
+// Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
+ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
+  const kind = (payload && payload.kind === 'repo') ? 'repo' : 'local';
+  const name = String((payload && payload.name) || '').trim();
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  if (!slug) return resolve({ ok: false, error: 'enter a name (letters, numbers, dashes)' });
+  if (registry.workspaces.some((w) => w.id === `${kind}-${slug}`)) return resolve({ ok: false, error: 'a workspace with that name already exists' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/create-workspace.sh' '${kind}' '${slug}'`],
+    { encoding: 'utf8', timeout: kind === 'repo' ? 300000 : 30000 }, (err, stdout) => {   // repo = network-bound (clone+push)
+      if (err) { console.error('[claudible] create-workspace:', err.message); return resolve({ ok: false, error: 'creation timed out or failed' }); }
+      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      // Register + switch to a workspace, then resolve. fresh=true for a brand-new one (start a fresh
+      // conversation); fresh=false when re-attaching an orphan (resume whatever's in that cwd).
+      const attach = (repoUrl, owner, fresh) => {
+        const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
+          repoUrl: repoUrl || undefined, owner: owner || undefined, createdAt: Date.now() };
+        registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
+        respawnPty(fresh ? 'new' : '');
+        resolve({ ok: true, workspace: ws });
+      };
+      if (r.ok) return attach(r.repoUrl, r.owner, true);
+      // The dir already exists on disk but isn't in our registry (registry wiped, or a prior create
+      // timed out AFTER provisioning): re-attach it instead of dead-ending the name.
+      if (/already exists/i.test(String(r.error || ''))) return attach(undefined, undefined, false);
+      resolve({ ok: false, error: r.error || 'creation failed' });
     });
 }));
 ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests

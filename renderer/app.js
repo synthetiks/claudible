@@ -764,6 +764,12 @@ function savePrefs(patch) { try { localStorage.setItem(PREFS_KEY, JSON.stringify
 const sessListEl = $('sess-list');
 const bodyEl = document.querySelector('.body');
 let activeSession = null;
+// Workspaces: which library the conversations below belong to. The conversation order is stored
+// PER workspace so switching libraries never reshuffles another one's list.
+let workspaces = [], activeWsId = 'legacy';
+function orderKey() { return 'wsOrder_' + activeWsId; }
+function getOrder() { return loadPrefs()[orderKey()] || []; }
+function setOrder(order) { savePrefs({ [orderKey()]: order }); }
 function relTime(sec) {
   if (!sec) return '';
   const d = Math.max(0, Date.now() / 1000 - sec);
@@ -873,7 +879,7 @@ function onSessPointerUp() {
   d.row.classList.remove('dragging');
   if (d.moved) {
     const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess')).map((r) => r.dataset.id);
-    savePrefs({ sessionOrder: order });                                            // manual order persists
+    setOrder(order);                                                               // manual order persists (per workspace)
   } else {
     openSession(d.id, d.label);                                                    // plain click → open
   }
@@ -882,8 +888,8 @@ const deletingIds = new Set();                                                  
 async function deleteSession(id) {
   if (deletingIds.has(id)) return;
   deletingIds.add(id);
-  const order = (loadPrefs().sessionOrder || []).filter((x) => x !== id);
-  savePrefs({ sessionOrder: order });
+  const order = getOrder().filter((x) => x !== id);
+  setOrder(order);
   if (id === activeSession) {                                                       // switch the pty OFF it BEFORE deleting the open file
     const next = order[0] || 'new';
     await openSession(next, next === 'new' ? '' : (sessIndex[next] && sessIndex[next].preview));
@@ -892,18 +898,22 @@ async function deleteSession(id) {
   refreshSessions();
 }
 async function refreshSessions() {
+  const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';
   let list = []; try { list = await claudible.sessionList(); } catch {}
+  if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
   if (Array.isArray(list) && deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));   // hide rows being deleted
   if (!Array.isArray(list) || !list.length) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
-  const order = mergeSessionOrder(loadPrefs().sessionOrder, list);
-  savePrefs({ sessionOrder: order });
+  const order = mergeSessionOrder(getOrder(), list);
+  setOrder(order);
   sessIndex = {}; list.forEach((s) => { sessIndex[s.id] = s; });
   const ordered = order.map((id) => sessIndex[id]).filter(Boolean);
-  if (!activeSession) activeSession = ordered[0].id;                                // a default launch resumes the top of the list
+  // Default highlight must match what session.sh `--continue` resumes — the most-recent conversation
+  // (max mtime) — not the top of the stable saved order.
+  if (!activeSession) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
   const act = sessIndex[activeSession];
   if (act && !curSessionLabel) { curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
   sessListEl.innerHTML = '';
@@ -913,7 +923,7 @@ async function refreshSessions() {
 // never covers the terminal/chat. The terminal auto-refits via its ResizeObserver when the column changes.
 function openSidebar(open) {
   bodyEl.classList.toggle('with-sessions', open);
-  if (open) refreshSessions();
+  if (open) { refreshWorkspaces(); refreshSessions(); }
 }
 async function openSession(id, label) {
   if (id !== 'new' && id === activeSession) return;   // already on this one
@@ -925,10 +935,86 @@ async function openSession(id, label) {
   try { await claudible.sessionOpen(id); } catch {}
   setTimeout(() => term.focus(), 150);
 }
+// ---------- workspaces (the library a session belongs to: legacy / local folder / private repo) ----------
+const WS_FOLDER_SVG = '<svg class="ws-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const WS_REPO_SVG = '<svg class="ws-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
+function renderWsChips() {
+  const el = $('ws-chips'); if (!el) return;
+  el.innerHTML = '';
+  workspaces.forEach((w) => {
+    const chip = document.createElement('div');
+    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '');
+    chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
+    chip.innerHTML = (w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG) +
+      '<span class="ws-name"></span>' +
+      (w.kind === 'legacy' ? '' : '<span class="ws-kind">' + (w.kind === 'repo' ? 'repo' : 'local') + '</span>');
+    chip.querySelector('.ws-name').textContent = w.label;
+    chip.addEventListener('click', () => switchWorkspace(w.id));
+    el.appendChild(chip);
+  });
+}
+async function refreshWorkspaces() {
+  let r = null; try { r = await claudible.workspaceList(); } catch {}
+  if (r && Array.isArray(r.workspaces)) { workspaces = r.workspaces; if (r.activeId) activeWsId = r.activeId; }
+  renderWsChips();
+}
+async function switchWorkspace(id) {
+  if (id === activeWsId) return;
+  activeWsId = id;
+  activeSession = null; curSessionLabel = '';     // the conversation list is about to change entirely
+  renderWsChips();
+  term.reset(); resetStats();                      // clear the old workspace's view; main respawns the pty in the new cwd
+  try { await claudible.workspaceOpen(id); } catch {}
+  refreshSessions();
+  setTimeout(() => term.focus(), 150);
+}
+// new-workspace chooser modal
+let wsChoiceKind = 'local';
+function selectWsKind(kind) {
+  wsChoiceKind = kind;
+  $('ch-local').classList.toggle('sel', kind === 'local');
+  $('ch-repo').classList.toggle('sel', kind === 'repo');
+}
+function openWsModal() {
+  selectWsKind('local');
+  $('ws-name-in').value = ''; $('ws-busy').textContent = ''; $('ws-busy').classList.remove('err');
+  $('ws-modal').classList.add('show');
+  setTimeout(() => $('ws-name-in').focus(), 60);
+}
+function closeWsModal() { $('ws-modal').classList.remove('show'); }
+async function createWorkspace() {
+  if ($('ws-create').disabled) return;                      // in-flight guard (the Enter key can bypass the disabled button)
+  const name = $('ws-name-in').value.trim();
+  const busy = $('ws-busy'); busy.classList.remove('err');
+  if (!name) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }
+  busy.textContent = wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…';
+  $('ws-create').disabled = true;
+  let r = null; try { r = await claudible.workspaceCreate(wsChoiceKind, name); } catch {}
+  $('ws-create').disabled = false;
+  if (!r || !r.ok) { busy.textContent = (r && r.error) || 'creation failed'; busy.classList.add('err'); return; }
+  closeWsModal();                                   // main already switched + respawned a fresh conversation
+  activeSession = null; curSessionLabel = '';
+  await refreshWorkspaces();
+  term.reset(); resetStats(); refreshSessions();
+  setTimeout(() => term.focus(), 150);
+}
+$('ws-add').addEventListener('click', openWsModal);
+$('ch-local').addEventListener('click', () => selectWsKind('local'));
+$('ch-repo').addEventListener('click', () => selectWsKind('repo'));
+$('ws-create').addEventListener('click', createWorkspace);
+$('ws-cancel').addEventListener('click', closeWsModal);
+$('ws-name-in').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); createWorkspace(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeWsModal(); }
+});
+
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
 $('new-session').addEventListener('click', () => openSession('new'));
-refreshSessions();   // open by default → populate the list on launch
+// One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
+// `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
+{ const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }
+(async () => { await refreshWorkspaces(); refreshSessions(); })();   // load workspaces first, then this workspace's conversations
 
 // ---------- desktop clipboard shortcuts (Ctrl on Win/Linux, ⌘ on Mac) ----------
 // In the TERMINAL: Ctrl/⌘+C copies the selection (or passes through as interrupt/SIGINT when nothing

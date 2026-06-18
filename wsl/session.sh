@@ -5,7 +5,20 @@
 # screen has no scrollback, which would break the mouse wheel in xterm.js).
 set -u
 
-SDIR="$HOME/.claudible/session"
+# --- workspace cwd: each Claudible workspace runs in its OWN dir, so Claude's per-cwd history
+# isolates for free (projects/<encoded cwd>/). The app inlines a kind + slug; unset (or a bad slug)
+# falls back to the original single session dir — fully backward compatible. The slug is a strict
+# [A-Za-z0-9-] leaf (no path chars), so it can't escape the workspace root even though it's interpolated.
+WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
+WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
+case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
+if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
+  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
+elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
+  SDIR="$HOME/.claudible/repos/$WS_SLUG"
+else
+  SDIR="$HOME/.claudible/session"
+fi
 # Runtime files live on the Windows FS so the Electron app reads them natively (NOT over the flaky
 # \\wsl.localhost 9P boundary). The app passes its OWN folder (as a /mnt path) in $1 — no hardcoded home.
 APPDIR="${1:?usage: session.sh <app-dir-as-wsl-path>}"

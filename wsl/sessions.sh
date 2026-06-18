@@ -3,7 +3,18 @@
 # Each conversation is a <session-id>.jsonl under ~/.claude/projects/<encoded cwd>/. We emit
 # [{id, mtime, preview, msgs}] sorted newest-first so the renderer can show a session switcher.
 set -u
-SDIR="$HOME/.claudible/session"
+# Per-workspace cwd (mirrors session.sh): list conversations for the SELECTED workspace's dir.
+# Unset / bad slug → the original single session dir. Slug is a strict [A-Za-z0-9-] leaf.
+WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
+WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
+case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
+if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
+  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
+elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
+  SDIR="$HOME/.claudible/repos/$WS_SLUG"
+else
+  SDIR="$HOME/.claudible/session"
+fi
 # Same encoding Claude uses: every non-alphanumeric char in the cwd path → '-'.
 PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
 
