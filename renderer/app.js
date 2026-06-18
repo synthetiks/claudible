@@ -597,9 +597,19 @@ window.addEventListener('contextmenu', (e) => {
   const inTerm = !!e.target.closest('#terminal');
   const chatLog = e.target.closest('#chat-log');                // right-clicked inside the viewer chat log
   const field = e.target.closest('input, textarea');
-  const sel = inTerm ? term.getSelection() : String(window.getSelection() || '');
+  const fS = field ? (field.selectionStart || 0) : 0, fE = field ? (field.selectionEnd || 0) : 0;
+  // the actual selected text wherever was clicked: terminal, an editable field, or document text (chat log)
+  const sel = inTerm ? term.getSelection() : (field ? String(field.value || '').substring(fS, fE) : String(window.getSelection() || ''));
   const items = [];
   if (sel && sel.trim()) items.push({ label: 'Copy', act: () => claudible.clipWrite(sel) });
+  if (sel && sel.trim() && (inTerm || field)) items.push({ label: 'Cut', act: () => {
+    claudible.clipWrite(sel);
+    if (field) {                                                // splice the selection out of the field
+      field.value = field.value.slice(0, fS) + field.value.slice(fE);
+      try { field.selectionStart = field.selectionEnd = fS; } catch {}
+      field.dispatchEvent(new Event('input', { bubbles: true })); field.focus();
+    } else { claudible.ptyInput('\x7f'.repeat(sel.length)); term.clearSelection(); }   // terminal: delete the marked text
+  } });
   if (inTerm || field) items.push({ label: 'Paste', act: async () => {
     const t = await claudible.clipRead(); if (!t) return;
     if (inTerm) { claudible.ptyInput('\x1b[200~' + t + '\x1b[201~'); term.focus(); }   // bracketed paste, no auto-submit
