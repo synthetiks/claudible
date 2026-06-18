@@ -1105,12 +1105,18 @@ function renderWsChips() {
   updateGitBtn();
 }
 // ---- git push / pull (repo workspaces only) ----
+let activeIsRepo = false;
 function updateGitBtn() {
   const aw = workspaces.find((w) => w.id === activeWsId);
-  const isRepo = !!(aw && aw.kind === 'repo');
-  const b = $('git-btn'); if (b) b.style.display = isRepo ? '' : 'none';
-  const t = $('terminal'); if (t) t.classList.toggle('has-git', isRepo);
-  if (!isRepo) closeGitMenu();
+  activeIsRepo = !!(aw && aw.kind === 'repo');
+  const b = $('git-btn');
+  if (b) {                                               // always visible (discoverable); dimmed when git doesn't apply
+    b.style.display = '';
+    b.classList.toggle('needs-repo', !activeIsRepo);
+    b.title = activeIsRepo ? 'Git — push / pull' : 'Git push/pull is available in Repo workspaces';
+  }
+  const t = $('terminal'); if (t) t.classList.add('has-git');
+  if (!activeIsRepo) closeGitMenu();
 }
 function openGitMenu() {
   const b = $('git-btn'); const m = $('git-menu'); if (!b || !m) return;
@@ -1131,7 +1137,11 @@ async function gitRun(op) {
   else { st.textContent = (r && r.error) || 'failed'; st.classList.add('err'); }
 }
 if ($('git-btn')) {
-  $('git-btn').addEventListener('click', (e) => { e.stopPropagation(); const m = $('git-menu'); (m && m.style.display === 'block') ? closeGitMenu() : openGitMenu(); });
+  $('git-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!activeIsRepo) { toast('Git push/pull works in Repo workspaces — make one with the ＋ in Workspaces'); return; }
+    const m = $('git-menu'); (m && m.style.display === 'block') ? closeGitMenu() : openGitMenu();
+  });
   $('git-push').addEventListener('click', () => gitRun('push'));
   $('git-pull').addEventListener('click', () => gitRun('pull'));
   $('git-msg').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); gitRun('push'); } else if (e.key === 'Escape') { e.preventDefault(); closeGitMenu(); } });

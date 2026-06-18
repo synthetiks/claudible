@@ -267,6 +267,7 @@
     .ctxitem .k{color:var(--ink-faint);font-size:11px}
     /* git push/pull dropdown (reuses .ctxmenu, position:fixed so it escapes #terminal overflow) */
     #git-btn{right:8px}
+    #git-btn.needs-repo{opacity:.45}                        /* visible but dimmed when not a repo workspace (push/pull needs a repo) */
     #terminal.has-git #savetab{right:46px}                  /* make room so Git sits to the RIGHT of save */
     .git-menu{min-width:236px;padding:7px}
     .git-menu .git-msg{width:100%;font-family:inherit;font-size:11.5px;color:var(--ink);background:#0a0b0d;
