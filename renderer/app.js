@@ -593,13 +593,16 @@ claudible.onShareGuests((n) => {
 
 // ---------- approve-guest prompt ----------
 // No one attaches to the terminal until you approve here. Requests are queued (one prompt at a time).
-const approveEl = $('approve'), approveMsg = $('approve-msg');
+const approveEl = $('approve'), approveMsg = $('approve-msg'), approveTitle = $('approve-title');
 let approveQueue = [], approveCur = null;
 function showNextApproval() {
   if (approveCur || !approveQueue.length) return;
   approveCur = approveQueue.shift();
-  approveMsg.textContent = (approveCur.name ? '“' + approveCur.name + '”' : 'Someone') +
-    ' wants to join your terminal. Approve only if you recognise them — they’ll see your session (and can type, unless view-only).';
+  // Put the viewer's chosen name in the HEADER so you can see exactly who you're approving at a glance
+  // (the body text just carries the security reminder). Falls back to "Someone" if no name was sent.
+  approveTitle.textContent = (approveCur.name ? '“' + approveCur.name + '”' : 'Someone') + ' wants to join';
+  approveMsg.textContent = 'They opened your link and are asking to join your terminal. Approve only if you recognise ' +
+    (approveCur.name ? approveCur.name : 'them') + ' — they’ll see your session (and can type, unless view-only).';
   approveEl.classList.add('show');
 }
 function decideApproval(ok) {

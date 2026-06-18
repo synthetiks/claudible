@@ -20,6 +20,22 @@ flagMobile();
 window.addEventListener('resize', flagMobile);
 window.addEventListener('orientationchange', flagMobile);
 
+// Pin the layout to the LIVE visible viewport. Mobile browsers grow/shrink the visible area as the URL bar
+// shows/hides; CSS svh/dvh help but lag or mis-report in some in-app webviews, leaving an empty gap under the
+// chat or a scrollable page. Writing the measured height into --app-h (read by body{height:var(--app-h)}) keeps
+// the app exactly the size of what's on screen — no gap, no page scroll.
+function setAppHeight() {
+  var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0;
+  if (h) document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+}
+setAppHeight();
+window.addEventListener('resize', setAppHeight);
+window.addEventListener('orientationchange', function () { setTimeout(setAppHeight, 250); });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setAppHeight);
+  window.visualViewport.addEventListener('scroll', setAppHeight);
+}
+
 var term = new Terminal({
   fontFamily: 'ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace',
   fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
@@ -58,7 +74,11 @@ term.open($('terminal'));
 })();
 
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
-function setStatus(txt, cls) { $('stxt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
+// The connection indicator now lives on the top session chip's dot (green = live, red = down, amber = connecting).
+function setStatus(txt, cls) {
+  var s = $('stxt'); if (s) s.textContent = txt;
+  var d = $('sess-dot'); if (d) d.className = 'dot' + (cls ? ' ' + cls : '');
+}
 function showOverlay(show, title, body, bad) {
   $('overlay').classList.toggle('show', !!show);
   if (title != null) $('ov-title').textContent = title;
@@ -74,25 +94,50 @@ function applySize(c, r) { if (c) hostCols = c; if (r) hostRows = r; try { term.
 // Font is computed from geometry (monospace advance ≈ 0.6 × fontSize, cell height ≈ 1.18 × fontSize), never
 // by reflowing columns.
 var BASE_FONT = 13;                                // matches Terminal({fontSize}) above
-var FIT_KEY = 'claudible_fitmode';                 // phone only: 'fit' (shrink all cols) | '1to1' (readable + scroll)
-var fitMode = '1to1';
-try { if (sessionStorage.getItem(FIT_KEY) === 'fit') fitMode = 'fit'; } catch (e) {}
+// PHONE sizing: the host paints a FIXED hostCols×hostRows grid, so at a fixed font the terminal can't "use" extra
+// vertical space — it just leaves a gap. The only honest lever is the FONT. Baseline = the size at which all the
+// host's ROWS exactly fill the available height, so the terminal always fills the pane AND grows into the space
+// freed when the chat collapses (shrinks back when it reopens). The −/＋ and pinch apply a remembered MULTIPLIER
+// on top of that baseline, so a viewer's size preference scales with the pane instead of leaving dead space.
+// Whatever doesn't fit the width is reached by horizontal pan (CSS #terminal{width:max-content} + .wrap overflow).
+var ZOOM_KEY = 'claudible_zoom';                   // persisted zoom multiplier (relative to the height-fit baseline)
+var FONT_MIN = 7, FONT_MAX = 40;
+var ZF_MIN = 0.4, ZF_MAX = 4;
+var zoomFactor = 1;
+try { var zf = parseFloat(localStorage.getItem(ZOOM_KEY)); if (zf >= ZF_MIN && zf <= ZF_MAX) zoomFactor = zf; } catch (e) {}
+var lastEffFont = BASE_FONT;                       // last applied effective font (anchors the −/＋ steppers)
 var hostCols = 120, hostRows = 32;                 // host's reported grid (set in applySize)
 function isMobile() { return document.body.classList.contains('mobile'); }
+function paneHeight() {
+  var t = $('terminal'), wrap = t && t.closest('.wrap'); if (!wrap) return 0;
+  var cs = getComputedStyle(wrap);
+  return wrap.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+}
+function fitHeightFont() {                          // size at which hostRows rows fill the pane height
+  var ph = paneHeight(); if (ph <= 0) return BASE_FONT;
+  return Math.max(FONT_MIN, Math.min(FONT_MAX, ph / (Math.max(1, hostRows) * 1.18)));
+}
+function applyMobileZoom() {
+  var eff = Math.max(FONT_MIN, Math.min(FONT_MAX, Math.round(fitHeightFont() * zoomFactor)));
+  lastEffFont = eff;
+  if (term.options.fontSize !== eff) term.options.fontSize = eff;
+  var lbl = $('zoom-lbl'); if (lbl) lbl.textContent = eff + 'px';
+}
+function setZoomFactor(f) {
+  zoomFactor = Math.max(ZF_MIN, Math.min(ZF_MAX, f));
+  try { localStorage.setItem(ZOOM_KEY, String(zoomFactor)); } catch (e) {}
+  applyMobileZoom();
+}
+function nudgeZoom(deltaPx) {                        // step the EFFECTIVE size by ~deltaPx, stored pane-relative
+  var base = fitHeightFont(); if (base > 0) setZoomFactor((lastEffFont + deltaPx) / base);
+}
 function recomputeFit() {
   var t = $('terminal'); if (!t) return;
   var wrap = t.closest('.wrap'); if (!wrap) return;
   var cur = term.options.fontSize || BASE_FONT;
   var phone = isMobile();
-  document.body.classList.toggle('can-fit', phone);           // the Fit/1:1 pill is a phone-only control
-  document.body.classList.toggle('term1to1', phone && fitMode === '1to1');
-  if (phone) {
-    if (fitMode === '1to1') { if (cur !== BASE_FONT) term.options.fontSize = BASE_FONT; return; }   // readable + scroll
-    var availP = vpWidth() - 26;
-    var tP = Math.max(4, Math.min(BASE_FONT, Math.floor(availP / (Math.max(1, hostCols) * 0.6))));
-    if (tP !== cur) term.options.fontSize = tP;
-    return;
-  }
+  document.body.classList.toggle('can-fit', phone);           // the zoom control is a phone-only affordance
+  if (phone) { applyMobileZoom(); return; }                   // fill the height; collapsing the chat grows it
   // tablet / desktop / wide: scale the whole grid to fill the pane (see everything, as large as it fits).
   var cs = getComputedStyle(wrap), tcs = getComputedStyle(t);
   var pw = wrap.clientWidth
@@ -127,18 +172,27 @@ function applyReadOnlyInput() {
   ta.tabIndex = -1;
 }
 
-// Fit / 1:1 toggle (CSP-safe: wired here, no inline handler). Labels the CURRENT state; dot color matches.
-(function fitToggle() {
-  var btn = $('fitbtn'); if (!btn) return;
-  var lbl = $('fitbtn-l');
-  function paint() { if (lbl) lbl.textContent = (fitMode === '1to1') ? '1:1' : 'Fit'; btn.setAttribute('aria-pressed', String(fitMode === 'fit')); }
-  btn.addEventListener('click', function () {
-    fitMode = (fitMode === '1to1') ? 'fit' : '1to1';
-    try { sessionStorage.setItem(FIT_KEY, fitMode); } catch (e) {}
-    paint(); recomputeFit();
-    if (fitMode === '1to1') { var w = $('terminal').closest('.wrap'); if (w) w.scrollLeft = 0; }   // pan from column 0
-  });
-  paint();
+// Terminal text-size control (phones) — lives on the chat bar. −/＋ steps the size; pinch on the terminal works too.
+// CSP-safe (wired here, no inline handlers). The whole control stops click propagation so tapping it never toggles
+// the chat collapse (the chat bar itself is the collapse handle).
+(function zoomCtl() {
+  var ctl = $('zoomctl'), out = $('zoom-out'), inn = $('zoom-in');
+  if (ctl) ctl.addEventListener('click', function (e) { e.stopPropagation(); });
+  if (out) out.addEventListener('click', function () { nudgeZoom(-1); });
+  if (inn) inn.addEventListener('click', function () { nudgeZoom(1); });
+  var t = $('terminal'); if (!t) return;
+  // pinch: scale the multiplier by the change in two-finger spread (native page-zoom is disabled in the viewport meta)
+  var startDist = 0, startFactor = 1;
+  function dist(e) { var a = e.touches[0], b = e.touches[1], dx = a.clientX - b.clientX, dy = a.clientY - b.clientY; return Math.sqrt(dx * dx + dy * dy); }
+  t.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) { startDist = dist(e); startFactor = zoomFactor; }
+  }, { passive: true });
+  t.addEventListener('touchmove', function (e) {
+    if (e.touches.length !== 2 || !startDist) return;
+    e.preventDefault();                                       // we own the pinch; don't let the page do anything
+    setZoomFactor(startFactor * (dist(e) / startDist));
+  }, { passive: false });
+  t.addEventListener('touchend', function (e) { if (e.touches.length < 2) startDist = 0; }, { passive: true });
 })();
 // Mirror the host's session tracker (context %, cost, tokens) — values arrive pre-formatted.
 function applyStatus(s) {
@@ -154,8 +208,8 @@ function applyStatus(s) {
   if (s.tokens != null) $('trk-tokens').textContent = s.tokens;
   if (s.session != null) {
     var chip = $('sess-chip');
-    if (s.session) { $('sess-chip-text').textContent = s.session; chip.style.display = ''; }
-    else { chip.style.display = 'none'; }
+    $('sess-chip-text').textContent = s.session || 'live session';   // keep the chip visible (it carries the connection dot)
+    if (chip) chip.style.display = '';
   }
 }
 
@@ -178,7 +232,9 @@ function connect() {
         applyReadOnlyInput();                                 // read-only: a tap won't raise the soft keyboard
         if (msg.resume) { resume = msg.resume; try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ t: token, r: resume })); } catch (e) {} }
         showOverlay(false);
-        document.body.classList.add('connected');             // reveal the mobile Fit/1:1 pill only once actually viewing
+        document.body.classList.add('connected');             // reveal the phone zoom control only once actually viewing
+        var chip = $('sess-chip');                            // reveal the session chip — it carries the connection dot
+        if (chip) { chip.style.display = ''; var ct = $('sess-chip-text'); if (ct && !ct.textContent) ct.textContent = 'live session'; }
         setStatus('connected', 'ok');
         applySize(msg.cols, msg.rows);
         if (!isMobile() && !readOnly) term.focus();           // don't pop the on-screen keyboard on phones / read-only viewers
@@ -233,11 +289,13 @@ function addChat(who, text, mine) {
   var b = document.createElement('div'); b.textContent = text;   // textContent → no HTML injection
   d.appendChild(w); d.appendChild(b); chatLog.appendChild(d);
   chatLog.scrollTop = chatLog.scrollHeight;
+  if (!mine) markUnread();                                       // light up if this arrived while the chat is hidden
 }
 function addSystemChat(text) {
   var empty = document.getElementById('chat-empty'); if (empty) empty.parentNode.removeChild(empty);
   var d = document.createElement('div'); d.className = 'chat-sys'; d.textContent = text;
   chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
+  markUnread();
 }
 function sendChat() {
   var text = (chatIn.value || '').trim(); if (!text) return;
@@ -249,6 +307,20 @@ function sendChat() {
 $('chat-send').addEventListener('click', sendChat);
 chatIn.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
 chatLog.innerHTML = '<div class="chat-empty" id="chat-empty">Chat with the host here — Claude never sees these messages.</div>';
+
+// ---- collapsible chat + unread light (tap the header to hide the log/input down to a slim bar) ----
+var gchat = document.querySelector('.gchat'), gchatHead = $('gchat-head');
+var chatCollapsed = false;
+function setChatCollapsed(c) {
+  chatCollapsed = !!c;
+  if (gchat) gchat.classList.toggle('collapsed', chatCollapsed);
+  document.body.classList.toggle('chat-collapsed', chatCollapsed);   // lets the zoom handle drop when chat is hidden
+  var tg = $('gchat-toggle'); if (tg) tg.setAttribute('aria-expanded', String(!chatCollapsed));
+  if (!chatCollapsed && gchat) gchat.classList.remove('has-unread');  // opening clears the unread light
+  scheduleFit();                                                      // terminal pane grew/shrank → rescale (desktop)
+}
+function markUnread() { if (chatCollapsed && gchat) gchat.classList.add('has-unread'); }
+if (gchatHead) gchatHead.addEventListener('click', function () { setChatCollapsed(!chatCollapsed); });
 
 // ---- desktop shortcuts, scoped to where you're focused ----
 // In the TERMINAL (code area): Ctrl/⌘+A selects ALL the terminal text, +C copies the selection,
