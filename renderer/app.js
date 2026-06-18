@@ -493,8 +493,65 @@ claudible.onHookLine((line) => {
     updateVoiceOutBtn();                  // enable ▶ Speak now that there's a reply
     if (alwaysSpeak) speak(reply);        // auto-speak the reply in the selected voice
     else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech caps reply at 600)
+  } else if (o.hook_event_name === 'PreToolUse' && o.tool_name === 'Task') {
+    onAgentStart(o);
+  } else if (o.hook_event_name === 'PostToolUse' && o.tool_name === 'Task') {
+    onAgentDone(o);
   }
 });
+
+// ---------- Agents tab: live view of Task subagents (fed by Pre/PostToolUse[Task] hooks, paired by tool_use_id) ----------
+const agents = new Map();   // tool_use_id -> {desc,type,status,startedAt,durationMs,ok}
+let agentsView = false;
+function onAgentStart(o) {
+  const id = o.tool_use_id || ('a' + agents.size + '-' + Date.now());
+  const ti = o.tool_input || {};
+  agents.set(id, { desc: String(ti.description || ti.subagent_type || 'subagent'), type: String(ti.subagent_type || ''),
+    status: 'running', startedAt: Date.now(), durationMs: null, ok: true });
+  renderAgents();
+  if (!agentsView) { const s = $('seg-agents'); if (s) s.classList.add('has-badge'); }   // badge while you're on the terminal
+}
+function onAgentDone(o) {
+  const a = o.tool_use_id && agents.get(o.tool_use_id); if (!a) return;
+  a.status = 'done';
+  a.durationMs = (o.duration_ms != null) ? o.duration_ms : (Date.now() - a.startedAt);
+  try { a.ok = !/"is_error"\s*:\s*true|"error"\s*:/i.test(JSON.stringify(o.tool_response || '').slice(0, 500)); } catch { a.ok = true; }
+  renderAgents();
+}
+function renderAgents() {
+  const el = $('agents-list'); if (!el) return;
+  const arr = Array.from(agents.values()).reverse();   // newest first
+  if (!arr.length) { el.innerHTML = '<div class="agents-empty">No subagents yet. When Claude spawns Task subagents in this session, they’ll appear here live.</div>'; return; }
+  el.innerHTML = '';
+  arr.forEach((a) => {
+    const row = document.createElement('div');
+    row.className = 'agent-row ' + (a.status === 'done' ? (a.ok ? 'done' : 'err') : 'running');
+    const dot = document.createElement('span'); dot.className = 'agent-dot'; row.appendChild(dot);
+    const c = document.createElement('div'); c.style.flex = '1'; c.style.minWidth = '0';
+    const name = document.createElement('div'); name.className = 'agent-name'; name.textContent = a.desc; c.appendChild(name);
+    const meta = document.createElement('div'); meta.className = 'agent-meta';
+    const pre = a.type ? a.type + ' · ' : '';
+    meta.textContent = a.status === 'running'
+      ? pre + 'running · ' + Math.round((Date.now() - a.startedAt) / 1000) + 's'
+      : pre + (a.ok ? 'done' : 'error') + (a.durationMs != null ? ' · ' + Math.round(a.durationMs / 1000) + 's' : '');
+    c.appendChild(meta); row.appendChild(c);
+    el.appendChild(row);
+  });
+}
+function setAgentsView(on) {
+  agentsView = on;
+  const pane = $('agents-pane'); if (pane) pane.classList.toggle('show', on);
+  const tr = document.querySelector('.termrow'); if (tr) tr.classList.toggle('agents-on', on);   // hide save/git tabs behind the pane
+  const st = $('seg-term'), sa = $('seg-agents');
+  if (st) st.classList.toggle('on', !on);
+  if (sa) { sa.classList.toggle('on', on); if (on) sa.classList.remove('has-badge'); }
+  if (on) renderAgents(); else setTimeout(() => term.focus(), 30);
+}
+if ($('seg-term')) {
+  $('seg-term').addEventListener('click', () => setAgentsView(false));
+  $('seg-agents').addEventListener('click', () => setAgentsView(true));
+  setInterval(() => { if (agentsView && Array.from(agents.values()).some((a) => a.status === 'running')) renderAgents(); }, 1000);
+}
 
 // ---------- Save Session (pop-out tab) ----------
 function buildTranscript() {
@@ -716,8 +773,61 @@ function openDrawer(open) {
   drawer.classList.toggle('open', open);
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (open) { loadSkills(); loadPlugins(); }       // refresh extension inventory each time the drawer opens
   if (!open) setTimeout(() => term.focus(), 0);
 }
+// ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
+async function loadSkills() {
+  const el = $('skills-list'); if (!el) return;
+  let list = []; try { list = await claudible.skillsList(); } catch {}
+  if (!Array.isArray(list) || !list.length) {
+    el.innerHTML = '<div class="ext-empty">No user/project skills found. Add one at <b>~/.claude/skills/&lt;name&gt;/SKILL.md</b> or this workspace’s <b>.claude/skills/</b>. (Bundled &amp; plugin skills aren’t listed here.)</div>';
+    return;
+  }
+  el.innerHTML = '';
+  list.forEach((s) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = '/' + s.name; main.appendChild(nm);
+    if (s.description) { const d = document.createElement('div'); d.className = 'ext-desc'; d.textContent = s.description; main.appendChild(d); }
+    const meta = document.createElement('div'); meta.className = 'ext-meta'; meta.textContent = s.scope || ''; main.appendChild(meta);
+    row.appendChild(main);
+    const on = s.state !== 'off';
+    const tog = document.createElement('button'); tog.className = 'ext-tog' + (on ? ' on' : ''); tog.textContent = on ? 'on' : 'off';
+    tog.addEventListener('click', async () => { let r = null; try { r = await claudible.skillsSet(s.name, on ? 'off' : 'on'); } catch {} if (r && r.ok) loadSkills(); });
+    row.appendChild(tog); el.appendChild(row);
+  });
+}
+async function loadPlugins() {
+  const el = $('plugins-list'); if (!el) return;
+  let list = []; try { list = await claudible.pluginsList(); } catch {}
+  if (!Array.isArray(list) || !list.length) {
+    el.innerHTML = '<div class="ext-empty">No plugins installed. Add them with <b>/plugin</b> in the terminal.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  list.forEach((p) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = p.name; main.appendChild(nm);
+    const meta = document.createElement('div'); meta.className = 'ext-meta';
+    meta.textContent = [p.marketplace, p.version, p.scope].filter(Boolean).join(' · '); main.appendChild(meta);
+    row.appendChild(main);
+    const tog = document.createElement('button'); tog.className = 'ext-tog' + (p.enabled ? ' on' : ''); tog.textContent = p.enabled ? 'on' : 'off';
+    tog.addEventListener('click', async () => {
+      tog.textContent = '…';
+      let r = null; try { r = await claudible.pluginsToggle(p.key, !p.enabled); } catch {}
+      if (r && r.ok) loadPlugins(); else { tog.textContent = p.enabled ? 'on' : 'off'; toast('Plugin toggle failed — try /plugin in the terminal'); }
+    });
+    row.appendChild(tog); el.appendChild(row);
+  });
+}
+function openExt(which) {
+  openDrawer(true);
+  setTimeout(() => { const sec = $(which === 'plugins' ? 'sec-plugins' : 'sec-skills'); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 90);
+}
+if ($('skills-refresh')) $('skills-refresh').addEventListener('click', loadSkills);
+if ($('plugins-refresh')) $('plugins-refresh').addEventListener('click', loadPlugins);
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));
@@ -1001,6 +1111,40 @@ function renderWsChips() {
   // name the active workspace in the SESSIONS header so the two-level relationship is unmistakable
   const aw = workspaces.find((w) => w.id === activeWsId);
   const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
+  updateGitBtn();
+}
+// ---- git push / pull (repo workspaces only) ----
+function updateGitBtn() {
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  const isRepo = !!(aw && aw.kind === 'repo');
+  const b = $('git-btn'); if (b) b.style.display = isRepo ? '' : 'none';
+  const t = $('terminal'); if (t) t.classList.toggle('has-git', isRepo);
+  if (!isRepo) closeGitMenu();
+}
+function openGitMenu() {
+  const b = $('git-btn'); const m = $('git-menu'); if (!b || !m) return;
+  const r = b.getBoundingClientRect();
+  m.style.display = 'block';
+  m.style.top = (r.bottom + 6) + 'px';
+  m.style.left = Math.max(8, r.right - m.offsetWidth) + 'px';   // right-align under the button
+  const st = $('git-status'); st.textContent = ''; st.classList.remove('err');
+  setTimeout(() => $('git-msg').focus(), 40);
+}
+function closeGitMenu() { const m = $('git-menu'); if (m) m.style.display = 'none'; }
+async function gitRun(op) {
+  const st = $('git-status'); st.classList.remove('err');
+  st.textContent = op === 'push' ? 'pushing…' : 'pulling…';
+  const msg = op === 'push' ? $('git-msg').value.trim() : '';
+  let r = null; try { r = await claudible.gitOp(op, msg); } catch {}
+  if (r && r.ok) { st.textContent = (op === 'push' ? '✓ pushed' : '✓ pulled') + (r.detail ? ' — ' + r.detail : ''); if (op === 'push') $('git-msg').value = ''; }
+  else { st.textContent = (r && r.error) || 'failed'; st.classList.add('err'); }
+}
+if ($('git-btn')) {
+  $('git-btn').addEventListener('click', (e) => { e.stopPropagation(); const m = $('git-menu'); (m && m.style.display === 'block') ? closeGitMenu() : openGitMenu(); });
+  $('git-push').addEventListener('click', () => gitRun('push'));
+  $('git-pull').addEventListener('click', () => gitRun('pull'));
+  $('git-msg').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); gitRun('push'); } else if (e.key === 'Escape') { e.preventDefault(); closeGitMenu(); } });
+  document.addEventListener('click', (e) => { const m = $('git-menu'); if (m && m.style.display === 'block' && !e.target.closest('#git-menu') && !e.target.closest('#git-btn')) closeGitMenu(); });
 }
 // inline workspace rename (mirrors session rename), persisted through main (registry is source of truth)
 function startWsEdit(chip, nm, w) {
@@ -1121,8 +1265,8 @@ claudible.onWorkspaceActiveChanged((id) => {
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
 $('new-session').addEventListener('click', () => openSession('new'));
-$('skills-btn').addEventListener('click', () => toast('Skills manager — coming in a later update'));
-$('plugins-btn').addEventListener('click', () => toast('Plugins manager — coming soon'));
+$('skills-btn').addEventListener('click', () => openExt('skills'));
+$('plugins-btn').addEventListener('click', () => openExt('plugins'));
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }

@@ -308,6 +308,60 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
     });
 }));
+// Git push/pull for the active repo workspace. Commit message is base64'd so free text can't break the
+// bash -lc string; the wsl script decodes it. push = stage-all + commit + push; pull = fast-forward only.
+ipcMain.handle('git:op', (e, payload) => new Promise((resolve) => {
+  const op = ['push', 'pull', 'status'].includes(payload && payload.op) ? payload.op : '';
+  if (!op) return resolve({ ok: false, error: 'bad op' });
+  if (!activeWorkspace || activeWorkspace.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  const msgB64 = op === 'push' ? Buffer.from(String((payload && payload.message) || '')).toString('base64') : '';
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/git.sh' '${op}' '${msgB64}'`],
+    { encoding: 'utf8', timeout: 120000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] git:', err.message); return resolve({ ok: false, error: 'git command failed' }); }
+      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      resolve(r && r.ok ? r : { ok: false, error: (r && r.error) || 'git command failed' });
+    });
+}));
+// ---- skills + plugins (manage Claude Code extensions from the cockpit) ----
+ipcMain.handle('skills:list', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/skills.sh' list`],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] skills:list', err.message); return resolve([]); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    });
+}));
+ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
+  const name = String((payload && payload.name) || '').replace(/[^A-Za-z0-9:/_.-]/g, '');
+  const state = ['on', 'off', 'name-only', 'user-invocable-only'].includes(payload && payload.state) ? payload.state : '';
+  if (!name || !state) return resolve({ ok: false, error: 'bad args' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/skills.sh' set '${name}' '${state}'`],
+    { encoding: 'utf8' }, (err, stdout) => {
+      if (err) { console.error('[claudible] skills:set', err.message); return resolve({ ok: false, error: 'failed' }); }
+      try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
+    });
+}));
+ipcMain.handle('plugins:list', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' list`],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] plugins:list', err.message); return resolve([]); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    });
+}));
+ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
+  const key = String((payload && payload.key) || '').replace(/[^A-Za-z0-9@._/-]/g, '');
+  const act = (payload && payload.enable) ? 'enable' : 'disable';
+  if (!key) return resolve({ ok: false, error: 'bad key' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' toggle '${key}' '${act}'`],
+    { encoding: 'utf8', timeout: 60000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] plugins:toggle', err.message); return resolve({ ok: false, error: 'failed' }); }
+      try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
+    });
+}));
 ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests
 ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } catch {} });   // host → guests chat
 ipcMain.handle('share:status', () => share.status());

@@ -96,7 +96,30 @@
     .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
-    .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0}
+    .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0;position:relative}
+    /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
+    .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:3px;border-radius:9px;
+      background:rgba(13,15,18,.85);border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
+    .termseg button{width:auto;padding:4px 11px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+      background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all .15s}
+    .termseg button:hover{color:var(--ink-dim)}
+    .termseg button.on{color:var(--ink);background:linear-gradient(180deg,#22262e,#171a20)}
+    .termseg .agent-badge{position:absolute;top:0;right:1px;width:6px;height:6px;border-radius:50%;
+      background:var(--live);box-shadow:0 0 6px -1px var(--live);display:none}
+    .termseg button.has-badge .agent-badge{display:block}
+    #agents-pane{position:absolute;inset:0;z-index:16;display:none;flex-direction:column;overflow:auto;
+      background:linear-gradient(180deg,#0c0e12,#0a0b0d);border:1px solid var(--hairline);border-radius:11px;padding:46px 14px 14px}
+    #agents-pane.show{display:flex}
+    .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
+    .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.6;max-width:300px}
+    .agent-row{display:flex;align-items:flex-start;gap:10px;padding:10px 11px;border:1px solid var(--hairline);border-radius:9px;
+      background:linear-gradient(180deg,#131519,#0e1013);margin-bottom:7px}
+    .agent-row .agent-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px;background:#3a3f47}
+    .agent-row.running .agent-dot{background:var(--amber);box-shadow:0 0 9px -1px var(--amber);animation:micpulse 1s ease-in-out infinite}
+    .agent-row.done .agent-dot{background:#5fb487;box-shadow:0 0 8px -2px #5fb487}
+    .agent-row.err .agent-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
+    .agent-name{font-size:12px;color:var(--ink);line-height:1.35;word-break:break-word}
+    .agent-meta{margin-top:3px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
     #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
       padding:10px 12px;flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
@@ -242,6 +265,30 @@
       font-size:12.5px;color:var(--ink);cursor:pointer;white-space:nowrap}
     .ctxitem:hover{background:var(--raised-hi)}
     .ctxitem .k{color:var(--ink-faint);font-size:11px}
+    /* git push/pull dropdown (reuses .ctxmenu, position:fixed so it escapes #terminal overflow) */
+    #git-btn{right:8px}
+    #terminal.has-git #savetab{right:46px}                  /* make room so Git sits to the RIGHT of save */
+    .git-menu{min-width:236px;padding:7px}
+    .git-menu .git-msg{width:100%;font-family:inherit;font-size:11.5px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:6px;padding:6px 8px;margin-bottom:6px}
+    .git-menu .git-msg:focus{outline:none;border-color:rgba(255,255,255,.3)}
+    .git-menu .ctxitem{justify-content:flex-start;gap:8px}
+    .git-menu .gup{color:#5fb487;font-weight:700}
+    .git-status{font-size:10.5px;color:var(--ink-dim);padding:5px 8px 2px;min-height:13px;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .git-status.err{color:var(--live-soft)}
+    /* skills + plugins manager rows (Settings drawer sections) */
+    .ext-list{display:flex;flex-direction:column;gap:6px}
+    .ext-empty{color:var(--ink-faint);font-size:11px;line-height:1.55;padding:6px 2px}
+    .ext-row{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013)}
+    .ext-row .ext-main{flex:1;min-width:0}
+    .ext-row .ext-name{font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ext-row .ext-desc{margin-top:3px;font-size:10px;color:var(--ink-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .ext-row .ext-meta{margin-top:3px;font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+    .ext-tog{flex:none;width:auto;padding:3px 10px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;cursor:pointer;
+      border:1px solid var(--hairline);background:#101216;color:var(--ink-dim);box-shadow:none;transition:all .15s}
+    .ext-tog.on{color:#0a0b0d;background:linear-gradient(180deg,#5fb487,#3f8f68);border-color:transparent;font-weight:700}
+    .ext-tog:hover{border-color:rgba(255,255,255,.22)}
     /* push-to-talk indicator (top bar) — always visible so you can see when you're talking */
     /* top-bar voice boxes — equal-height with the Settings button. Voice In = mic; Voice Out = TTS + controls */
     .vgroup{display:flex;align-items:center;gap:8px}
@@ -525,12 +572,20 @@
         <span class="lbl">save session</span>
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
       </button>
+      <button class="termtab tr" id="git-btn" title="Git — push / pull" style="display:none">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </button>
       <button class="termtab br" id="cleartab" title="Clear what you've typed in the input box">
         <span class="lbl">clear input</span>
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
       </button>
     </div>
       <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
+      <div class="termseg" id="termseg">
+        <button id="seg-term" class="on" type="button">Terminal</button>
+        <button id="seg-agents" type="button">Agents<span class="agent-badge"></span></button>
+      </div>
+      <div id="agents-pane"><div class="agents-list" id="agents-list"></div></div>
       </div><!-- /termrow -->
       <div class="cmdbar" title="One-tap commands — runs in the live terminal · scroll or drag for more">
         <div class="cmdscroll-wrap">
@@ -622,6 +677,15 @@
         </label>
       </div>
 
+      <div class="sec" id="sec-skills">
+        <div class="label">skills <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
+        <div class="ext-list" id="skills-list"><div class="ext-empty">loading…</div></div>
+      </div>
+      <div class="sec" id="sec-plugins">
+        <div class="label">plugins <button class="collapse min" id="plugins-refresh" title="Refresh">⟳</button></div>
+        <div class="ext-list" id="plugins-list"><div class="ext-empty">loading…</div></div>
+      </div>
+
     </div>
   </div>
 
@@ -633,6 +697,13 @@
   </div>
 
   <div id="ctxmenu" class="ctxmenu"></div>
+
+  <div id="git-menu" class="ctxmenu git-menu" style="display:none">
+    <input class="git-msg" id="git-msg" type="text" maxlength="200" placeholder="commit message (optional)" />
+    <button class="ctxitem" id="git-push"><span class="gup">↑</span> Commit &amp; Push</button>
+    <button class="ctxitem" id="git-pull">↓ Pull (fast-forward)</button>
+    <div class="git-status" id="git-status"></div>
+  </div>
 
   <div class="approve" id="approve">
     <div class="box">
