@@ -18,6 +18,7 @@ let cloudflaredProc = null, ptyCols = 120, ptyRows = 32, shareBaseUrl = null, pe
 const share = createShareServer({
   onInput: (d) => { try { ptyProc && ptyProc.write(d); } catch {} },   // a guest typed → into the live pty
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
+  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} },   // presence lights
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
   onApprovalCancel: (id) => { try { win && win.webContents.send('share:approval-cancel', id); } catch {} },
   onChat: (m) => { try { win && win.webContents.send('share:chat', m); } catch {} },   // guest → host chat

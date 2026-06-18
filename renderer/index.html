@@ -250,11 +250,15 @@
     .vout .vname{width:auto;padding:3px 8px;border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;
       color:var(--silver);font-size:10.5px;cursor:pointer;box-shadow:none}
     .vout .vname:hover{border-color:rgba(255,255,255,.22);color:#fff}
-    .vout .vstop{width:auto;display:flex;align-items:center;justify-content:center;height:21px;padding:0 8px;
-      border:1px solid rgba(229,86,75,.4);border-radius:6px;background:rgba(229,86,75,.12);color:var(--live-soft);
-      font-size:9px;cursor:pointer;box-shadow:none;opacity:.5;transition:opacity .16s,background .16s,color .16s,border-color .16s}
-    .vout.speaking .vstop{opacity:1}
-    .vout .vstop:hover{opacity:1;color:#fff;background:rgba(229,86,75,.28);border-color:var(--live)}
+    /* dual button: ▶ Speak when idle (reads Claude's latest reply), ■ Stop while speaking */
+    .vout .vstop{width:auto;min-width:58px;display:flex;align-items:center;justify-content:center;gap:4px;height:21px;padding:0 9px;
+      border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;color:var(--ink-dim);
+      font-size:9.5px;letter-spacing:.04em;cursor:pointer;box-shadow:none;transition:all .16s}
+    .vout .vstop:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    .vout .vstop:disabled{opacity:.4;cursor:default}
+    .vout .vstop:disabled:hover{color:var(--ink-dim);border-color:var(--hairline-soft)}
+    .vout.speaking .vstop{border-color:rgba(229,86,75,.5);background:rgba(229,86,75,.14);color:var(--live-soft)}
+    .vout.speaking .vstop:hover{color:#fff;background:rgba(229,86,75,.3);border-color:var(--live)}
     .vout .vauto{width:auto;height:21px;padding:0 9px;border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;
       color:var(--ink-faint);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:none;transition:.15s}
     .vout .vauto.on{color:#0a0b0d;background:linear-gradient(180deg,var(--silver),#9aa3ae);border-color:transparent;font-weight:700}
@@ -284,7 +288,7 @@
     .sess:hover{border-color:rgba(255,255,255,.2)}
     .sess.active{border-color:var(--live);box-shadow:0 0 14px -7px var(--live)}
     .sess.dragging{opacity:.55;border-color:rgba(255,255,255,.32);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
-    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:20px}
+    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:44px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* hover trash → inline confirm → soft-delete (recoverable, moves to ~/.claudible/trash) */
@@ -294,6 +298,18 @@
     .sess:hover .sess-del{opacity:1}
     .sess-del:hover{color:var(--live);border-color:rgba(229,86,75,.4);background:rgba(229,86,75,.1)}
     .sess-del svg{width:13px;height:13px;display:block}
+    /* rename pencil — left of the trash, hover-revealed */
+    .sess-edit{position:absolute;top:6px;right:30px;width:auto;padding:4px;border:1px solid transparent;border-radius:7px;
+      background:none;color:var(--ink-faint);opacity:0;cursor:pointer;display:flex;box-shadow:none;
+      transition:opacity .15s,color .15s,border-color .15s,background .15s}
+    .sess:hover .sess-edit{opacity:1}
+    .sess-edit:hover{color:var(--ink);border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.05)}
+    .sess-edit svg{width:13px;height:13px;display:block}
+    .sess.confirming .sess-edit{display:none}
+    /* inline rename input (replaces the title while editing) */
+    .sess-rename{width:100%;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:6px;padding:4px 7px;margin-bottom:3px}
+    .sess-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
     .sess-confirm{position:absolute;inset:0;display:none;align-items:center;gap:6px;padding:0 9px;border-radius:9px;
       background:linear-gradient(90deg,rgba(14,16,19,.45),var(--panel) 34%)}
     .sess.confirming .sess-confirm{display:flex}
@@ -345,6 +361,16 @@
     .chat-head{display:flex;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--hairline-soft);
       font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
     .chat-head .chat-sub{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-faint);text-transform:none}
+    /* presence roster — you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light */
+    .chat-roster{margin-left:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;
+      font-size:9px;letter-spacing:.04em;color:var(--ink-faint);text-transform:none;max-width:70%}
+    .rmember{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+    .rmember.you{color:var(--ink-dim)}
+    .rmember.gone{color:var(--ink-faint);opacity:.7}
+    .rdot{width:6px;height:6px;border-radius:50%;background:#565c66;flex:none}
+    .rdot.ok{background:#5fb487;box-shadow:0 0 6px -1px #5fb487}
+    .rdot.idle{background:#e0a93b;box-shadow:0 0 6px -1px #e0a93b}
+    .rdot.gone{background:var(--live);opacity:.85}
     .chat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
     .chat-msg{max-width:88%;padding:7px 10px;border-radius:9px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
     .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
@@ -386,7 +412,7 @@
       <div class="vbox vout" id="voice-out" title="Claude's voice output">
         <span class="vdot" id="vout-dot"></span><span class="vlbl">Voice Out</span>
         <button class="vname" id="vout-name" title="Click to change voice">Bella</button>
-        <button class="vstop" id="vout-stop" title="Stop Claude speaking">■ STOP</button>
+        <button class="vstop" id="vout-stop" type="button" title="Speak Claude's latest reply" disabled>▶ Speak</button>
         <button class="vauto on" id="vout-auto" aria-pressed="true" title="Always speak Claude's replies">auto</button>
       </div>
     </div>
@@ -446,7 +472,7 @@
       </div>
     </div><!-- /center -->
     <div class="chat" id="chat">
-      <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><span class="chat-sub">just you &amp; your viewer</span></div>
+      <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><span class="chat-roster" id="chat-roster"></span></div>
       <div class="chat-log" id="chat-log"></div>
       <div class="chat-input">
         <input type="text" id="chat-in" placeholder="message your viewer — Claude won't see this" maxlength="2000" />

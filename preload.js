@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('claudible', {
   shareSendChat: (text) => ipcRenderer.send('share:chat-send', text),
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),
   onShareGuests: (cb) => ipcRenderer.on('share:guests', (_e, n) => cb(n)),
+  onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
   onShareClaimed: (cb) => ipcRenderer.on('share:claimed', () => cb()),
   onShareApproval: (cb) => ipcRenderer.on('share:approval', (_e, info) => cb(info)),
   onShareApprovalCancel: (cb) => ipcRenderer.on('share:approval-cancel', (_e, id) => cb(id)),

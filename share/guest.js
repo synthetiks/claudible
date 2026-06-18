@@ -87,6 +87,23 @@ function showOverlay(show, title, body, bad) {
 }
 function applySize(c, r) { if (c) hostCols = c; if (r) hostRows = r; try { term.resize(c, r); } catch (e) {} scheduleFit(); }
 
+// ---- presence: tell the host we're active (green) or idle/AFK (amber); a disconnect shows red on the host. ----
+var presence = null, idleTimer = null;
+function sendPresence(st, force) {
+  if (!force && st === presence) return;
+  presence = st;
+  if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'presence', state: st })); } catch (e) {} }
+}
+function markActive() {
+  if (document.hidden) return;
+  clearTimeout(idleTimer);
+  sendPresence('active');
+  idleTimer = setTimeout(function () { sendPresence('idle'); }, 60000);   // 60s of no activity while visible → AFK
+}
+document.addEventListener('visibilitychange', function () { sendPresence(document.hidden ? 'idle' : 'active'); if (!document.hidden) markActive(); });
+['pointerdown', 'keydown', 'wheel', 'touchstart', 'mousemove'].forEach(function (ev) { window.addEventListener(ev, markActive, { passive: true }); });
+markActive();
+
 // ---- size the mirrored terminal to the viewport ----
 // The host runs a fixed grid (hostCols x hostRows). PHONES: default to readable text that scrolls inside the
 // screen-capped pane (Fit pill shrinks all columns instead). TABLET / DESKTOP / WIDE: scale the WHOLE grid to
@@ -236,6 +253,7 @@ function connect() {
         var chip = $('sess-chip');                            // reveal the session chip — it carries the connection dot
         if (chip) { chip.style.display = ''; var ct = $('sess-chip-text'); if (ct && !ct.textContent) ct.textContent = 'live session'; }
         setStatus('connected', 'ok');
+        sendPresence(document.hidden ? 'idle' : 'active', true);   // tell the host we're here (green) / AFK (amber)
         applySize(msg.cols, msg.rows);
         if (!isMobile() && !readOnly) term.focus();           // don't pop the on-screen keyboard on phones / read-only viewers
       } else if (msg.type === 'pending') {

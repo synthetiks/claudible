@@ -59,7 +59,7 @@ function cleanName(n, fallback) {
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onApprovalRequest, onApprovalCancel, onChat } = {}) {
+function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let linkToken = null, hostName = 'Host';
   let cols = 120, rows = 32;
@@ -71,6 +71,10 @@ function createShareServer({ onInput, onGuests, onApprovalRequest, onApprovalCan
   let pendingSeq = 0;
 
   const notifyGuests = () => { try { onGuests && onGuests(clients.size); } catch {} };
+  // presence roster — name -> 'active'(green) | 'idle'(amber/AFK) | 'gone'(red, closed tab). 'gone' is kept so the
+  // host can see who left; a resume reconnect flips it back to active.
+  const roster = new Map();
+  const notifyRoster = () => { try { onRoster && onRoster(Array.from(roster, ([name, state]) => ({ name, state }))); } catch {} };
   function appendRing(buf) {
     ring = ring.length ? Buffer.concat([ring, buf]) : Buffer.from(buf);
     if (ring.length > RING_CAP) ring = ring.slice(ring.length - RING_CAP);
@@ -105,7 +109,8 @@ function createShareServer({ onInput, onGuests, onApprovalRequest, onApprovalCan
     else { ws._resume = resumeTok; }
     ws.binaryType = 'nodebuffer';
     clients.add(ws);
-    notifyGuests();
+    ws._presence = 'active'; roster.set(name, 'active');
+    notifyGuests(); notifyRoster();
     try {
       ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name }));
       if (lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
@@ -120,12 +125,17 @@ function createShareServer({ onInput, onGuests, onApprovalRequest, onApprovalCan
         relayChat({ type: 'chat', role: 'guest', name: ws._name, text: msg.text.slice(0, 2000) }, ws);
         return;
       }
+      if (msg.type === 'presence') {                                  // active (green) / idle = AFK (amber)
+        ws._presence = (msg.state === 'idle') ? 'idle' : 'active';
+        roster.set(ws._name, ws._presence); notifyRoster();
+        return;
+      }
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (readOnly) return;
         try { onInput && onInput(msg.data); } catch {}
       }
     });
-    const drop = () => { if (clients.delete(ws)) { notifyGuests(); systemChat(ws._name + ' left'); } };
+    const drop = () => { if (clients.delete(ws)) { roster.set(ws._name, 'gone'); notifyGuests(); notifyRoster(); systemChat(ws._name + ' left'); } };
     ws.on('close', drop);
     ws.on('error', drop);
   }
@@ -210,7 +220,7 @@ function createShareServer({ onInput, onGuests, onApprovalRequest, onApprovalCan
     for (const [, p] of pending) { try { p.ws.close(); } catch {} }
     pending.clear();
     for (const ws of clients) { try { ws.close(); } catch {} }
-    clients.clear(); notifyGuests();
+    clients.clear(); roster.clear(); notifyGuests(); notifyRoster();
     try { wss && wss.close(); } catch {}
     try { server && server.close(); } catch {}
     server = null; wss = null; port = null; ring = Buffer.alloc(0);

@@ -257,11 +257,20 @@ if ($('ptt-key-btn')) $('ptt-key-btn').addEventListener('click', () => { pttCapt
 
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
 let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0;
+let lastReply = '';                                  // Claude's latest reply (stripped) — the manual "▶ Speak" reads this
+// Voice Out button is dual: ▶ Speak (idle, reads lastReply) ↔ ■ Stop (while speaking). Disabled when nothing to speak.
+function updateVoiceOutBtn() {
+  const b = $('vout-stop'); if (!b) return;
+  const speaking = ttsBusy || !!ttsAudio;
+  b.textContent = speaking ? '■ Stop' : '▶ Speak';
+  b.disabled = !speaking && !lastReply;
+  b.title = speaking ? 'Stop speaking' : (lastReply ? "Speak Claude's latest reply" : 'Nothing to speak yet');
+}
 function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
           .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 600);
 }
-function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? 'Stop Speech' : 'Speak'; b.classList.toggle('live', on); const vo = $('voice-out'); if (vo) vo.classList.toggle('speaking', on); }
+function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? 'Stop Speech' : 'Speak'; b.classList.toggle('live', on); const vo = $('voice-out'); if (vo) vo.classList.toggle('speaking', on); updateVoiceOutBtn(); }
 function stopSpeech() {
   speakGen++;                                         // invalidate any in-flight speak()
   ttsBusy = false;
@@ -339,7 +348,7 @@ function setAlways(on) { alwaysSpeak = !!on; savePrefs({ alwaysSpeak: alwaysSpea
 document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown', (e) => { e.preventDefault(); setVoice(p.dataset.voice); }));
 // top-bar Voice Out: voice name cycles voices, ■ stops Claude speaking, auto = always-speak toggle
 if ($('vout-name')) $('vout-name').addEventListener('click', () => { const i = VOICE_ORDER.indexOf(selectedVoice); setVoice(VOICE_ORDER[(i + 1) % VOICE_ORDER.length]); });
-if ($('vout-stop')) $('vout-stop').addEventListener('click', () => stopSpeech());
+if ($('vout-stop')) { $('vout-stop').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else if (lastReply) speak(lastReply); }); updateVoiceOutBtn(); }
 if ($('vout-auto')) $('vout-auto').addEventListener('click', () => setAlways(!alwaysSpeak));
 // collapse / expand the voice-out text box
 $('tts-collapse').addEventListener('click', () => {
@@ -418,7 +427,9 @@ claudible.onHookLine((line) => {
   } else if (o.hook_event_name === 'Stop' && o.last_assistant_message) {
     sessionLog.push({ role: 'claude', text: String(o.last_assistant_message) });
     const reply = stripForSpeech(o.last_assistant_message);
+    lastReply = reply;                    // remember it for the manual "▶ Speak" button
     $('tts-in').value = reply;            // populate the (collapsible) box for manual Speak
+    updateVoiceOutBtn();                  // enable ▶ Speak now that there's a reply
     if (alwaysSpeak) speak(reply);        // auto-speak the reply in the selected voice
     else setDot('d-tts', 'ok');
   }
@@ -520,8 +531,26 @@ function shareUI(on) {
   $('share-ro').disabled = on;                 // mode is fixed for the life of a session
   shareNew.style.display = on ? 'block' : 'none';
   document.querySelector('.body').classList.toggle('sharing', on);   // reveal/hide the chat column
-  if (on) chatReset();
+  if (on) { chatReset(); renderRoster([]); }                         // show "you" in the roster the moment sharing starts
 }
+// presence roster in the chat header: you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light
+function renderRoster(roster) {
+  const el = $('chat-roster'); if (!el) return;
+  el.innerHTML = '';
+  const you = document.createElement('span'); you.className = 'rmember you';
+  const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
+  you.appendChild(document.createTextNode((hostDisplayName || 'You') + ' · you'));
+  el.appendChild(you);
+  (roster || []).forEach((g) => {
+    const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
+    const m = document.createElement('span'); m.className = 'rmember' + (g.state === 'gone' ? ' gone' : '');
+    m.title = g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab');
+    const d = document.createElement('span'); d.className = 'rdot ' + cls;
+    m.appendChild(d); m.appendChild(document.createTextNode(g.name));
+    el.appendChild(m);
+  });
+}
+claudible.onShareRoster((roster) => renderRoster(roster));
 function showLink(url) {
   shareLink.value = url; shareLink.style.display = 'block'; shareLink.style.opacity = '1';
   shareLink.title = 'Click to copy';
@@ -714,12 +743,15 @@ function mergeSessionOrder(saved, list) {
   return [...fresh, ...kept];
 }
 const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
+// Manual session title override (user-set — no auto-titling), stored per id in prefs; falls back to the preview.
+function sessTitle(s) { const t = (loadPrefs().sessionTitles || {})[s.id]; return t || s.preview; }
 function renderSessionRow(s) {
   const row = document.createElement('div');
   row.className = 'sess' + (s.id === activeSession ? ' active' : '');
   row.dataset.id = s.id; row.setAttribute('role', 'button'); row.tabIndex = 0;
-  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = s.preview;
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
   const m = document.createElement('div'); m.className = 'sess-meta';
   m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
   row.appendChild(p); row.appendChild(m);
@@ -734,21 +766,50 @@ function renderSessionRow(s) {
   yes.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id); });
   no.addEventListener('click', (e) => { e.stopPropagation(); row.classList.remove('confirming'); });
   conf.appendChild(lbl); conf.appendChild(yes); conf.appendChild(no);
-  row.appendChild(del); row.appendChild(conf);
+  const edit = document.createElement('button');
+  edit.className = 'sess-edit'; edit.title = 'Rename session'; edit.setAttribute('aria-label', 'Rename session');
+  edit.innerHTML = PENCIL_SVG;
+  edit.addEventListener('click', (e) => { e.stopPropagation(); startSessEdit(row, p, s); });
+  row.appendChild(edit); row.appendChild(del); row.appendChild(conf);
   row.addEventListener('pointerdown', (e) => onSessPointerDown(e, row, s));
   row.addEventListener('pointermove', onSessPointerMove);
   row.addEventListener('pointerup', onSessPointerUp);
   row.addEventListener('pointercancel', onSessPointerUp);
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openSession(s.id, s.preview); } });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openSession(s.id, sessTitle(s)); } });
   return row;
+}
+// Inline rename: pencil → editable input in place of the title; Enter/blur saves, Esc cancels. Stored in prefs.
+function startSessEdit(row, p, s) {
+  if (row.querySelector('.sess-rename')) return;
+  const inp = document.createElement('input');
+  inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = sessTitle(s);
+  p.style.display = 'none'; row.insertBefore(inp, p);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = (save) => {
+    if (done) return; done = true;
+    if (save) {
+      const t = inp.value.trim();
+      const titles = loadPrefs().sessionTitles || {};
+      if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
+      savePrefs({ sessionTitles: titles });
+      p.textContent = t || s.preview;
+      if (s.id === activeSession) { curSessionLabel = p.textContent; pushTracker(); }   // mirror the new title to guests
+    }
+    try { inp.remove(); } catch {} p.style.display = '';
+  };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
+  inp.addEventListener('blur', () => commit(true));
+  inp.addEventListener('pointerdown', (e) => e.stopPropagation());   // don't start a row drag / open
+  inp.addEventListener('click', (e) => e.stopPropagation());
 }
 // pointer-drag reorder with a movement threshold: a plain click opens; a drag past 5px reorders the DOM
 // live and persists the new order. A press on the trash / confirm controls never starts a drag or open.
 let sdrag = null;
 function onSessPointerDown(e, row, s) {
   if (e.button !== 0) return;
-  if (e.target.closest('.sess-del') || e.target.closest('.sess-confirm') || row.classList.contains('confirming')) return;
-  sdrag = { id: s.id, label: s.preview, row, startY: e.clientY, moved: false, pid: e.pointerId };
+  if (e.target.closest('.sess-del') || e.target.closest('.sess-confirm') || e.target.closest('.sess-edit') || e.target.closest('.sess-rename') || row.classList.contains('confirming')) return;
+  sdrag = { id: s.id, label: sessTitle(s), row, startY: e.clientY, moved: false, pid: e.pointerId };
   try { row.setPointerCapture(e.pointerId); } catch {}
 }
 function onSessPointerMove(e) {
