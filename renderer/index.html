@@ -507,6 +507,26 @@
     .approve .ghost{background:none;border-color:var(--hairline-soft);color:var(--ink-dim)}
     /* system chat lines ("X joined" / "X left") */
     .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
+    /* ============================================================
+       PREMIUM POLISH (reversible) — purely additive depth, hover lift,
+       focus rings, and easing. No layout / size / placement changes.
+       To revert: delete this whole block (or `git revert` its commit).
+       ============================================================ */
+    :root{ --ease-pop:cubic-bezier(.2,.7,.2,1) }
+    /* 1 — buttons: weighted easing + a 1px hover lift, settling on press (transform only → never clips) */
+    .iconbtn,.vbox,.ws-chip,.ext-tog,.newsess-mini,.ws-add,.share-btn,.cmdpill{ transition:all .16s var(--ease-pop) }
+    .iconbtn:hover,.vbox:hover,.ws-chip:hover,.ext-tog:hover,.newsess-mini:hover,.ws-add:hover,.share-btn:hover,.cmdpill:hover{ transform:translateY(-1px) }
+    .iconbtn:active,.ws-chip:active,.ext-tog:active,.newsess-mini:active,.ws-add:active,.share-btn:active,.cmdpill:active{ transform:translateY(0) }
+    /* depth on the most-visible buttons (top bar = visible overflow, shadow renders clean; keeps the inset sheen) */
+    .iconbtn{ box-shadow:inset 0 1px 0 var(--sheen),0 2px 5px rgba(0,0,0,.38) }
+    .iconbtn:hover{ box-shadow:inset 0 1px 0 var(--sheen),0 5px 12px rgba(0,0,0,.5) }
+    /* 2 — floating surfaces read as stacked cards (filter = separate from their box-shadow, so insets stay) */
+    .drawer,.ctxmenu,#agents-pane{ filter:drop-shadow(0 14px 32px rgba(0,0,0,.52)) }
+    #agents-pane{ border-top-color:rgba(255,255,255,.12) }   /* light-from-above top edge */
+    /* 3 — cohesive keyboard focus ring (outline = separate from box-shadow; clobbers nothing) */
+    .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.cmdpill:focus-visible,.share-btn:focus-visible,
+    .ws-chip:focus-visible,.ext-tog:focus-visible,.newsess-mini:focus-visible,.ws-add:focus-visible,.panel-close:focus-visible,
+    .vstop:focus-visible,.vauto:focus-visible,input:focus-visible{ outline:1.5px solid rgba(207,214,223,.55); outline-offset:2px }
   </style>
 </head>
 <body>
