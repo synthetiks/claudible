@@ -3,11 +3,19 @@
 const $ = (id) => document.getElementById(id);
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
 const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
+// transient toast (button feedback / coming-soon placeholders)
+function toast(msg) {
+  let t = $('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
 
 // ---------- embedded live TUI ----------
+const BASE_LH = 1.15;   // baseline line-height; fillHeight() nudges it up slightly to absorb the floored last-row remainder
 const term = new Terminal({
   fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
-  fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
+  fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 5000,
   theme: { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8',
            selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
 });
@@ -16,9 +24,23 @@ term.loadAddon(fit);
 term.open($('terminal'));
 
 let ptyStarted = false;
+// After FitAddon floors rows to whole cells, a sub-row remainder (up to ~1 cell) renders as a dead black
+// band under the last line. Bump lineHeight just enough that rows×cellHeight fills the pane — fontSize and
+// columns are untouched, so nothing reflows horizontally.
+function fillHeight() {
+  const el = $('terminal'); const rows = term.rows; if (!el || !rows) return;
+  const cs = getComputedStyle(el);
+  const innerH = el.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+  if (innerH <= 0) return;
+  let lh = innerH / (rows * (term.options.fontSize || 13));
+  lh = Math.max(BASE_LH, Math.min(1.4, lh));
+  if (Math.abs(lh - (term.options.lineHeight || BASE_LH)) > 0.005) term.options.lineHeight = lh;
+}
 function sync() {
   try {
+    if (term.options.lineHeight !== BASE_LH) term.options.lineHeight = BASE_LH;   // stable baseline so fit() floors consistently
     fit.fit();
+    fillHeight();                                                                  // absorb the floored remainder → no dead band
     if (!ptyStarted) { ptyStarted = true; claudible.ptyStart(term.cols, term.rows); } // spawn Claude at the EXACT fitted size
     else claudible.ptyResize(term.cols, term.rows);
     updateScrollbar();
@@ -107,7 +129,7 @@ claudible.onStatus((s) => {
   // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
   if (typeof s.ctxPct === 'number') {
     const pct = s.ctxPct; curCtxPct = pct;
-    $('trk-ctx').textContent = pct + '%';
+    $('trk-ctx').textContent = 'CONTEXT ' + pct + '%';
     $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
     const bar = $('trk-ctxbar');
     bar.classList.toggle('warn', pct >= 70 && pct < 85);
@@ -136,7 +158,7 @@ let mediaRecorder = null, chunks = [], recording = false, micStream = null, disc
 function talkUI(on) {
   $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on);
   // Top-bar Voice In box — always visible (even with the drawer closed) so you can see you're talking.
-  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'listening…' : 'ready'; }
+  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'Recording' : 'Record'; }
 }
 
 async function startRecording() {
@@ -264,7 +286,7 @@ let announceOn = true, chimeOn = true;               // factory-on: spoken "task
 function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
   const speaking = ttsBusy || !!ttsAudio;
-  b.textContent = speaking ? '■ Stop' : '▶ Speak';
+  b.textContent = speaking ? '◼ Speaking' : '▶ Speak';
   b.disabled = !speaking && !lastReply;
   b.title = speaking ? 'Stop speaking' : (lastReply ? "Speak Claude's latest reply" : 'Nothing to speak yet');
 }
@@ -965,12 +987,42 @@ function renderWsChips() {
       iv.addEventListener('click', (e) => { e.stopPropagation(); openInviteModal(w); });
       chip.appendChild(iv);
     }
+    // inline rename (pencil) — user-created workspaces only (not the legacy "My sessions")
+    if (w.kind !== 'legacy') {
+      const ed = document.createElement('button');
+      ed.className = 'ws-edit'; ed.title = 'Rename workspace';
+      ed.innerHTML = PENCIL_SVG;
+      ed.addEventListener('click', (e) => { e.stopPropagation(); startWsEdit(chip, nm, w); });
+      chip.appendChild(ed);
+    }
     chip.addEventListener('click', () => switchWorkspace(w.id));
     el.appendChild(chip);
   });
   // name the active workspace in the SESSIONS header so the two-level relationship is unmistakable
   const aw = workspaces.find((w) => w.id === activeWsId);
   const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
+}
+// inline workspace rename (mirrors session rename), persisted through main (registry is source of truth)
+function startWsEdit(chip, nm, w) {
+  if (chip.querySelector('.ws-rename')) return;
+  const inp = document.createElement('input');
+  inp.className = 'ws-rename'; inp.type = 'text'; inp.maxLength = 80; inp.value = w.label;
+  nm.style.display = 'none'; chip.insertBefore(inp, nm);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    if (save) {
+      const t = inp.value.trim();
+      if (t && t !== w.label) { let r = null; try { r = await claudible.workspaceRename(w.id, t); } catch {} if (r && r.ok) w.label = r.label; }
+    }
+    try { inp.remove(); } catch {} nm.style.display = '';
+    nm.textContent = w.label; chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
+    if (w.id === activeWsId) { const sw = $('sess-ws'); if (sw) sw.textContent = '· ' + w.label; }
+  };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
+  inp.addEventListener('blur', () => commit(true));
+  inp.addEventListener('click', (e) => e.stopPropagation());
 }
 async function toggleShared(w) {
   const next = !w.shared;
@@ -1069,6 +1121,8 @@ claudible.onWorkspaceActiveChanged((id) => {
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
 $('new-session').addEventListener('click', () => openSession('new'));
+$('skills-btn').addEventListener('click', () => toast('Skills manager — coming in a later update'));
+$('plugins-btn').addEventListener('click', () => toast('Plugins manager — coming soon'));
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }

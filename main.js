@@ -282,6 +282,16 @@ ipcMain.handle('workspace:setShared', (e, payload) => {
   syncShare();
   return { ok: true, shared: ws.shared };
 });
+// Rename a workspace (registry is the source of truth; mirror the new label to guests' granted library).
+ipcMain.handle('workspace:rename', (e, payload) => {
+  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  const label = String((payload && payload.label) || '').trim().slice(0, 80);
+  if (!label) return { ok: false, error: 'empty name' };
+  ws.label = label; saveRegistry();
+  syncShare();
+  return { ok: true, label };
+});
 // Invite a GitHub user as a push collaborator on a repo workspace's repo (Stage 2 — durable git collab).
 ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
