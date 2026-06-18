@@ -466,10 +466,7 @@ cmdscroll.addEventListener('scroll', cmdEdges);
 new ResizeObserver(cmdEdges).observe(cmdscroll);              // recompute on width changes (sharing/sessions toggles)
 
 // Context guardrail: the ctx bar becomes a one-tap /compact shortcut only once it's in the warn/crit zone.
-$('trk-ctxbar').addEventListener('mousedown', (e) => {
-  const bar = $('trk-ctxbar');
-  if (bar.classList.contains('warn') || bar.classList.contains('crit')) { e.preventDefault(); send('/compact'); }
-});
+// The context meter is display-only — clicking it must NOT auto-compact (removed by request).
 
 // ---------- Claude's reply -> VOICE OUT (via the Stop hook) ----------
 claudible.onHookLine((line) => {

@@ -63,7 +63,7 @@
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives color + pulse + click */
     .ctxbar.warn .ctxfill{background:linear-gradient(90deg,#8a6a23,#e0a93b)}
     .ctxbar.crit .ctxfill{background:linear-gradient(90deg,#7d2f2a,#e5564b)}
-    .ctxbar.warn,.ctxbar.crit{cursor:pointer}
+    .ctxbar.warn,.ctxbar.crit{cursor:default}
     .ctxbar.warn{animation:ctxpulse-amber 2.4s ease-in-out infinite}
     .ctxbar.crit{animation:ctxpulse-red 1.7s ease-in-out infinite}
     .ctxbar.warn:hover{box-shadow:inset 0 0 0 1px rgba(224,169,59,.85)}
@@ -136,10 +136,9 @@
     .scroll:hover .thumb{background:linear-gradient(180deg,#49515d,#30353d)}
     .scroll .thumb.drag{cursor:grabbing;background:linear-gradient(180deg,var(--silver),#8a929b)}
     /* command bar — 5 commands visible; scroll or drag horizontally for the rest */
-    .cmdbar{display:flex;align-items:center;gap:10px;flex:none;position:relative;
-      padding:9px 11px;border:1px solid var(--hairline);border-radius:11px;
-      background:linear-gradient(180deg,#0e1014,#0a0b0d);
-      box-shadow:inset 0 1px 0 var(--sheen),0 0 0 1px rgba(0,0,0,.4)}
+    /* frameless command row — no box/corners (nothing for hovered pills to clash with); the reclaimed
+       border + padding height goes to the terminal above. Pills keep their own glow-hover. */
+    .cmdbar{display:flex;align-items:center;gap:10px;flex:none;position:relative;padding:2px 11px}
     /* viewport: clips the track; edge fades cue that there's more to scroll */
     .cmdscroll-wrap{position:relative;flex:1;min-width:0}
     .cmdscroll-wrap::before,.cmdscroll-wrap::after{content:'';position:absolute;top:0;bottom:0;width:30px;
@@ -514,9 +513,9 @@
        ============================================================ */
     :root{ --ease-pop:cubic-bezier(.2,.7,.2,1) }
     /* 1 — buttons: weighted easing + a 1px hover lift, settling on press (transform only → never clips) */
-    .iconbtn,.vbox,.ws-chip,.ext-tog,.newsess-mini,.ws-add,.share-btn,.cmdpill{ transition:all .16s var(--ease-pop) }
-    .iconbtn:hover,.vbox:hover,.ws-chip:hover,.ext-tog:hover,.newsess-mini:hover,.ws-add:hover,.share-btn:hover,.cmdpill:hover{ transform:translateY(-1px) }
-    .iconbtn:active,.ws-chip:active,.ext-tog:active,.newsess-mini:active,.ws-add:active,.share-btn:active,.cmdpill:active{ transform:translateY(0) }
+    .iconbtn,.vbox,.ws-chip,.ext-tog,.newsess-mini,.ws-add,.share-btn{ transition:all .16s var(--ease-pop) }
+    .iconbtn:hover,.vbox:hover,.ws-chip:hover,.ext-tog:hover,.newsess-mini:hover,.ws-add:hover,.share-btn:hover{ transform:translateY(-1px) }
+    .iconbtn:active,.ws-chip:active,.ext-tog:active,.newsess-mini:active,.ws-add:active,.share-btn:active{ transform:translateY(0) }
     /* depth on the most-visible buttons (top bar = visible overflow, shadow renders clean; keeps the inset sheen) */
     .iconbtn{ box-shadow:inset 0 1px 0 var(--sheen),0 2px 5px rgba(0,0,0,.38) }
     .iconbtn:hover{ box-shadow:inset 0 1px 0 var(--sheen),0 5px 12px rgba(0,0,0,.5) }
@@ -524,7 +523,7 @@
     .drawer,.ctxmenu,#agents-pane{ filter:drop-shadow(0 14px 32px rgba(0,0,0,.52)) }
     #agents-pane{ border-top-color:rgba(255,255,255,.12) }   /* light-from-above top edge */
     /* 3 — cohesive keyboard focus ring (outline = separate from box-shadow; clobbers nothing) */
-    .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.cmdpill:focus-visible,.share-btn:focus-visible,
+    .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.share-btn:focus-visible,
     .ws-chip:focus-visible,.ext-tog:focus-visible,.newsess-mini:focus-visible,.ws-add:focus-visible,.panel-close:focus-visible,
     .vstop:focus-visible,.vauto:focus-visible,input:focus-visible{ outline:1.5px solid rgba(207,214,223,.55); outline-offset:2px }
   </style>
@@ -714,7 +713,7 @@
     <span class="s" id="sb-whisper">whisper</span>
     <span class="s" id="sb-kokoro">kokoro</span>
     <span class="end" id="meta">connecting…</span>
-    <span class="ver" id="app-ver">v0.1</span>
+    <span class="ver" id="app-ver">claudible v.01</span>
   </div>
 
   <div id="ctxmenu" class="ctxmenu"></div>
