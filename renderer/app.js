@@ -563,7 +563,7 @@ window.addEventListener('contextmenu', (e) => {
 let sharing = false;
 const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out'), shareNew = $('share-newlink');
 function shareUI(on) {
-  shareBtn.textContent = on ? 'Stop sharing' : 'Share session';
+  shareBtn.textContent = on ? 'Stop sharing' : 'Invite to workspace';
   shareBtn.classList.toggle('live', on);
   setActive('lbl-share', on);
   setDot('d-share', on ? 'ok' : '');
@@ -968,6 +968,9 @@ function renderWsChips() {
     chip.addEventListener('click', () => switchWorkspace(w.id));
     el.appendChild(chip);
   });
+  // name the active workspace in the SESSIONS header so the two-level relationship is unmistakable
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
 }
 async function toggleShared(w) {
   const next = !w.shared;

@@ -326,13 +326,25 @@
     .sess-yes{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b)}
     .sess-no{color:var(--ink-dim)}
     /* workspace bar — the two-level top of the sidebar (which library the sessions below belong to) */
-    .ws-bar{flex:none;padding:11px 14px 6px;border-bottom:1px solid var(--hairline-soft)}
-    .ws-bar-head{display:flex;align-items:center;justify-content:space-between;font-size:9px;letter-spacing:.16em;
-      text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px}
+    /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
+    .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
+      font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+    .ws-section-head{padding:14px 14px 9px}
+    .sh-actions{display:flex;align-items:center;gap:9px}
+    .panel-close{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
+    .panel-close:hover{color:var(--ink)}
     .ws-add{width:auto;padding:0 8px 1px;font-size:15px;line-height:1.3;color:var(--ink-dim);background:none;
       border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
     .ws-add:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
-    .ws-chips{display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto}
+    .ws-chips{flex:none;display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto;
+      padding:0 14px 13px;border-bottom:1px solid var(--hairline)}   /* the divider between workspaces and sessions */
+    /* SESSIONS section header — names the active workspace so it's clear these conversations live inside it */
+    .sess-section-head{padding:12px 14px 9px}
+    .sess-ws{text-transform:none;letter-spacing:.02em;font-size:10px;color:var(--ink-dim)}
+    .sess-ws:not(:empty){margin-left:7px}
+    .newsess-mini{width:auto;padding:2px 10px 3px;font-size:11px;letter-spacing:.02em;text-transform:none;color:var(--ink-dim);
+      background:none;border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
+    .newsess-mini:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .ws-chip{display:flex;align-items:center;gap:8px;width:auto;text-align:left;padding:7px 9px;border:1px solid var(--hairline);
       border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;box-shadow:none;
       transition:border-color .16s,box-shadow .16s}
@@ -467,23 +479,31 @@
 
   <div class="body with-sessions">
     <aside class="sidebar" id="sidebar">
-      <div class="drawer-head"><span>sessions</span><button id="sidebar-close" title="Hide sessions">‹</button></div>
-      <div class="ws-bar" id="ws-bar">
-        <div class="ws-bar-head"><span>workspaces</span><button class="ws-add" id="ws-add" title="New workspace">+</button></div>
-        <div class="ws-chips" id="ws-chips"></div>
+      <!-- WORKSPACES — the top-level: which folder/repo the sessions below live in -->
+      <div class="ws-section-head">
+        <span>workspaces</span>
+        <span class="sh-actions">
+          <button class="ws-add" id="ws-add" title="New workspace">+</button>
+          <button class="panel-close" id="sidebar-close" title="Hide panel">‹</button>
+        </span>
       </div>
-      <button class="newsess" id="new-session">+ New session</button>
+      <div class="ws-chips" id="ws-chips"></div>
+      <!-- SESSIONS — the conversations inside the active workspace -->
+      <div class="sess-section-head">
+        <span>sessions<span class="sess-ws" id="sess-ws"></span></span>
+        <button class="newsess-mini" id="new-session" title="New session in this workspace">+ New</button>
+      </div>
       <div class="sess-list" id="sess-list"></div>
       <div class="share-dock">
         <div class="sharelbl" id="lbl-share">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
-          <span>share</span><span class="dot" id="d-share"></span>
+          <span>invite</span><span class="dot" id="d-share"></span>
           <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
         </div>
-        <button id="share-btn" class="share-btn">Share session</button>
+        <button id="share-btn" class="share-btn">Invite to workspace</button>
         <input type="text" id="share-link" readonly placeholder="invite link" style="display:none" title="Click to copy" />
         <button id="share-newlink" style="display:none">New link</button>
-        <div class="out share-out" id="share-out">live, one-time invite link</div>
+        <div class="out share-out" id="share-out">invite a teammate to your shared workspaces</div>
       </div>
     </aside>
     <div class="center">
@@ -615,7 +635,7 @@
 
   <div class="approve" id="namemodal">
     <div class="box">
-      <h3>Share this session</h3>
+      <h3>Invite to your workspace</h3>
       <p>Pick a display name so the people you invite know it's you.</p>
       <input type="text" id="host-name-in" maxlength="40" placeholder="Your name" />
       <div class="row">
