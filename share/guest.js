@@ -74,6 +74,7 @@ term.open($('terminal'));
 })();
 
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
+var grantedWs = [], wsPaused = false, lastLiveId = null;   // granted workspace library + private-pause state
 // The connection indicator now lives on the top session chip's dot (green = live, red = down, amber = connecting).
 function setStatus(txt, cls) {
   var s = $('stxt'); if (s) s.textContent = txt;
@@ -230,6 +231,38 @@ function applyStatus(s) {
   }
 }
 
+// ---- granted workspace library: the host shares a SUBSET of their Claudible. You watch the live one,
+// and (when interactive) can click another granted workspace to switch the shared terminal to it. ----
+function renderGuestWs() {
+  var bar = $('wsbar'), box = $('wschips'); if (!bar || !box) return;
+  box.innerHTML = '';
+  if (!grantedWs.length) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  var liveId = null;
+  grantedWs.forEach(function (w) {
+    if (w.live) liveId = w.id;
+    var c = document.createElement('div');
+    c.className = 'wschip' + (w.live ? ' live' : '');
+    c.title = w.label + (w.kind && w.kind !== 'legacy' ? ' (' + w.kind + ')' : '');
+    var n = document.createElement('span'); n.textContent = w.label; c.appendChild(n);
+    if (w.kind && w.kind !== 'legacy') { var k = document.createElement('span'); k.className = 'wsk'; k.textContent = w.kind; c.appendChild(k); }
+    if (!readOnly) c.addEventListener('click', function () { switchWorkspaceReq(w.id, w.live); });
+    box.appendChild(c);
+  });
+  if (liveId && liveId !== lastLiveId) { lastLiveId = liveId; try { term.reset(); } catch (e) {} }   // clean swap on switch
+}
+function switchWorkspaceReq(id, live) {
+  if (readOnly || live) return;                                // can't switch when view-only or already there
+  if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'switch', id: id })); } catch (e) {} }
+}
+function applyPaused(label) {
+  var ov = $('paused-ov'); if (ov) ov.classList.toggle('show', !!wsPaused);
+  var b = $('paused-body');
+  if (b) b.textContent = (wsPaused && label)
+    ? 'The host is working in "' + label + '" (not shared). The mirror resumes when they switch back to a shared workspace.'
+    : 'The mirror resumes when they switch back to a shared workspace.';
+}
+
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss' : 'ws';
   var cred = (resume ? ('r=' + encodeURIComponent(resume)) : ('t=' + encodeURIComponent(token))) + '&n=' + encodeURIComponent(myName);
@@ -246,7 +279,11 @@ function connect() {
         readOnly = !!msg.readOnly;
         if (msg.host) hostName = msg.host;
         $('ro').style.display = readOnly ? '' : 'none';
+        document.body.classList.toggle('ro', readOnly);
         applyReadOnlyInput();                                 // read-only: a tap won't raise the soft keyboard
+        grantedWs = Array.isArray(msg.workspaces) ? msg.workspaces : [];
+        wsPaused = !!msg.paused;
+        renderGuestWs(); applyPaused();                       // show the granted library + freeze if host is private
         if (msg.resume) { resume = msg.resume; try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ t: token, r: resume })); } catch (e) {} }
         showOverlay(false);
         document.body.classList.add('connected');             // reveal the phone zoom control only once actually viewing
@@ -273,6 +310,12 @@ function connect() {
       } else if (msg.type === 'chat') {
         if (msg.role === 'system') addSystemChat(msg.text);
         else addChat(msg.name || (msg.role === 'host' ? hostName : 'viewer'), msg.text, false);
+      } else if (msg.type === 'workspaces') {
+        grantedWs = Array.isArray(msg.list) ? msg.list : [];
+        renderGuestWs();
+      } else if (msg.type === 'paused') {
+        wsPaused = !!msg.paused;
+        applyPaused(msg.label);
       }
     } else {
       term.write(new Uint8Array(ev.data));   // raw terminal output

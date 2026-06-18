@@ -938,20 +938,63 @@ async function openSession(id, label) {
 // ---------- workspaces (the library a session belongs to: legacy / local folder / private repo) ----------
 const WS_FOLDER_SVG = '<svg class="ws-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
 const WS_REPO_SVG = '<svg class="ws-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
+const EYE_ON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+const PERSON_ADD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>';
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
   el.innerHTML = '';
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
-    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '');
+    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (w.shared ? ' shared' : '');
     chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
-    chip.innerHTML = (w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG) +
-      '<span class="ws-name"></span>' +
-      (w.kind === 'legacy' ? '' : '<span class="ws-kind">' + (w.kind === 'repo' ? 'repo' : 'local') + '</span>');
-    chip.querySelector('.ws-name').textContent = w.label;
+    chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
+    const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
+    // share toggle (eye) — grant/revoke this workspace to guests (default private)
+    const sh = document.createElement('button');
+    sh.className = 'ws-share';
+    sh.title = w.shared ? 'Shared with guests — click to make private' : 'Private — click to share with guests';
+    sh.innerHTML = w.shared ? EYE_ON_SVG : EYE_OFF_SVG;
+    sh.addEventListener('click', (e) => { e.stopPropagation(); toggleShared(w); });
+    chip.appendChild(sh);
+    // repo collaborator invite (repo workspaces only)
+    if (w.kind === 'repo') {
+      const iv = document.createElement('button');
+      iv.className = 'ws-invite'; iv.title = 'Invite a GitHub collaborator';
+      iv.innerHTML = PERSON_ADD_SVG;
+      iv.addEventListener('click', (e) => { e.stopPropagation(); openInviteModal(w); });
+      chip.appendChild(iv);
+    }
     chip.addEventListener('click', () => switchWorkspace(w.id));
     el.appendChild(chip);
   });
+}
+async function toggleShared(w) {
+  const next = !w.shared;
+  let r = null; try { r = await claudible.workspaceSetShared(w.id, next); } catch {}
+  if (r && r.ok) { w.shared = r.shared; renderWsChips(); }
+}
+// repo collaborator invite modal
+let inviteWs = null;
+function openInviteModal(w) {
+  inviteWs = w;
+  $('invite-repo').textContent = w.owner ? (w.owner + '/' + w.slug) : w.slug;
+  $('invite-name-in').value = ''; $('invite-busy').textContent = ''; $('invite-busy').classList.remove('err');
+  $('invite-modal').classList.add('show');
+  setTimeout(() => $('invite-name-in').focus(), 60);
+}
+function closeInviteModal() { $('invite-modal').classList.remove('show'); inviteWs = null; }
+async function doInvite() {
+  if (!inviteWs) return;
+  if ($('invite-go').disabled) return;
+  const u = $('invite-name-in').value.trim();
+  const busy = $('invite-busy'); busy.classList.remove('err');
+  if (!u) { busy.textContent = 'enter a GitHub username'; busy.classList.add('err'); return; }
+  busy.textContent = 'sending invite…'; $('invite-go').disabled = true;
+  let r = null; try { r = await claudible.repoInvite(inviteWs.id, u); } catch {}
+  $('invite-go').disabled = false;
+  if (r && r.ok) busy.textContent = '✓ invited ' + u + ' — they need to accept on GitHub';
+  else { busy.textContent = (r && r.error) || 'invite failed'; busy.classList.add('err'); }
 }
 async function refreshWorkspaces() {
   let r = null; try { r = await claudible.workspaceList(); } catch {}
@@ -1006,6 +1049,18 @@ $('ws-cancel').addEventListener('click', closeWsModal);
 $('ws-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); createWorkspace(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeWsModal(); }
+});
+$('invite-go').addEventListener('click', doInvite);
+$('invite-cancel').addEventListener('click', closeInviteModal);
+$('invite-name-in').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); doInvite(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeInviteModal(); }
+});
+// A guest switched the live workspace (they clicked a granted chip) → reflect it in the host UI.
+claudible.onWorkspaceActiveChanged((id) => {
+  if (id === activeWsId) return;
+  activeWsId = id; activeSession = null; curSessionLabel = '';
+  refreshWorkspaces(); term.reset(); resetStats(); refreshSessions();
 });
 
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));

@@ -22,6 +22,14 @@ const share = createShareServer({
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
   onApprovalCancel: (id) => { try { win && win.webContents.send('share:approval-cancel', id); } catch {} },
   onChat: (m) => { try { win && win.webContents.send('share:chat', m); } catch {} },   // guest → host chat
+  // A guest clicked a (granted) workspace in their viewer → switch the shared terminal to it, and tell the host UI.
+  onSwitchWorkspace: (id) => {
+    const ws = registry.workspaces.find((w) => w.id === id && w.shared);
+    if (!ws) return;                                                   // only granted workspaces are switchable
+    activeWorkspace = ws; registry.activeId = id; saveRegistry();
+    respawnPty('');                                                    // resume the most-recent conversation in that cwd
+    try { win && win.webContents.send('workspace:active-changed', id); } catch {}
+  },
 });
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
@@ -142,13 +150,28 @@ function spawnPty(cols, rows) {
     });
   } catch (e) { win.webContents.send('pty:data', `\r\n[claudible] pty spawn failed: ${e.message}\r\n`); }
 }
+// The granted workspace library a guest is allowed to see (paths/urls stripped); marks which is live.
+function grantedList() {
+  return registry.workspaces.filter((w) => w.shared)
+    .map((w) => ({ id: w.id, label: w.label, kind: w.kind, live: w.id === registry.activeId }));
+}
+// Push the current grant state to guests: pause the mirror when the live workspace isn't granted,
+// and refresh the visible library. No-op when not sharing.
+function syncShare() {
+  if (!share.status().running) return;
+  try { share.setPaused(!(activeWorkspace && activeWorkspace.shared)); } catch {}
+  try { share.setWorkspaces(grantedList()); } catch {}
+}
 // Switch the embedded terminal to a chosen session ('new' | <session-id>). Kills the current pty
 // (its guarded handlers go quiet) and respawns with the selection.
 function respawnPty(session) {
   pendingSession = session || '';
+  // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
+  try { if (share.status().running) share.setPaused(!(activeWorkspace && activeWorkspace.shared)); } catch {}
   const old = ptyProc; ptyProc = null;
   if (old) { try { old.kill(); } catch {} }
   spawnPty(ptyCols, ptyRows);
+  syncShare();                                            // refresh the granted library (live flag) for guests
 }
 ipcMain.on('pty:start', (e, { cols, rows }) => spawnPty(cols, rows));
 ipcMain.on('pty:input', (e, d) => { if (ptyProc) ptyProc.write(d); });
@@ -163,6 +186,7 @@ ipcMain.handle('share:start', async (e, opts) => {
   try {
     const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
     share.setSize(ptyCols, ptyRows);
+    syncShare();                                          // tell guests the granted library + pause if the live ws is private
     let base = `http://127.0.0.1:${port}`, remote = false, note = null;
     try {
       const { proc, url } = await startCloudflared(port);
@@ -248,6 +272,30 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
       // timed out AFTER provisioning): re-attach it instead of dead-ending the name.
       if (/already exists/i.test(String(r.error || ''))) return attach(undefined, undefined, false);
       resolve({ ok: false, error: r.error || 'creation failed' });
+    });
+}));
+// Grant / revoke a workspace to guests (default-deny). Updates the live share immediately.
+ipcMain.handle('workspace:setShared', (e, payload) => {
+  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  ws.shared = !!(payload && payload.shared); saveRegistry();
+  syncShare();
+  return { ok: true, shared: ws.shared };
+});
+// Invite a GitHub user as a push collaborator on a repo workspace's repo (Stage 2 — durable git collab).
+ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
+  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  if (!ws || ws.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
+  const login = String((payload && payload.username) || '').trim().replace(/[^A-Za-z0-9-]/g, '');   // GitHub logins are [A-Za-z0-9-]
+  if (!login) return resolve({ ok: false, error: 'enter a GitHub username' });
+  const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');          // honor the bash-interpolation invariant (re-sanitise)
+  if (!slug) return resolve({ ok: false, error: 'bad workspace' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/repo-invite.sh' '${slug}' '${login}'`],
+    { encoding: 'utf8', timeout: 60000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
+      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
     });
 }));
 ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests

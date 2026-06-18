@@ -21,7 +21,7 @@
     body{height:100vh;height:100svh;height:100dvh;height:var(--app-h,100dvh)}
     body{background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
       color:var(--ink);font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
-      display:grid;grid-template-rows:52px 1fr 22px}
+      display:grid;grid-template-rows:52px auto 1fr 22px}
     /* top bar — mirrors the Claudable cockpit */
     .bar{display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--hairline);
       background:linear-gradient(180deg,#0d0f13,#090a0c);font-size:12px;letter-spacing:.04em}
@@ -143,6 +143,25 @@
       border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);box-shadow:inset 0 1px 0 var(--sheen)}
     .sesschip .dot{flex:none}   /* the chip's dot is the connection indicator (uses the shared .dot ok/bad/work colors) */
     .sesschip b{font-weight:600;color:var(--silver);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* guest workspace bar — the granted library the host shared. The host drives; an interactive guest
+       can click a chip to switch the shared terminal to that workspace. Collapses to 0 height when empty. */
+    .wsbar{display:flex;align-items:center;gap:9px;padding:7px 16px;border-bottom:1px solid var(--hairline);
+      background:linear-gradient(180deg,#0b0d11,#090a0c);overflow-x:auto;overflow-y:hidden}
+    .wsbar.hidden{height:0;padding:0;border:0;overflow:hidden}
+    .wsbar-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);flex:none}
+    .wschips{display:flex;gap:6px;align-items:center}
+    .wschip{display:flex;align-items:center;gap:6px;flex:none;padding:5px 10px;border:1px solid var(--hairline);
+      border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);
+      cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s}
+    .wschip:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
+    .wschip.live{border-color:var(--ok);color:var(--silver);box-shadow:0 0 12px -7px var(--ok)}
+    .wschip .wsk{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    body.ro .wschip{cursor:default}                        /* view-only viewers can't drive switching */
+    /* paused — host moved to a private (non-shared) workspace; mirror is frozen until they return */
+    .paused-ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:6;
+      background:rgba(5,6,8,.82);backdrop-filter:blur(3px)}
+    .paused-ov.show{display:flex}
+    .paused-ov .card h2{color:var(--amber)}
     /* overlay shown while waiting for host approval / when denied */
     .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
       background:rgba(5,6,8,.78);backdrop-filter:blur(2px);z-index:5}
@@ -158,7 +177,7 @@
     @keyframes sp{to{transform:rotate(360deg)}}
     /* ---- mobile / small screens: stack terminal over chat, trim the chrome ---- */
     @media (max-width: 760px){
-      body{grid-template-rows:46px 1fr auto}
+      body{grid-template-rows:46px auto 1fr auto}
       .bar{gap:9px;padding:0 11px}
       .bar .logo{height:24px}
       .bar .name{font-size:12px;letter-spacing:.16em}
@@ -196,10 +215,20 @@
       <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
     </span>
   </div>
+  <div class="wsbar hidden" id="wsbar">
+    <span class="wsbar-lbl">workspaces</span>
+    <div class="wschips" id="wschips"></div>
+  </div>
   <div class="main">
     <div class="wrap">
       <div id="terminal"></div>
       <div class="gutter" id="gutter"><div class="gthumb" id="gthumb"></div></div>
+      <div class="paused-ov" id="paused-ov">
+        <div class="card">
+          <h2 id="paused-title">Host is in a private workspace</h2>
+          <p id="paused-body">The mirror resumes when they switch back to a shared workspace.</p>
+        </div>
+      </div>
       <div class="overlay" id="overlay">
         <div class="card" id="card">
           <div class="spin"></div>

@@ -59,12 +59,14 @@ function cleanName(n, fallback) {
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat } = {}) {
+function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let linkToken = null, hostName = 'Host';
   let cols = 120, rows = 32;
   let ring = Buffer.alloc(0);
   let lastStatus = null;
+  let paused = false;            // host is in a NON-granted workspace → stream nothing to guests
+  let workspaces = [];           // granted workspace library shown to guests: [{id,label,kind,live}]
   const clients = new Set();
   const resumeTokens = new Set();   // one private reconnect token per approved guest
   const pending = new Map();
@@ -112,9 +114,10 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     ws._presence = 'active'; roster.set(name, 'active');
     notifyGuests(); notifyRoster();
     try {
-      ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name }));
-      if (lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
-      if (ring.length) ws.send(ring);
+      ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused }));
+      // Never replay status/scrollback while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
+      if (!paused && lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
+      if (!paused && ring.length) ws.send(ring);
     } catch {}
     if (mode === 'link') systemChat(name + ' joined');   // only on a fresh join, not on reconnect
     ws.on('message', (data, isBinary) => {
@@ -128,6 +131,12 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       if (msg.type === 'presence') {                                  // active (green) / idle = AFK (amber)
         ws._presence = (msg.state === 'idle') ? 'idle' : 'active';
         roster.set(ws._name, ws._presence); notifyRoster();
+        return;
+      }
+      if (msg.type === 'switch' && typeof msg.id === 'string') {       // guest navigates to another GRANTED workspace
+        if (readOnly) return;                                          // view-only guests can't drive navigation
+        if (!workspaces.some((w) => w.id === msg.id)) return;          // never switch to a non-granted workspace
+        try { onSwitchWorkspace && onSwitchWorkspace(msg.id); } catch {}
         return;
       }
       if (msg.type === 'input' && typeof msg.data === 'string') {
@@ -173,7 +182,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     requireApproval = opts.requireApproval !== false;
     hostName = cleanName(opts.name, 'Host');
     linkToken = newToken(); resumeTokens.clear();
-    ring = Buffer.alloc(0); lastStatus = null;
+    ring = Buffer.alloc(0); lastStatus = null; paused = false; workspaces = [];
     server = http.createServer((req, res) => {
       const u = (req.url || '').split('?')[0];
       if (u === '/' || u === '/index.html') {
@@ -198,7 +207,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   function regenerateLink() { if (!server) return null; linkToken = newToken(); return linkToken; }   // rotate invite; keeps current guests
 
   function broadcast(data) {
-    if (!server) return;
+    if (!server || paused) return;     // paused = host is in a private (non-granted) workspace: stream nothing, ring nothing
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
     appendRing(buf);
     for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(buf); } catch {} } }
@@ -208,8 +217,25 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(JSON.stringify({ type: 'size', cols, rows })); } catch {} } }
   }
   function broadcastStatus(s) {
+    if (paused) return;                // don't leak a private workspace's tracker/session label
     lastStatus = s;
     for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(JSON.stringify({ type: 'status', status: s })); } catch {} } }
+  }
+  // Host moved to a private/granted workspace → tell guests to freeze/unfreeze the mirror.
+  // Pausing CLEARS the ring + lastStatus so a now-private workspace's scrollback/label can never
+  // replay to a guest who joins later (the single choke point for setShared / syncShare / start / respawn).
+  // The private workspace NAME is deliberately NOT broadcast (guests show a generic "private" message).
+  function setPaused(p) {
+    paused = !!p;
+    if (paused) { ring = Buffer.alloc(0); lastStatus = null; }
+    const s = JSON.stringify({ type: 'paused', paused });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  }
+  // Push the granted workspace library (stripped to {id,label,kind,live}) to guests.
+  function setWorkspaces(list) {
+    workspaces = Array.isArray(list) ? list : [];
+    const s = JSON.stringify({ type: 'workspaces', list: workspaces });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
   }
   function broadcastChat(text) { relayChat({ type: 'chat', role: 'host', name: hostName, text: String(text).slice(0, 2000) }, null); }
 
@@ -224,14 +250,14 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     try { wss && wss.close(); } catch {}
     try { server && server.close(); } catch {}
     server = null; wss = null; port = null; ring = Buffer.alloc(0);
-    linkToken = null; resumeTokens.clear();
+    linkToken = null; resumeTokens.clear(); paused = false; workspaces = [];
   }
 
   function status() {
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, resetRing, resetStatus, regenerateLink, decideApproval, status };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, decideApproval, status };
 }
 
 module.exports = { createShareServer };

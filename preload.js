@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceCreate: (kind, name) => ipcRenderer.invoke('workspace:create', { kind, name }),
   workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
+  workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
+  repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),
+  onWorkspaceActiveChanged: (cb) => ipcRenderer.on('workspace:active-changed', (_e, id) => cb(id)),
   // audio
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
