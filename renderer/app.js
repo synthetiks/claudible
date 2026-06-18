@@ -12,7 +12,7 @@ function toast(msg) {
 }
 
 // ---------- embedded live TUI ----------
-const BASE_LH = 1.15;   // baseline line-height; fillHeight() nudges it up slightly to absorb the floored last-row remainder
+const BASE_LH = 1.15;   // terminal line-height
 const term = new Terminal({
   fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
   fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 5000,
@@ -24,23 +24,14 @@ term.loadAddon(fit);
 term.open($('terminal'));
 
 let ptyStarted = false;
-// After FitAddon floors rows to whole cells, a sub-row remainder (up to ~1 cell) renders as a dead black
-// band under the last line. Bump lineHeight just enough that rows×cellHeight fills the pane — fontSize and
-// columns are untouched, so nothing reflows horizontally.
-function fillHeight() {
-  const el = $('terminal'); const rows = term.rows; if (!el || !rows) return;
-  const cs = getComputedStyle(el);
-  const innerH = el.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
-  if (innerH <= 0) return;
-  let lh = innerH / (rows * (term.options.fontSize || 13));
-  lh = Math.max(BASE_LH, Math.min(1.4, lh));
-  if (Math.abs(lh - (term.options.lineHeight || BASE_LH)) > 0.005) term.options.lineHeight = lh;
-}
 function sync() {
   try {
-    if (term.options.lineHeight !== BASE_LH) term.options.lineHeight = BASE_LH;   // stable baseline so fit() floors consistently
     fit.fit();
-    fillHeight();                                                                  // absorb the floored remainder → no dead band
+    // Leave ~1 row of breathing room at the bottom: Claude's TUI anchors its input box, the
+    // bypass-permissions banner and the status/“working… esc to interrupt” line to the last rows —
+    // running them flush to the pane edge clips them. One reserved row (+ the floored sub-row remainder)
+    // gives the 1–2 lines of space that keeps those always visible. fontSize/columns unchanged.
+    if (term.rows > 6) term.resize(term.cols, term.rows - 1);
     if (!ptyStarted) { ptyStarted = true; claudible.ptyStart(term.cols, term.rows); } // spawn Claude at the EXACT fitted size
     else claudible.ptyResize(term.cols, term.rows);
     updateScrollbar();
