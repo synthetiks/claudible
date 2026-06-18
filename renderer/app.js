@@ -258,6 +258,8 @@ if ($('ptt-key-btn')) $('ptt-key-btn').addEventListener('click', () => { pttCapt
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
 let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0;
 let lastReply = '';                                  // Claude's latest reply (stripped) — the manual "▶ Speak" reads this
+let ttsSpeed = 0;                                    // % faster over baseline (0–25), applied via audio.playbackRate
+let announceOn = true, chimeOn = true;               // factory-on: spoken "task complete" cue + soft chat chime
 // Voice Out button is dual: ▶ Speak (idle, reads lastReply) ↔ ■ Stop (while speaking). Disabled when nothing to speak.
 function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
@@ -302,6 +304,8 @@ function playBlob(arrayBuf, myGen) {
     if (myGen !== speakGen) return resolve();
     const url = URL.createObjectURL(new Blob([new Uint8Array(arrayBuf)], { type: 'audio/mpeg' }));
     ttsUrl = url; const a = new Audio(url); ttsAudio = a;
+    a.preservesPitch = true; if ('webkitPreservesPitch' in a) a.webkitPreservesPitch = true;   // speed up without chipmunk pitch
+    a.playbackRate = 1 + (ttsSpeed || 0) / 100;       // voice-speed slider: % over baseline
     let done = false;
     const fin = () => { if (done) return; done = true; URL.revokeObjectURL(url); if (ttsUrl === url) ttsUrl = null; resolve(); };
     a.onended = fin; a.onerror = fin; a.onpause = fin;   // onpause catches stopSpeech()'s pause
@@ -350,6 +354,41 @@ document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown
 if ($('vout-name')) $('vout-name').addEventListener('click', () => { const i = VOICE_ORDER.indexOf(selectedVoice); setVoice(VOICE_ORDER[(i + 1) % VOICE_ORDER.length]); });
 if ($('vout-stop')) { $('vout-stop').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else if (lastReply) speak(lastReply); }); updateVoiceOutBtn(); }
 if ($('vout-auto')) $('vout-auto').addEventListener('click', () => setAlways(!alwaysSpeak));
+
+// ---- Voice-out speed slider (0–25% over baseline) ----
+const speedRange = $('tts-speed'), speedVal = $('tts-speed-val');
+function applyTtsSpeed(pct, save) {
+  ttsSpeed = Math.max(0, Math.min(25, pct | 0));
+  if (speedRange) speedRange.value = String(ttsSpeed);
+  if (speedVal) speedVal.textContent = '+' + ttsSpeed + '%';
+  if (ttsAudio) { try { ttsAudio.preservesPitch = true; ttsAudio.playbackRate = 1 + ttsSpeed / 100; } catch (e) {} }   // live, mid-playback
+  if (save) savePrefs({ ttsSpeed: ttsSpeed });
+}
+if (speedRange) {
+  speedRange.addEventListener('input', () => applyTtsSpeed(parseInt(speedRange.value, 10) || 0, false));
+  speedRange.addEventListener('change', () => savePrefs({ ttsSpeed: ttsSpeed }));
+}
+// ---- Alerts: announce-when-done + chat chime ----
+if ($('announce-done')) $('announce-done').addEventListener('change', (e) => { announceOn = e.target.checked; $('announce-toggle').classList.toggle('on', announceOn); savePrefs({ announce: announceOn }); });
+if ($('chat-chime')) $('chat-chime').addEventListener('change', (e) => { chimeOn = e.target.checked; $('chime-toggle').classList.toggle('on', chimeOn); savePrefs({ chime: chimeOn }); });
+// soft, relaxing two-tone chime (Web Audio — no asset). Lazy ctx + resume (autoplay parks it until a gesture).
+let _chimeCtx = null;
+function playChime() {
+  try {
+    _chimeCtx = _chimeCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (_chimeCtx.state === 'suspended') _chimeCtx.resume();
+    const ctx = _chimeCtx, now = ctx.currentTime, g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.12, now + 0.02);     // gentle attack
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);    // soft decay
+    g.connect(ctx.destination);
+    [880, 1320].forEach((f, i) => {                            // a soft perfect fifth — calm, not jarring
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const og = ctx.createGain(); og.gain.value = i ? 0.5 : 1;
+      o.connect(og); og.connect(g); o.start(now); o.stop(now + 0.95);
+    });
+  } catch (e) {}
+}
 // collapse / expand the voice-out text box
 $('tts-collapse').addEventListener('click', () => {
   $('tts-wrap').classList.toggle('min');
@@ -431,7 +470,7 @@ claudible.onHookLine((line) => {
     $('tts-in').value = reply;            // populate the (collapsible) box for manual Speak
     updateVoiceOutBtn();                  // enable ▶ Speak now that there's a reply
     if (alwaysSpeak) speak(reply);        // auto-speak the reply in the selected voice
-    else setDot('d-tts', 'ok');
+    else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech caps reply at 600)
   }
 });
 
@@ -692,7 +731,7 @@ chatIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey
 claudible.onShareChat((m) => {
   if (!m) return;
   if (m.role === 'system') addSystemChat(m.text);          // "X joined" / "X left"
-  else if (m.text) addChat(m.name || 'viewer', m.text, false);
+  else if (m.text) { addChat(m.name || 'viewer', m.text, false); if (chimeOn) playChime(); }   // soft ping so you don't miss a codev's chat
 });
 chatReset();
 
@@ -712,6 +751,10 @@ function savePrefs(patch) { try { localStorage.setItem(PREFS_KEY, JSON.stringify
     $('always-speak').checked = p.alwaysSpeak;
     $('always-toggle').classList.toggle('on', p.alwaysSpeak);
   }
+  // factory-on (undefined → ON): announce-when-done + chat chime; speed defaults to baseline (0)
+  announceOn = p.announce !== false; if ($('announce-done')) { $('announce-done').checked = announceOn; $('announce-toggle').classList.toggle('on', announceOn); }
+  chimeOn = p.chime !== false; if ($('chat-chime')) { $('chat-chime').checked = chimeOn; $('chime-toggle').classList.toggle('on', chimeOn); }
+  applyTtsSpeed(p.ttsSpeed || 0, false);
   if (p.pttKey) pttKey = p.pttKey;
   applyPttKey();   // render the current push-to-talk key (default or saved)
   syncVoiceUI();   // reflect saved voice + always-speak in the top-bar Voice Out box

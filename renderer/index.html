@@ -88,10 +88,12 @@
     .ptt-hint.live kbd{color:var(--live);border-color:rgba(229,86,75,.5);
       box-shadow:inset 0 1px 0 var(--sheen),0 0 10px -2px rgba(229,86,75,.6)}
     /* body */
+    /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
+       The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
     .body{display:grid;grid-template-columns:1fr;gap:11px;padding:14px;min-height:0}
-    .body.sharing{grid-template-columns:1fr 312px}                       /* + chat (right) while sharing */
-    .body.with-sessions{grid-template-columns:244px 1fr}                 /* + docked sessions (left) */
-    .body.with-sessions.sharing{grid-template-columns:244px 1fr 312px}   /* both */
+    .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
+    .body.with-sessions{grid-template-columns:clamp(244px,16vw,340px) 1fr}                                   /* + docked sessions (left) */
+    .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
     .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0}
@@ -198,6 +200,14 @@
     /* Always-Speak slide toggle */
     .speakrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px}
     .speakrow .out{margin:0;font-size:11px;color:var(--ink-faint);text-align:right;min-height:0}
+    /* voice-out speed slider */
+    .speedrow{display:flex;align-items:center;gap:10px;margin-top:12px}
+    .speedrow .speedlbl{font-size:11px;color:var(--ink-dim);white-space:nowrap}
+    .speedrow .speedval{font-size:10px;color:var(--ink-faint);min-width:36px;text-align:right;font-variant-numeric:tabular-nums}
+    .speedrow input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;
+      background:#181b20;box-shadow:inset 0 0 0 1px var(--hairline-soft);outline:none;cursor:pointer}
+    .speedrow input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
+      background:linear-gradient(180deg,#cfe6d8,#5fb487);border:none;box-shadow:0 1px 3px #000;cursor:pointer}
     .toggle{display:flex;align-items:center;gap:9px;cursor:pointer;
       font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);transition:color .15s}
     .toggle input{display:none}
@@ -523,6 +533,25 @@
           </label>
           <span class="out" id="tts-out"></span>
         </div>
+        <div class="speedrow">
+          <span class="speedlbl">Voice speed</span>
+          <input type="range" id="tts-speed" min="0" max="25" step="1" value="0" title="Speak faster — % over the baseline" />
+          <span class="speedval" id="tts-speed-val">+0%</span>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="label">alerts</div>
+        <label class="toggle on" id="announce-toggle" title="When Claude finishes a long reply (and Always Speak is off), say “The task is complete.”">
+          <input type="checkbox" id="announce-done" checked />
+          <span class="sw"></span>
+          <span class="tlabel">Announce when done</span>
+        </label>
+        <label class="toggle on" id="chime-toggle" title="Soft chime when a viewer messages you in chat" style="margin-top:11px">
+          <input type="checkbox" id="chat-chime" checked />
+          <span class="sw"></span>
+          <span class="tlabel">Chat chime</span>
+        </label>
       </div>
 
     </div>
