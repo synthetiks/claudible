@@ -816,6 +816,50 @@ function openExt(which) {
 }
 if ($('skills-refresh')) $('skills-refresh').addEventListener('click', loadSkills);
 if ($('plugins-refresh')) $('plugins-refresh').addEventListener('click', loadPlugins);
+
+// ---- official marketplace browser (the "+" beside Skills/Plugins) — search + install ----
+function termRun(cmd) { claudible.ptyInput('\x1b'); setTimeout(() => claudible.ptyInput(cmd + '\r'), 120); setTimeout(() => term.focus(), 170); }
+let mktCache = null;
+async function openMkt() {
+  $('mkt-modal').classList.add('show');
+  $('mkt-search').value = '';
+  $('mkt-list').innerHTML = '<div class="ext-empty">loading…</div>';
+  setTimeout(() => $('mkt-search').focus(), 60);
+  if (!mktCache) { try { mktCache = await claudible.pluginsAvailable(); } catch { mktCache = []; } }
+  renderMkt('');
+}
+function closeMkt() { $('mkt-modal').classList.remove('show'); }
+function renderMkt(q) {
+  const el = $('mkt-list'); if (!el) return;
+  q = (q || '').toLowerCase().trim();
+  const all = mktCache || [];
+  const items = (q ? all.filter((p) => p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q)) : all).slice(0, 80);
+  if (!items.length) { el.innerHTML = '<div class="ext-empty">' + (all.length ? 'no matches' : 'no marketplace catalog found — add one with /plugin in the terminal') + '</div>'; return; }
+  el.innerHTML = '';
+  items.forEach((p) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = p.name; main.appendChild(nm);
+    if (p.description) { const d = document.createElement('div'); d.className = 'ext-desc'; d.textContent = p.description; main.appendChild(d); }
+    row.appendChild(main);
+    const btn = document.createElement('button');
+    if (p.installed) { btn.className = 'ext-tog'; btn.textContent = 'installed'; btn.disabled = true; }
+    else { btn.className = 'ext-tog on'; btn.textContent = 'install'; btn.addEventListener('click', () => installMkt(p)); }
+    row.appendChild(btn); el.appendChild(row);
+  });
+}
+function installMkt(p) {
+  closeMkt();
+  termRun('/plugin install ' + p.name + '@' + p.marketplace);   // runs in the terminal so the trust prompt is visible
+  toast('Installing ' + p.name + ' — approve it in the terminal');
+}
+if ($('skills-add')) $('skills-add').addEventListener('click', openMkt);
+if ($('plugins-add')) $('plugins-add').addEventListener('click', openMkt);
+if ($('mkt-search')) {
+  $('mkt-search').addEventListener('input', (e) => renderMkt(e.target.value));
+  $('mkt-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMkt(); } });
+}
+if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));

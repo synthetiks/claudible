@@ -41,5 +41,28 @@ PY
     fi
     ;;
 
+  available)
+    # Browse what's installable from the registered marketplaces (the official one + any others).
+    python3 - <<'PY' 2>/dev/null || printf '[]'
+import os, json, glob
+home = os.path.expanduser("~")
+try: inst = set((json.load(open(os.path.join(home, ".claude", "plugins", "installed_plugins.json"))).get("plugins") or {}).keys())
+except Exception: inst = set()
+out = []
+for cat in glob.glob(os.path.join(home, ".claude", "plugins", "marketplaces", "*", ".claude-plugin", "marketplace.json")):
+    try: d = json.load(open(cat))
+    except Exception: continue
+    mkt = os.path.basename(os.path.dirname(os.path.dirname(cat)))
+    for p in (d.get("plugins") or d.get("entries") or []):
+        if not isinstance(p, dict): continue
+        nm = p.get("name")
+        if not nm: continue
+        out.append({"name": nm, "marketplace": mkt, "description": (p.get("description") or "")[:160],
+                    "installed": (nm + "@" + mkt) in inst})
+out.sort(key=lambda x: x["name"].lower())
+print(json.dumps(out))
+PY
+    ;;
+
   *) printf '{"ok":false,"error":"bad op"}' ;;
 esac

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('claudible', {
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsSet: (name, state) => ipcRenderer.invoke('skills:set', { name, state }),
   pluginsList: () => ipcRenderer.invoke('plugins:list'),
+  pluginsAvailable: () => ipcRenderer.invoke('plugins:available'),
   pluginsToggle: (key, enable) => ipcRenderer.invoke('plugins:toggle', { key, enable }),
   onWorkspaceActiveChanged: (cb) => ipcRenderer.on('workspace:active-changed', (_e, id) => cb(id)),
   // audio

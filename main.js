@@ -336,6 +336,14 @@ ipcMain.handle('plugins:list', () => new Promise((resolve) => {
       try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
     });
 }));
+ipcMain.handle('plugins:available', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' available`],
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] plugins:available', err.message); return resolve([]); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    });
+}));
 ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
   const key = String((payload && payload.key) || '').replace(/[^A-Za-z0-9@._/-]/g, '');
   const act = (payload && payload.enable) ? 'enable' : 'disable';

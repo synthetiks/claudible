@@ -286,6 +286,12 @@
       border:1px solid var(--hairline);background:#101216;color:var(--ink-dim);box-shadow:none;transition:all .15s}
     .ext-tog.on{color:#0a0b0d;background:linear-gradient(180deg,#5fb487,#3f8f68);border-color:transparent;font-weight:700}
     .ext-tog:hover{border-color:rgba(255,255,255,.22)}
+    /* official-marketplace browser (the "+" beside Skills/Plugins) */
+    .mkt-box{width:480px;max-width:92vw}
+    #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:13px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:9px;padding:10px 12px}
+    #mkt-search:focus{outline:none;border-color:rgba(255,255,255,.28)}
+    .mkt-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;margin-bottom:14px;text-align:left}
     /* push-to-talk indicator (top bar) — always visible so you can see when you're talking */
     /* top-bar voice boxes — equal-height with the Settings button. Voice In = mic; Voice Out = TTS + controls */
     .vgroup{display:flex;align-items:center;gap:8px}
@@ -697,11 +703,11 @@
       </div>
 
       <div class="sec" id="sec-skills">
-        <div class="label">skills <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
+        <div class="label">skills <button class="collapse min" id="skills-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
         <div class="ext-list" id="skills-list"><div class="ext-empty">loading…</div></div>
       </div>
       <div class="sec" id="sec-plugins">
-        <div class="label">plugins <button class="collapse min" id="plugins-refresh" title="Refresh">⟳</button></div>
+        <div class="label">plugins <button class="collapse min" id="plugins-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="plugins-refresh" title="Refresh">⟳</button></div>
         <div class="ext-list" id="plugins-list"><div class="ext-empty">loading…</div></div>
       </div>
 
@@ -779,6 +785,16 @@
         <button id="invite-go">Send invite</button>
         <button id="invite-cancel" class="ghost">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <div class="approve" id="mkt-modal">
+    <div class="box mkt-box">
+      <h3>Add from the official marketplace</h3>
+      <p>Search Anthropic's official plugins (they can bundle skills, agents &amp; commands). Installing runs in your terminal so you can approve it.</p>
+      <input type="text" id="mkt-search" maxlength="60" placeholder="search plugins &amp; skills…" />
+      <div class="mkt-list" id="mkt-list"><div class="ext-empty">loading…</div></div>
+      <div class="row"><button id="mkt-close" class="ghost">Close</button></div>
     </div>
   </div>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
