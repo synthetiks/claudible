@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // hooks + tracker
   onHookLine: (cb) => ipcRenderer.on('hook:line', (_e, { tabId, line }) => cb(tabId, line)),
   onWorkflowAgents: (cb) => ipcRenderer.on('workflow:agents', (_e, { tabId, workflows }) => cb(tabId, workflows)),
+  onAgentTokens: (cb) => ipcRenderer.on('agent-tokens', (_e, { tabId, agentTok }) => cb(tabId, agentTok)),
   hookTest: () => ipcRenderer.invoke('hook:test'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),   // s carries s.tabId
   // live terminal sharing

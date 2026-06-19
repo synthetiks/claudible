@@ -129,7 +129,7 @@ function createWindow() {
   win.loadFile('renderer/index.html');
   win.webContents.once('did-finish-load', () => {   // one-shot, scoped to this contents: a reload won't stack a 2nd set of pollers/timers
     startVoiceServices();   // idempotent; ensures STT/TTS are up even when launched via `npm start`
-    pollStatus(); pollHooks();
+    pollStatus(); pollHooks(); pollAgentTokens();
     // spawn-on-size fallback: if the renderer never reports a size, seed the first tab ('main') at a default
     setTimeout(() => { if (ptys.size === 0) spawnPty('main', 120, 32, activeWorkspace, ''); }, 1800);
     startPoll();            // adaptive background session sync for the active repo workspace
@@ -686,6 +686,23 @@ function pollStatus() {
   }, 1200);
 }
 
+// ---- agent-token meter: the statusLine usage excludes subagents/swarms, so scan each live tab's
+// subagents dir for the tokens they consumed and forward it. Slow cadence (a cheap python scan). ----
+function pollAgentTokens() {
+  if (!APPDIR_WSL) return;
+  setInterval(() => {
+    for (const [tabId, rec] of ptys) {
+      const sid = String(rec.sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
+      if (!sid) continue;
+      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(rec.ws)} bash '${APPDIR_WSL}/wsl/agent-tokens.sh' '${sid}'`],
+        { encoding: 'utf8', timeout: 10000 }, (err, stdout) => {
+          if (err) return;
+          const n = parseInt(String(stdout).trim(), 10);
+          if (Number.isFinite(n)) { try { win && win.webContents.send('agent-tokens', { tabId, agentTok: n }); } catch {} }
+        });
+    }
+  }, 8000);
+}
 // ---- hook events: poll EACH live tab's runtime/tabs/<tab>/hooks.ndjson for appended lines ----
 const hookState = new Map();   // tabId -> { offset, buf } (independent tail cursor per tab)
 function pollHooks() {

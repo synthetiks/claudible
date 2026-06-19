@@ -42,7 +42,7 @@ function makeTab(tabId, wsId, session) {
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
   const rec = { tabId, term: t, fit: f, container, started: false, wsId: wsId || null, session: session || '',
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, sessionLog: [], curCtxPct: null, curSessionLabel: '',
-    agents: new Map(), workflows: [] };
+    agents: new Map(), workflows: [], agentTok: 0 };
   tabs.set(tabId, rec);
   return rec;
 }
@@ -226,7 +226,9 @@ function repaintTracker(t) {
     bar.classList.remove('warn', 'crit'); bar.title = 'context window used';
   }
   $('trk-cost').textContent = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
-  $('trk-tokens').textContent = fmtK(t.sessTok || 0);
+  const at = t.agentTok || 0;                                    // subagent/swarm tokens (the main meter misses these)
+  $('trk-tokens').textContent = fmtK((t.sessTok || 0) + at);
+  $('trk-tokens').title = at ? (fmtK(t.sessTok || 0) + ' main + ' + fmtK(at) + ' agents') : '';
 }
 function resetStats(t) {
   t = t || AT(); if (!t) return;
@@ -602,6 +604,12 @@ claudible.onHookLine((tabId, line) => {
   } else if (o.hook_event_name === 'PostToolUse' && o.tool_name === 'Task') {
     onAgentDone(t, o);
   }
+});
+// Subagent/swarm token usage (the statusLine meter only sees the main thread) — fold into the token counter.
+claudible.onAgentTokens((tabId, agentTok) => {
+  const t = tabs.get(tabId); if (!t) return;
+  t.agentTok = agentTok || 0;
+  if (t.tabId === activeTabId) repaintTracker(t);
 });
 // Workflow/swarm agents (read WSL-side from the session's subagents dir, since they emit no Task hooks).
 claudible.onWorkflowAgents((tabId, workflows) => {
