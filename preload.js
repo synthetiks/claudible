@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionList: () => ipcRenderer.invoke('session:list'),
   sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
   sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
+  exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),

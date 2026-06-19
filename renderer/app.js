@@ -1158,6 +1158,7 @@ function mergeSessionOrder(saved, list) {
 }
 const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+const SHARE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><polyline points="8 7 12 3 16 7"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
 // Manual session title override (user-set — no auto-titling), stored per id in prefs; falls back to the preview.
 function sessTitle(s) { const t = (loadPrefs().sessionTitles || {})[s.id]; return t || s.preview; }
@@ -1185,7 +1186,19 @@ function renderSessionRow(s) {
   edit.className = 'sess-edit'; edit.title = 'Rename session'; edit.setAttribute('aria-label', 'Rename session');
   edit.innerHTML = PENCIL_SVG;
   edit.addEventListener('click', (e) => { e.stopPropagation(); startSessEdit(row, p, s); });
-  row.appendChild(edit); row.appendChild(del); row.appendChild(conf);
+  const exp = document.createElement('button');
+  exp.className = 'sess-export'; exp.title = 'Export as a shareable HTML replay'; exp.setAttribute('aria-label', 'Export session');
+  exp.innerHTML = SHARE_SVG;
+  exp.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    exp.disabled = true; let r = null;
+    try { r = await claudible.exportSession(s.id); } catch {}
+    exp.disabled = false;
+    if (r && r.saved) toast('Replay saved · ' + r.saved.replace(/^.*[\\/]/, ''));
+    else if (r && r.canceled) { /* user dismissed the save dialog */ }
+    else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
+  });
+  row.appendChild(exp); row.appendChild(edit); row.appendChild(del); row.appendChild(conf);
   row.addEventListener('pointerdown', (e) => onSessPointerDown(e, row, s));
   row.addEventListener('pointermove', onSessPointerMove);
   row.addEventListener('pointerup', onSessPointerUp);
@@ -1223,7 +1236,7 @@ function startSessEdit(row, p, s) {
 let sdrag = null;
 function onSessPointerDown(e, row, s) {
   if (e.button !== 0) return;
-  if (e.target.closest('.sess-del') || e.target.closest('.sess-confirm') || e.target.closest('.sess-edit') || e.target.closest('.sess-rename') || row.classList.contains('confirming')) return;
+  if (e.target.closest('.sess-del') || e.target.closest('.sess-confirm') || e.target.closest('.sess-edit') || e.target.closest('.sess-export') || e.target.closest('.sess-rename') || row.classList.contains('confirming')) return;
   sdrag = { id: s.id, label: sessTitle(s), row, startY: e.clientY, moved: false, pid: e.pointerId };
   try { row.setPointerCapture(e.pointerId); } catch {}
 }

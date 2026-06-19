@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
 const { createShareServer } = require('./share/server');
+const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
 
 let win;
@@ -832,6 +833,34 @@ ipcMain.handle('save-session', async (e, text) => {
     if (canceled || !filePath) return { canceled: true };
     fs.writeFileSync(filePath, text, 'utf8');
     return { saved: filePath };
+  } catch (err) { return { error: String(err) }; }
+});
+
+// Export a saved session as a SELF-CONTAINED, shareable HTML replay (no server, works offline). Reads the
+// transcript for the active workspace's session via transcript.sh, renders it, and lets the user pick where
+// to save. Text is embedded as JSON and rendered client-side via textContent → no injection from transcript.
+ipcMain.handle('session:export', async (e, sessionId) => {
+  try {
+    const ws = activeWorkspace;
+    const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!sid || !APPDIR_WSL) return { error: 'no session' };
+    const messages = await new Promise((resolve) => {
+      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/transcript.sh' '${sid}'`],
+        { encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+          let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+          resolve(Array.isArray(m) ? m : []);
+        });
+    });
+    if (!messages.length) return { error: 'empty' };
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const first = (messages.find((m) => m.role === 'you') || messages[0] || {}).text || 'Claude session';
+    const html = renderReplayHtml({ title: String(first).replace(/\s+/g, ' ').slice(0, 90), workspace: (ws && ws.label) || '', date: d.toLocaleString(), messages });
+    const defaultPath = path.join(app.getPath('desktop'), `claudible-replay-${stamp}.html`);
+    const { canceled, filePath } = await dialog.showSaveDialog(win, { defaultPath, filters: [{ name: 'HTML', extensions: ['html'] }] });
+    if (canceled || !filePath) return { canceled: true };
+    fs.writeFileSync(filePath, html, 'utf8');
+    return { saved: filePath, count: messages.length };
   } catch (err) { return { error: String(err) }; }
 });
 
