@@ -157,6 +157,30 @@
     .wschip.live{border-color:var(--ok);color:var(--silver);box-shadow:0 0 12px -7px var(--ok)}
     .wschip .wsk{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
     body.ro .wschip{cursor:default}                        /* view-only viewers can't drive switching */
+    /* "Browse sessions" — opens the read-only library (independent of the live view) */
+    .browse-open{margin-left:auto;flex:none;padding:5px 11px;border:1px solid var(--hairline);border-radius:8px;
+      background:var(--sheen);color:var(--ink-dim);font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+    .browse-open:hover{color:var(--ink);border-color:rgba(255,255,255,.25)}
+    /* read-only browse panel: workspaces → sessions → transcript, all without touching the live terminal */
+    .browse{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg);z-index:8}
+    .browse.show{display:flex}
+    .browse-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--hairline);flex:none}
+    .browse-back,.browse-x{background:none;border:1px solid var(--hairline);border-radius:7px;color:var(--ink-dim);
+      width:26px;height:26px;font-size:15px;line-height:1;cursor:pointer;flex:none}
+    .browse-back:hover,.browse-x:hover{color:var(--ink);border-color:rgba(255,255,255,.25)}
+    .browse-x{margin-left:auto;font-size:12px}
+    .browse-title{font-size:13px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .browse-body{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+    .brow-item{text-align:left;padding:11px 12px;border:1px solid var(--hairline);border-radius:10px;
+      background:linear-gradient(180deg,#131519,#0e1013);color:var(--ink);cursor:pointer;font:inherit;flex:none}
+    .brow-item:hover{border-color:rgba(255,255,255,.22)}
+    .brow-item .bt{font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .brow-item .bm{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    .brow-note,.brow-empty{color:var(--ink-faint);font-size:12px;text-align:center;padding:24px;line-height:1.5}
+    .brow-msg{max-width:92%;padding:9px 12px;border-radius:12px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;flex:none}
+    .brow-msg .bw{display:block;font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px}
+    .brow-msg.you{align-self:flex-end;background:#17202c;border:1px solid #243243;color:#dce6f2}
+    .brow-msg.claude{align-self:flex-start;background:#121418;border:1px solid var(--hairline);color:var(--silver)}
     /* paused — host moved to a private (non-shared) workspace; mirror is frozen until they return */
     .paused-ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:6;
       background:rgba(5,6,8,.82);backdrop-filter:blur(3px)}
@@ -218,6 +242,7 @@
   <div class="wsbar hidden" id="wsbar">
     <span class="wsbar-lbl">workspaces</span>
     <div class="wschips" id="wschips"></div>
+    <button class="browse-open" id="browse-open" type="button" title="Read any shared session — without changing the live view">Browse sessions</button>
   </div>
   <div class="main">
     <div class="wrap">
@@ -235,6 +260,15 @@
           <h2 id="ov-title">Waiting for the host to let you in…</h2>
           <p id="ov-body">The host needs to approve your connection. Keep this tab open.</p>
         </div>
+      </div>
+      <!-- read-only session browser: navigate shared workspaces → sessions → transcript, no effect on the live view -->
+      <div class="browse" id="browse">
+        <div class="browse-head">
+          <button class="browse-back" id="browse-back" type="button" title="Back" style="display:none">‹</button>
+          <span class="browse-title" id="browse-title">Browse sessions</span>
+          <button class="browse-x" id="browse-x" type="button" title="Close">✕</button>
+        </div>
+        <div class="browse-body" id="browse-body"></div>
       </div>
     </div>
     <div class="gchat">

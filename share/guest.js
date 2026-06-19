@@ -263,6 +263,84 @@ function applyPaused(label) {
     : 'The mirror resumes when they switch back to a shared workspace.';
 }
 
+// ---- read-only session browser: click through SHARED workspaces → their saved sessions → a transcript,
+// entirely independent of the live mirror. It NEVER sends 'switch' and NEVER changes the host's terminal. ----
+var browseView = 'ws', browseWsId = null, browseWsLabel = '', browseSessionId = null, lastSessions = [];
+function browseSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify(obj)); } catch (e) {} } }
+function relTime(sec) {
+  if (!sec) return '';
+  var m = Math.floor(Date.now() / 1000 - sec) / 60;
+  if (m < 1) return 'just now';
+  if (m < 60) return Math.floor(m) + 'm ago';
+  var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}
+function setBrowseHead() {
+  var back = $('browse-back'), title = $('browse-title');
+  if (browseView === 'ws') { title.textContent = 'Browse sessions'; back.style.display = 'none'; }
+  else { back.style.display = ''; if (browseView === 'sessions') title.textContent = browseWsLabel || 'Sessions'; }
+}
+function browseNote(cls, text) { var b = $('browse-body'); b.innerHTML = ''; var d = document.createElement('div'); d.className = cls; d.textContent = text; b.appendChild(d); }
+function openBrowse() { browseView = 'ws'; $('browse').classList.add('show'); renderBrowseWs(); }
+function closeBrowse() { $('browse').classList.remove('show'); }
+function browseBack() {
+  if (browseView === 'transcript') { browseView = 'sessions'; setBrowseHead(); renderBrowseSessions(lastSessions); }
+  else if (browseView === 'sessions') { browseView = 'ws'; renderBrowseWs(); }
+  else closeBrowse();
+}
+function browItem(title, meta, onClick) {
+  var it = document.createElement('button'); it.className = 'brow-item';
+  var t = document.createElement('div'); t.className = 'bt'; t.textContent = title;
+  var m = document.createElement('div'); m.className = 'bm'; m.textContent = meta;
+  it.appendChild(t); it.appendChild(m); it.addEventListener('click', onClick);
+  return it;
+}
+function renderBrowseWs() {
+  setBrowseHead();
+  var b = $('browse-body'); b.innerHTML = '';
+  if (!grantedWs.length) { browseNote('brow-empty', 'No shared workspaces to browse.'); return; }
+  grantedWs.forEach(function (w) {
+    b.appendChild(browItem(w.label, (w.kind && w.kind !== 'legacy' ? w.kind : 'workspace') + (w.live ? ' · live now' : ''),
+      function () { openBrowseSessions(w); }));
+  });
+}
+function openBrowseSessions(w) {
+  browseView = 'sessions'; browseWsId = w.id; browseWsLabel = w.label; lastSessions = [];
+  setBrowseHead(); browseNote('brow-note', 'Loading sessions…');
+  browseSend({ type: 'ws-sessions', id: w.id });
+}
+function renderBrowseSessions(list) {
+  var b = $('browse-body'); b.innerHTML = '';
+  if (!list.length) { browseNote('brow-empty', 'No saved sessions in this workspace yet.'); return; }
+  list.forEach(function (s) {
+    b.appendChild(browItem(s.preview || '(empty session)',
+      relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : ''),
+      function () { openBrowseTranscript(s); }));
+  });
+}
+function openBrowseTranscript(s) {
+  browseView = 'transcript'; browseSessionId = s.id;
+  $('browse-back').style.display = '';
+  var pv = s.preview || 'Transcript';
+  $('browse-title').textContent = pv.length > 48 ? pv.slice(0, 48) + '…' : pv;
+  browseNote('brow-note', 'Loading transcript…');
+  browseSend({ type: 'ws-transcript', id: browseWsId, sid: s.id });
+}
+function renderTranscript(msgs) {
+  var b = $('browse-body'); b.innerHTML = '';
+  if (!msgs.length) { browseNote('brow-empty', 'This conversation has no readable messages.'); return; }
+  msgs.forEach(function (mm) {
+    var d = document.createElement('div'); d.className = 'brow-msg ' + (mm.role === 'you' ? 'you' : 'claude');
+    var who = document.createElement('span'); who.className = 'bw'; who.textContent = (mm.role === 'you' ? (hostName || 'host') : 'claude');
+    var body = document.createElement('div'); body.textContent = mm.text || '';   // textContent → no HTML injection from transcript text
+    d.appendChild(who); d.appendChild(body); b.appendChild(d);
+  });
+  b.scrollTop = 0;
+}
+$('browse-open').addEventListener('click', openBrowse);
+$('browse-x').addEventListener('click', closeBrowse);
+$('browse-back').addEventListener('click', browseBack);
+
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss' : 'ws';
   var cred = (resume ? ('r=' + encodeURIComponent(resume)) : ('t=' + encodeURIComponent(token))) + '&n=' + encodeURIComponent(myName);
@@ -316,6 +394,10 @@ function connect() {
       } else if (msg.type === 'paused') {
         wsPaused = !!msg.paused;
         applyPaused(msg.label);
+      } else if (msg.type === 'ws-sessions') {
+        if (browseView === 'sessions' && msg.wsId === browseWsId) { lastSessions = Array.isArray(msg.list) ? msg.list : []; renderBrowseSessions(lastSessions); }
+      } else if (msg.type === 'ws-transcript') {
+        if (browseView === 'transcript' && msg.wsId === browseWsId && msg.sessionId === browseSessionId) renderTranscript(Array.isArray(msg.msgs) ? msg.msgs : []);
       }
     } else {
       term.write(new Uint8Array(ev.data));   // raw terminal output

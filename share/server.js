@@ -59,7 +59,7 @@ function cleanName(n, fallback) {
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace } = {}) {
+function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let linkToken = null, hostName = 'Host';
   let cols = 120, rows = 32;
@@ -137,6 +137,20 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         if (readOnly) return;                                          // view-only guests can't drive navigation
         if (!workspaces.some((w) => w.id === msg.id)) return;          // never switch to a non-granted workspace
         try { onSwitchWorkspace && onSwitchWorkspace(msg.id); } catch {}
+        return;
+      }
+      // Read-only browsing of a GRANTED workspace's saved sessions/transcripts. Allowed even for view-only
+      // guests AND while paused — it reads saved text from SHARED workspaces only, and NEVER touches the live
+      // terminal or a private workspace. Replies go only to THIS requesting guest.
+      const sendBack = (p) => { if (ws.readyState === ws.OPEN) { try { ws.send(JSON.stringify(p)); } catch {} } };
+      if (msg.type === 'ws-sessions' && typeof msg.id === 'string') {
+        if (!workspaces.some((w) => w.id === msg.id)) return;          // only granted (shared) workspaces are browsable
+        try { onBrowseSessions && onBrowseSessions(msg.id, sendBack); } catch {}
+        return;
+      }
+      if (msg.type === 'ws-transcript' && typeof msg.id === 'string' && typeof msg.sid === 'string') {
+        if (!workspaces.some((w) => w.id === msg.id)) return;          // gate to granted workspaces (transcripts can be sensitive)
+        try { onBrowseTranscript && onBrowseTranscript(msg.id, msg.sid, sendBack); } catch {}
         return;
       }
       if (msg.type === 'input' && typeof msg.data === 'string') {

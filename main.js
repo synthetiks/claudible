@@ -41,6 +41,28 @@ const share = createShareServer({
     respawnPty(fgTabId, '');                                           // resume the most-recent conversation in that cwd
     try { win && win.webContents.send('workspace:active-changed', id); } catch {}
   },
+  // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
+  // that workspace's conversations and (separately) reads one transcript for display. Only SHARED workspaces
+  // are reachable (the server already gates wsId to the granted list; we re-check w.shared as defense in depth).
+  onBrowseSessions: (wsId, reply) => {
+    const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
+    if (!ws || !APPDIR_WSL) return reply({ type: 'ws-sessions', wsId, list: [] });
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/sessions.sh'`],
+      { encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+        let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+        reply({ type: 'ws-sessions', wsId, label: ws.label, list: Array.isArray(list) ? list : [] });
+      });
+  },
+  onBrowseTranscript: (wsId, sessionId, reply) => {
+    const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
+    const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');   // strict id (also the bash-interp invariant)
+    if (!ws || !sid || !APPDIR_WSL) return reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: [] });
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/transcript.sh' '${sid}'`],
+      { encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+        let msgs = []; try { msgs = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+        reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
+      });
+  },
 });
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
