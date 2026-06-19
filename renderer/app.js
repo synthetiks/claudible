@@ -175,11 +175,9 @@ function closeTab(tabId) {
 
 new ResizeObserver(sync).observe(termHost);
 window.addEventListener('resize', sync);
-// Seed the first tab ('main' — matches main.js's spawn fallback id) and activate it so `term`/`fit` resolve
-// and the foreground pty starts at the fitted size. wsId left null → main binds it to the registry's active
-// workspace; the renderer's activeWsId is reconciled onto it once the workspace list loads.
-makeTab('main', null, '');
-setActiveTab('main');
+// NOTE: the first tab is seeded at the very END of this file (bootFirstTab), AFTER every const/helper it
+// transitively touches (fmtK, SWARM_SVG, …) is initialized — seeding it here would hit those in the TDZ.
+// These timers/observer are safe before then: sync()/updateScrollbar() no-op until a tab is active.
 setTimeout(sync, 180);
 setTimeout(() => { if (term) term.focus(); }, 350);   // keyboard ready in the terminal on launch
 
@@ -1556,6 +1554,11 @@ $('plugins-btn').addEventListener('click', () => openExt('plugins'));
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }
+// Seed + activate the first tab ('main' — matches main.js's spawn fallback id) NOW that every const/helper
+// it touches is defined. sidebarReady is still false here, so setActiveTab skips the sidebar refresh; the
+// async loader below does workspaces + sessions once. (term/fit resolve; the foreground pty starts fitted.)
+makeTab('main', null, '');
+setActiveTab('main');
 sidebarReady = true;   // the sessions/workspace section is now fully initialized — tab switches may refresh the sidebar
 (async () => { await refreshWorkspaces(); refreshSessions(); renderTabStrip(); })();   // load workspaces first, then this workspace's conversations
 
