@@ -1370,12 +1370,56 @@ function renderWsChips() {
       ed.addEventListener('click', (e) => { e.stopPropagation(); startWsEdit(chip, nm, w); });
       chip.appendChild(ed);
     }
-    chip.addEventListener('click', () => switchWorkspace(w.id));
+    chip.dataset.id = w.id;
+    chip.addEventListener('pointerdown', (e) => onWsPointerDown(e, chip, w));
+    chip.addEventListener('pointermove', onWsPointerMove);
+    chip.addEventListener('pointerup', onWsPointerUp);
+    chip.addEventListener('pointercancel', onWsPointerUp);
+    chip.addEventListener('contextmenu', (e) => {
+      if (w.kind === 'legacy') return;                     // the default workspace isn't deletable
+      e.preventDefault(); e.stopPropagation();
+      if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
+    });
     el.appendChild(chip);
   });
   // name the active workspace in the SESSIONS header so the two-level relationship is unmistakable
   const aw = workspaces.find((w) => w.id === activeWsId);
   const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
+}
+// workspace drag-reorder (mirrors session rows) + right-click delete
+let wsdrag = null;
+function onWsPointerDown(e, chip, w) {
+  if (e.button !== 0) return;
+  if (e.target.closest('button') || chip.querySelector('.ws-rename')) return;   // child controls / mid-rename
+  wsdrag = { id: w.id, chip, startY: e.clientY, moved: false, pid: e.pointerId };
+  try { chip.setPointerCapture(e.pointerId); } catch {}
+}
+function onWsPointerMove(e) {
+  if (!wsdrag) return;
+  if (!wsdrag.moved) { if (Math.abs(e.clientY - wsdrag.startY) < 5) return; wsdrag.moved = true; wsdrag.chip.classList.add('dragging'); }
+  const el = $('ws-chips'); if (!el) return;
+  const chips = Array.prototype.slice.call(el.querySelectorAll('.ws-chip')).filter((c) => c !== wsdrag.chip);
+  let before = null;
+  for (let i = 0; i < chips.length; i++) { const r = chips[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { before = chips[i]; break; } }
+  if (before) el.insertBefore(wsdrag.chip, before); else el.appendChild(wsdrag.chip);
+}
+function onWsPointerUp() {
+  if (!wsdrag) return;
+  const d = wsdrag; wsdrag = null;
+  try { d.chip.releasePointerCapture(d.pid); } catch {}
+  d.chip.classList.remove('dragging');
+  if (d.moved) {
+    const order = Array.prototype.slice.call($('ws-chips').querySelectorAll('.ws-chip')).map((c) => c.dataset.id);
+    workspaces.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));   // keep the local array in sync with the DOM order
+    claudible.workspaceReorder(order).catch(() => {});
+  } else {
+    switchWorkspace(d.id);                                                  // plain click → switch workspace
+  }
+}
+async function deleteWorkspace(w) {
+  let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
+  if (r && r.ok) { if (r.activeId) activeWsId = r.activeId; await refreshWorkspaces(); refreshSessions(); }
+  else toast((r && r.error) || 'delete failed');
 }
 // ---- git push / pull: clicking a menu item writes the command into the live terminal (like the cmd bar) ----
 function openGitMenu() {

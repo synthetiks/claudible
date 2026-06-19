@@ -540,6 +540,34 @@ ipcMain.handle('workspace:rename', (e, payload) => {
   syncShare();
   return { ok: true, label };
 });
+// Delete a workspace: soft-delete its folder (recoverable) + drop it from the registry. Never 'legacy'.
+ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
+  const ws = registry.workspaces.find((w) => w.id === id);
+  if (!ws || ws.id === 'legacy') return resolve({ ok: false, error: 'cannot delete this workspace' });
+  const fallback = registry.workspaces.find((w) => w.id === 'legacy') || registry.workspaces.find((w) => w.id !== id);
+  const fgWasHere = !!(fgRec() && fgRec().ws && fgRec().ws.id === id);
+  for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id) rec.ws = fallback; }   // repoint any tab inside it
+  if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
+  registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
+  saveRegistry(); syncShare();
+  if (fgWasHere) { try { respawnPty(fgTabId, ''); } catch {} try { win && win.webContents.send('workspace:active-changed', registry.activeId); } catch {} }
+  const finish = () => resolve({ ok: true, activeId: registry.activeId });
+  const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (APPDIR_WSL && slug && (ws.kind === 'local' || ws.kind === 'repo')) {
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/delete-workspace.sh' '${ws.kind}' '${slug}'`],
+      { encoding: 'utf8', timeout: 20000 }, finish);
+  } else finish();
+}));
+// Reorder the workspace chips (drag). Accepts the new id order; any ids not listed keep their place at the end.
+ipcMain.handle('workspace:reorder', (e, ids) => {
+  if (!Array.isArray(ids)) return { ok: false };
+  const byId = new Map(registry.workspaces.map((w) => [w.id, w]));
+  const next = [];
+  ids.forEach((id) => { const w = byId.get(id); if (w) { next.push(w); byId.delete(id); } });
+  for (const w of byId.values()) next.push(w);
+  registry.workspaces = next; saveRegistry();
+  return { ok: true };
+});
 // Default reasoning effort — persisted in the registry, applied to every new session via buildBoot (CLAUDIBLE_EFFORT).
 ipcMain.handle('effort:get', () => registry.effort || '');
 ipcMain.handle('effort:set', (e, level) => {
