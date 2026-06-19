@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# Claudible — sync a repo workspace's Claude conversations between collaborators over GitHub.
+#
+# WHY a separate worktree + orphan branch:
+#   Claude's transcripts live OUTSIDE the repo at ~/.claude/projects/<encoded cwd>/<id>.jsonl, and the
+#   encoded dir name is derived from $HOME (so it differs per machine/user). We therefore COPY the bare
+#   <id>.jsonl files into a dedicated git branch and, on the other side, copy them back into THAT machine's
+#   own encoded projects dir. The branch is an ORPHAN branch (claudible/sessions) checked out in a SEPARATE
+#   worktree (~/.claudible/sessions-sync/<slug>), so syncing it NEVER touches the user's code working tree
+#   (~/.claudible/repos/<slug>) or main's history — a background pull can't disturb the live session's files.
+#
+# WHY per-author dirs:
+#   Each install writes ONLY to sessions/<my-github-login>/<id>.jsonl. Two collaborators therefore never
+#   touch the same path, so the branch ALWAYS merges with disjoint paths — no git conflicts in the normal
+#   case. Same-id divergence (someone resumed someone else's session) is contained on IMPORT, not by git.
+#
+# Subcommands ($1): init | push | pull | sync | status   (sync = pull then push)
+# Env: CLAUDIBLE_WS_KIND=repo, CLAUDIBLE_WS_SLUG=<slug>, CLAUDIBLE_LIVE_SESSION=<id-to-skip-on-push|''>
+# Emits ONE JSON line on stdout for the renderer; all git chatter is muted.
+set -u
+
+emit() { printf '%s\n' "$1"; }
+fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
+
+op="${1:-status}"
+case "$op" in init|push|pull|sync|status) ;; *) fail "bad op" ;; esac
+
+# --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
+WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
+WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
+case "$WS_SLUG" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad workspace" ;; esac
+[ "$WS_KIND" = "repo" ] || fail "sync is only available for repo workspaces"
+
+SDIR="$HOME/.claudible/repos/$WS_SLUG"               # the code working tree (the user's clone)
+[ -d "$SDIR/.git" ] || fail "repo workspace not found"
+
+# Same encoder Claude uses (must match session.sh exactly): EVERY non-alphanumeric char in the absolute
+# cwd path -> a single '-'. This is recomputed locally on each machine, so the per-machine dir is correct.
+PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+
+# Trust boundary: a session is TRUSTED (may run under --dangerously-skip-permissions) ONLY if it was
+# created locally by Claude here. The moment ANY content is copied in from the shared branch, the id is
+# recorded here as foreign — permanently. We key trust on this, NOT on the sessions/<login>/ dir name,
+# because any push-access collaborator can write to ANY author dir (including one named after you), so the
+# dir name is attacker-controlled and cannot be a trust signal. session.sh consults this same file.
+FSET="$PROJ/.claudible-foreign"
+mark_foreign() { grep -qxF -- "$1" "$FSET" 2>/dev/null || printf '%s\n' "$1" >> "$FSET"; }
+# Install a branch transcript so it is ONLY ever visible in final, already-foreign, already-aged form:
+# record foreign FIRST, copy to a temp, age the temp, then atomically rename into place. This closes the
+# TOCTOU window in which a concurrently-spawned session.sh could observe a trusted, current-mtime
+# collaborator file at $dest and resume it under --dangerously-skip-permissions (RCE).
+import_file() {   # $1=src  $2=dest  $3=id
+  mark_foreign "$3" || return 1   # if we can't record it as foreign, DO NOT place it — never import an unflagged (would-be-trusted) transcript
+  cp -f "$1" "$2.cltmp" 2>/dev/null || return 1
+  touch -d '2000-01-01T00:00:00' "$2.cltmp" 2>/dev/null
+  mv -f "$2.cltmp" "$2" 2>/dev/null
+}
+
+WT="$HOME/.claudible/sessions-sync/$WS_SLUG"         # the isolated sessions worktree
+BR="claudible/sessions"                              # the orphan branch sessions ride on
+LIVE="${CLAUDIBLE_LIVE_SESSION:-}"
+case "$LIVE" in *[!A-Za-z0-9-]*) LIVE="" ;; esac     # only a clean id can name the live session
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed in WSL"
+author="$(gh api user --jq .login 2>/dev/null)"
+case "$author" in '' | *[!A-Za-z0-9-]*) fail "gh is not authenticated — run: gh auth login" ;; esac
+
+# git in the worktree with a stable identity (the user may not have configured git globally), no editor.
+gitwt() { GIT_EDITOR=true git -C "$WT" -c user.name="$author" -c user.email="$author@users.noreply.github.com" "$@"; }
+
+# --- ensure the sessions worktree exists and tracks origin/claudible/sessions -----------------------------
+ensure_worktree() {
+  if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Heal a partially-checked-out worktree so a later `add` can't stage missing files as deletions.
+    [ -n "$(git -C "$WT" ls-files -d 2>/dev/null)" ] && git -C "$WT" checkout-index -f -a >/dev/null 2>&1
+    return 0
+  fi
+  # A stale path (e.g. the worktree was pruned) must be cleared or `worktree add` refuses.
+  rm -rf "$WT" 2>/dev/null
+  git -C "$SDIR" worktree prune >/dev/null 2>&1
+  mkdir -p "$(dirname "$WT")" 2>/dev/null
+  git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
+  if git -C "$SDIR" show-ref --verify --quiet "refs/remotes/origin/$BR"; then
+    # Remote branch exists → attach a worktree. If a local branch already exists (possibly with unpushed
+    # self-healing commits), attach it as-is and let pull_branch merge origin in; only create-from-origin
+    # when there is no local branch, so we never force-reset away local commits.
+    if git -C "$SDIR" show-ref --verify --quiet "refs/heads/$BR"; then
+      git -C "$SDIR" worktree add "$WT" "$BR" >/dev/null 2>&1 || return 1
+    else
+      git -C "$SDIR" worktree add -B "$BR" "$WT" "origin/$BR" >/dev/null 2>&1 || return 1
+    fi
+    return 0
+  fi
+  # Remote branch does NOT exist → create a true orphan (no shared history with main) via plumbing,
+  # which is cleaner and more version-robust than `checkout --orphan` inside a fresh worktree.
+  local empty_tree root
+  empty_tree="$(git -C "$SDIR" hash-object -w -t tree /dev/null 2>/dev/null)"
+  [ -n "$empty_tree" ] || return 1
+  root="$(git -C "$SDIR" -c user.name="$author" -c user.email="$author@users.noreply.github.com" \
+            commit-tree "$empty_tree" -m "claudible: init sessions branch" 2>/dev/null)"
+  [ -n "$root" ] || return 1
+  git -C "$SDIR" branch "$BR" "$root" >/dev/null 2>&1
+  git -C "$SDIR" worktree add "$WT" "$BR" >/dev/null 2>&1 || return 1
+  printf 'sessions/**/*.jsonl binary\n' > "$WT/.gitattributes"   # 'binary' = -text -diff -merge (a real macro; merge=binary names an unconfigured driver and is a no-op)
+  mkdir -p "$WT/sessions" 2>/dev/null; : > "$WT/sessions/.gitkeep"
+  gitwt add -A >/dev/null 2>&1
+  gitwt commit -m "claudible: init sessions branch" >/dev/null 2>&1
+  if ! gitwt push -u origin "$BR" >/dev/null 2>&1; then
+    # Race: a collaborator created the branch first → adopt theirs (our empty init is discardable).
+    git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
+    gitwt reset --hard "origin/$BR" >/dev/null 2>&1
+    gitwt branch --set-upstream-to="origin/$BR" "$BR" >/dev/null 2>&1
+  fi
+  return 0
+}
+
+# Pull remote sessions into the worktree. Disjoint per-author paths => clean auto-merge, never a conflict.
+pull_branch() {
+  git -C "$WT" fetch origin "$BR" >/dev/null 2>&1 || return 1
+  git -C "$WT" show-ref --verify --quiet "refs/remotes/origin/$BR" || return 0   # nothing pushed yet
+  gitwt merge --no-edit "origin/$BR" >/dev/null 2>&1 && return 0
+  # A conflict should not happen (disjoint per-author paths) but must NEVER wedge sync — pull_branch is the
+  # first gate of every op. Origin wins; our OWN session content is re-derived from $PROJ on the next
+  # export, so reset loses nothing real. This self-heals the one-account-two-machines same-id case.
+  gitwt merge --abort >/dev/null 2>&1
+  gitwt reset --hard "origin/$BR" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# Import every transcript from the branch into THIS machine's encoded projects dir.
+#  - new id           -> copy in
+#  - remote extends local (append-only fast-forward) -> update in place
+#  - genuinely diverged (same id edited on both sides) -> SKIP and flag (no silent overwrite, no risky
+#    rename: resuming a renamed transcript is unverified, so v1 stays safe and surfaces the conflict)
+# SECURITY: transcripts from ANOTHER author dir are untrusted. We (a) record their ids in a sidecar so
+# session.sh resumes them sandboxed and never auto-opens them, and (b) age their mtime into the past so
+# the most-recent-local heuristic can never select one. A basic JSONL sanity check rejects junk files.
+import_sessions() {
+  mkdir -p "$PROJ" 2>/dev/null
+  IMPORTED=0; UPDATED=0; DIVERGED=0
+  [ -d "$WT/sessions" ] || return 0
+  local f id dest dsz
+  for f in "$WT"/sessions/*/*.jsonl; do
+    [ -e "$f" ] || continue
+    id="$(basename "$f" .jsonl)"
+    case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac  # reject leading/trailing-dash ids (argv tricks)
+    head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
+    dest="$PROJ/$id.jsonl"
+    if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
+      import_file "$f" "$dest" "$id" && IMPORTED=$((IMPORTED+1)); continue
+    fi
+    cmp -s "$f" "$dest" && continue                                 # identical → leave trust status unchanged
+    dsz="$(wc -c < "$dest" 2>/dev/null || echo 0)"
+    if [ "$(wc -c < "$f")" -gt "$dsz" ] && head -c "$dsz" "$f" | cmp -s - "$dest"; then
+      import_file "$f" "$dest" "$id" && UPDATED=$((UPDATED+1))       # remote = local + more turns → ff (now foreign)
+    elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
+      :                                                             # local is ahead of remote → our push handles it
+    else
+      DIVERGED=$((DIVERGED+1))                                      # true fork → leave local untouched, flag it
+    fi
+  done
+  return 0
+}
+
+# Copy this machine's transcripts into our own author dir. Skips: the live session, and any session that
+# ORIGINATED elsewhere (already present under another author on the branch) — we never re-publish an
+# imported session under our own name, so attribution and the disjoint-path invariant both hold.
+export_sessions() {
+  mkdir -p "$WT/sessions/$author" 2>/dev/null
+  PUSHED=0
+  local f id dest m age
+  for f in "$PROJ"/*.jsonl; do
+    [ -e "$f" ] || continue
+    id="$(basename "$f" .jsonl)"
+    case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac
+    [ "$id" = "$LIVE" ] && continue                                  # never sync the currently-live session
+    grep -qxF -- "$id" "$FSET" 2>/dev/null && continue              # imported (foreign) → never republish under our name
+    m="$(stat -c %Y "$f" 2>/dev/null || echo 0)"; age=$(( $(date +%s) - m ))   # torn-write guard: skip a file still
+    [ "$age" -ge 0 ] && [ "$age" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ] && continue   # being written (~2s); ignore future mtimes (clock skew)
+    dest="$WT/sessions/$author/$id.jsonl"
+    if ! cmp -s "$f" "$dest" 2>/dev/null; then cp -f "$f" "$dest" 2>/dev/null && PUSHED=$((PUSHED+1)); fi
+  done
+  return 0
+}
+
+# Commit staged session changes and push, retrying once through a fetch+merge on a non-ff rejection.
+commit_and_push() {
+  gitwt add --ignore-removal -- . >/dev/null 2>&1   # never propagate deletions (a partial checkout must not delete others' sessions)
+  if ! gitwt diff --cached --quiet >/dev/null 2>&1; then
+    gitwt commit -m "claudible: sync sessions ($author)" >/dev/null 2>&1
+  fi
+  local i
+  for i in 1 2 3; do
+    gitwt push origin "$BR" >/dev/null 2>&1 && return 0
+    git -C "$WT" rev-parse "@{upstream}" >/dev/null 2>&1 || gitwt branch --set-upstream-to="origin/$BR" "$BR" >/dev/null 2>&1
+    pull_branch || return 1                                          # integrate the new remote tip, then retry
+  done
+  return 1
+}
+
+count_synced() { ls "$WT"/sessions/*/*.jsonl 2>/dev/null | wc -l | tr -d ' '; }
+
+case "$op" in
+  init)
+    ensure_worktree || fail "could not set up the sessions branch"
+    emit "{\"ok\":true,\"op\":\"init\",\"synced\":$(count_synced)}"
+    ;;
+  pull)
+    ensure_worktree || fail "could not set up the sessions branch"
+    pull_branch || fail "pull failed"
+    import_sessions
+    emit "{\"ok\":true,\"op\":\"pull\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED}"
+    ;;
+  push)
+    ensure_worktree || fail "could not set up the sessions branch"
+    pull_branch || fail "pull failed"
+    export_sessions
+    commit_and_push || fail "push failed (no access, or network)"
+    emit "{\"ok\":true,\"op\":\"push\",\"pushed\":$PUSHED}"
+    ;;
+  sync)
+    ensure_worktree || fail "could not set up the sessions branch"
+    pull_branch || fail "pull failed"
+    import_sessions
+    export_sessions
+    commit_and_push || fail "push failed (no access, or network)"
+    emit "{\"ok\":true,\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"pushed\":$PUSHED}"
+    ;;
+  status)
+    if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      emit "{\"ok\":true,\"op\":\"status\",\"ready\":true,\"synced\":$(count_synced)}"
+    else
+      emit "{\"ok\":true,\"op\":\"status\",\"ready\":false,\"synced\":0}"
+    fi
+    ;;
+esac

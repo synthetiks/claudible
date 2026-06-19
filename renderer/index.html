@@ -342,13 +342,17 @@
     .ws-chip.active .ws-ico{color:var(--live-soft)}
     .ws-chip .ws-name{font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ws-chip .ws-kind{margin-left:auto;font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);flex:none}
-    /* per-chip actions: share toggle (grant to guests) + repo collaborator invite */
-    .ws-chip .ws-share,.ws-chip .ws-invite{width:auto;padding:3px;border:1px solid transparent;border-radius:6px;
+    /* per-chip actions: share toggle (grant to guests) + repo collaborator invite + sessions sync */
+    .ws-chip .ws-share,.ws-chip .ws-invite,.ws-chip .ws-sync{width:auto;padding:3px;border:1px solid transparent;border-radius:6px;
       background:none;color:var(--ink-faint);cursor:pointer;display:flex;box-shadow:none;flex:none;transition:all .15s}
     .ws-chip .ws-share{margin-left:auto}                    /* push actions to the right edge of the chip */
-    .ws-chip .ws-share svg,.ws-chip .ws-invite svg{width:13px;height:13px;display:block}
+    .ws-chip .ws-share svg,.ws-chip .ws-invite svg,.ws-chip .ws-sync svg{width:13px;height:13px;display:block}
     .ws-chip.shared .ws-share{color:#5fb487}               /* green eye = currently shared with guests */
-    .ws-chip .ws-share:hover,.ws-chip .ws-invite:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    .ws-chip .ws-sync.on{color:#6aa6e0}                    /* blue cloud = sessions sync is on */
+    .ws-chip .ws-sync.syncing{color:#6aa6e0;animation:ws-sync-pulse 1s ease-in-out infinite}
+    .ws-chip .ws-sync.err{color:#d2685f}
+    @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+    .ws-chip .ws-share:hover,.ws-chip .ws-invite:hover,.ws-chip .ws-sync:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .invite-repo{color:var(--silver)}
     /* new-workspace chooser (reuses the .approve overlay shell) */
     .choice-row{display:flex;flex-direction:column;gap:9px;margin:4px 0 14px;text-align:left}
@@ -657,6 +661,17 @@
       <div class="row">
         <button id="invite-go">Send invite</button>
         <button id="invite-cancel" class="ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <div class="approve" id="sync-modal">
+    <div class="box">
+      <h3>Share sessions with collaborators</h3>
+      <p>Turn on shared sessions for <b class="invite-repo" id="sync-repo"></b>. Everyone with push access to this repo will then see and can resume the same conversations, and yours sync automatically. <b>Heads up:</b> this commits your transcripts — including anything Claude read during them (file contents, secrets, command output) — into the private repo's history. It stays on until you turn it off.</p>
+      <div class="ws-busy" id="sync-busy"></div>
+      <div class="row">
+        <button id="sync-go">Turn on sharing</button>
+        <button id="sync-cancel" class="ghost">Cancel</button>
       </div>
     </div>
   </div>

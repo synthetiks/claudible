@@ -47,11 +47,13 @@ case "$kind" in
     # Keep Claude's runtime + transcripts OUT of the repo (no committed secrets), then push that rule up.
     printf '.claude/\n' > "$dir/.gitignore"
     mkdir -p "$dir/.claude" 2>/dev/null
+    # A committed marker so a collaborator's Claudible can DISCOVER this repo as a workspace (sessions-discover.sh).
+    printf '{"claudible":true,"slug":"%s"}\n' "$slug" > "$dir/.claudible-workspace"
     (
       cd "$dir" || exit 0
-      git add .gitignore >/dev/null 2>&1
+      git add .gitignore .claudible-workspace >/dev/null 2>&1
       git -c user.name="$owner" -c user.email="$owner@users.noreply.github.com" \
-          commit -m "claudible: ignore .claude runtime" >/dev/null 2>&1
+          commit -m "claudible: ignore .claude runtime + mark workspace" >/dev/null 2>&1
       git push >/dev/null 2>&1
     )
     printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' \

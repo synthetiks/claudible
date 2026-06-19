@@ -941,6 +941,8 @@ const WS_REPO_SVG = '<svg class="ws-ico" viewBox="0 0 24 24" fill="none" stroke=
 const EYE_ON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 const PERSON_ADD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>';
+const CLOUD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
+const wsSyncState = {};   // ws id -> { status:'syncing'|'idle'|'error', synced, diverged } (live, from main)
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
   el.innerHTML = '';
@@ -957,13 +959,24 @@ function renderWsChips() {
     sh.innerHTML = w.shared ? EYE_ON_SVG : EYE_OFF_SVG;
     sh.addEventListener('click', (e) => { e.stopPropagation(); toggleShared(w); });
     chip.appendChild(sh);
-    // repo collaborator invite (repo workspaces only)
+    // repo workspaces: collaborator invite + sessions-sync toggle/button
     if (w.kind === 'repo') {
       const iv = document.createElement('button');
       iv.className = 'ws-invite'; iv.title = 'Invite a GitHub collaborator';
       iv.innerHTML = PERSON_ADD_SVG;
       iv.addEventListener('click', (e) => { e.stopPropagation(); openInviteModal(w); });
       chip.appendChild(iv);
+      // sessions sync: dim cloud = private (click to turn on); blue = on (click to sync now); pulse = syncing
+      const st = wsSyncState[w.id] || {};
+      const sy = document.createElement('button');
+      sy.className = 'ws-sync' + (w.syncSessions ? ' on' : '') + (st.status === 'syncing' ? ' syncing' : '') + (st.status === 'error' ? ' err' : '');
+      sy.innerHTML = CLOUD_SVG;
+      sy.title = w.syncSessions
+        ? ('Shared sessions ON' + (st.synced != null ? ' · ' + st.synced + ' synced' : '') + (st.diverged ? ' · ' + st.diverged + ' need attention' : '') + ' — click to sync now, right-click to stop sharing')
+        : 'Sessions are private — click to share them with collaborators';
+      sy.addEventListener('click', (e) => { e.stopPropagation(); w.syncSessions ? triggerSyncNow(w) : openSyncModal(w); });
+      sy.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); if (w.syncSessions) disableSync(w); });
+      chip.appendChild(sy);
     }
     chip.addEventListener('click', () => switchWorkspace(w.id));
     el.appendChild(chip);
@@ -995,6 +1008,35 @@ async function doInvite() {
   $('invite-go').disabled = false;
   if (r && r.ok) busy.textContent = '✓ invited ' + u + ' — they need to accept on GitHub';
   else { busy.textContent = (r && r.error) || 'invite failed'; busy.classList.add('err'); }
+}
+// sessions sync: manual "sync now" (when already on); state arrives via the sync:state event from main.
+async function triggerSyncNow(w) {
+  wsSyncState[w.id] = Object.assign({}, wsSyncState[w.id], { status: 'syncing' }); renderWsChips();
+  let r = null; try { r = await claudible.syncNow(w.id); } catch {}
+  if (r && !r.ok && r.error !== 'busy') { wsSyncState[w.id] = { status: 'error' }; renderWsChips(); }
+}
+// turn sharing OFF (right-click the cloud) — stops publishing; already-committed history stays in the repo
+async function disableSync(w) {
+  let r = null; try { r = await claudible.syncSetEnabled(w.id, false); } catch {}
+  if (r && r.ok) { w.syncSessions = false; delete wsSyncState[w.id]; renderWsChips(); }
+}
+// one-time consent modal before turning sharing on (it commits transcripts to the repo)
+let syncWs = null;
+function openSyncModal(w) {
+  syncWs = w;
+  $('sync-repo').textContent = w.owner ? (w.owner + '/' + w.slug) : w.slug;
+  $('sync-busy').textContent = ''; $('sync-busy').classList.remove('err'); $('sync-go').disabled = false;
+  $('sync-modal').classList.add('show');
+}
+function closeSyncModal() { $('sync-modal').classList.remove('show'); syncWs = null; }
+async function confirmSync() {
+  if (!syncWs || $('sync-go').disabled) return;
+  const w = syncWs, busy = $('sync-busy');
+  busy.classList.remove('err'); busy.textContent = 'setting up sharing…'; $('sync-go').disabled = true;
+  let r = null; try { r = await claudible.syncSetEnabled(w.id, true); } catch {}
+  $('sync-go').disabled = false;
+  if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); }
+  else { busy.textContent = (r && r.error) || 'could not turn on sharing'; busy.classList.add('err'); }
 }
 async function refreshWorkspaces() {
   let r = null; try { r = await claudible.workspaceList(); } catch {}
@@ -1052,6 +1094,19 @@ $('ws-name-in').addEventListener('keydown', (e) => {
 });
 $('invite-go').addEventListener('click', doInvite);
 $('invite-cancel').addEventListener('click', closeInviteModal);
+$('sync-go').addEventListener('click', confirmSync);
+$('sync-cancel').addEventListener('click', closeSyncModal);
+// live sync state from main → repaint the cloud button; refresh the switcher when sessions changed
+claudible.onSyncState((s) => {
+  if (!s || !s.id) return;
+  const u = { status: s.status };                 // merge so a 'syncing' tick doesn't wipe the last counts
+  if (s.synced != null) u.synced = s.synced;
+  if (s.diverged != null) u.diverged = s.diverged;
+  wsSyncState[s.id] = Object.assign({}, wsSyncState[s.id], u);
+  renderWsChips();
+});
+claudible.onSyncChanged((s) => { if (s && s.id === activeWsId) refreshSessions(); });
+claudible.onWorkspaceAdded(() => { refreshWorkspaces(); });
 $('invite-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); doInvite(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeInviteModal(); }

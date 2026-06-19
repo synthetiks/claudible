@@ -74,32 +74,55 @@ cd "$SDIR"
 # keeps the check de-hardcoded. The char class must match Claude's encoder exactly: it maps EVERY
 # non-alphanumeric char (incl. '_', spaces, etc. — not just '/' and '.') to a single '-'.
 PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+# SECURITY: Claudible runs Claude with --dangerously-skip-permissions for frictionless local use. But a
+# transcript synced from a collaborator is UNTRUSTED input — resuming it with approvals disabled would let
+# its contents drive tool execution (RCE) with full $HOME access. So a foreign session resumes in NORMAL
+# approval-prompting mode (and without --add-dir "$HOME"), and is NEVER auto-resumed — only opened by an
+# explicit user choice in the switcher. sessions-sync.sh records foreign ids in this sidecar on import.
+FOREIGN_LIST="$PROJ/.claudible-foreign"
+is_foreign() { [ -f "$FOREIGN_LIST" ] && grep -qxF -- "$1" "$FOREIGN_LIST"; }
+resume_one() {   # $1 = session id — trusted (own) runs skip-permissions; foreign runs sandboxed (prompts)
+  if is_foreign "$1"; then
+    echo "[claudible] opening a collaborator's session — Claude will ask before running tools."
+    claude --resume "$1"
+  else
+    claude --dangerously-skip-permissions --resume "$1" --add-dir "$HOME"
+  fi
+}
 FRESH=(claude --dangerously-skip-permissions --add-dir "$HOME")
 # The app's session switcher passes a choice in CLAUDIBLE_SESSION: 'new' (fresh), a specific
-# <session-id> (resume exactly that), or empty (default = resume most recent — the original behavior).
+# <session-id> (resume exactly that), or empty (default = resume most-recent LOCAL conversation).
 SEL="${CLAUDIBLE_SESSION:-}"
+case "$SEL" in -*) SEL="" ;; esac          # a dash-prefixed id could be read as a claude flag — ignore it
 
 if [ "$SEL" = "new" ]; then
   exec "${FRESH[@]}"
 fi
 
 if [ -n "$SEL" ]; then
-  # Resume a SPECIFIC session picked in the switcher (same fast-exit fallback as the default path).
+  # Resume the SPECIFIC session picked in the switcher. Some Claude builds refuse to resume a given
+  # session (e.g. one that ended mid-tool-call) and exit IMMEDIATELY rather than opening the TUI; a real
+  # resumed session blocks until quit, so a return in under ~4s means resume failed → fall back to fresh.
   START=$(date +%s)
-  claude --dangerously-skip-permissions --resume "$SEL" --add-dir "$HOME"
+  resume_one "$SEL"
   [ $(( $(date +%s) - START )) -ge 4 ] && exit 0
   echo "[claudible] couldn't resume that session — starting a fresh one."
   exec "${FRESH[@]}"
 fi
 
-if ls "$PROJ"/*.jsonl >/dev/null 2>&1; then
-  # Default: resume the previous conversation. Some Claude builds refuse to resume a given session
-  # (e.g. one that ended mid-tool-call) — they print an error and exit IMMEDIATELY instead of opening
-  # the interactive TUI. A real resumed session blocks until you quit it, so a return after only a
-  # couple of seconds means resume failed; fall back to a fresh session so the terminal is never left
-  # dead. (Run un-exec'd precisely so we can detect that fast exit.)
+# Default (no explicit selection): resume the most-recent LOCALLY-AUTHORED conversation, chosen by id
+# (newest mtime, skipping foreign ids) instead of --continue — so a synced collaborator session can never
+# be auto-opened, and never auto-run under --dangerously-skip-permissions.
+LATEST=""
+while IFS= read -r f; do
+  cand="$(basename "$f" .jsonl)"
+  case "$cand" in -*) continue ;; esac
+  is_foreign "$cand" && continue
+  LATEST="$cand"; break
+done < <(ls -1t "$PROJ"/*.jsonl 2>/dev/null)
+if [ -n "$LATEST" ]; then
   START=$(date +%s)
-  claude --dangerously-skip-permissions --continue --add-dir "$HOME"
+  claude --dangerously-skip-permissions --resume "$LATEST" --add-dir "$HOME"
   [ $(( $(date +%s) - START )) -ge 4 ] && exit 0   # resumed and used, then quit normally — done
   echo "[claudible] couldn't resume the previous conversation — starting a fresh one."
 fi

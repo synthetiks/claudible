@@ -5,7 +5,7 @@
 //  • reads runtime/status.json (session tracker) + runtime/hooks.ndjson (Claude hook events)
 //    from the WINDOWS FS natively (no flaky 9P watch)
 //  • STT/TTS fetches run here (no renderer CORS)
-const { app, BrowserWindow, ipcMain, session, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
@@ -26,6 +26,7 @@ const share = createShareServer({
   onSwitchWorkspace: (id) => {
     const ws = registry.workspaces.find((w) => w.id === id && w.shared);
     if (!ws) return;                                                   // only granted workspaces are switchable
+    openGen++;                                                         // supersede any in-flight workspace:open clone
     activeWorkspace = ws; registry.activeId = id; saveRegistry();
     respawnPty('');                                                    // resume the most-recent conversation in that cwd
     try { win && win.webContents.send('workspace:active-changed', id); } catch {}
@@ -56,7 +57,7 @@ function wsEnv(ws) {
 }
 function buildBoot(session, ws) {
   if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
-  const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '');
+  const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
   const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + wsEnv(ws) + ' ';
   return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
 }
@@ -104,6 +105,7 @@ function createWindow() {
     icon: path.join(__dirname, 'assets', 'claudible.ico'),   // window + taskbar branding (the headphones/mic guy)
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
+  Menu.setApplicationMenu(null);   // no default menu → no View>Reload/Force-Reload that would re-init pollers & corrupt the hook stream
   // Grant ONLY the microphone (needed for push-to-talk); deny every other permission request.
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media'));
   // Lock the window down: it only ever loads our local renderer. Block navigation away and any
@@ -111,11 +113,14 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.loadFile('renderer/index.html');
-  win.webContents.on('did-finish-load', () => {
+  win.webContents.once('did-finish-load', () => {   // one-shot, scoped to this contents: a reload won't stack a 2nd set of pollers/timers
     startVoiceServices();   // idempotent; ensures STT/TTS are up even when launched via `npm start`
     pollStatus(); pollHooks();
     // spawn-on-size fallback: if the renderer never reports a size, start at a default
     setTimeout(() => { if (!ptyProc) spawnPty(120, 32); }, 1800);
+    startPoll();            // adaptive background session sync for the active repo workspace
+    // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
+    setTimeout(() => { discoverWorkspaces().then(syncAllEnabled); }, 3000);
   });
 }
 
@@ -147,6 +152,7 @@ function spawnPty(cols, rows) {
       if (ptyProc !== proc) return;                        // an intentional switch already replaced us
       const msg = '\r\n[claudible] session ended\r\n';
       win.webContents.send('pty:data', msg); share.broadcast(msg); share.resetRing(); ptyProc = null;
+      setGenBusy(false); schedulePush();                   // session ended → flush its transcript to collaborators
     });
   } catch (e) { win.webContents.send('pty:data', `\r\n[claudible] pty spawn failed: ${e.message}\r\n`); }
 }
@@ -166,6 +172,7 @@ function syncShare() {
 // (its guarded handlers go quiet) and respawns with the selection.
 function respawnPty(session) {
   pendingSession = session || '';
+  setGenBusy(false);                                        // a switch ends any in-flight turn for sync gating
   // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
   try { if (share.status().running) share.setPaused(!(activeWorkspace && activeWorkspace.shared)); } catch {}
   const old = ptyProc; ptyProc = null;
@@ -236,14 +243,182 @@ ipcMain.handle('session:delete', (e, id) => new Promise((resolve) => {
       try { resolve(JSON.parse((stdout || '').trim() || '{}')); } catch { resolve({ ok: true }); }
     });
 }));
+
+// ---- shared-session sync (repo workspaces) -----------------------------------------------------
+// Copy this workspace's Claude transcripts to/from collaborators over an ISOLATED orphan branch
+// (wsl/sessions-sync.sh, run in a SEPARATE git worktree) so a background pull/push never touches the
+// code working tree or main's history. Opt-in per workspace (committing transcripts is a deliberate
+// privacy choice); once on it runs automatically: a debounced push after each turn + an adaptive
+// background pull. We never sync mid-generation (genBusy) and the manual path skips the live session.
+let genBusy = false, genBusyTimer = null;     // true between UserPromptSubmit and Stop — never auto-sync then
+const syncLock = new Set();                   // ws ids with an in-flight git sync (serialize per workspace)
+const cloneInFlight = new Map();              // ws id -> in-flight clone promise (dedupe concurrent ensureClone)
+let pollDelay = 30000, openGen = 0; const SYNC_MIN = 30000, SYNC_MAX = 300000;
+const pushTimers = new Map();                 // per-workspace debounced push timers (independent across ws)
+// Track turn busy/idle with a watchdog so a missed Stop (interrupted turn) can't wedge auto-sync off forever.
+function setGenBusy(v) {
+  genBusy = v;
+  if (genBusyTimer) { clearTimeout(genBusyTimer); genBusyTimer = null; }
+  if (v) genBusyTimer = setTimeout(() => { genBusy = false; genBusyTimer = null; schedulePush(); }, 1800000); // self-heal a missed Stop after 30min (well beyond any real turn); the export <2s skip still guards torn writes
+}
+
+// op ∈ {init,pull,push,sync,status}. Resolves to the script's parsed JSON (or {ok:false,...}).
+function runSync(ws, op, opts) {
+  return new Promise((resolve) => {
+    const o = ['init', 'pull', 'push', 'sync', 'status'].includes(op) ? op : 'status';
+    if (!APPDIR_WSL || !ws || ws.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
+    const live = (opts && opts.live && /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(opts.live)) ? `CLAUDIBLE_LIVE_SESSION='${opts.live}' ` : '';
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${live}${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/sessions-sync.sh' '${o}'`],
+      { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+        if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'exec' }); }
+        try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false, error: 'parse' }); }
+      });
+  });
+}
+// Locked, state-broadcasting sync: tells the renderer 'syncing'→'idle'/'error' (status button) and asks it
+// to refresh the switcher when the active workspace gained/changed sessions. Requires sync ON + cloned.
+async function doSync(ws, op, opts) {
+  if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) return { ok: false, error: 'sync off' };
+  if (syncLock.has(ws.id)) return { ok: false, error: 'busy' };
+  syncLock.add(ws.id);
+  try { win && win.webContents.send('sync:state', { id: ws.id, status: 'syncing' }); } catch {}
+  const r = await runSync(ws, op, opts);
+  syncLock.delete(ws.id);
+  const changed = !!(r && (r.imported || r.updated || r.pushed));
+  try { win && win.webContents.send('sync:state', { id: ws.id, status: r && r.ok ? 'idle' : 'error', synced: r && r.synced, diverged: r && r.diverged }); } catch {}
+  if (changed && activeWorkspace && activeWorkspace.id === ws.id) { try { win && win.webContents.send('sync:changed', { id: ws.id }); } catch {} }
+  return r;
+}
+// Only needed to SKIP the live session during a MANUAL sync mid-turn; auto-syncs run only when idle.
+async function liveIdNow() {
+  if (!genBusy) return '';
+  try { const a = await listSessions(); return (Array.isArray(a) && a[0] && a[0].id) || ''; } catch { return ''; }
+}
+// After a turn ends (Stop) the transcript is quiesced → safe to push (incl. the current session). Debounced.
+function schedulePush() {
+  const ws = activeWorkspace;
+  if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) return;
+  const id = ws.id, prev = pushTimers.get(id); if (prev) clearTimeout(prev);
+  pushTimers.set(id, setTimeout(() => {
+    pushTimers.delete(id);
+    // a non-active workspace is always quiesced; only the active one must wait out an in-flight turn
+    if (ws.id !== (activeWorkspace && activeWorkspace.id) || !genBusy) doSync(ws, 'push', {});
+  }, 5000));
+}
+// Adaptive background pull(+push) of the ACTIVE repo workspace only, when idle; backs off when nothing changes.
+function startPoll() {
+  const tick = async () => {
+    const ws = activeWorkspace;
+    if (ws && ws.kind === 'repo' && ws.syncSessions && !ws.needsClone && !genBusy && !syncLock.has(ws.id)) {
+      const r = await doSync(ws, 'sync', {});
+      pollDelay = (r && (r.imported || r.updated || r.pushed)) ? SYNC_MIN : Math.min(SYNC_MAX, Math.round(pollDelay * 1.5));
+    }
+    setTimeout(tick, pollDelay);
+  };
+  setTimeout(tick, pollDelay);
+}
+// Hook events are also forwarded raw to the renderer; here we track turn busy/idle + push after each turn.
+function handleHook(line) {
+  let ev = ''; try { ev = JSON.parse(line).hook_event_name || ''; } catch {}
+  if (ev === 'UserPromptSubmit') setGenBusy(true);
+  else if (ev === 'Stop') { setGenBusy(false); schedulePush(); }
+}
+// Clone an existing (invited) repo workspace into ~/.claudible/repos/<slug> if it isn't local yet.
+function ensureClone(ws) {
+  if (cloneInFlight.has(ws.id)) return cloneInFlight.get(ws.id);   // a clone for this ws is already running → share it (no double gh clone into the same dir)
+  const p = new Promise((resolve) => {
+    if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+    const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+    const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!slug || !owner) return resolve({ ok: false, error: 'bad workspace' });
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/clone-workspace.sh' '${owner}' '${slug}'`],
+      { encoding: 'utf8', timeout: 300000 }, (err, stdout) => {
+        if (err) return resolve({ ok: false, error: 'clone exec' });
+        let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+        if (r.ok) { delete ws.needsClone; saveRegistry(); }
+        resolve(r.ok ? { ok: true } : { ok: false, error: r.error || 'clone failed' });
+      });
+  });
+  cloneInFlight.set(ws.id, p);
+  p.finally(() => cloneInFlight.delete(ws.id));
+  return p;
+}
+// Find repo workspaces the user was invited to and register any new ones (sync OFF + needing clone until opened).
+function discoverWorkspaces() {
+  return new Promise((resolve) => {
+    if (!APPDIR_WSL) return resolve({ ok: false, added: [] });
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/sessions-discover.sh'`],
+      { encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+        if (err) { console.error('[claudible] discover:', err.message); return resolve({ ok: false, added: [] }); }
+        let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+        const added = [];
+        for (const item of (Array.isArray(list) ? list : [])) {
+          const slug = String(item && item.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+          const owner = String(item && item.owner || '').replace(/[^A-Za-z0-9-]/g, '');
+          if (!slug || !owner) continue;
+          const wid = `repo-${slug}`;
+          if (registry.workspaces.some((w) => w.id === wid)) continue;       // already known locally
+          const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoUrl: (item && item.repoUrl) || undefined, createdAt: Date.now(), needsClone: true };
+          registry.workspaces.push(ws); added.push(ws);
+        }
+        if (added.length) { saveRegistry(); try { win && win.webContents.send('workspace:added', added.map((w) => ({ id: w.id, label: w.label }))); } catch {} }
+        resolve({ ok: true, added });
+      });
+  });
+}
+// On launch, sync every already-enabled repo workspace once so collaborators' latest sessions land.
+function syncAllEnabled() {
+  for (const ws of registry.workspaces) if (ws.kind === 'repo' && ws.syncSessions && !ws.needsClone) doSync(ws, 'sync', {});
+}
+ipcMain.handle('session:syncStatus', (e, id) => {
+  const ws = registry.workspaces.find((w) => w.id === (id || registry.activeId)) || activeWorkspace;
+  if (!ws || ws.kind !== 'repo') return { ok: true, kind: ws ? ws.kind : '', enabled: false, ready: false };
+  if (ws.needsClone) return { ok: true, kind: 'repo', enabled: false, ready: false, needsClone: true };
+  return runSync(ws, 'status', {}).then((r) => ({ ok: true, kind: 'repo', enabled: !!ws.syncSessions, ready: !!(r && r.ready), synced: (r && r.synced) || 0 }));
+});
+// Turn sync on/off for a workspace. Enabling = one-time consent to publish this workspace's transcripts;
+// it clones if needed, sets up the branch, and kicks a first sync. Disabling leaves all files in place.
+ipcMain.handle('session:syncSetEnabled', async (e, payload) => {
+  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  if (!ws || ws.kind !== 'repo') return { ok: false, error: 'not a repo workspace' };
+  const enabled = !!(payload && payload.enabled);
+  ws.syncSessions = enabled; saveRegistry();
+  if (!enabled) return { ok: true, enabled: false };
+  if (ws.needsClone) { const c = await ensureClone(ws); if (!c.ok) { ws.syncSessions = false; saveRegistry(); return { ok: false, error: c.error }; } }
+  if (syncLock.has(ws.id)) return { ok: false, error: 'busy' };
+  syncLock.add(ws.id);                          // hold the lock across init so the poll can't race the worktree setup
+  let r;
+  try { r = await runSync(ws, 'init', {}); } finally { syncLock.delete(ws.id); }
+  if (!r || !r.ok) { ws.syncSessions = false; saveRegistry(); return { ok: false, error: (r && r.error) || 'could not set up sync' }; }
+  doSync(ws, 'sync', {});                        // first real sync in the background
+  return { ok: true, enabled: true };
+});
+ipcMain.handle('session:syncNow', async (e, id) => {   // the manual "sync now" button
+  const ws = registry.workspaces.find((w) => w.id === (id || registry.activeId)) || activeWorkspace;
+  if (!ws || ws.kind !== 'repo') return { ok: false, error: 'not a repo workspace' };
+  if (!ws.syncSessions || ws.needsClone) return { ok: false, error: 'sync is off for this workspace' };
+  // only the ACTIVE workspace has a live transcript to skip; for any other, there's nothing to exclude
+  const live = (activeWorkspace && ws.id === activeWorkspace.id) ? await liveIdNow() : '';
+  return doSync(ws, 'sync', { live });
+});
+ipcMain.handle('workspace:discover', () => discoverWorkspaces());
+
 // ---- workspaces (the library a session belongs to: legacy / local folder / private repo) ----
 ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspaces: registry.workspaces }));
 // Switch the active workspace: subsequent session list/open/delete scope to its cwd; resume its latest convo.
-ipcMain.handle('workspace:open', (e, id) => {
+ipcMain.handle('workspace:open', async (e, id) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return { ok: false, error: 'unknown workspace' };
+  const myGen = ++openGen;                                         // a later open must win over a slow clone
+  if (ws.kind === 'repo' && ws.needsClone) {                       // invited workspace, not cloned yet → fetch it first
+    const c = await ensureClone(ws);
+    if (!c.ok) return { ok: false, error: c.error || 'clone failed' };
+  }
+  if (myGen !== openGen) return { ok: false, error: 'superseded' };   // a newer open started during our clone → stand down
   activeWorkspace = ws; registry.activeId = id; saveRegistry();
   respawnPty('');                                                  // '' = resume most-recent conversation in that cwd
+  pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
+  if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
   return { ok: true };
 });
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
@@ -261,6 +436,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
       // Register + switch to a workspace, then resolve. fresh=true for a brand-new one (start a fresh
       // conversation); fresh=false when re-attaching an orphan (resume whatever's in that cwd).
       const attach = (repoUrl, owner, fresh) => {
+        openGen++;                                                     // supersede any in-flight workspace:open clone
         const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
           repoUrl: repoUrl || undefined, owner: owner || undefined, createdAt: Date.now() };
         registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
@@ -331,7 +507,7 @@ function pollHooks() {
       const fd = fs.openSync(HOOKS, 'r'); const buf = Buffer.alloc(st.size - hookOffset);
       fs.readSync(fd, buf, 0, buf.length, hookOffset); fs.closeSync(fd);
       hookOffset = st.size; hookBuf += buf.toString('utf8');
-      let i; while ((i = hookBuf.indexOf('\n')) >= 0) { const l = hookBuf.slice(0, i).trim(); hookBuf = hookBuf.slice(i + 1); if (l) win.webContents.send('hook:line', l); }
+      let i; while ((i = hookBuf.indexOf('\n')) >= 0) { const l = hookBuf.slice(0, i).trim(); hookBuf = hookBuf.slice(i + 1); if (l) { handleHook(l); win.webContents.send('hook:line', l); } }
     } catch {}
   }, 80);   // poll often so a finished reply reaches the renderer (and TTS) with minimal lag
 }

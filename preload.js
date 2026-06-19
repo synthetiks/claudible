@@ -18,6 +18,14 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),
   onWorkspaceActiveChanged: (cb) => ipcRenderer.on('workspace:active-changed', (_e, id) => cb(id)),
+  // shared-session sync (repo workspaces): same sessions across collaborators, over the repo's git
+  syncStatus: (id) => ipcRenderer.invoke('session:syncStatus', id),
+  syncSetEnabled: (id, enabled) => ipcRenderer.invoke('session:syncSetEnabled', { id, enabled }),
+  syncNow: (id) => ipcRenderer.invoke('session:syncNow', id),
+  workspaceDiscover: () => ipcRenderer.invoke('workspace:discover'),
+  onSyncState: (cb) => ipcRenderer.on('sync:state', (_e, s) => cb(s)),
+  onSyncChanged: (cb) => ipcRenderer.on('sync:changed', (_e, s) => cb(s)),
+  onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
   // audio
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
