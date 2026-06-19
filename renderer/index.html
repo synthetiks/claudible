@@ -175,10 +175,6 @@
     .tab .tab-x{flex:none;width:15px;height:15px;line-height:13px;text-align:center;border:none;border-radius:4px;
       background:none;color:var(--ink-faint);font-size:14px;cursor:pointer;padding:0}
     .tab .tab-x:hover{color:var(--ink);background:#2a2e36}
-    .tab-add{flex:none;width:24px;height:24px;border:1px solid var(--hairline);border-radius:8px;cursor:pointer;
-      background:linear-gradient(180deg,#16181d,#0f1115);color:var(--ink-dim);font-size:15px;line-height:1;box-shadow:inset 0 1px 0 var(--sheen)}
-    .tab-add:hover:not(:disabled){color:var(--ink);border-color:var(--ink-faint)}
-    .tab-add:disabled{opacity:.4;cursor:default}
     /* sidebar rows already open in a tab get a subtle left accent */
     .sess.open-in-tab{border-left:2px solid var(--live)}
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
@@ -204,8 +200,8 @@
     .cmdscroll-wrap::after{right:0;background:linear-gradient(270deg,#0b0d10,transparent)}
     .cmdscroll-wrap.more-l::before{opacity:1}
     .cmdscroll-wrap.more-r::after{opacity:1}
-    /* track: 10 equal columns sized so EXACTLY 5 fit the viewport (4 inner gaps of 8px) */
-    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px) / 5);gap:8px;
+    /* track: equal columns sized so EXACTLY 6 fit the viewport (5 inner gaps of 8px = 40px) — narrower pills, more shown */
+    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 40px) / 6);gap:8px;
       overflow-x:auto;overflow-y:hidden;scrollbar-width:none;cursor:grab;touch-action:pan-x}
     .cmdscroll:active{cursor:grabbing}
     .cmdscroll::-webkit-scrollbar{height:0;width:0}
@@ -685,8 +681,13 @@
             <button class="cmdpill" data-cmd="/clear">/clear</button>
             <button class="cmdpill" data-cmd="/loop">/loop</button>
             <button class="cmdpill" data-cmd="/context">/context</button>
+            <button class="cmdpill" data-cmd="/mcp">/mcp</button>
+            <button class="cmdpill" data-cmd="/agents">/agents</button>
+            <button class="cmdpill" data-cmd="/plan">/plan</button>
             <button class="cmdpill" data-cmd="/status">/status</button>
             <button class="cmdpill" data-cmd="/resume">/resume</button>
+            <button class="cmdpill" data-cmd="/init">/init</button>
+            <button class="cmdpill" data-cmd="/review">/review</button>
             <button class="cmdpill" data-cmd="/cost">/cost</button>
             <button class="cmdpill" data-cmd="/help">/help</button>
           </div>
@@ -714,7 +715,6 @@
           <button class="collapse min" id="stt-collapse" title="show / hide last transcript">▾</button>
         </div>
         <button id="talk" class="primary" title="Click to start, click again (■ Stop) to send — it won't stop on its own. Or hold the push-to-talk key to talk and release to send.">Talk</button>
-        <div class="ptt-hint">hold <kbd id="ptt-kbd">Left&nbsp;Alt</kbd> to talk</div>
         <div class="ptt-key-row"><span>push-to-talk key</span><button id="ptt-key-btn" class="keycap-btn">Left Alt</button></div>
         <div class="out" id="stt-out"></div>
         <div class="collapsible min" id="stt-wrap">

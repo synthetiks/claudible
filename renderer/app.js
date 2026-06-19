@@ -115,25 +115,22 @@ function tabLabel(rec) {
 function renderTabStrip() {
   const strip = $('tabstrip'); if (!strip) return;
   strip.innerHTML = '';
+  // A single session needs no tab bar — a lone chip + an add "+" just duplicate the sidebar's
+  // "+ New session" (which opens a new tab). The strip appears automatically once a 2nd concurrent
+  // tab exists; chips then carry an × to close.
+  if (tabs.size <= 1) { strip.style.display = 'none'; return; }
+  strip.style.display = '';
   for (const rec of tabs.values()) {
     const chip = document.createElement('div');
     chip.className = 'tab' + (rec.tabId === activeTabId ? ' active' : '') + (rec.busy ? ' busy' : '');
     chip.title = tabLabel(rec);
     const nm = document.createElement('span'); nm.className = 'tab-name'; nm.textContent = tabLabel(rec); chip.appendChild(nm);
-    if (tabs.size > 1) {
-      const x = document.createElement('button'); x.className = 'tab-x'; x.title = 'Close tab'; x.textContent = '×';
-      x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
-      chip.appendChild(x);
-    }
+    const x = document.createElement('button'); x.className = 'tab-x'; x.title = 'Close tab'; x.textContent = '×';
+    x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
+    chip.appendChild(x);
     chip.addEventListener('click', () => setActiveTab(rec.tabId));
     strip.appendChild(chip);
   }
-  const add = document.createElement('button');
-  add.className = 'tab-add'; add.textContent = '+';
-  if (tabs.size >= MAX_TABS) { add.disabled = true; add.title = 'Tab limit reached (' + MAX_TABS + ')'; }
-  else add.title = 'New session in a new tab';
-  add.addEventListener('click', () => newBlankTab());
-  strip.appendChild(add);
 }
 // Show one tab, hide the rest. Point the global term/fit at it, fit it (NEVER fit a hidden tab), and
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
@@ -144,6 +141,7 @@ function setActiveTab(tabId) {
   term = rec.term; fit = rec.fit;
   try { claudible.tabForeground(tabId); } catch {}   // guests + main's active-workspace follow the foreground tab
   sync();                                          // fit the now-visible tab + (re)start/resize its pty
+  scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
   try { rec.term.refresh(0, rec.term.rows - 1); } catch {}   // force a repaint of the freshly-shown (was-hidden) buffer
   repaintTracker(rec);                             // project this tab's tracker into #trk-*
   renderAgents();                                  // …and its agents into the agents pane
@@ -175,6 +173,12 @@ function closeTab(tabId) {
 
 new ResizeObserver(sync).observe(termHost);
 window.addEventListener('resize', sync);
+// Re-fit after layout/fonts actually settle. A fit during boot, or right after a display:none→block tab
+// swap, can measure a stale/short size and under-count rows — leaving dead space below the terminal. Extra
+// fits are harmless (sync no-ops at <2×2 and only resizes the active tab), so schedule a couple of catch-ups.
+function scheduleFit() { requestAnimationFrame(() => requestAnimationFrame(sync)); }
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+window.addEventListener('load', scheduleFit);
 // NOTE: the first tab is seeded at the very END of this file (bootFirstTab), AFTER every const/helper it
 // transitively touches (fmtK, SWARM_SVG, …) is initialized — seeding it here would hit those in the TDZ.
 // These timers/observer are safe before then: sync()/updateScrollbar() no-op until a tab is active.
@@ -644,52 +648,52 @@ function agentRow(a, nowSec) {
   const name = document.createElement('div'); name.className = 'agent-name'; name.textContent = label; name.title = label; c.appendChild(name);
   const meta = document.createElement('div'); meta.className = 'agent-meta';
   const pre = a.type ? a.type + ' · ' : '';
+  const startSec = a.start || (a.startedAt ? a.startedAt / 1000 : null);
   let dur = '';
-  if (running) dur = a.start ? fmtDur(nowSec - a.start) : (a.startedAt ? fmtDur((Date.now() - a.startedAt) / 1000) : '');
+  if (running) dur = startSec ? fmtDur(nowSec - startSec) : '';
   else dur = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : '');
   meta.textContent = pre + (running ? 'running' : (a.ok === false ? 'error' : 'done')) + (dur ? ' · ' + dur : '');
+  if (running && startSec) { meta.dataset.start = startSec; meta.dataset.pre = pre; }   // for cheap in-place timer ticks
   c.appendChild(meta); row.appendChild(c);
   return row;
 }
+let _agentsSig = '';
 function renderAgents() {
   const el = $('agents-list'); if (!el) return;
   const at = AT();
-  const workflows = (at && at.workflows) || [];
-  const taskAgents = at ? Array.from(at.agents.values()).reverse() : [];   // newest first
-  if (!workflows.length && !taskAgents.length) {
-    el.innerHTML = '<div class="agents-empty"><span class="agents-empty-ico">' + SWARM_SVG + '</span>'
-      + 'No agents running.<br>When Claude spawns subagents or a workflow swarm, they light up here live.</div>';
+  const liveWf = ((at && at.workflows) || []).filter((w) => w.running > 0);   // ONLY swarms with a genuinely-live agent
+  const taskAgents = at ? Array.from(at.agents.values()).reverse() : [];      // hook-fed Task subagents (newest first)
+  const nowSec = Date.now() / 1000;
+  // Rebuild the DOM only when membership/status actually changes — NOT on every 1s tick. The old code did
+  // el.innerHTML='' every poll, which restarted the CSS entry animations = the "flashing". When unchanged,
+  // just advance the elapsed timers in place.
+  const sig = JSON.stringify([
+    liveWf.map((w) => [w.wf, w.running, w.agents.filter((a) => a.status === 'running').map((a) => a.id)]),
+    taskAgents.map((a) => a.desc + a.status),
+  ]);
+  if (sig === _agentsSig) {
+    el.querySelectorAll('.agent-meta[data-start]').forEach((m) => {
+      m.textContent = (m.dataset.pre || '') + 'running · ' + fmtDur(nowSec - parseFloat(m.dataset.start));
+    });
     return;
   }
-  const nowSec = Date.now() / 1000;
+  _agentsSig = sig;
+  if (!liveWf.length && !taskAgents.length) {
+    el.innerHTML = '<div class="agents-empty"><span class="agents-empty-ico">' + SWARM_SVG + '</span>'
+      + 'No agents running.<br>When Claude spawns subagents or a workflow swarm, they appear here.</div>';
+    return;
+  }
   el.innerHTML = '';
-  // workflow swarms first (newest on top) — each a card with a live progress bar
-  workflows.forEach((wf) => {
-    const card = document.createElement('div');
-    card.className = 'wf-card' + (wf.running > 0 ? ' live' : '');
-    const head = document.createElement('div'); head.className = 'wf-head';
-    const ico = document.createElement('span'); ico.className = 'wf-ico'; ico.innerHTML = SWARM_SVG; head.appendChild(ico);
-    const ht = document.createElement('div'); ht.className = 'wf-title';
-    ht.innerHTML = '<span class="wf-name">Agent swarm</span><span class="wf-sub">' + wf.total + ' agent' + (wf.total === 1 ? '' : 's') + '</span>';
-    head.appendChild(ht);
-    const cnt = document.createElement('div'); cnt.className = 'wf-count';
-    cnt.innerHTML = wf.running > 0
-      ? '<span class="wf-run">' + wf.running + ' running</span> <span class="wf-done">' + wf.done + ' done</span>'
-      : '<span class="wf-done">' + wf.done + '/' + wf.total + ' done</span>';
-    head.appendChild(cnt);
-    card.appendChild(head);
-    const bar = document.createElement('div'); bar.className = 'wf-bar';
-    const fill = document.createElement('div'); fill.className = 'wf-fill';
-    fill.style.width = Math.round(100 * (wf.total ? wf.done / wf.total : 0)) + '%';
-    bar.appendChild(fill); card.appendChild(bar);
-    const list = document.createElement('div'); list.className = 'wf-agents';
-    wf.agents.forEach((a) => list.appendChild(agentRow(a, nowSec)));
-    card.appendChild(list);
-    el.appendChild(card);
+  // Running swarm agents — a clean flat list (Claude-Code style), no progress-bar/sweep chrome.
+  liveWf.forEach((wf) => {
+    const hd = document.createElement('div'); hd.className = 'agents-section';
+    hd.textContent = 'Agent swarm · ' + wf.running + ' running' + (wf.done ? ' · ' + wf.done + ' done' : '');
+    el.appendChild(hd);
+    wf.agents.filter((a) => a.status === 'running').forEach((a) => el.appendChild(agentRow(a, nowSec)));
   });
-  // standalone Task subagents (hook-fed)
+  // Task subagents (hook-fed) — running + a short recently-done history.
   if (taskAgents.length) {
-    if (workflows.length) { const hd = document.createElement('div'); hd.className = 'agents-section'; hd.textContent = 'Task subagents'; el.appendChild(hd); }
+    if (liveWf.length) { const hd = document.createElement('div'); hd.className = 'agents-section'; hd.textContent = 'Task subagents'; el.appendChild(hd); }
     taskAgents.forEach((a) => el.appendChild(agentRow(a, nowSec)));
   }
 }

@@ -31,7 +31,8 @@ python3 - "$WF_ROOT" <<'PY' 2>/dev/null || printf '[]'
 import sys, os, json, glob, time, datetime
 root = sys.argv[1]
 now = time.time()
-RECENT = 900   # show workflows whose dir changed within 15 min, or that still have a running agent
+RECENT = 900   # prune any workflow with no file activity within this window (15 min)
+STALE = 180    # an agent with no 'result' whose transcript hasn't been written in this long = ended, not running
 
 def head_info(f):
     """Cheaply read only the head of an agent transcript: its first prompt (label) + first timestamp (start)."""
@@ -87,18 +88,25 @@ for wf in wfs[:6]:
         last = None
         try: last = int(os.path.getmtime(af))
         except Exception: pass
+        # RUNNING only if it has no 'result' AND its transcript was written recently — a swarm killed
+        # before writing results would otherwise look 'running' forever (the phantom/flashing bug).
+        is_running = (aid not in done) and (last is not None) and ((now - last) <= STALE)
         agents.append({'id': aid[:9], 'label': label or 'agent',
-                       'status': 'done' if aid in done else 'running',
+                       'status': 'running' if is_running else 'done',
                        'start': int(start) if start else None, 'last': last})
     if not agents:
         continue
     running = sum(1 for a in agents if a['status'] == 'running')
-    try: mtime = int(os.path.getmtime(wf))
-    except Exception: mtime = 0
-    if (now - mtime) > RECENT and running == 0:
-        continue   # an old, fully-finished workflow — don't clutter the live view
-    out.append({'wf': os.path.basename(wf), 'mtime': mtime,
-                'total': len(agents), 'done': len(done & set(seen)), 'running': running,
-                'agents': agents})
+    # liveness = newest of journal + every agent file (the dir mtime is frozen at creation, so it can't
+    # gauge activity). Prune anything stale REGARDLESS of a lingering 'running' flag (no escape hatch).
+    acts = [a['last'] for a in agents if a.get('last')]
+    try: acts.append(int(os.path.getmtime(jpath)))
+    except Exception: pass
+    activity = max(acts) if acts else 0
+    if (now - activity) > RECENT:
+        continue
+    out.append({'wf': os.path.basename(wf), 'mtime': activity,
+                'total': len(agents), 'done': sum(1 for a in agents if a['status'] != 'running'),
+                'running': running, 'agents': agents})
 print(json.dumps(out))
 PY
