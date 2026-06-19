@@ -574,6 +574,36 @@
     .drawer-head button{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
     .drawer-head button:hover{color:var(--ink)}
     .drawer .panel{flex:1;overflow:auto;padding:2px 16px 18px}
+    /* Diff Review panel — a wider right-side slide-in (mirrors the drawer mechanism) */
+    .diffpanel{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:540px;max-width:94vw;display:flex;flex-direction:column;
+      transform:translateX(102%);transition:transform .22s ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
+      border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
+    .diffpanel.open{transform:translateX(0)}
+    .diffpanel .drawer-head button{font-size:18px}
+    .diff-body{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+    .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}
+    .diff-sec-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 2px -2px}
+    .diff-file{border:1px solid var(--hairline);border-radius:10px;overflow:hidden;background:#0b0d10}
+    .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:#101216;border-bottom:1px solid var(--hairline)}
+    .diff-path{font-size:12px;color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}
+    .diff-counts{flex:none;font-size:10px;font-family:ui-monospace,monospace}
+    .diff-counts .add{color:#5fb487;font-style:normal}
+    .diff-counts .del{color:#d2685f;font-style:normal;margin-left:4px}
+    .diff-revert-file,.diff-revert-hunk{width:auto;flex:none;padding:3px 9px;font-size:10.5px;letter-spacing:.02em;color:var(--ink-dim);
+      background:#16181d;border:1px solid var(--hairline);border-radius:6px;cursor:pointer;box-shadow:none}
+    .diff-revert-file:hover,.diff-revert-hunk:hover{color:#fff;border-color:rgba(210,104,95,.5);background:rgba(210,104,95,.14)}
+    .diff-revert-file:disabled,.diff-revert-hunk:disabled{opacity:.45;cursor:default}
+    .diff-binary{padding:10px 12px;font-size:11px;color:var(--ink-faint)}
+    .diff-hunk{border-top:1px solid var(--hairline-soft)}
+    .diff-hunk:first-of-type{border-top:0}
+    .diff-hunk-head{display:flex;align-items:center;gap:9px;padding:5px 10px;background:#0d0f13}
+    .diff-hunk-lbl{flex:1;min-width:0;font-size:10.5px;color:#6aa6e0;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .diff-lines{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:11.5px;line-height:1.5;overflow-x:auto}
+    .diff-lines .dl{white-space:pre;padding:0 11px}
+    .diff-lines .dl.add{background:rgba(95,180,135,.12);color:#bfe6cf}
+    .diff-lines .dl.del{background:rgba(210,104,95,.12);color:#f0c3bd}
+    .diff-lines .dl.ctx{color:var(--ink-dim)}
+    .diff-lines .dl.meta{color:var(--ink-faint)}
     /* viewer chat (only shown while sharing) */
     .chat{display:none;flex-direction:column;min-height:0;background:var(--panel);
       border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
@@ -645,6 +675,7 @@
     <span class="wordmark">claudible</span>
     <div class="topbtns">
       <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
+      <button class="iconbtn" id="diff-btn" title="Review changes — what Claude changed in this repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins">⚙</button>
     </div>
     <div class="vgroup">
@@ -746,6 +777,18 @@
         <button id="chat-send">Send</button>
       </div>
     </div>
+  </div>
+
+  <!-- Diff Review panel: what Claude changed in the workspace's git repo, with per-hunk / per-file revert -->
+  <div class="drawer-scrim" id="diff-scrim"></div>
+  <div class="diffpanel" id="diffpanel" aria-hidden="true">
+    <div class="drawer-head"><span>review changes</span>
+      <span style="margin-left:auto;display:flex;gap:4px">
+        <button id="diff-refresh" title="Refresh">⟳</button>
+        <button id="diff-close" title="Close">×</button>
+      </span>
+    </div>
+    <div class="diff-body" id="diff-body"></div>
   </div>
 
   <div class="drawer-scrim" id="drawer-scrim"></div>

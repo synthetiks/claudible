@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
   sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
   exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
+  // diff review (what Claude changed in the workspace's git repo)
+  diffList: () => ipcRenderer.invoke('diff:list'),
+  diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),
+  diffDiscard: (relPath) => ipcRenderer.invoke('diff:discard', relPath),
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),

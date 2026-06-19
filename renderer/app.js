@@ -1068,6 +1068,89 @@ $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) openDrawer(false); });
 
+// ---------- Diff Review: what Claude changed in the active workspace's git repo, revert per hunk/file ----------
+function openDiff(open) {
+  const p = $('diffpanel'), s = $('diff-scrim'); if (!p) return;
+  p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
+  p.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (open) refreshDiff();
+}
+async function refreshDiff() {
+  const body = $('diff-body'); if (!body) return;
+  body.innerHTML = '<div class="diff-empty">reading changes…</div>';
+  let r = null; try { r = await claudible.diffList(); } catch {}
+  if (!r || !r.ok) { body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
+  if (!r.repo) { body.innerHTML = '<div class="diff-empty">This workspace isn’t a git repo — nothing to review.<br>Diff review works in repo workspaces (or any folder that’s a git repo).</div>'; return; }
+  const files = r.files || [], untracked = r.untracked || [];
+  if (!files.length && !untracked.length) { body.innerHTML = '<div class="diff-empty">No changes — the working tree is clean. ✨</div>'; return; }
+  body.innerHTML = '';
+  files.forEach((f) => body.appendChild(renderDiffFile(f)));
+  if (untracked.length) {
+    const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'new files (untracked)';
+    body.appendChild(lbl);
+    untracked.forEach((p) => body.appendChild(renderUntracked(p)));
+  }
+}
+async function doDiffRevert(patch, btn, label) {
+  btn.disabled = true;
+  let r = null; try { r = await claudible.diffRevert(patch); } catch {}
+  if (r && r.ok) { toast(label || 'Reverted'); refreshDiff(); }
+  else { btn.disabled = false; toast((r && r.error) || 'Revert failed'); }
+}
+function renderDiffFile(f) {
+  const card = document.createElement('div'); card.className = 'diff-file';
+  const head = document.createElement('div'); head.className = 'diff-file-head';
+  const nm = document.createElement('span'); nm.className = 'diff-path'; nm.textContent = f.path; nm.title = f.path;
+  const cnt = document.createElement('span'); cnt.className = 'diff-counts';
+  const add = document.createElement('i'); add.className = 'add'; add.textContent = '+' + (f.additions || 0);
+  const del = document.createElement('i'); del.className = 'del'; del.textContent = '-' + (f.deletions || 0);
+  cnt.appendChild(add); cnt.appendChild(del);
+  head.appendChild(nm); head.appendChild(cnt);
+  if (!f.binary && f.filePatch) {
+    const rb = document.createElement('button'); rb.className = 'diff-revert-file'; rb.textContent = 'Revert file';
+    rb.title = 'Undo all of Claude’s changes to this file';
+    rb.addEventListener('click', () => doDiffRevert(f.filePatch, rb, 'Reverted ' + f.path));
+    head.appendChild(rb);
+  }
+  card.appendChild(head);
+  if (f.binary) { const b = document.createElement('div'); b.className = 'diff-binary'; b.textContent = '(binary file — changed)'; card.appendChild(b); return card; }
+  (f.hunks || []).forEach((h) => {
+    const hk = document.createElement('div'); hk.className = 'diff-hunk';
+    const hh = document.createElement('div'); hh.className = 'diff-hunk-head';
+    const hl = document.createElement('span'); hl.className = 'diff-hunk-lbl'; hl.textContent = h.header;
+    const rv = document.createElement('button'); rv.className = 'diff-revert-hunk'; rv.textContent = 'Revert';
+    rv.title = 'Undo just this hunk';
+    rv.addEventListener('click', () => doDiffRevert(h.patch, rv, 'Reverted hunk'));
+    hh.appendChild(hl); hh.appendChild(rv); hk.appendChild(hh);
+    const pre = document.createElement('div'); pre.className = 'diff-lines';
+    (h.lines || []).forEach((l) => {
+      const ln = document.createElement('div');
+      ln.className = 'dl ' + (l.t === '+' ? 'add' : l.t === '-' ? 'del' : l.t === '\\' ? 'meta' : 'ctx');
+      ln.textContent = (l.t === ' ' || !l.t ? '  ' : l.t + ' ') + (l.s || '');
+      pre.appendChild(ln);
+    });
+    hk.appendChild(pre); card.appendChild(hk);
+  });
+  return card;
+}
+function renderUntracked(p) {
+  const row = document.createElement('div'); row.className = 'diff-file';
+  const head = document.createElement('div'); head.className = 'diff-file-head';
+  const nm = document.createElement('span'); nm.className = 'diff-path'; nm.textContent = p; nm.title = p;
+  const tag = document.createElement('span'); tag.className = 'diff-counts'; const t = document.createElement('i'); t.className = 'add'; t.textContent = 'new'; tag.appendChild(t);
+  const db = document.createElement('button'); db.className = 'diff-revert-file'; db.textContent = 'Discard'; db.title = 'Delete this new file';
+  db.addEventListener('click', async () => {
+    db.disabled = true; let r = null; try { r = await claudible.diffDiscard(p); } catch {}
+    if (r && r.ok) { toast('Discarded ' + p); refreshDiff(); } else { db.disabled = false; toast((r && r.error) || 'Discard failed'); }
+  });
+  head.appendChild(nm); head.appendChild(tag); head.appendChild(db); row.appendChild(head); return row;
+}
+$('diff-btn').addEventListener('click', () => openDiff(!$('diffpanel').classList.contains('open')));
+$('diff-close').addEventListener('click', () => openDiff(false));
+$('diff-refresh').addEventListener('click', refreshDiff);
+$('diff-scrim').addEventListener('click', () => openDiff(false));
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('diffpanel').classList.contains('open')) openDiff(false); });
+
 // ---------- viewer chat (human↔human side channel; never reaches Claude/terminal) ----------
 const chatLog = $('chat-log'), chatIn = $('chat-in');
 function chatReset() {

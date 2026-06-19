@@ -864,6 +864,35 @@ ipcMain.handle('session:export', async (e, sessionId) => {
   } catch (err) { return { error: String(err) }; }
 });
 
+// ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
+ipcMain.handle('diff:list', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/diff.sh'`],
+    { encoding: 'utf8', timeout: 30000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
+      let r = { ok: false, repo: false, files: [], untracked: [] };
+      try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      resolve(r);
+    });
+}));
+// Reverse-apply a hunk/file patch, or discard an untracked file. The patch text / target path is written to
+// an APP-controlled temp file and only its path is passed to bash (never the repo data) — no injection.
+function diffAction(mode, payload) {
+  return new Promise((resolve) => {
+    try {
+      if (!APPDIR_WSL || typeof payload !== 'string' || !payload) return resolve({ ok: false, error: 'bad args' });
+      const tmp = path.join(RT, 'diffaction.tmp');
+      fs.writeFileSync(tmp, payload, 'utf8');
+      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/diff-apply.sh' ${mode} '${APPDIR_WSL}/runtime/diffaction.tmp'`],
+        { encoding: 'utf8', timeout: 20000 }, (err, stdout) => {
+          let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+          resolve(r);
+        });
+    } catch (err) { resolve({ ok: false, error: String(err) }); }
+  });
+}
+ipcMain.handle('diff:revert', (e, patch) => diffAction('apply-reverse', patch));
+ipcMain.handle('diff:discard', (e, relPath) => diffAction('discard', relPath));
+
 // Safety net: never let a stray error from a pty/agent take the whole cockpit down.
 process.on('uncaughtException', (e) => console.error('[claudible] uncaughtException:', e && e.message));
 process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
