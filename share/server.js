@@ -140,7 +140,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         return;
       }
       if (msg.type === 'input' && typeof msg.data === 'string') {
-        if (readOnly) return;
+        if (readOnly || paused) return;   // paused = host on a private/non-granted workspace; never inject into it
         try { onInput && onInput(msg.data); } catch {}
       }
     });

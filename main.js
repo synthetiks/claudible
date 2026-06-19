@@ -458,6 +458,16 @@ ipcMain.handle('workspace:setShared', (e, payload) => {
   syncShare();
   return { ok: true, shared: ws.shared };
 });
+// Rename a workspace (registry is the source of truth; mirror the new label to guests' granted library).
+ipcMain.handle('workspace:rename', (e, payload) => {
+  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  const label = String((payload && payload.label) || '').trim().slice(0, 80);
+  if (!label) return { ok: false, error: 'empty name' };
+  ws.label = label; saveRegistry();
+  syncShare();
+  return { ok: true, label };
+});
 // Invite a GitHub user as a push collaborator on a repo workspace's repo (Stage 2 — durable git collab).
 ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
@@ -472,6 +482,53 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
       if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
+    });
+}));
+// ---- skills + plugins (manage Claude Code extensions from the cockpit) ----
+ipcMain.handle('skills:list', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/skills.sh' list`],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] skills:list', err.message); return resolve([]); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    });
+}));
+ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
+  const name = String((payload && payload.name) || '').replace(/[^A-Za-z0-9:/_.-]/g, '');
+  const state = ['on', 'off', 'name-only', 'user-invocable-only'].includes(payload && payload.state) ? payload.state : '';
+  if (!name || !state) return resolve({ ok: false, error: 'bad args' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/skills.sh' set '${name}' '${state}'`],
+    { encoding: 'utf8' }, (err, stdout) => {
+      if (err) { console.error('[claudible] skills:set', err.message); return resolve({ ok: false, error: 'failed' }); }
+      try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
+    });
+}));
+ipcMain.handle('plugins:list', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' list`],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] plugins:list', err.message); return resolve([]); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    });
+}));
+ipcMain.handle('plugins:available', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' available`],
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] plugins:available', err.message); return resolve([]); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    });
+}));
+ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
+  const key = String((payload && payload.key) || '').replace(/[^A-Za-z0-9@._/-]/g, '');
+  const act = (payload && payload.enable) ? 'enable' : 'disable';
+  if (!key) return resolve({ ok: false, error: 'bad key' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' toggle '${key}' '${act}'`],
+    { encoding: 'utf8', timeout: 60000 }, (err, stdout) => {
+      if (err) { console.error('[claudible] plugins:toggle', err.message); return resolve({ ok: false, error: 'failed' }); }
+      try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
     });
 }));
 ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests

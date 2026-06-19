@@ -48,21 +48,22 @@
       border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,#0d0f13,#090a0c)}
     .logo{height:32px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
-    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14px;color:var(--silver)}
+    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:var(--silver)}
+    .topbtns{display:flex;align-items:center;gap:6px}     /* icon buttons grouped tight, right of the title */
     .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
     /* session tracker */
     .trk{margin-left:auto;display:flex;align-items:center;gap:20px}
     .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
     .trk-item b{font-size:15px;font-weight:700;color:var(--silver);letter-spacing:.01em}
     .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
-    .ctxbar{position:relative;width:126px;height:30px;border-radius:8px;overflow:hidden;
+    .ctxbar{position:relative;width:146px;height:30px;border-radius:8px;overflow:hidden;
       background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline);transition:box-shadow .25s ease}
     .ctxfill{position:absolute;left:0;top:0;bottom:0;width:0;
       background:linear-gradient(90deg,#2f6b50,#5fb487);transition:width .45s ease,background .4s ease}
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives color + pulse + click */
     .ctxbar.warn .ctxfill{background:linear-gradient(90deg,#8a6a23,#e0a93b)}
     .ctxbar.crit .ctxfill{background:linear-gradient(90deg,#7d2f2a,#e5564b)}
-    .ctxbar.warn,.ctxbar.crit{cursor:pointer}
+    .ctxbar.warn,.ctxbar.crit{cursor:default}
     .ctxbar.warn{animation:ctxpulse-amber 2.4s ease-in-out infinite}
     .ctxbar.crit{animation:ctxpulse-red 1.7s ease-in-out infinite}
     .ctxbar.warn:hover{box-shadow:inset 0 0 0 1px rgba(224,169,59,.85)}
@@ -76,7 +77,7 @@
       background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),
         rgba(255,255,255,.11) calc(10% - 1px),rgba(255,255,255,.11) 10%)}
     .ctxpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-      font-size:15px;font-weight:700;color:var(--silver);text-shadow:0 1px 3px #000,0 0 2px #000}
+      font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--silver);text-shadow:0 1px 3px #000,0 0 2px #000}
     /* push-to-talk hint under the Talk button — <kbd> rendered as a physical key cap */
     .ptt-hint{margin-top:7px;display:flex;align-items:center;justify-content:center;gap:6px;
       font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint)}
@@ -96,7 +97,30 @@
     .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
-    .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0}
+    .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0;position:relative}
+    /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
+    .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:3px;border-radius:9px;
+      background:#14171c;border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
+    .termseg button{width:auto;padding:4px 11px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+      background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all .15s}
+    .termseg button:hover{color:var(--ink-dim)}
+    .termseg button.on{color:var(--ink);background:linear-gradient(180deg,#22262e,#171a20)}
+    .termseg .agent-badge{position:absolute;top:0;right:1px;width:6px;height:6px;border-radius:50%;
+      background:var(--live);box-shadow:0 0 6px -1px var(--live);display:none}
+    .termseg button.has-badge .agent-badge{display:block}
+    #agents-pane{position:absolute;inset:0;z-index:16;display:none;flex-direction:column;overflow:auto;
+      background:#0c0e12;border:1px solid var(--hairline);border-radius:11px;padding:46px 14px 14px}
+    #agents-pane.show{display:flex}
+    .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
+    .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.6;max-width:300px}
+    .agent-row{display:flex;align-items:flex-start;gap:10px;padding:10px 11px;border:1px solid var(--hairline);border-radius:9px;
+      background:linear-gradient(180deg,#131519,#0e1013);margin-bottom:7px}
+    .agent-row .agent-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px;background:#3a3f47}
+    .agent-row.running .agent-dot{background:var(--amber);box-shadow:0 0 9px -1px var(--amber);animation:micpulse 1s ease-in-out infinite}
+    .agent-row.done .agent-dot{background:#5fb487;box-shadow:0 0 8px -2px #5fb487}
+    .agent-row.err .agent-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
+    .agent-name{font-size:12px;color:var(--ink);line-height:1.35;word-break:break-word}
+    .agent-meta{margin-top:3px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
     #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
       padding:10px 12px;flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
@@ -112,10 +136,9 @@
     .scroll:hover .thumb{background:linear-gradient(180deg,#49515d,#30353d)}
     .scroll .thumb.drag{cursor:grabbing;background:linear-gradient(180deg,var(--silver),#8a929b)}
     /* command bar — 5 commands visible; scroll or drag horizontally for the rest */
-    .cmdbar{display:flex;align-items:center;gap:10px;flex:none;position:relative;
-      padding:9px 11px;border:1px solid var(--hairline);border-radius:11px;
-      background:linear-gradient(180deg,#0e1014,#0a0b0d);
-      box-shadow:inset 0 1px 0 var(--sheen),0 0 0 1px rgba(0,0,0,.4)}
+    /* frameless command row — no box/corners (nothing for hovered pills to clash with); the reclaimed
+       border + padding height goes to the terminal above. Pills keep their own glow-hover. */
+    .cmdbar{display:flex;align-items:center;gap:10px;flex:none;position:relative;padding:2px 11px}
     /* viewport: clips the track; edge fades cue that there's more to scroll */
     .cmdscroll-wrap{position:relative;flex:1;min-width:0}
     .cmdscroll-wrap::before,.cmdscroll-wrap::after{content:'';position:absolute;top:0;bottom:0;width:30px;
@@ -234,6 +257,8 @@
     .status .s{display:flex;align-items:center;gap:7px}
     .status .s .dot{margin-left:0}
     .status .end{margin-left:auto;color:var(--ink-faint)}
+    .status .ver{color:var(--silver);font-weight:600;letter-spacing:.08em;padding:1px 8px;border-radius:6px;
+      border:1px solid rgba(207,214,223,.45);box-shadow:0 0 8px -4px var(--silver)}   /* silver-outlined version, pops */
     /* right-click menu (Copy / Paste / Select All) */
     .ctxmenu{position:fixed;z-index:9999;display:none;min-width:148px;padding:5px;
       background:var(--raised);border:1px solid var(--hairline);border-radius:9px;
@@ -242,6 +267,31 @@
       font-size:12.5px;color:var(--ink);cursor:pointer;white-space:nowrap}
     .ctxitem:hover{background:var(--raised-hi)}
     .ctxitem .k{color:var(--ink-faint);font-size:11px}
+    /* git push/pull dropdown (reuses .ctxmenu, position:fixed so it escapes #terminal overflow) */
+    #git-btn{right:8px}
+    #savetab{right:46px}                                    /* Git sits to the RIGHT of save (Git button is always shown) */
+    .git-menu{min-width:150px;padding:6px}
+    .git-menu .ctxitem{justify-content:flex-start;gap:8px}
+    .git-menu .gup{color:#5fb487;font-weight:700}
+    .git-menu .gdn{color:var(--ink-dim);font-weight:700}
+    /* skills + plugins manager rows (Settings drawer sections) */
+    .ext-list{display:flex;flex-direction:column;gap:6px}
+    .ext-empty{color:var(--ink-faint);font-size:11px;line-height:1.55;padding:6px 2px}
+    .ext-row{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013)}
+    .ext-row .ext-main{flex:1;min-width:0}
+    .ext-row .ext-name{font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ext-row .ext-desc{margin-top:3px;font-size:10px;color:var(--ink-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .ext-row .ext-meta{margin-top:3px;font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+    .ext-tog{flex:none;width:auto;padding:3px 10px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;cursor:pointer;
+      border:1px solid var(--hairline);background:#101216;color:var(--ink-dim);box-shadow:none;transition:all .15s}
+    .ext-tog.on{color:#0a0b0d;background:linear-gradient(180deg,#5fb487,#3f8f68);border-color:transparent;font-weight:700}
+    .ext-tog:hover{border-color:rgba(255,255,255,.22)}
+    /* official-marketplace browser (the "+" beside Skills/Plugins) */
+    .mkt-box{width:480px;max-width:92vw}
+    #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:13px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:9px;padding:10px 12px}
+    #mkt-search:focus{outline:none;border-color:rgba(255,255,255,.28)}
+    .mkt-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;margin-bottom:14px;text-align:left}
     /* push-to-talk indicator (top bar) — always visible so you can see when you're talking */
     /* top-bar voice boxes — equal-height with the Settings button. Voice In = mic; Voice Out = TTS + controls */
     .vgroup{display:flex;align-items:center;gap:8px}
@@ -250,6 +300,7 @@
       font-size:11px;letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}
     .vbox .vdot{width:8px;height:8px;border-radius:50%;background:#3a3f47;flex:none;transition:.2s}
     .vbox .vlbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    .vbox .vstat{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
     /* Voice In — click to talk; lights red while recording */
     .vin{cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s,color .16s}
     .vin:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
@@ -279,9 +330,11 @@
     .keycap-btn:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
     .keycap-btn.capturing{color:var(--live);border-color:var(--live);box-shadow:0 0 12px -4px var(--live)}
     /* sessions hamburger (top bar) + the left session sidebar */
-    .iconbtn{width:auto;padding:7px 11px;font-size:15px;line-height:1;color:var(--ink-dim);
+    .iconbtn{width:auto;padding:7px 11px;font-size:15.5px;line-height:1;color:var(--ink-dim);
+      display:inline-flex;align-items:center;justify-content:center;
       background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);border-radius:9px;
       cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all .15s}
+    .iconbtn svg{width:15.5px;height:15.5px;display:block}
     .iconbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     .iconbtn:active{transform:translateY(1px)}
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
@@ -326,13 +379,26 @@
     .sess-yes{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b)}
     .sess-no{color:var(--ink-dim)}
     /* workspace bar — the two-level top of the sidebar (which library the sessions below belong to) */
-    .ws-bar{flex:none;padding:11px 14px 6px;border-bottom:1px solid var(--hairline-soft)}
-    .ws-bar-head{display:flex;align-items:center;justify-content:space-between;font-size:9px;letter-spacing:.16em;
-      text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px}
-    .ws-add{width:auto;padding:0 8px 1px;font-size:15px;line-height:1.3;color:var(--ink-dim);background:none;
+    /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
+    .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
+      font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#6c7480}   /* a touch larger + more visible */
+    .ws-section-head{padding:14px 14px 9px}
+    .sh-actions{display:flex;align-items:center;gap:9px}
+    .panel-close{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
+    .panel-close:hover{color:var(--ink)}
+    .ws-add{width:auto;display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;
+      font-size:15px;line-height:1;color:var(--ink-dim);background:none;
       border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
     .ws-add:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
-    .ws-chips{display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto}
+    .ws-chips{flex:none;display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto;
+      padding:0 14px 13px;border-bottom:1px solid var(--hairline)}   /* the divider between workspaces and sessions */
+    /* SESSIONS section header — names the active workspace so it's clear these conversations live inside it */
+    .sess-section-head{padding:12px 14px 9px}
+    .sess-ws{text-transform:none;letter-spacing:.02em;font-size:10px;color:var(--ink-dim)}
+    .sess-ws:not(:empty){margin-left:7px}
+    .newsess-mini{width:auto;padding:2px 10px 3px;font-size:11px;letter-spacing:.02em;text-transform:none;color:var(--ink-dim);
+      background:none;border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
+    .newsess-mini:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .ws-chip{display:flex;align-items:center;gap:8px;width:auto;text-align:left;padding:7px 9px;border:1px solid var(--hairline);
       border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;box-shadow:none;
       transition:border-color .16s,box-shadow .16s}
@@ -352,7 +418,19 @@
     .ws-chip .ws-sync.syncing{color:#6aa6e0;animation:ws-sync-pulse 1s ease-in-out infinite}
     .ws-chip .ws-sync.err{color:#d2685f}
     @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
-    .ws-chip .ws-share:hover,.ws-chip .ws-invite:hover,.ws-chip .ws-sync:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    .ws-chip .ws-edit{width:auto;padding:3px;border:1px solid transparent;border-radius:6px;background:none;
+      color:var(--ink-faint);cursor:pointer;display:flex;box-shadow:none;flex:none;transition:all .15s}
+    .ws-chip .ws-edit svg{width:13px;height:13px;display:block}
+    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:11.5px;color:var(--ink);background:#0a0b0d;
+      border:1px solid var(--hairline);border-radius:6px;padding:2px 6px}
+    .ws-chip .ws-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
+    .ws-chip .ws-share:hover,.ws-chip .ws-invite:hover,.ws-chip .ws-sync:hover,.ws-chip .ws-edit:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    /* transient toast (button feedback / coming-soon) */
+    .toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(12px);opacity:0;pointer-events:none;
+      background:linear-gradient(180deg,#191c22,#0f1115);border:1px solid var(--hairline);border-radius:10px;
+      padding:10px 16px;font-size:12px;color:var(--ink);box-shadow:0 12px 36px -12px #000;z-index:10001;
+      transition:opacity .2s,transform .2s}
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
     .invite-repo{color:var(--silver)}
     /* new-workspace chooser (reuses the .approve overlay shell) */
     .choice-row{display:flex;flex-direction:column;gap:9px;margin:4px 0 14px;text-align:left}
@@ -366,13 +444,13 @@
     .ws-busy{font-size:11px;color:var(--ink-dim);min-height:15px;margin:-4px 0 12px;text-align:left}
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
-    .share-dock{flex:none;border-top:1px solid var(--hairline);padding:12px 13px 13px;display:flex;flex-direction:column;gap:8px}
-    .sharelbl{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}
+    .share-dock{flex:none;border-top:1px solid var(--hairline);padding:14px 14px 16px;display:flex;flex-direction:column;gap:11px}
+    .sharelbl{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}
     .sharelbl .ico{width:14px;height:14px;color:var(--ink-faint);flex:none;transition:color .2s,filter .2s}
     .sharelbl.active{color:var(--ink)}
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
     .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
-    .share-dock .out{margin-top:0;font-size:10.5px;line-height:1.45}
+    .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
     .share-dock input[type=text]{margin-bottom:0;font-size:11px;padding:9px 10px}
     .share-btn{width:100%}
     /* settings drawer — slimmer, tighter, less clunky */
@@ -384,11 +462,6 @@
     .drawer #speak{padding:11px}
     .drawer .voices{margin-bottom:9px}
     /* Settings button (top bar) — opens the slide-in drawer holding voice/commands/share */
-    .settingsbtn{width:auto;padding:8px 12px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
-      color:var(--ink-dim);background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);
-      border-radius:9px;cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all .15s}
-    .settingsbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
-    .settingsbtn:active{transform:translateY(1px)}
     /* drawer + scrim */
     .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity .2s}
     .drawer-scrim.open{opacity:1;pointer-events:auto}
@@ -444,26 +517,50 @@
     .approve .ghost{background:none;border-color:var(--hairline-soft);color:var(--ink-dim)}
     /* system chat lines ("X joined" / "X left") */
     .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
+    /* ============================================================
+       PREMIUM POLISH (reversible) — purely additive depth, hover lift,
+       focus rings, and easing. No layout / size / placement changes.
+       To revert: delete this whole block (or `git revert` its commit).
+       ============================================================ */
+    :root{ --ease-pop:cubic-bezier(.2,.7,.2,1) }
+    /* 1 — buttons: weighted easing + a 1px hover lift, settling on press (transform only → never clips) */
+    .iconbtn,.vbox,.ws-chip,.ext-tog,.newsess-mini,.ws-add,.share-btn{ transition:all .16s var(--ease-pop) }
+    .iconbtn:hover,.vbox:hover,.ws-chip:hover,.ext-tog:hover,.newsess-mini:hover,.ws-add:hover,.share-btn:hover{ transform:translateY(-1px) }
+    .iconbtn:active,.ws-chip:active,.ext-tog:active,.newsess-mini:active,.ws-add:active,.share-btn:active{ transform:translateY(0) }
+    /* depth on the most-visible buttons (top bar = visible overflow, shadow renders clean; keeps the inset sheen) */
+    .iconbtn{ box-shadow:inset 0 1px 0 var(--sheen),0 2px 5px rgba(0,0,0,.38) }
+    .iconbtn:hover{ box-shadow:inset 0 1px 0 var(--sheen),0 5px 12px rgba(0,0,0,.5) }
+    /* 2 — floating surfaces read as stacked cards (filter = separate from their box-shadow, so insets stay) */
+    .drawer,.ctxmenu,#agents-pane{ filter:drop-shadow(0 14px 32px rgba(0,0,0,.52)) }
+    #agents-pane{ border-top-color:rgba(255,255,255,.12) }   /* light-from-above top edge */
+    /* 3 — cohesive keyboard focus ring (outline = separate from box-shadow; clobbers nothing) */
+    .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.share-btn:focus-visible,
+    .ws-chip:focus-visible,.ext-tog:focus-visible,.newsess-mini:focus-visible,.ws-add:focus-visible,.panel-close:focus-visible,
+    .vstop:focus-visible,.vauto:focus-visible,input:focus-visible{ outline:1.5px solid rgba(207,214,223,.55); outline-offset:2px }
   </style>
 </head>
 <body>
   <div class="top">
-    <button class="iconbtn" id="sessions-btn" title="Sessions">☰</button>
     <img class="logo" src="../assets/logo.png" alt="Claudible logo" />
-    <span class="wordmark">claudible</span><span class="tag">v2</span>
-    <button class="settingsbtn" id="settings-btn" title="Voice, commands &amp; sharing">⚙ Settings</button>
+    <span class="wordmark">claudible</span>
+    <div class="topbtns">
+      <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
+      <button class="iconbtn" id="settings-btn" title="Settings">⚙</button>
+      <button class="iconbtn" id="skills-btn" title="Skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.7L18.5 9l-4.8 1.3L12 15l-1.7-4.7L5.5 9l4.8-1.3z"/><path d="M18.5 14l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9z"/></svg></button>
+      <button class="iconbtn" id="plugins-btn" title="Plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.3"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.3"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.3"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.3"/></svg></button>
+    </div>
     <div class="vgroup">
-      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
-        <span class="vdot"></span><span class="vlbl">Voice In</span><span class="vstat" id="vin-stat">ready</span>
+      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop recording">
+        <span class="vdot"></span><span class="vstat" id="vin-stat">Record</span>
       </button>
       <div class="vbox vout" id="voice-out" title="Claude's voice output">
-        <span class="vdot" id="vout-dot"></span><span class="vlbl">Voice Out</span>
+        <span class="vdot" id="vout-dot"></span>
         <button class="vstop" id="vout-stop" type="button" title="Speak Claude's latest reply" disabled>▶ Speak</button>
         <button class="vauto on" id="vout-auto" aria-pressed="true" title="Always speak Claude's replies">auto</button>
       </div>
     </div>
     <span class="trk" title="session usage">
-      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">—</span></span>
+      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">CONTEXT —</span></span>
       <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>
       <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
     </span>
@@ -471,23 +568,31 @@
 
   <div class="body with-sessions">
     <aside class="sidebar" id="sidebar">
-      <div class="drawer-head"><span>sessions</span><button id="sidebar-close" title="Hide sessions">‹</button></div>
-      <div class="ws-bar" id="ws-bar">
-        <div class="ws-bar-head"><span>workspaces</span><button class="ws-add" id="ws-add" title="New workspace">+</button></div>
-        <div class="ws-chips" id="ws-chips"></div>
+      <!-- WORKSPACES — the top-level: which folder/repo the sessions below live in -->
+      <div class="ws-section-head">
+        <span>workspaces</span>
+        <span class="sh-actions">
+          <button class="ws-add" id="ws-add" title="New workspace">+</button>
+          <button class="panel-close" id="sidebar-close" title="Hide panel">‹</button>
+        </span>
       </div>
-      <button class="newsess" id="new-session">+ New session</button>
+      <div class="ws-chips" id="ws-chips"></div>
+      <!-- SESSIONS — the conversations inside the active workspace -->
+      <div class="sess-section-head">
+        <span>sessions<span class="sess-ws" id="sess-ws"></span></span>
+        <button class="newsess-mini" id="new-session" title="New session in this workspace">+ New</button>
+      </div>
       <div class="sess-list" id="sess-list"></div>
       <div class="share-dock">
         <div class="sharelbl" id="lbl-share">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
-          <span>share</span><span class="dot" id="d-share"></span>
+          <span>invite</span><span class="dot" id="d-share"></span>
           <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
         </div>
-        <button id="share-btn" class="share-btn">Share session</button>
+        <button id="share-btn" class="share-btn">Invite to workspace</button>
         <input type="text" id="share-link" readonly placeholder="invite link" style="display:none" title="Click to copy" />
         <button id="share-newlink" style="display:none">New link</button>
-        <div class="out share-out" id="share-out">live, one-time invite link</div>
+        <div class="out share-out" id="share-out">invite a teammate to your shared workspaces</div>
       </div>
     </aside>
     <div class="center">
@@ -497,12 +602,20 @@
         <span class="lbl">save session</span>
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
       </button>
+      <button class="termtab tr" id="git-btn" title="Git — push / pull">
+        <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.21 11.16.6.11.82-.26.82-.58 0-.28-.01-1.04-.02-2.04-3.34.72-4.04-1.6-4.04-1.6-.55-1.38-1.34-1.75-1.34-1.75-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.23 1.84 1.23 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.29C24 5.78 18.63.5 12 .5z"/></svg>
+      </button>
       <button class="termtab br" id="cleartab" title="Clear what you've typed in the input box">
         <span class="lbl">clear input</span>
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
       </button>
     </div>
       <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
+      <div class="termseg" id="termseg">
+        <button id="seg-term" class="on" type="button">Terminal</button>
+        <button id="seg-agents" type="button">Agents<span class="agent-badge"></span></button>
+      </div>
+      <div id="agents-pane"><div class="agents-list" id="agents-list"></div></div>
       </div><!-- /termrow -->
       <div class="cmdbar" title="One-tap commands — runs in the live terminal · scroll or drag for more">
         <div class="cmdscroll-wrap">
@@ -594,6 +707,15 @@
         </label>
       </div>
 
+      <div class="sec" id="sec-skills">
+        <div class="label">skills <button class="collapse min" id="skills-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
+        <div class="ext-list" id="skills-list"><div class="ext-empty">loading…</div></div>
+      </div>
+      <div class="sec" id="sec-plugins">
+        <div class="label">plugins <button class="collapse min" id="plugins-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="plugins-refresh" title="Refresh">⟳</button></div>
+        <div class="ext-list" id="plugins-list"><div class="ext-empty">loading…</div></div>
+      </div>
+
     </div>
   </div>
 
@@ -602,9 +724,15 @@
     <span class="s" id="sb-whisper">whisper</span>
     <span class="s" id="sb-kokoro">kokoro</span>
     <span class="end" id="meta">connecting…</span>
+    <span class="ver" id="app-ver">claudible v.01</span>
   </div>
 
   <div id="ctxmenu" class="ctxmenu"></div>
+
+  <div id="git-menu" class="ctxmenu git-menu" style="display:none">
+    <button class="ctxitem" id="git-push"><span class="gup">↑</span> git push</button>
+    <button class="ctxitem" id="git-pull"><span class="gdn">↓</span> git pull</button>
+  </div>
 
   <div class="approve" id="approve">
     <div class="box">
@@ -619,7 +747,7 @@
 
   <div class="approve" id="namemodal">
     <div class="box">
-      <h3>Share this session</h3>
+      <h3>Invite to your workspace</h3>
       <p>Pick a display name so the people you invite know it's you.</p>
       <input type="text" id="host-name-in" maxlength="40" placeholder="Your name" />
       <div class="row">
@@ -673,6 +801,16 @@
         <button id="sync-go">Turn on sharing</button>
         <button id="sync-cancel" class="ghost">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <div class="approve" id="mkt-modal">
+    <div class="box mkt-box">
+      <h3>Add from the official marketplace</h3>
+      <p>Search Anthropic's official plugins (they can bundle skills, agents &amp; commands). Installing runs in your terminal so you can approve it.</p>
+      <input type="text" id="mkt-search" maxlength="60" placeholder="search plugins &amp; skills…" />
+      <div class="mkt-list" id="mkt-list"><div class="ext-empty">loading…</div></div>
+      <div class="row"><button id="mkt-close" class="ghost">Close</button></div>
     </div>
   </div>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>

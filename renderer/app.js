@@ -3,11 +3,19 @@
 const $ = (id) => document.getElementById(id);
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
 const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
+// transient toast (button feedback / coming-soon placeholders)
+function toast(msg) {
+  let t = $('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
 
 // ---------- embedded live TUI ----------
+const BASE_LH = 1.15;   // terminal line-height
 const term = new Terminal({
   fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
-  fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
+  fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 5000,
   theme: { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8',
            selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
 });
@@ -19,6 +27,11 @@ let ptyStarted = false;
 function sync() {
   try {
     fit.fit();
+    // Leave ~1 row of breathing room at the bottom: Claude's TUI anchors its input box, the
+    // bypass-permissions banner and the status/“working… esc to interrupt” line to the last rows —
+    // running them flush to the pane edge clips them. One reserved row (+ the floored sub-row remainder)
+    // gives the 1–2 lines of space that keeps those always visible. fontSize/columns unchanged.
+    if (term.rows > 6) term.resize(term.cols, term.rows - 1);
     if (!ptyStarted) { ptyStarted = true; claudible.ptyStart(term.cols, term.rows); } // spawn Claude at the EXACT fitted size
     else claudible.ptyResize(term.cols, term.rows);
     updateScrollbar();
@@ -107,7 +120,7 @@ claudible.onStatus((s) => {
   // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
   if (typeof s.ctxPct === 'number') {
     const pct = s.ctxPct; curCtxPct = pct;
-    $('trk-ctx').textContent = pct + '%';
+    $('trk-ctx').textContent = 'CONTEXT ' + pct + '%';
     $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
     const bar = $('trk-ctxbar');
     bar.classList.toggle('warn', pct >= 70 && pct < 85);
@@ -136,7 +149,7 @@ let mediaRecorder = null, chunks = [], recording = false, micStream = null, disc
 function talkUI(on) {
   $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on);
   // Top-bar Voice In box — always visible (even with the drawer closed) so you can see you're talking.
-  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'listening…' : 'ready'; }
+  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'Recording' : 'Record'; }
 }
 
 async function startRecording() {
@@ -264,7 +277,7 @@ let announceOn = true, chimeOn = true;               // factory-on: spoken "task
 function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
   const speaking = ttsBusy || !!ttsAudio;
-  b.textContent = speaking ? '■ Stop' : '▶ Speak';
+  b.textContent = speaking ? '◼ Speaking' : '▶ Speak';
   b.disabled = !speaking && !lastReply;
   b.title = speaking ? 'Stop speaking' : (lastReply ? "Speak Claude's latest reply" : 'Nothing to speak yet');
 }
@@ -453,10 +466,7 @@ cmdscroll.addEventListener('scroll', cmdEdges);
 new ResizeObserver(cmdEdges).observe(cmdscroll);              // recompute on width changes (sharing/sessions toggles)
 
 // Context guardrail: the ctx bar becomes a one-tap /compact shortcut only once it's in the warn/crit zone.
-$('trk-ctxbar').addEventListener('mousedown', (e) => {
-  const bar = $('trk-ctxbar');
-  if (bar.classList.contains('warn') || bar.classList.contains('crit')) { e.preventDefault(); send('/compact'); }
-});
+// The context meter is display-only — clicking it must NOT auto-compact (removed by request).
 
 // ---------- Claude's reply -> VOICE OUT (via the Stop hook) ----------
 claudible.onHookLine((line) => {
@@ -471,8 +481,65 @@ claudible.onHookLine((line) => {
     updateVoiceOutBtn();                  // enable ▶ Speak now that there's a reply
     if (alwaysSpeak) speak(reply);        // auto-speak the reply in the selected voice
     else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech caps reply at 600)
+  } else if (o.hook_event_name === 'PreToolUse' && o.tool_name === 'Task') {
+    onAgentStart(o);
+  } else if (o.hook_event_name === 'PostToolUse' && o.tool_name === 'Task') {
+    onAgentDone(o);
   }
 });
+
+// ---------- Agents tab: live view of Task subagents (fed by Pre/PostToolUse[Task] hooks, paired by tool_use_id) ----------
+const agents = new Map();   // tool_use_id -> {desc,type,status,startedAt,durationMs,ok}
+let agentsView = false;
+function onAgentStart(o) {
+  const id = o.tool_use_id || ('a' + agents.size + '-' + Date.now());
+  const ti = o.tool_input || {};
+  agents.set(id, { desc: String(ti.description || ti.subagent_type || 'subagent'), type: String(ti.subagent_type || ''),
+    status: 'running', startedAt: Date.now(), durationMs: null, ok: true });
+  renderAgents();
+  if (!agentsView) { const s = $('seg-agents'); if (s) s.classList.add('has-badge'); }   // badge while you're on the terminal
+}
+function onAgentDone(o) {
+  const a = o.tool_use_id && agents.get(o.tool_use_id); if (!a) return;
+  a.status = 'done';
+  a.durationMs = (o.duration_ms != null) ? o.duration_ms : (Date.now() - a.startedAt);
+  try { a.ok = !/"is_error"\s*:\s*true|"error"\s*:/i.test(JSON.stringify(o.tool_response || '').slice(0, 500)); } catch { a.ok = true; }
+  renderAgents();
+}
+function renderAgents() {
+  const el = $('agents-list'); if (!el) return;
+  const arr = Array.from(agents.values()).reverse();   // newest first
+  if (!arr.length) { el.innerHTML = '<div class="agents-empty">No subagents yet. When Claude spawns Task subagents in this session, they’ll appear here live.</div>'; return; }
+  el.innerHTML = '';
+  arr.forEach((a) => {
+    const row = document.createElement('div');
+    row.className = 'agent-row ' + (a.status === 'done' ? (a.ok ? 'done' : 'err') : 'running');
+    const dot = document.createElement('span'); dot.className = 'agent-dot'; row.appendChild(dot);
+    const c = document.createElement('div'); c.style.flex = '1'; c.style.minWidth = '0';
+    const name = document.createElement('div'); name.className = 'agent-name'; name.textContent = a.desc; c.appendChild(name);
+    const meta = document.createElement('div'); meta.className = 'agent-meta';
+    const pre = a.type ? a.type + ' · ' : '';
+    meta.textContent = a.status === 'running'
+      ? pre + 'running · ' + Math.round((Date.now() - a.startedAt) / 1000) + 's'
+      : pre + (a.ok ? 'done' : 'error') + (a.durationMs != null ? ' · ' + Math.round(a.durationMs / 1000) + 's' : '');
+    c.appendChild(meta); row.appendChild(c);
+    el.appendChild(row);
+  });
+}
+function setAgentsView(on) {
+  agentsView = on;
+  const pane = $('agents-pane'); if (pane) pane.classList.toggle('show', on);
+  const tr = document.querySelector('.termrow'); if (tr) tr.classList.toggle('agents-on', on);   // hide save/git tabs behind the pane
+  const st = $('seg-term'), sa = $('seg-agents');
+  if (st) st.classList.toggle('on', !on);
+  if (sa) { sa.classList.toggle('on', on); if (on) sa.classList.remove('has-badge'); }
+  if (on) renderAgents(); else setTimeout(() => term.focus(), 30);
+}
+if ($('seg-term')) {
+  $('seg-term').addEventListener('click', () => setAgentsView(false));
+  $('seg-agents').addEventListener('click', () => setAgentsView(true));
+  setInterval(() => { if (agentsView && Array.from(agents.values()).some((a) => a.status === 'running')) renderAgents(); }, 1000);
+}
 
 // ---------- Save Session (pop-out tab) ----------
 function buildTranscript() {
@@ -530,9 +597,19 @@ window.addEventListener('contextmenu', (e) => {
   const inTerm = !!e.target.closest('#terminal');
   const chatLog = e.target.closest('#chat-log');                // right-clicked inside the viewer chat log
   const field = e.target.closest('input, textarea');
-  const sel = inTerm ? term.getSelection() : String(window.getSelection() || '');
+  const fS = field ? (field.selectionStart || 0) : 0, fE = field ? (field.selectionEnd || 0) : 0;
+  // the actual selected text wherever was clicked: terminal, an editable field, or document text (chat log)
+  const sel = inTerm ? term.getSelection() : (field ? String(field.value || '').substring(fS, fE) : String(window.getSelection() || ''));
   const items = [];
   if (sel && sel.trim()) items.push({ label: 'Copy', act: () => claudible.clipWrite(sel) });
+  if (sel && sel.trim() && (inTerm || field)) items.push({ label: 'Cut', act: () => {
+    claudible.clipWrite(sel);
+    if (field) {                                                // splice the selection out of the field
+      field.value = field.value.slice(0, fS) + field.value.slice(fE);
+      try { field.selectionStart = field.selectionEnd = fS; } catch {}
+      field.dispatchEvent(new Event('input', { bubbles: true })); field.focus();
+    } else { claudible.ptyInput('\x7f'.repeat(sel.length)); term.clearSelection(); }   // terminal: delete the marked text
+  } });
   if (inTerm || field) items.push({ label: 'Paste', act: async () => {
     const t = await claudible.clipRead(); if (!t) return;
     if (inTerm) { claudible.ptyInput('\x1b[200~' + t + '\x1b[201~'); term.focus(); }   // bracketed paste, no auto-submit
@@ -563,7 +640,7 @@ window.addEventListener('contextmenu', (e) => {
 let sharing = false;
 const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out'), shareNew = $('share-newlink');
 function shareUI(on) {
-  shareBtn.textContent = on ? 'Stop sharing' : 'Share session';
+  shareBtn.textContent = on ? 'Stop sharing' : 'Invite to workspace';
   shareBtn.classList.toggle('live', on);
   setActive('lbl-share', on);
   setDot('d-share', on ? 'ok' : '');
@@ -694,8 +771,105 @@ function openDrawer(open) {
   drawer.classList.toggle('open', open);
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (open) { loadSkills(); loadPlugins(); }       // refresh extension inventory each time the drawer opens
   if (!open) setTimeout(() => term.focus(), 0);
 }
+// ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
+async function loadSkills() {
+  const el = $('skills-list'); if (!el) return;
+  let list = []; try { list = await claudible.skillsList(); } catch {}
+  if (!Array.isArray(list) || !list.length) {
+    el.innerHTML = '<div class="ext-empty">No user/project skills found. Add one at <b>~/.claude/skills/&lt;name&gt;/SKILL.md</b> or this workspace’s <b>.claude/skills/</b>. (Bundled &amp; plugin skills aren’t listed here.)</div>';
+    return;
+  }
+  el.innerHTML = '';
+  list.forEach((s) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = '/' + s.name; main.appendChild(nm);
+    if (s.description) { const d = document.createElement('div'); d.className = 'ext-desc'; d.textContent = s.description; main.appendChild(d); }
+    const meta = document.createElement('div'); meta.className = 'ext-meta'; meta.textContent = s.scope || ''; main.appendChild(meta);
+    row.appendChild(main);
+    const on = s.state !== 'off';
+    const tog = document.createElement('button'); tog.className = 'ext-tog' + (on ? ' on' : ''); tog.textContent = on ? 'on' : 'off';
+    tog.addEventListener('click', async () => { let r = null; try { r = await claudible.skillsSet(s.name, on ? 'off' : 'on'); } catch {} if (r && r.ok) loadSkills(); });
+    row.appendChild(tog); el.appendChild(row);
+  });
+}
+async function loadPlugins() {
+  const el = $('plugins-list'); if (!el) return;
+  let list = []; try { list = await claudible.pluginsList(); } catch {}
+  if (!Array.isArray(list) || !list.length) {
+    el.innerHTML = '<div class="ext-empty">No plugins installed. Add them with <b>/plugin</b> in the terminal.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  list.forEach((p) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = p.name; main.appendChild(nm);
+    const meta = document.createElement('div'); meta.className = 'ext-meta';
+    meta.textContent = [p.marketplace, p.version, p.scope].filter(Boolean).join(' · '); main.appendChild(meta);
+    row.appendChild(main);
+    const tog = document.createElement('button'); tog.className = 'ext-tog' + (p.enabled ? ' on' : ''); tog.textContent = p.enabled ? 'on' : 'off';
+    tog.addEventListener('click', async () => {
+      tog.textContent = '…';
+      let r = null; try { r = await claudible.pluginsToggle(p.key, !p.enabled); } catch {}
+      if (r && r.ok) loadPlugins(); else { tog.textContent = p.enabled ? 'on' : 'off'; toast('Plugin toggle failed — try /plugin in the terminal'); }
+    });
+    row.appendChild(tog); el.appendChild(row);
+  });
+}
+function openExt(which) {
+  openDrawer(true);
+  setTimeout(() => { const sec = $(which === 'plugins' ? 'sec-plugins' : 'sec-skills'); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 90);
+}
+if ($('skills-refresh')) $('skills-refresh').addEventListener('click', loadSkills);
+if ($('plugins-refresh')) $('plugins-refresh').addEventListener('click', loadPlugins);
+
+// ---- official marketplace browser (the "+" beside Skills/Plugins) — search + install ----
+function termRun(cmd) { claudible.ptyInput('\x1b'); setTimeout(() => claudible.ptyInput(cmd + '\r'), 120); setTimeout(() => term.focus(), 170); }
+let mktCache = null;
+async function openMkt() {
+  $('mkt-modal').classList.add('show');
+  $('mkt-search').value = '';
+  $('mkt-list').innerHTML = '<div class="ext-empty">loading…</div>';
+  setTimeout(() => $('mkt-search').focus(), 60);
+  if (!mktCache) { try { mktCache = await claudible.pluginsAvailable(); } catch { mktCache = []; } }
+  renderMkt('');
+}
+function closeMkt() { $('mkt-modal').classList.remove('show'); }
+function renderMkt(q) {
+  const el = $('mkt-list'); if (!el) return;
+  q = (q || '').toLowerCase().trim();
+  const all = mktCache || [];
+  const items = (q ? all.filter((p) => p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q)) : all).slice(0, 80);
+  if (!items.length) { el.innerHTML = '<div class="ext-empty">' + (all.length ? 'no matches' : 'no marketplace catalog found — add one with /plugin in the terminal') + '</div>'; return; }
+  el.innerHTML = '';
+  items.forEach((p) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = p.name; main.appendChild(nm);
+    if (p.description) { const d = document.createElement('div'); d.className = 'ext-desc'; d.textContent = p.description; main.appendChild(d); }
+    row.appendChild(main);
+    const btn = document.createElement('button');
+    if (p.installed) { btn.className = 'ext-tog'; btn.textContent = 'installed'; btn.disabled = true; }
+    else { btn.className = 'ext-tog on'; btn.textContent = 'install'; btn.addEventListener('click', () => installMkt(p)); }
+    row.appendChild(btn); el.appendChild(row);
+  });
+}
+function installMkt(p) {
+  closeMkt();
+  termRun('/plugin install ' + p.name + '@' + p.marketplace);   // runs in the terminal so the trust prompt is visible
+  toast('Installing ' + p.name + ' — approve it in the terminal');
+}
+if ($('skills-add')) $('skills-add').addEventListener('click', openMkt);
+if ($('plugins-add')) $('plugins-add').addEventListener('click', openMkt);
+if ($('mkt-search')) {
+  $('mkt-search').addEventListener('input', (e) => renderMkt(e.target.value));
+  $('mkt-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMkt(); } });
+}
+if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));
@@ -978,9 +1152,63 @@ function renderWsChips() {
       sy.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); if (w.syncSessions) disableSync(w); });
       chip.appendChild(sy);
     }
+    // inline rename (pencil) — user-created workspaces only (not the legacy "My sessions")
+    if (w.kind !== 'legacy') {
+      const ed = document.createElement('button');
+      ed.className = 'ws-edit'; ed.title = 'Rename workspace';
+      ed.innerHTML = PENCIL_SVG;
+      ed.addEventListener('click', (e) => { e.stopPropagation(); startWsEdit(chip, nm, w); });
+      chip.appendChild(ed);
+    }
     chip.addEventListener('click', () => switchWorkspace(w.id));
     el.appendChild(chip);
   });
+  // name the active workspace in the SESSIONS header so the two-level relationship is unmistakable
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
+}
+// ---- git push / pull: clicking a menu item writes the command into the live terminal (like the cmd bar) ----
+function openGitMenu() {
+  const b = $('git-btn'), m = $('git-menu'); if (!b || !m) return;
+  const r = b.getBoundingClientRect();
+  m.style.display = 'block';
+  m.style.top = (r.bottom + 6) + 'px';
+  m.style.left = Math.max(8, r.right - m.offsetWidth) + 'px';   // right-align under the button
+}
+function closeGitMenu() { const m = $('git-menu'); if (m) m.style.display = 'none'; }
+function gitCmd(cmd) {
+  closeGitMenu();
+  claudible.ptyInput('\x1b');                                   // clear/close any open input first
+  setTimeout(() => claudible.ptyInput(cmd + '\r'), 120);        // …then run it in the terminal
+  setTimeout(() => term.focus(), 170);
+}
+if ($('git-btn')) {
+  $('git-btn').addEventListener('click', (e) => { e.stopPropagation(); const m = $('git-menu'); (m && m.style.display === 'block') ? closeGitMenu() : openGitMenu(); });
+  $('git-push').addEventListener('click', () => gitCmd('git push'));
+  $('git-pull').addEventListener('click', () => gitCmd('git pull'));
+  document.addEventListener('click', (e) => { const m = $('git-menu'); if (m && m.style.display === 'block' && !e.target.closest('#git-menu') && !e.target.closest('#git-btn')) closeGitMenu(); });
+}
+// inline workspace rename (mirrors session rename), persisted through main (registry is source of truth)
+function startWsEdit(chip, nm, w) {
+  if (chip.querySelector('.ws-rename')) return;
+  const inp = document.createElement('input');
+  inp.className = 'ws-rename'; inp.type = 'text'; inp.maxLength = 80; inp.value = w.label;
+  nm.style.display = 'none'; chip.insertBefore(inp, nm);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    if (save) {
+      const t = inp.value.trim();
+      if (t && t !== w.label) { let r = null; try { r = await claudible.workspaceRename(w.id, t); } catch {} if (r && r.ok) w.label = r.label; }
+    }
+    try { inp.remove(); } catch {} nm.style.display = '';
+    nm.textContent = w.label; chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
+    if (w.id === activeWsId) { const sw = $('sess-ws'); if (sw) sw.textContent = '· ' + w.label; }
+  };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
+  inp.addEventListener('blur', () => commit(true));
+  inp.addEventListener('click', (e) => e.stopPropagation());
 }
 async function toggleShared(w) {
   const next = !w.shared;
@@ -1121,6 +1349,8 @@ claudible.onWorkspaceActiveChanged((id) => {
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
 $('new-session').addEventListener('click', () => openSession('new'));
+$('skills-btn').addEventListener('click', () => openExt('skills'));
+$('plugins-btn').addEventListener('click', () => openExt('plugins'));
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }
