@@ -68,7 +68,8 @@ function buildBoot(session, ws, tabId) {
   if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
   const tab = tabRuntimeId(tabId);                                                       // per-tab runtime path key (matches session.sh)
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}' ` + wsEnv(ws) + ' ';
+  const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(registry.effort) ? ` CLAUDIBLE_EFFORT='${registry.effort}'` : '';
+  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + ' ' + wsEnv(ws) + ' ';
   return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
 }
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
@@ -538,6 +539,13 @@ ipcMain.handle('workspace:rename', (e, payload) => {
   ws.label = label; saveRegistry();
   syncShare();
   return { ok: true, label };
+});
+// Default reasoning effort — persisted in the registry, applied to every new session via buildBoot (CLAUDIBLE_EFFORT).
+ipcMain.handle('effort:get', () => registry.effort || '');
+ipcMain.handle('effort:set', (e, level) => {
+  registry.effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(level) ? level : '';
+  saveRegistry();
+  return { ok: true, effort: registry.effort };
 });
 // Invite a GitHub user as a push collaborator on a repo workspace's repo (Stage 2 — durable git collab).
 ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {

@@ -1047,6 +1047,19 @@ if ($('mkt-search')) {
   $('mkt-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMkt(); } });
 }
 if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
+// default-effort selector — load the remembered value, highlight it, persist on click (applies to new sessions)
+(async () => {
+  const row = $('effort-row'); if (!row) return;
+  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.eff || '') === (v || '')));
+  let cur = ''; try { cur = await claudible.effortGet(); } catch {}
+  paint(cur || '');
+  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
+    const v = b.dataset.eff || '';
+    let r = null; try { r = await claudible.effortSet(v); } catch {}
+    const set = (r && r.ok) ? r.effort : v; paint(set);
+    toast(set ? ('Default effort: ' + set + ' — applies to new sessions') : 'Default effort cleared');
+  }));
+})();
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));

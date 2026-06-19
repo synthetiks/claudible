@@ -95,15 +95,19 @@ PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
 # explicit user choice in the switcher. sessions-sync.sh records foreign ids in this sidecar on import.
 FOREIGN_LIST="$PROJ/.claudible-foreign"
 is_foreign() { [ -f "$FOREIGN_LIST" ] && grep -qxF -- "$1" "$FOREIGN_LIST"; }
+# Default reasoning effort — a remembered Claudible setting inlined as CLAUDIBLE_EFFORT. Invalid/empty → omit
+# (Claude uses its own default). Applied to fresh AND resumed launches.
+EFFORT="${CLAUDIBLE_EFFORT:-}"
+case "$EFFORT" in low|medium|high|xhigh|max) EFF=(--effort "$EFFORT") ;; *) EFF=() ;; esac
 resume_one() {   # $1 = session id — trusted (own) runs skip-permissions; foreign runs sandboxed (prompts)
   if is_foreign "$1"; then
     echo "[claudible] opening a collaborator's session — Claude will ask before running tools."
-    claude --resume "$1"
+    claude --resume "$1" "${EFF[@]}"
   else
-    claude --dangerously-skip-permissions --resume "$1" --add-dir "$HOME"
+    claude --dangerously-skip-permissions --resume "$1" --add-dir "$HOME" "${EFF[@]}"
   fi
 }
-FRESH=(claude --dangerously-skip-permissions --add-dir "$HOME")
+FRESH=(claude --dangerously-skip-permissions --add-dir "$HOME" "${EFF[@]}")
 # The app's session switcher passes a choice in CLAUDIBLE_SESSION: 'new' (fresh), a specific
 # <session-id> (resume exactly that), or empty (default = resume most-recent LOCAL conversation).
 SEL="${CLAUDIBLE_SESSION:-}"
@@ -136,7 +140,7 @@ while IFS= read -r f; do
 done < <(ls -1t "$PROJ"/*.jsonl 2>/dev/null)
 if [ -n "$LATEST" ]; then
   START=$(date +%s)
-  claude --dangerously-skip-permissions --resume "$LATEST" --add-dir "$HOME"
+  claude --dangerously-skip-permissions --resume "$LATEST" --add-dir "$HOME" "${EFF[@]}"
   [ $(( $(date +%s) - START )) -ge 4 ] && exit 0   # resumed and used, then quit normally — done
   echo "[claudible] couldn't resume the previous conversation — starting a fresh one."
 fi

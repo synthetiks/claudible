@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   workspaceRename: (id, label) => ipcRenderer.invoke('workspace:rename', { id, label }),
+  effortGet: () => ipcRenderer.invoke('effort:get'),
+  effortSet: (level) => ipcRenderer.invoke('effort:set', level),
   repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsSet: (name, state) => ipcRenderer.invoke('skills:set', { name, state }),

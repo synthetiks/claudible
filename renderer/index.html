@@ -263,6 +263,12 @@
     .vpill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
     .vpill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
     .vpill.on i{opacity:.7}
+    /* default-effort selector (remembered, applied to new sessions) */
+    .effort-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:7px}
+    .eff-pill{width:auto;flex:none;padding:5px 11px;font-size:10.5px;letter-spacing:.04em;color:var(--ink-dim);
+      background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen)}
+    .eff-pill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
+    .eff-pill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
     /* sleek collapse chevron + collapsible text box */
     .collapse{width:auto;padding:0 3px;background:none;border:none;box-shadow:none;color:var(--ink-dim);
       font-size:17px;line-height:1;cursor:pointer;transition:transform .2s ease,color .15s}
@@ -764,6 +770,19 @@
           <span class="sw"></span>
           <span class="tlabel">Chat chime</span>
         </label>
+      </div>
+
+      <div class="sec">
+        <div class="label">default effort</div>
+        <div class="effort-row" id="effort-row">
+          <button class="eff-pill" data-eff="">default</button>
+          <button class="eff-pill" data-eff="low">low</button>
+          <button class="eff-pill" data-eff="medium">medium</button>
+          <button class="eff-pill" data-eff="high">high</button>
+          <button class="eff-pill" data-eff="xhigh">xhigh</button>
+          <button class="eff-pill" data-eff="max">max</button>
+        </div>
+        <div class="out">remembered across launches · applies to new sessions you open</div>
       </div>
 
       <div class="sec" id="sec-skills">
