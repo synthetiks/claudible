@@ -106,31 +106,18 @@ sc.addEventListener('pointerdown', (e) => {           // click the gutter to jum
   if (e.target === thumb) return;
   scrollToFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
 });
-// ---------- tab strip: each tab is one live session/pty; the active tab is the visible terminal ----------
+// ---------- concurrent sessions ----------
+// Each tab is still one live session/pty running in the background; the active tab is the visible terminal.
+// There is NO top tab strip anymore — every live session is shown as a row in the LEFT SIDEBAR instead
+// (saved ones as their normal session row, brand-new unsaved ones as a synthetic "live" row). So this
+// function just keeps the old top strip permanently hidden; all the renderTabStrip() callers stay valid.
 const MAX_TABS = 8;
 function tabLabel(rec) {
   if (rec.label) return rec.label;
   return (rec.session === 'new' || !rec.session) ? 'New session' : 'Session';
 }
 function renderTabStrip() {
-  const strip = $('tabstrip'); if (!strip) return;
-  strip.innerHTML = '';
-  // A single session needs no tab bar — a lone chip + an add "+" just duplicate the sidebar's
-  // "+ New session" (which opens a new tab). The strip appears automatically once a 2nd concurrent
-  // tab exists; chips then carry an × to close.
-  if (tabs.size <= 1) { strip.style.display = 'none'; return; }
-  strip.style.display = '';
-  for (const rec of tabs.values()) {
-    const chip = document.createElement('div');
-    chip.className = 'tab' + (rec.tabId === activeTabId ? ' active' : '') + (rec.busy ? ' busy' : '');
-    chip.title = tabLabel(rec);
-    const nm = document.createElement('span'); nm.className = 'tab-name'; nm.textContent = tabLabel(rec); chip.appendChild(nm);
-    const x = document.createElement('button'); x.className = 'tab-x'; x.title = 'Close tab'; x.textContent = '×';
-    x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
-    chip.appendChild(x);
-    chip.addEventListener('click', () => setActiveTab(rec.tabId));
-    strip.appendChild(chip);
-  }
+  const strip = $('tabstrip'); if (strip) { strip.innerHTML = ''; strip.style.display = 'none'; }
 }
 // Show one tab, hide the rest. Point the global term/fit at it, fit it (NEVER fit a hidden tab), and
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
@@ -238,6 +225,13 @@ function resetStats(t) {
 }
 claudible.onStatus((s) => {
   const t = tabs.get(s.tabId); if (!t) return;   // route the status to the tab it belongs to
+  // Reconcile a freshly-started tab with the real session id Claude assigned it, so its synthetic "live"
+  // sidebar row collapses into the proper saved session row (and the right row highlights as active).
+  if (s.sessionId && t.session !== s.sessionId && (t.session === 'new' || !t.session)) {
+    t.session = s.sessionId;
+    if (t.tabId === activeTabId) activeSession = s.sessionId;
+    if (sidebarReady && t.wsId === activeWsId) refreshSessions();
+  }
   // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
   if (typeof s.ctxPct === 'number') t.curCtxPct = s.ctxPct;
   // session cost — statusLine cost is cumulative for the continued conversation; show delta since launch
@@ -585,10 +579,13 @@ claudible.onHookLine((tabId, line) => {
   const t = tabs.get(tabId); if (!t) return;            // route every hook to the tab it came from
   let o; try { o = JSON.parse(line); } catch { return; }
   if (o.hook_event_name === 'UserPromptSubmit') {
-    t.busy = true; renderTabStrip();
+    t.busy = true; markTabBusy(t.tabId, true);
     if (o.prompt) t.sessionLog.push({ role: 'you', text: String(o.prompt) });   // captures typed AND voice turns
   } else if (o.hook_event_name === 'Stop') {
-    t.busy = false; renderTabStrip();
+    t.busy = false; markTabBusy(t.tabId, false);
+    // A turn just finished: if this tab is still showing a "live · unsaved" row, its transcript now exists on
+    // disk, so refresh the sidebar to collapse that live row into its proper saved session row.
+    if (sidebarReady && t.wsId === activeWsId && sessListEl && sessListEl.querySelector('.sess.sess-live[data-tab="' + t.tabId + '"]')) refreshSessions();
     if (o.last_assistant_message) {
       t.sessionLog.push({ role: 'claude', text: String(o.last_assistant_message) });
       if (tabId === activeTabId) {   // only the FOREGROUND tab speaks / fills the Speak box, so background turns never talk over it
@@ -1007,10 +1004,6 @@ async function loadPlugins() {
     row.appendChild(tog); el.appendChild(row);
   });
 }
-function openExt(which) {
-  openDrawer(true);
-  setTimeout(() => { const sec = $(which === 'plugins' ? 'sec-plugins' : 'sec-skills'); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 90);
-}
 if ($('skills-refresh')) $('skills-refresh').addEventListener('click', loadSkills);
 if ($('plugins-refresh')) $('plugins-refresh').addEventListener('click', loadPlugins);
 
@@ -1237,7 +1230,7 @@ function onSessPointerDown(e, row, s) {
 function onSessPointerMove(e) {
   if (!sdrag) return;
   if (!sdrag.moved) { if (Math.abs(e.clientY - sdrag.startY) < 5) return; sdrag.moved = true; sdrag.row.classList.add('dragging'); }
-  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess')).filter((r) => r !== sdrag.row);
+  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-live)')).filter((r) => r !== sdrag.row);
   let before = null;
   for (let i = 0; i < rows.length; i++) { const r = rows[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { before = rows[i]; break; } }
   if (before) sessListEl.insertBefore(sdrag.row, before); else sessListEl.appendChild(sdrag.row);
@@ -1251,7 +1244,7 @@ function onSessPointerUp() {
   try { d.row.releasePointerCapture(d.pid); } catch {}
   d.row.classList.remove('dragging');
   if (d.moved) {
-    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess')).map((r) => r.dataset.id);
+    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-live)')).map((r) => r.dataset.id);
     setOrder(order);                                                               // manual order persists (per workspace)
   } else {
     openSession(d.id, d.label);                                                    // plain click → open
@@ -1276,11 +1269,19 @@ async function deleteSession(id) {
 }
 async function refreshSessions() {
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
-  sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';
+  if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
   let list = []; try { list = await claudible.sessionList(); } catch {}
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
-  if (Array.isArray(list) && deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));   // hide rows being deleted
-  if (!Array.isArray(list) || !list.length) {
+  if (!Array.isArray(list)) list = [];
+  if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
+  const savedIds = new Set(list.map((s) => s.id));
+  // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row. That covers a brand-
+  // new 'new' tab AND a just-started session whose real id exists but whose transcript file hasn't been
+  // written to disk yet — so the row never vanishes in the gap between "created" and "first saved". The
+  // empty-session boot tab ('') is excluded: it resolves to the most-recent saved row via reconcile, so it
+  // must not flash a phantom "New session" at launch.
+  const liveTabs = Array.from(tabs.values()).filter((r) => r.wsId === activeWsId && r.session !== '' && !savedIds.has(r.session));
+  if (!list.length && !liveTabs.length) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
@@ -1290,12 +1291,81 @@ async function refreshSessions() {
   const ordered = order.map((id) => sessIndex[id]).filter(Boolean);
   // Default highlight must match what session.sh `--continue` resumes — the most-recent conversation
   // (max mtime) — not the top of the stable saved order.
-  if (!activeSession) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
+  // Pick a default highlight only when the active tab isn't itself on a brand-new session (don't hijack the
+  // highlight to a saved row while the user is sitting in a fresh "New session").
+  if (!activeSession && list.length && !(AT() && AT().session === 'new')) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
   const act = sessIndex[activeSession];
   const at = AT();
   if (at && act && !at.curSessionLabel) { at.curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
   sessListEl.innerHTML = '';
   ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
+  liveTabs.forEach((rec) => sessListEl.appendChild(renderLiveTabRow(rec)));          // live, not-yet-saved sessions, appended below
+  const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
+  if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
+}
+// A live, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
+// switch to it, pencil to name it, trash to CLOSE it (nothing to delete on disk). Mirrors a saved row's look.
+function renderLiveTabRow(rec) {
+  const row = document.createElement('div');
+  row.className = 'sess sess-live' + (rec.tabId === activeTabId ? ' active' : '') + (rec.busy ? ' busy' : '');
+  row.dataset.tab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = rec.label || 'New session';
+  const m = document.createElement('div'); m.className = 'sess-meta';
+  m.innerHTML = '<span class="sess-livedot"></span>' + (rec.busy ? 'working…' : 'live · unsaved');
+  row.appendChild(p); row.appendChild(m);
+  const edit = document.createElement('button');
+  edit.className = 'sess-edit'; edit.title = 'Rename session'; edit.setAttribute('aria-label', 'Rename session');
+  edit.innerHTML = PENCIL_SVG;
+  edit.addEventListener('click', (e) => { e.stopPropagation(); startLiveRename(row, p, rec); });
+  const del = document.createElement('button');
+  del.className = 'sess-del'; del.title = 'Close session'; del.setAttribute('aria-label', 'Close session');
+  del.innerHTML = TRASH_SVG;
+  del.addEventListener('click', (e) => { e.stopPropagation(); if (tabs.size <= 1) { toast('This is your only open session'); return; } row.classList.add('confirming'); });
+  const conf = document.createElement('div'); conf.className = 'sess-confirm';
+  const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'Close?';
+  const yes = document.createElement('button'); yes.className = 'sess-yes'; yes.textContent = 'Close';
+  const no = document.createElement('button'); no.className = 'sess-no'; no.textContent = 'Cancel';
+  yes.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
+  no.addEventListener('click', (e) => { e.stopPropagation(); row.classList.remove('confirming'); });
+  conf.appendChild(lbl); conf.appendChild(yes); conf.appendChild(no);
+  row.appendChild(edit); row.appendChild(del); row.appendChild(conf);
+  row.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('.sess-rename') || row.classList.contains('confirming')) return; setActiveTab(rec.tabId); });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setActiveTab(rec.tabId); } });
+  return row;
+}
+// Rename a live (unsaved) session: stored on the tab record's label (mirrors the saved-row rename UX).
+function startLiveRename(row, p, rec) {
+  if (row.querySelector('.sess-rename')) return;
+  const inp = document.createElement('input');
+  inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = rec.label || '';
+  p.style.display = 'none'; row.insertBefore(inp, p);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = (save) => {
+    if (done) return; done = true;
+    if (save) {
+      rec.label = inp.value.trim() || '';
+      p.textContent = rec.label || 'New session';
+      if (rec.tabId === activeTabId) { rec.curSessionLabel = p.textContent; pushTracker(); }   // mirror to guests
+    }
+    try { inp.remove(); } catch {} p.style.display = '';
+  };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
+  inp.addEventListener('blur', () => commit(true));
+  inp.addEventListener('pointerdown', (e) => e.stopPropagation());
+  inp.addEventListener('click', (e) => e.stopPropagation());
+}
+// Cheap in-place busy toggle on a tab's sidebar row (no disk re-read): live row by tab id, or saved row by session id.
+function markTabBusy(tabId, busy) {
+  const rec = tabs.get(tabId); if (!rec || !sessListEl) return;
+  let row = sessListEl.querySelector('.sess.sess-live[data-tab="' + tabId + '"]');
+  if (!row && rec.session && rec.session !== 'new') row = sessListEl.querySelector('.sess[data-id="' + rec.session + '"]');
+  if (!row) return;
+  row.classList.toggle('busy', !!busy);
+  if (row.classList.contains('sess-live')) {
+    const meta = row.querySelector('.sess-meta');
+    if (meta) meta.innerHTML = '<span class="sess-livedot"></span>' + (busy ? 'working…' : 'live · unsaved');
+  }
 }
 // The sidebar is DOCKED (a left column of .body) — toggling .with-sessions slides the layout, it
 // never covers the terminal/chat. The terminal auto-refits via its ResizeObserver when the column changes.
@@ -1332,9 +1402,12 @@ const EYE_ON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 const PERSON_ADD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>';
 const CLOUD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
+const CARET_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';   // TRASH_SVG already declared above (reused by the menu)
 const wsSyncState = {};   // ws id -> { status:'syncing'|'idle'|'error', synced, diverged } (live, from main)
+let wsMenuFor = null;     // id of the workspace whose ▾ options menu is currently open (null = closed)
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
+  closeWsMenu();                 // a re-render replaces the chips/caret the open menu was anchored to
   el.innerHTML = '';
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
@@ -1342,44 +1415,28 @@ function renderWsChips() {
     chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
     chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
-    // share toggle (eye) — grant/revoke this workspace to guests (default private)
-    const sh = document.createElement('button');
-    sh.className = 'ws-share';
-    sh.title = w.shared
-      ? 'Live screen-share: ON — invited guests can watch this terminal live in their browser. Click to make private.'
-      : 'Live screen-share: OFF — click to let invited guests watch this terminal live in their browser (ephemeral; nothing is saved).';
-    sh.innerHTML = w.shared ? EYE_ON_SVG : EYE_OFF_SVG;
-    sh.addEventListener('click', (e) => { e.stopPropagation(); toggleShared(w); });
-    chip.appendChild(sh);
-    // repo workspaces: collaborator invite + sessions-sync toggle/button
-    if (w.kind === 'repo') {
-      const iv = document.createElement('button');
-      iv.className = 'ws-invite'; iv.title = 'Invite a GitHub collaborator to this repo (needed before they can cloud-sync sessions with you)';
-      iv.innerHTML = PERSON_ADD_SVG;
-      iv.addEventListener('click', (e) => { e.stopPropagation(); openInviteModal(w); });
-      chip.appendChild(iv);
-      // hairline divider: separates the GUESTS controls (eye + invite) from the SYNC control (cloud)
-      const sep = document.createElement('span'); sep.className = 'ws-actsep'; chip.appendChild(sep);
-      // cloud = GitHub SESSION-SYNC (distinct from the eye's live screen-share): dim = off, blue = on, pulse = syncing
-      const st = wsSyncState[w.id] || {};
-      const sy = document.createElement('button');
-      sy.className = 'ws-sync' + (w.syncSessions ? ' on' : '') + (st.status === 'syncing' ? ' syncing' : '') + (st.status === 'error' ? ' err' : '');
-      sy.innerHTML = CLOUD_SVG;
-      sy.title = w.syncSessions
-        ? ('Cloud session-sync: ON' + (st.synced != null ? ' · ' + st.synced + ' synced' : '') + (st.diverged ? ' · ' + st.diverged + ' need attention' : '') + ' — saves chat transcripts to this repo on GitHub so collaborators can resume them. Click to sync now · right-click to stop.')
-        : 'Cloud session-sync: OFF — click to save this workspace\'s chat transcripts to its private GitHub repo so collaborators can open & resume your sessions.';
-      sy.addEventListener('click', (e) => { e.stopPropagation(); w.syncSessions ? triggerSyncNow(w) : openSyncModal(w); });
-      sy.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); if (w.syncSessions) disableSync(w); });
-      chip.appendChild(sy);
+    // Right edge: a passive status dot (at-a-glance share/sync state) + a single ▾ that opens the options
+    // menu. All actions (share, invite, sync, rename, delete) now live in that menu so the chip stays clean
+    // and the full workspace name is readable — no row of icons crowding it out.
+    const right = document.createElement('div'); right.className = 'ws-right';
+    if (w.shared || w.syncSessions) {
+      const st0 = wsSyncState[w.id] || {};
+      const dot = document.createElement('span');
+      dot.className = 'ws-dot' + (w.syncSessions ? ' sync' : ' live')
+        + (st0.status === 'syncing' ? ' syncing' : '') + (st0.status === 'error' ? ' err' : '');
+      dot.title = [w.shared ? 'screen-share ON' : '', w.syncSessions ? 'session-sync ON' : ''].filter(Boolean).join(' · ');
+      right.appendChild(dot);
     }
-    // inline rename (pencil) — user-created workspaces only (not the legacy "My sessions")
-    if (w.kind !== 'legacy') {
-      const ed = document.createElement('button');
-      ed.className = 'ws-edit'; ed.title = 'Rename workspace';
-      ed.innerHTML = PENCIL_SVG;
-      ed.addEventListener('click', (e) => { e.stopPropagation(); startWsEdit(chip, nm, w); });
-      chip.appendChild(ed);
-    }
+    const mb = document.createElement('button');
+    mb.className = 'ws-menu-btn'; mb.title = 'Workspace options';
+    mb.innerHTML = CARET_SVG;
+    mb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = wsMenuFor === w.id; closeWsMenu();
+      if (!wasOpen) openWsMenu(mb, chip, nm, w);
+    });
+    right.appendChild(mb);
+    chip.appendChild(right);
     chip.dataset.id = w.id;
     chip.addEventListener('pointerdown', (e) => onWsPointerDown(e, chip, w));
     chip.addEventListener('pointermove', onWsPointerMove);
@@ -1437,6 +1494,76 @@ async function deleteWorkspace(w) {
     await refreshWorkspaces(); refreshSessions();
   } else toast((r && r.error) || 'delete failed');
 }
+// ---- workspace options (▾) menu: every per-workspace action lives here so the chip stays a clean name ----
+function wsMenuItems(chip, nm, w) {
+  const st = wsSyncState[w.id] || {};
+  const items = [];
+  // live screen-share (guests watch the terminal) — available on every workspace
+  items.push({
+    icon: w.shared ? EYE_ON_SVG : EYE_OFF_SVG,
+    label: w.shared ? 'Screen-share: ON' : 'Screen-share to guests',
+    hint: w.shared ? 'Guests can watch this terminal live. Click to make it private.'
+                   : 'Let invited guests watch this terminal live in their browser (nothing is saved).',
+    on: w.shared,
+    act: () => toggleShared(w),
+  });
+  if (w.kind === 'repo') {
+    items.push({ icon: PERSON_ADD_SVG, label: 'Invite collaborator…',
+      hint: 'Add a GitHub user to this repo so they can cloud-sync sessions with you.',
+      act: () => openInviteModal(w) });
+    if (w.syncSessions) {
+      const extra = (st.synced != null ? ' · ' + st.synced + ' synced' : '') + (st.diverged ? ' · ' + st.diverged + ' to review' : '');
+      items.push({ icon: CLOUD_SVG, label: (st.status === 'syncing' ? 'Syncing sessions…' : 'Sync sessions now') + extra, on: true,
+        hint: 'Push & pull session transcripts with your collaborators now.', act: () => triggerSyncNow(w) });
+      items.push({ icon: CLOUD_SVG, label: 'Turn off session-sync',
+        hint: 'Stop saving this workspace’s transcripts to its GitHub repo.', act: () => disableSync(w) });
+    } else {
+      items.push({ icon: CLOUD_SVG, label: 'Cloud session-sync…',
+        hint: 'Save your chat transcripts to this repo on GitHub so collaborators can open & resume your sessions.',
+        act: () => openSyncModal(w) });
+    }
+  }
+  if (w.kind !== 'legacy') {
+    items.push({ sep: true });
+    items.push({ icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this workspace (local label only).', act: () => startWsEdit(chip, nm, w) });
+    items.push({
+      icon: TRASH_SVG, label: 'Delete workspace', danger: true,
+      hint: 'Move this workspace’s folder to trash (recoverable). A repo keeps its GitHub copy.',
+      act: () => { if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w); },
+    });
+  }
+  return items;
+}
+function openWsMenu(btn, chip, nm, w) {
+  const m = $('ws-menu'); if (!m) return;
+  m.innerHTML = '';
+  wsMenuItems(chip, nm, w).forEach((it) => {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'ws-menu-sep'; m.appendChild(s); return; }
+    const b = document.createElement('button');
+    b.className = 'ctxitem ws-mi' + (it.danger ? ' danger' : '') + (it.on ? ' on' : '');
+    if (it.hint) b.title = it.hint;                          // short hover description of what this action does
+    b.innerHTML = '<span class="ws-mi-ic">' + it.icon + '</span><span class="ws-mi-lb"></span>';
+    b.querySelector('.ws-mi-lb').textContent = it.label;     // textContent → labels can't inject markup
+    b.addEventListener('click', (e) => { e.stopPropagation(); closeWsMenu(); it.act(); });
+    m.appendChild(b);
+  });
+  // Drop straight down as if it were the next workspace chip: EXACT same left edge and EXACT same width as
+  // the bar it came off of (the menu is border-box, so width == the bar's full box). Flips above only if it
+  // would overflow the viewport bottom.
+  const r = (chip || btn).getBoundingClientRect();
+  m.style.minWidth = '0';
+  m.style.width = Math.round(r.width) + 'px';
+  m.style.display = 'block';
+  const mh = m.offsetHeight;
+  m.style.left = Math.round(r.left) + 'px';
+  m.style.top = (r.bottom + 5 + mh > window.innerHeight - 8 ? Math.max(8, r.top - 5 - mh) : r.bottom + 5) + 'px';
+  wsMenuFor = w.id;
+}
+function closeWsMenu() { const m = $('ws-menu'); if (m) m.style.display = 'none'; wsMenuFor = null; }
+document.addEventListener('click', (e) => {
+  if (wsMenuFor && !e.target.closest('#ws-menu') && !e.target.closest('.ws-menu-btn')) closeWsMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && wsMenuFor) closeWsMenu(); });
 // ---- git push / pull: clicking a menu item writes the command into the live terminal (like the cmd bar) ----
 function openGitMenu() {
   const b = $('git-btn'), m = $('git-menu'); if (!b || !m) return;
@@ -1629,8 +1756,6 @@ claudible.onWorkspaceActiveChanged((id) => {
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
 $('new-session').addEventListener('click', () => newBlankTab(activeWsId, 'new'));   // a NEW tab — never clears the current session
-$('skills-btn').addEventListener('click', () => openExt('skills'));
-$('plugins-btn').addEventListener('click', () => openExt('plugins'));
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }

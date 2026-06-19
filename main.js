@@ -677,6 +677,7 @@ function pollStatus() {
         const cu = c.current_usage || null;   // last turn's usage (input/output here are NEW, non-cache)
         win.webContents.send('status', {
           tabId,
+          sessionId: d.session_id || null,   // lets the renderer reconcile a freshly-started "new" tab into its saved session row
           ctxPct: c.used_percentage, costUsd: cost.total_cost_usd,
           newTok: cu ? ((cu.input_tokens || 0) + (cu.output_tokens || 0)) : null,  // genuinely-new tokens, excl. cache
           usageKey: cu ? `${cu.input_tokens}:${cu.output_tokens}:${cu.cache_read_input_tokens}:${cu.cache_creation_input_tokens}` : null,

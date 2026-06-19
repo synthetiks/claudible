@@ -153,7 +153,8 @@
     .term-host{position:absolute;inset:0;display:none;padding:10px 12px}
     .term-host.active{display:block}
     /* tab strip — one chip per live session/pty (the active chip = the visible terminal) */
-    .tabstrip{display:flex;align-items:center;gap:6px;flex:none;height:32px;padding:0 2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+    /* top tab strip retired — concurrent sessions now live in the left sidebar; kept hidden so old refs are harmless */
+    .tabstrip{display:none;align-items:center;gap:6px;flex:none;height:32px;padding:0 2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
     .tabstrip::-webkit-scrollbar{height:0}
     .tab{display:flex;align-items:center;gap:7px;flex:none;max-width:200px;height:24px;padding:0 6px 0 11px;cursor:pointer;
       font-size:11px;color:var(--ink-faint);background:linear-gradient(180deg,#16181d,#0f1115);
@@ -399,6 +400,13 @@
     .sess.dragging{opacity:.55;border-color:rgba(255,255,255,.32);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:44px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    /* live (unsaved) session rows: a blue dotted accent so they read as "running, not yet saved" */
+    .sess.sess-live{border-style:dashed}
+    .sess.sess-live .sess-meta{color:#6aa6e0}
+    .sess-livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#6aa6e0;
+      margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px #6aa6e0}
+    .sess.busy .sess-livedot{animation:ws-sync-pulse 1s ease-in-out infinite}
+    .sess.busy.open-in-tab,.sess.busy.sess-live{border-color:var(--live)}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* hover trash → inline confirm → soft-delete (recoverable, moves to ~/.claudible/trash) */
     .sess-del{position:absolute;top:6px;right:6px;width:auto;padding:4px;border:1px solid transparent;border-radius:7px;
@@ -456,7 +464,32 @@
     .ws-chip.dragging{opacity:.55;border-color:rgba(255,255,255,.32);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .ws-chip .ws-ico{width:13px;height:13px;flex:none;color:var(--ink-faint)}
     .ws-chip.active .ws-ico{color:var(--live-soft)}
-    .ws-chip .ws-name{font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ws-chip .ws-name{flex:1;min-width:0;font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* right edge: passive status dot + the ▾ options trigger (all actions moved into the dropdown) */
+    .ws-chip .ws-right{flex:none;display:flex;align-items:center;gap:6px;margin-left:6px}
+    .ws-chip .ws-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ink-faint)}
+    .ws-chip .ws-dot.live{background:#5fb487;box-shadow:0 0 6px -1px #5fb487}      /* green = live screen-share */
+    .ws-chip .ws-dot.sync{background:#6aa6e0;box-shadow:0 0 6px -1px #6aa6e0}      /* blue  = session-sync on */
+    .ws-chip .ws-dot.syncing{animation:ws-sync-pulse 1s ease-in-out infinite}
+    .ws-chip .ws-dot.err{background:#d2685f;box-shadow:0 0 6px -1px #d2685f}
+    .ws-chip .ws-menu-btn{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:20px;
+      padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer}
+    .ws-chip .ws-menu-btn svg{width:14px;height:14px;display:block}
+    .ws-chip .ws-menu-btn:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    .ws-chip.active .ws-menu-btn{color:var(--ink-dim)}
+    /* the ▾ dropdown (reuses .ctxmenu) — icon + label rows, with a danger row for delete */
+    .ws-menu{min-width:184px;padding:6px;box-sizing:border-box}   /* border-box so JS width == the workspace bar's full box (exact alignment) */
+    .ws-menu .ws-mi{justify-content:flex-start;gap:8px;color:var(--ink-dim);font-size:11px;padding:6px 9px}
+    /* label flexes + ellipsizes so every row fits the bar-width box at one uniform size (no half-cut text) */
+    .ws-menu .ws-mi-lb{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+    .ws-menu .ws-mi:hover{color:var(--ink)}
+    .ws-menu .ws-mi.on{color:var(--ink)}
+    .ws-menu .ws-mi-ic{display:flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none;opacity:.9}
+    .ws-menu .ws-mi-ic svg{width:14px;height:14px;display:block}
+    .ws-menu .ws-mi.on .ws-mi-ic{color:#6aa6e0}
+    .ws-menu .ws-mi.danger{color:#d2685f}
+    .ws-menu .ws-mi.danger:hover{background:rgba(210,104,95,.12);color:#e0796f}
+    .ws-menu .ws-menu-sep{height:1px;background:var(--hairline);margin:5px 6px}
     .ws-chip .ws-kind{margin-left:auto;font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);flex:none}
     /* per-chip actions: share toggle (grant to guests) + repo collaborator invite + sessions sync */
     .ws-chip .ws-share,.ws-chip .ws-invite,.ws-chip .ws-sync{width:auto;padding:3px;border:1px solid transparent;border-radius:6px;
@@ -509,11 +542,16 @@
     /* settings drawer — slimmer, tighter, less clunky */
     .drawer{width:338px}
     .drawer .panel{padding:4px 16px 18px}
-    .drawer .sec{padding:13px 2px}
-    .drawer .label{margin-bottom:10px;font-size:10.5px}
-    .drawer button.primary{padding:12px;font-size:12.5px}
-    .drawer #speak{padding:11px}
-    .drawer .voices{margin-bottom:9px}
+    .drawer .sec{padding:11px 2px}
+    .drawer .label{margin-bottom:8px;font-size:10.5px}
+    .drawer button.primary{padding:9px 12px;font-size:12px}        /* Talk — was an oversized block */
+    .drawer #speak{padding:8px 12px;font-size:11.5px}              /* Speak — was an oversized block */
+    .drawer .voices{margin-bottom:8px}
+    .drawer .ptt-key-row{margin-top:8px}
+    .drawer .out{margin-top:8px}
+    .drawer .speakrow{margin-top:9px}
+    .drawer .speedrow{margin-top:9px}
+    .drawer .transcript{max-height:120px}
     /* Settings button (top bar) — opens the slide-in drawer holding voice/commands/share */
     /* drawer + scrim */
     .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity .2s}
@@ -598,9 +636,7 @@
     <span class="wordmark">claudible</span>
     <div class="topbtns">
       <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
-      <button class="iconbtn" id="settings-btn" title="Settings">⚙</button>
-      <button class="iconbtn" id="skills-btn" title="Skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.7L18.5 9l-4.8 1.3L12 15l-1.7-4.7L5.5 9l4.8-1.3z"/><path d="M18.5 14l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9z"/></svg></button>
-      <button class="iconbtn" id="plugins-btn" title="Plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.3"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.3"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.3"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.3"/></svg></button>
+      <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins">⚙</button>
     </div>
     <div class="vgroup">
       <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop recording">
@@ -804,6 +840,9 @@
     <button class="ctxitem" id="git-push"><span class="gup">↑</span> git push</button>
     <button class="ctxitem" id="git-pull"><span class="gdn">↓</span> git pull</button>
   </div>
+
+  <!-- per-workspace options (▾): populated dynamically by openWsMenu() -->
+  <div id="ws-menu" class="ctxmenu ws-menu" style="display:none"></div>
 
   <div class="approve" id="approve">
     <div class="box">
