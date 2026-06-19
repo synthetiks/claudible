@@ -19,6 +19,7 @@ elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
 else
   SDIR="$HOME/.claudible/session"
 fi
+[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location (set only for workspaces with a stored path)
 # Runtime files live on the Windows FS so the Electron app reads them natively (NOT over the flaky
 # \\wsl.localhost 9P boundary). The app passes its OWN folder (as a /mnt path) in $1 — no hardcoded home.
 APPDIR="${1:?usage: session.sh <app-dir-as-wsl-path>}"

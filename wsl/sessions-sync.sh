@@ -32,6 +32,7 @@ case "$WS_SLUG" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad workspace" ;; esac
 [ "$WS_KIND" = "repo" ] || fail "sync is only available for repo workspaces"
 
 SDIR="$HOME/.claudible/repos/$WS_SLUG"               # the code working tree (the user's clone)
+[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
 [ -d "$SDIR/.git" ] || fail "repo workspace not found"
 
 # Same encoder Claude uses (must match session.sh exactly): EVERY non-alphanumeric char in the absolute

@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
-  workspaceCreate: (kind, name) => ipcRenderer.invoke('workspace:create', { kind, name }),
+  workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),
   workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   workspaceRename: (id, label) => ipcRenderer.invoke('workspace:rename', { id, label }),

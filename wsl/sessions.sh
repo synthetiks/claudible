@@ -15,6 +15,7 @@ elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
 else
   SDIR="$HOME/.claudible/session"
 fi
+[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
 # Same encoding Claude uses: every non-alphanumeric char in the cwd path → '-'.
 PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
 

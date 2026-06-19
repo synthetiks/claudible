@@ -12,6 +12,7 @@ case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
 if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
 elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then SDIR="$HOME/.claudible/repos/$WS_SLUG"
 else SDIR="$HOME/.claudible/session"; fi
+[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
 
 op="${1:-list}"
 case "$op" in

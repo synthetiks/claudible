@@ -16,10 +16,11 @@ esac
 
 case "$kind" in
   local)
-    dir="$HOME/.claudible/workspaces/$slug"
-    if [ -e "$dir" ]; then printf '{"ok":false,"error":"a workspace with that name already exists"}'; exit 0; fi
+    pdir="${3:-}"                                          # optional custom parent dir (absolute WSL path from the app)
+    if [ -n "$pdir" ]; then dir="$pdir/$slug"; else dir="$HOME/.claudible/workspaces/$slug"; fi
+    if [ -e "$dir" ]; then printf '{"ok":false,"error":"a workspace with that name already exists there"}'; exit 0; fi
     if mkdir -p "$dir/.claude"; then
-      printf '{"ok":true,"kind":"local","slug":"%s"}' "$slug"
+      printf '{"ok":true,"kind":"local","slug":"%s","path":"%s"}' "$slug" "$dir"
     else
       printf '{"ok":false,"error":"could not create the folder"}'
     fi

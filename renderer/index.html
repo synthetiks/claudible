@@ -503,6 +503,8 @@
     .choice .ct{font-size:12.5px;color:var(--ink);margin-bottom:3px}
     .choice .cd{font-size:10.5px;line-height:1.45;color:var(--ink-dim)}
     .ws-busy{font-size:11px;color:var(--ink-dim);min-height:15px;margin:-4px 0 12px;text-align:left}
+    .ws-pick-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);margin:2px 0 12px;cursor:pointer;text-align:left}
+    .ws-pick-row input{cursor:pointer}
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:14px 14px 16px;display:flex;flex-direction:column;gap:11px}
@@ -851,6 +853,7 @@
         </div>
       </div>
       <input type="text" id="ws-name-in" maxlength="60" placeholder="Workspace name (letters, numbers, dashes)" />
+      <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose a folder for it (local only — else it goes in ~/.claudible)</span></label>
       <div class="ws-busy" id="ws-busy"></div>
       <div class="row">
         <button id="ws-create">Create</button>

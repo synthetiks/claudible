@@ -1545,10 +1545,12 @@ function selectWsKind(kind) {
   wsChoiceKind = kind;
   $('ch-local').classList.toggle('sel', kind === 'local');
   $('ch-repo').classList.toggle('sel', kind === 'repo');
+  const pr = $('ws-pick-row'); if (pr) pr.style.display = (kind === 'local') ? '' : 'none';   // custom folder is local-only
 }
 function openWsModal() {
   selectWsKind('local');
   $('ws-name-in').value = ''; $('ws-busy').textContent = ''; $('ws-busy').classList.remove('err');
+  if ($('ws-pick')) $('ws-pick').checked = false;
   $('ws-modal').classList.add('show');
   setTimeout(() => $('ws-name-in').focus(), 60);
 }
@@ -1558,9 +1560,10 @@ async function createWorkspace() {
   const name = $('ws-name-in').value.trim();
   const busy = $('ws-busy'); busy.classList.remove('err');
   if (!name) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }
-  busy.textContent = wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…';
+  const pick = wsChoiceKind === 'local' && $('ws-pick') && $('ws-pick').checked;   // custom folder (local only)
+  busy.textContent = pick ? 'choose a folder…' : (wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…');
   $('ws-create').disabled = true;
-  let r = null; try { r = await claudible.workspaceCreate(wsChoiceKind, name); } catch {}
+  let r = null; try { r = await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
   $('ws-create').disabled = false;
   if (!r || !r.ok) { busy.textContent = (r && r.error) || 'creation failed'; busy.classList.add('err'); return; }
   closeWsModal();                                   // main already switched the foreground tab + respawned a fresh conversation

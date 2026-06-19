@@ -21,6 +21,7 @@ elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
 else
   SDIR="$HOME/.claudible/session"
 fi
+[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
 SID="${1:-}"
 case "$SID" in '' | *[!A-Za-z0-9-]*) printf '[]'; exit 0 ;; esac      # need a clean session id
 PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"

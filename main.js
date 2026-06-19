@@ -61,7 +61,10 @@ catch (e) { console.error('[claudible] wslpath failed:', e.message); }
 function wsEnv(ws) {
   const kind = ws && ['local', 'repo', 'legacy'].includes(ws.kind) ? ws.kind : 'legacy';
   const slug = String((ws && ws.slug) || '').replace(/[^A-Za-z0-9-]/g, '');
-  return `CLAUDIBLE_WS_KIND='${kind}'` + (slug ? ` CLAUDIBLE_WS_SLUG='${slug}'` : '');
+  let s = `CLAUDIBLE_WS_KIND='${kind}'` + (slug ? ` CLAUDIBLE_WS_SLUG='${slug}'` : '');
+  const p = ws && ws.path;   // custom save-location (absolute WSL path); single-quote-free for safe inlining
+  if (p && typeof p === 'string' && !p.includes("'")) s += ` CLAUDIBLE_WS_DIR='${p}'`;
+  return s;
 }
 function tabRuntimeId(tabId) { return String(tabId || '').replace(/[^A-Za-z0-9-]/g, '') || 'default'; }
 function buildBoot(session, ws, tabId) {
@@ -500,27 +503,43 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
   if (!slug) return resolve({ ok: false, error: 'enter a name (letters, numbers, dashes)' });
   if (registry.workspaces.some((w) => w.id === `${kind}-${slug}`)) return resolve({ ok: false, error: 'a workspace with that name already exists' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/create-workspace.sh' '${kind}' '${slug}'`],
-    { encoding: 'utf8', timeout: kind === 'repo' ? 300000 : 30000 }, (err, stdout) => {   // repo = network-bound (clone+push)
-      if (err) { console.error('[claudible] create-workspace:', err.message); return resolve({ ok: false, error: 'creation timed out or failed' }); }
-      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-      // Register + switch to a workspace, then resolve. fresh=true for a brand-new one (start a fresh
-      // conversation); fresh=false when re-attaching an orphan (resume whatever's in that cwd).
-      const attach = (repoUrl, owner, fresh) => {
-        openGen++;                                                     // supersede any in-flight workspace:open clone
-        const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
-          repoUrl: repoUrl || undefined, owner: owner || undefined, createdAt: Date.now() };
-        registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
-        const fr = fgRec(); if (fr) fr.ws = ws;                       // re-point the foreground tab at the new workspace
-        respawnPty(fgTabId, fresh ? 'new' : '');
-        resolve({ ok: true, workspace: ws });
-      };
-      if (r.ok) return attach(r.repoUrl, r.owner, true);
-      // The dir already exists on disk but isn't in our registry (registry wiped, or a prior create
-      // timed out AFTER provisioning): re-attach it instead of dead-ending the name.
-      if (/already exists/i.test(String(r.error || ''))) return attach(undefined, undefined, false);
-      resolve({ ok: false, error: r.error || 'creation failed' });
-    });
+  const exec = (pdirWsl) => {
+    const arg3 = pdirWsl ? ` '${pdirWsl}'` : '';                       // optional custom parent dir (local only)
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/create-workspace.sh' '${kind}' '${slug}'${arg3}`],
+      { encoding: 'utf8', timeout: kind === 'repo' ? 300000 : 30000 }, (err, stdout) => {   // repo = network-bound (clone+push)
+        if (err) { console.error('[claudible] create-workspace:', err.message); return resolve({ ok: false, error: 'creation timed out or failed' }); }
+        let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+        // Register + switch to a workspace, then resolve. fresh=true for a brand-new one (start a fresh
+        // conversation); fresh=false when re-attaching an orphan (resume whatever's in that cwd).
+        const attach = (repoUrl, owner, fresh, wsPath) => {
+          openGen++;                                                     // supersede any in-flight workspace:open clone
+          const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
+            repoUrl: repoUrl || undefined, owner: owner || undefined, path: wsPath || undefined, createdAt: Date.now() };
+          registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
+          const fr = fgRec(); if (fr) fr.ws = ws;                       // re-point the foreground tab at the new workspace
+          respawnPty(fgTabId, fresh ? 'new' : '');
+          resolve({ ok: true, workspace: ws });
+        };
+        if (r.ok) return attach(r.repoUrl, r.owner, true, r.path);
+        // The dir already exists on disk but isn't in our registry (registry wiped, or a prior create
+        // timed out AFTER provisioning): re-attach it instead of dead-ending the name.
+        if (/already exists/i.test(String(r.error || ''))) return attach(undefined, undefined, false, r.path);
+        resolve({ ok: false, error: r.error || 'creation failed' });
+      });
+  };
+  // Custom save-location (local only): pick a parent folder, convert Windows→WSL path, create <folder>/<slug> there.
+  if (kind === 'local' && payload && payload.pick) {
+    dialog.showOpenDialog(win, { title: 'Choose where to create this workspace', properties: ['openDirectory', 'createDirectory'] })
+      .then((res) => {
+        if (res.canceled || !res.filePaths || !res.filePaths.length) return resolve({ ok: false, error: 'cancelled' });
+        let wslp = '';
+        try { wslp = cp.execFileSync('wsl.exe', ['wslpath', '-u', res.filePaths[0].replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); } catch {}
+        if (!wslp || wslp.includes("'")) return resolve({ ok: false, error: 'could not use that folder' });
+        exec(wslp);
+      }).catch(() => resolve({ ok: false, error: 'folder pick failed' }));
+  } else {
+    exec('');
+  }
 }));
 // Grant / revoke a workspace to guests (default-deny). Updates the live share immediately.
 ipcMain.handle('workspace:setShared', (e, payload) => {
