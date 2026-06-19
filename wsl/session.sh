@@ -22,19 +22,30 @@ fi
 # Runtime files live on the Windows FS so the Electron app reads them natively (NOT over the flaky
 # \\wsl.localhost 9P boundary). The app passes its OWN folder (as a /mnt path) in $1 — no hardcoded home.
 APPDIR="${1:?usage: session.sh <app-dir-as-wsl-path>}"
-RT="$APPDIR/runtime"
+# Per-TAB runtime isolation: each Claudible tab is its own live session/pty, but they share one Windows
+# runtime/ dir. Status + hooks must live under runtime/tabs/<tab>/ so two concurrent sessions never
+# truncate or interleave each other's streams. The app inlines CLAUDIBLE_TAB (a strict [A-Za-z0-9-]
+# leaf); unset/bad falls back to 'default', so a lone session stays fully backward compatible.
+TAB="${CLAUDIBLE_TAB:-}"
+case "$TAB" in '' | *[!A-Za-z0-9-]*) TAB="default" ;; esac
+RT="$APPDIR/runtime/tabs/$TAB"
 STATUS="$RT/status.json"
 HOOKS="$RT/hooks.ndjson"
+# Exported so Claude — and the hook/statusline subprocesses it spawns — inherit the per-tab paths.
+# The generated scripts below read these at RUNTIME (not bake-time), so the SHARED scripts route each
+# tab's output to its own files based on that tab's Claude process env (env inheritance is verified).
+export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS"
 
 mkdir -p "$SDIR/.claude" "$RT"
-: > "$HOOKS"            # fresh hook stream per launch
+: > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
 printf '{}' > "$STATUS" # clear stale status so the meter starts blank, not on last session's numbers
 
 # --- statusLine: dump the rich JSON to STATUS, print a compact line for the TUI ---
 cat > "$SDIR/.claude/statusline.sh" <<EOF
 #!/usr/bin/env bash
 in=\$(cat)
-printf '%s' "\$in" > "$STATUS"
+out="\${CLAUDIBLE_STATUS:-$STATUS}"   # per-tab path from the inheriting Claude env; baked path is the fallback
+printf '%s' "\$in" > "\$out"
 printf '%s' "\$in" | python3 -c "import sys,json
 try:
     d=json.load(sys.stdin); c=d.get('context_window',{})
@@ -47,7 +58,8 @@ chmod +x "$SDIR/.claude/statusline.sh"
 cat > "$SDIR/.claude/hook.sh" <<EOF
 #!/usr/bin/env bash
 line=\$(cat)
-printf '%s\n' "\$line" >> "$HOOKS"
+out="\${CLAUDIBLE_HOOKS:-$HOOKS}"   # per-tab path from the inheriting Claude env; baked path is the fallback
+printf '%s\n' "\$line" >> "\$out"
 exit 0
 EOF
 chmod +x "$SDIR/.claude/hook.sh"

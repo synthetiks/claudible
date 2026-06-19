@@ -2,14 +2,18 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('claudible', {
-  // terminal
-  ptyStart: (cols, rows) => ipcRenderer.send('pty:start', { cols, rows }),
-  onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, d) => cb(d)),
-  ptyInput: (d) => ipcRenderer.send('pty:input', d),
-  ptyResize: (cols, rows) => ipcRenderer.send('pty:resize', { cols, rows }),
+  // terminal (per-tab: every channel carries a tabId so N live ptys/xterms can coexist)
+  ptyStart: (tabId, cols, rows) => ipcRenderer.send('pty:start', { tabId, cols, rows }),
+  onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, { tabId, data }) => cb(tabId, data)),
+  ptyInput: (tabId, d) => ipcRenderer.send('pty:input', { tabId, data: d }),
+  ptyResize: (tabId, cols, rows) => ipcRenderer.send('pty:resize', { tabId, cols, rows }),
+  // tabs (lifecycle): record intent → start → foreground → close
+  tabOpen: (tabId, wsId, session) => ipcRenderer.invoke('tab:open', { tabId, wsId, session }),
+  tabClose: (tabId) => ipcRenderer.invoke('tab:close', { tabId }),
+  tabForeground: (tabId) => ipcRenderer.send('pty:foreground', { tabId }),
   // sessions (switcher)
   sessionList: () => ipcRenderer.invoke('session:list'),
-  sessionOpen: (id) => ipcRenderer.invoke('session:open', id),
+  sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
   sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
@@ -36,9 +40,10 @@ contextBridge.exposeInMainWorld('claudible', {
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
   // hooks + tracker
-  onHookLine: (cb) => ipcRenderer.on('hook:line', (_e, l) => cb(l)),
+  onHookLine: (cb) => ipcRenderer.on('hook:line', (_e, { tabId, line }) => cb(tabId, line)),
+  onWorkflowAgents: (cb) => ipcRenderer.on('workflow:agents', (_e, { tabId, workflows }) => cb(tabId, workflows)),
   hookTest: () => ipcRenderer.invoke('hook:test'),
-  onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
+  onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),   // s carries s.tabId
   // live terminal sharing
   shareStart: (opts) => ipcRenderer.invoke('share:start', opts || {}),
   shareStop: () => ipcRenderer.invoke('share:stop'),

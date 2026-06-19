@@ -12,11 +12,20 @@ const cp = require('child_process');
 const { createShareServer } = require('./share/server');
 const { startCloudflared } = require('./share/cloudflared');
 
-let win, ptyProc, trustDone = false;
+let win;
+// Multi-tab: each Claudible tab is its own live session/pty. `ptys` maps a renderer-issued tabId to a
+// per-tab record { proc, cols, rows, trustDone, ws, session, runtimeId, busy, busyTimer }. `fgTabId` is
+// the FOREGROUND tab — the only one mirrored to guests; the global activeWorkspace/registry.activeId are
+// kept in lockstep with it (via setForegroundTab) so all existing active-workspace logic (sessions list,
+// sync, share grant) keeps working unchanged.
+const ptys = new Map();
+let fgTabId = null;
+const tabIntent = new Map();   // tabId -> { ws, session } recorded by tab:open, consumed by the next pty:start
+function fgRec() { return ptys.get(fgTabId) || null; }
 // Live terminal sharing: server runs locally (loopback); cloudflared carries the last hop. See share/.
-let cloudflaredProc = null, ptyCols = 120, ptyRows = 32, shareBaseUrl = null, pendingSession = '';
+let cloudflaredProc = null, shareBaseUrl = null;
 const share = createShareServer({
-  onInput: (d) => { try { ptyProc && ptyProc.write(d); } catch {} },   // a guest typed → into the live pty
+  onInput: (d) => { const t = ptys.get(fgTabId); try { t && t.proc.write(d); } catch {} },   // a guest typed → into the FOREGROUND pty
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
   onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} },   // presence lights
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
@@ -27,16 +36,15 @@ const share = createShareServer({
     const ws = registry.workspaces.find((w) => w.id === id && w.shared);
     if (!ws) return;                                                   // only granted workspaces are switchable
     openGen++;                                                         // supersede any in-flight workspace:open clone
+    const rec = fgRec(); if (rec) rec.ws = ws;                         // re-point the shared (foreground) tab at that ws
     activeWorkspace = ws; registry.activeId = id; saveRegistry();
-    respawnPty('');                                                    // resume the most-recent conversation in that cwd
+    respawnPty(fgTabId, '');                                           // resume the most-recent conversation in that cwd
     try { win && win.webContents.send('workspace:active-changed', id); } catch {}
   },
 });
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
-const RT = path.join(__dirname, 'runtime');
-const STATUS = path.join(RT, 'status.json');
-const HOOKS  = path.join(RT, 'hooks.ndjson');
+const RT = path.join(__dirname, 'runtime');   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 let APPDIR_WSL = null;
@@ -55,10 +63,12 @@ function wsEnv(ws) {
   const slug = String((ws && ws.slug) || '').replace(/[^A-Za-z0-9-]/g, '');
   return `CLAUDIBLE_WS_KIND='${kind}'` + (slug ? ` CLAUDIBLE_WS_SLUG='${slug}'` : '');
 }
-function buildBoot(session, ws) {
+function tabRuntimeId(tabId) { return String(tabId || '').replace(/[^A-Za-z0-9-]/g, '') || 'default'; }
+function buildBoot(session, ws, tabId) {
   if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + wsEnv(ws) + ' ';
+  const tab = tabRuntimeId(tabId);                                                       // per-tab runtime path key (matches session.sh)
+  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}' ` + wsEnv(ws) + ' ';
   return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
 }
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
@@ -116,45 +126,54 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {   // one-shot, scoped to this contents: a reload won't stack a 2nd set of pollers/timers
     startVoiceServices();   // idempotent; ensures STT/TTS are up even when launched via `npm start`
     pollStatus(); pollHooks();
-    // spawn-on-size fallback: if the renderer never reports a size, start at a default
-    setTimeout(() => { if (!ptyProc) spawnPty(120, 32); }, 1800);
+    // spawn-on-size fallback: if the renderer never reports a size, seed the first tab ('main') at a default
+    setTimeout(() => { if (ptys.size === 0) spawnPty('main', 120, 32, activeWorkspace, ''); }, 1800);
     startPoll();            // adaptive background session sync for the active repo workspace
+    startWorkflowPoll();    // live workflow/swarm agents for the foreground tab's Agents pane
     // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
     setTimeout(() => { discoverWorkspaces().then(syncAllEnabled); }, 3000);
   });
 }
 
-// ---- embedded live Claude TUI ----
-function spawnPty(cols, rows) {
-  if (ptyProc || !nodePty) {
-    if (!nodePty && win) win.webContents.send('pty:data', `\r\n[claudible] node-pty unavailable (${ptyErr})\r\n`);
+// ---- embedded live Claude TUI (one pty per tab) ----
+function spawnPty(tabId, cols, rows, ws, session) {
+  if (!tabId) return;
+  if (ptys.has(tabId) || !nodePty) {
+    if (!nodePty && win) win.webContents.send('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${ptyErr})\r\n` });
     return;
   }
+  ws = ws || activeWorkspace;
   try {
-    const proc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(pendingSession, activeWorkspace)], {
+    const proc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, tabId)], {
       name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
       // ConPTY (default on Win11) — preserves full ANSI incl. the dim attribute (winpty strips it).
       // Its console-list agent crash ("AttachConsole failed") is neutralized by the guard patch in
       // node_modules/node-pty/lib/conpty_console_list_agent.js + the uncaughtException net below.
     });
-    ptyProc = proc; pendingSession = '';                   // consume the one-shot session selection
-    ptyCols = cols || 120; ptyRows = rows || 32; trustDone = false;
-    share.resetRing(); share.resetStatus(); share.setSize(ptyCols, ptyRows);   // fresh session → drop stale replay/tracker, tell guests the size
-    // Handlers are guarded by `ptyProc === proc` so a soon-to-die OLD pty (during a session switch)
-    // can't stomp the NEW one's stream or null it out.
+    const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
+      runtimeId: tabRuntimeId(tabId), busy: false, busyTimer: null };
+    ptys.set(tabId, rec);
+    if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
+    if (tabId === fgTabId) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the foreground tab drives the guest mirror
+    // Handlers are guarded by `ptys.get(tabId)?.proc === proc` so a soon-to-die OLD pty (during a session
+    // switch on this tab) can't stomp the NEW one's stream — the map entry is replaced/deleted before kill.
     proc.onData(d => {
-      if (ptyProc !== proc) return;
-      win.webContents.send('pty:data', d);
-      share.broadcast(d);                                  // tee the SAME stream to any connected guests
-      if (!trustDone && /trust this folder/i.test(d)) { trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
+      if (ptys.get(tabId)?.proc !== proc) return;
+      win.webContents.send('pty:data', { tabId, data: d });
+      if (tabId === fgTabId) share.broadcast(d);           // tee ONLY the foreground stream to guests
+      const r = ptys.get(tabId);
+      if (r && !r.trustDone && /trust this folder/i.test(d)) { r.trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
     });
     proc.onExit(() => {
-      if (ptyProc !== proc) return;                        // an intentional switch already replaced us
+      if (ptys.get(tabId)?.proc !== proc) return;          // an intentional switch already replaced us
+      const r = ptys.get(tabId); const rws = r && r.ws;
       const msg = '\r\n[claudible] session ended\r\n';
-      win.webContents.send('pty:data', msg); share.broadcast(msg); share.resetRing(); ptyProc = null;
-      setGenBusy(false); schedulePush();                   // session ended → flush its transcript to collaborators
+      win.webContents.send('pty:data', { tabId, data: msg });
+      if (tabId === fgTabId) { share.broadcast(msg); share.resetRing(); }
+      setGenBusy(tabId, false); ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId);
+      schedulePush(rws);                                   // session ended → flush its workspace's transcripts to collaborators
     });
-  } catch (e) { win.webContents.send('pty:data', `\r\n[claudible] pty spawn failed: ${e.message}\r\n`); }
+  } catch (e) { win.webContents.send('pty:data', { tabId, data: `\r\n[claudible] pty spawn failed: ${e.message}\r\n` }); }
 }
 // The granted workspace library a guest is allowed to see (paths/urls stripped); marks which is live.
 function grantedList() {
@@ -168,31 +187,69 @@ function syncShare() {
   try { share.setPaused(!(activeWorkspace && activeWorkspace.shared)); } catch {}
   try { share.setWorkspaces(grantedList()); } catch {}
 }
-// Switch the embedded terminal to a chosen session ('new' | <session-id>). Kills the current pty
-// (its guarded handlers go quiet) and respawns with the selection.
-function respawnPty(session) {
-  pendingSession = session || '';
-  setGenBusy(false);                                        // a switch ends any in-flight turn for sync gating
-  // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
-  try { if (share.status().running) share.setPaused(!(activeWorkspace && activeWorkspace.shared)); } catch {}
-  const old = ptyProc; ptyProc = null;
+// Switch a tab's terminal to a chosen session ('new' | <session-id> | '' = resume latest). Kills that
+// tab's current pty (its guarded handlers go quiet, since the map entry is deleted BEFORE the kill) and
+// respawns it with the selection. Only foreground-tab switches touch the guest mirror.
+function respawnPty(tabId, session) {
+  const rec = ptys.get(tabId);
+  setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
+  const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
+  if (tabId === fgTabId) {
+    // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
+    try { if (share.status().running) share.setPaused(!(ws && ws.shared)); } catch {}
+  }
+  const old = rec && rec.proc;
+  ptys.delete(tabId);                                       // drop the entry first → the old handlers' guard goes quiet
   if (old) { try { old.kill(); } catch {} }
-  spawnPty(ptyCols, ptyRows);
-  syncShare();                                            // refresh the granted library (live flag) for guests
+  spawnPty(tabId, cols, rows, ws, session);
+  if (tabId === fgTabId) syncShare();                       // refresh the granted library (live flag) for guests
 }
-ipcMain.on('pty:start', (e, { cols, rows }) => spawnPty(cols, rows));
-ipcMain.on('pty:input', (e, d) => { if (ptyProc) ptyProc.write(d); });
-ipcMain.on('pty:resize', (e, { cols, rows }) => {
-  ptyCols = cols || ptyCols; ptyRows = rows || ptyRows;
-  try { ptyProc && ptyProc.resize(cols, rows); } catch {}
-  share.setSize(ptyCols, ptyRows);                         // keep guests' xterm matched to the host pty size
+// Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points
+// the single guest mirror at this tab and keeps the global active-workspace notion in lockstep with it.
+function setForegroundTab(tabId) {
+  fgTabId = tabId;   // record intent even if the pty hasn't spawned yet — spawnPty wires the mirror once it has
+  const rec = ptys.get(tabId);
+  if (rec && rec.ws && registry.activeId !== rec.ws.id) { activeWorkspace = rec.ws; registry.activeId = rec.ws.id; saveRegistry(); }
+  else if (rec && rec.ws) activeWorkspace = rec.ws;
+  try { share.resetRing(); share.resetStatus(); } catch {}                        // drop the previous tab's replay/tracker
+  try { if (share.status().running) share.setPaused(!(rec && rec.ws && rec.ws.shared)); } catch {}
+  if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
+  syncShare();
+}
+ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
+  const intent = tabIntent.get(tabId); tabIntent.delete(tabId);
+  const rec = ptys.get(tabId);
+  spawnPty(tabId, cols, rows, (rec && rec.ws) || (intent && intent.ws) || activeWorkspace, (rec && rec.session) || (intent && intent.session) || '');
+});
+ipcMain.on('pty:input', (e, { tabId, data }) => { const t = ptys.get(tabId); if (t) { try { t.proc.write(data); } catch {} } });
+ipcMain.on('pty:resize', (e, { tabId, cols, rows }) => {
+  const t = ptys.get(tabId); if (!t) return;
+  t.cols = cols || t.cols; t.rows = rows || t.rows;
+  try { t.proc.resize(t.cols, t.rows); } catch {}
+  if (tabId === fgTabId) share.setSize(t.cols, t.rows);    // keep guests' xterm matched to the FOREGROUND pty size
+});
+ipcMain.on('pty:foreground', (e, { tabId }) => setForegroundTab(tabId));
+// Record a new tab's intended workspace + session BEFORE its pty:start, so spawnPty binds it correctly.
+ipcMain.handle('tab:open', (e, { tabId, wsId, session }) => {
+  const ws = registry.workspaces.find((w) => w.id === wsId) || activeWorkspace;
+  tabIntent.set(tabId, { ws, session: session || '' });
+  return { ok: true };
+});
+// Close a tab: kill its pty (handlers go quiet via the deleted-entry guard) and drop its state.
+ipcMain.handle('tab:close', (e, { tabId }) => {
+  const rec = ptys.get(tabId);
+  setGenBusy(tabId, false);
+  ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId); tabIntent.delete(tabId);
+  if (rec) { try { rec.proc.kill(); } catch {} }
+  if (fgTabId === tabId) fgTabId = ptys.keys().next().value || null;   // renderer will foreground the next tab explicitly
+  return { ok: true };
 });
 
 // ---- live terminal sharing (local server + cloudflared tunnel) ----
 ipcMain.handle('share:start', async (e, opts) => {
   try {
     const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
-    share.setSize(ptyCols, ptyRows);
+    const fr0 = fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
     syncShare();                                          // tell guests the granted library + pause if the live ws is private
     let base = `http://127.0.0.1:${port}`, remote = false, note = null;
     try {
@@ -231,7 +288,7 @@ function listSessions() {
   });
 }
 ipcMain.handle('session:list', () => listSessions());
-ipcMain.handle('session:open', (e, id) => { respawnPty(id); return { ok: true }; });   // 'new' | <session-id>
+ipcMain.handle('session:open', (e, { tabId, id }) => { respawnPty(tabId, id); return { ok: true }; });   // re-point an existing tab at 'new' | <session-id>
 // Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
 // switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.
 ipcMain.handle('session:delete', (e, id) => new Promise((resolve) => {
@@ -249,18 +306,22 @@ ipcMain.handle('session:delete', (e, id) => new Promise((resolve) => {
 // (wsl/sessions-sync.sh, run in a SEPARATE git worktree) so a background pull/push never touches the
 // code working tree or main's history. Opt-in per workspace (committing transcripts is a deliberate
 // privacy choice); once on it runs automatically: a debounced push after each turn + an adaptive
-// background pull. We never sync mid-generation (genBusy) and the manual path skips the live session.
-let genBusy = false, genBusyTimer = null;     // true between UserPromptSubmit and Stop — never auto-sync then
+// background pull. We never sync while a workspace has a busy tab (per-tab turn state) so a transcript is
 const syncLock = new Set();                   // ws ids with an in-flight git sync (serialize per workspace)
 const cloneInFlight = new Map();              // ws id -> in-flight clone promise (dedupe concurrent ensureClone)
 let pollDelay = 30000, openGen = 0; const SYNC_MIN = 30000, SYNC_MAX = 300000;
 const pushTimers = new Map();                 // per-workspace debounced push timers (independent across ws)
-// Track turn busy/idle with a watchdog so a missed Stop (interrupted turn) can't wedge auto-sync off forever.
-function setGenBusy(v) {
-  genBusy = v;
-  if (genBusyTimer) { clearTimeout(genBusyTimer); genBusyTimer = null; }
-  if (v) genBusyTimer = setTimeout(() => { genBusy = false; genBusyTimer = null; schedulePush(); }, 1800000); // self-heal a missed Stop after 30min (well beyond any real turn); the export <2s skip still guards torn writes
+// Turn busy/idle is tracked PER TAB (rec.busy) so concurrent sessions never cross-gate each other's sync:
+// one tab mid-turn must neither block nor prematurely release auto-sync for another tab's workspace. A
+// watchdog per tab self-heals a missed Stop (interrupted turn) so it can't wedge that tab busy forever.
+function setGenBusy(tabId, v) {
+  const rec = ptys.get(tabId); if (!rec) return;
+  rec.busy = v;
+  if (rec.busyTimer) { clearTimeout(rec.busyTimer); rec.busyTimer = null; }
+  if (v) rec.busyTimer = setTimeout(() => { rec.busy = false; rec.busyTimer = null; schedulePush(rec.ws); }, 1800000); // self-heal a missed Stop after 30min; the export <2s age skip still guards torn writes
 }
+// Is any tab bound to this workspace mid-turn? Auto-sync waits until a ws is fully quiesced before pushing.
+function wsHasBusyTab(wsId) { for (const r of ptys.values()) if (r.ws && r.ws.id === wsId && r.busy) return true; return false; }
 
 // op ∈ {init,pull,push,sync,status}. Resolves to the script's parsed JSON (or {ok:false,...}).
 function runSync(ws, op, opts) {
@@ -286,42 +347,50 @@ async function doSync(ws, op, opts) {
   syncLock.delete(ws.id);
   const changed = !!(r && (r.imported || r.updated || r.pushed));
   try { win && win.webContents.send('sync:state', { id: ws.id, status: r && r.ok ? 'idle' : 'error', synced: r && r.synced, diverged: r && r.diverged }); } catch {}
-  if (changed && activeWorkspace && activeWorkspace.id === ws.id) { try { win && win.webContents.send('sync:changed', { id: ws.id }); } catch {} }
+  if (changed) { try { win && win.webContents.send('sync:changed', { id: ws.id }); } catch {} }   // renderer refreshes only if it's the shown workspace
   return r;
 }
-// Only needed to SKIP the live session during a MANUAL sync mid-turn; auto-syncs run only when idle.
+// Only needed to SKIP the live session during a MANUAL sync mid-turn; auto-syncs already wait out a busy
+// workspace entirely (wsHasBusyTab), so they never push a mid-write transcript and need no live skip.
 async function liveIdNow() {
-  if (!genBusy) return '';
+  if (!activeWorkspace || !wsHasBusyTab(activeWorkspace.id)) return '';
   try { const a = await listSessions(); return (Array.isArray(a) && a[0] && a[0].id) || ''; } catch { return ''; }
 }
-// After a turn ends (Stop) the transcript is quiesced → safe to push (incl. the current session). Debounced.
-function schedulePush() {
-  const ws = activeWorkspace;
+// After a turn ends (Stop) push that turn's WORKSPACE — but only once NO tab bound to it is still mid-turn,
+// so two concurrent sessions in one workspace are pushed together, quiesced, never torn. Debounced per ws.
+function schedulePush(ws) {
   if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) return;
   const id = ws.id, prev = pushTimers.get(id); if (prev) clearTimeout(prev);
   pushTimers.set(id, setTimeout(() => {
     pushTimers.delete(id);
-    // a non-active workspace is always quiesced; only the active one must wait out an in-flight turn
-    if (ws.id !== (activeWorkspace && activeWorkspace.id) || !genBusy) doSync(ws, 'push', {});
+    if (!wsHasBusyTab(id)) doSync(ws, 'push', {});       // all of ws's sessions are idle → safe to push
+    else schedulePush(ws);                               // a tab is still busy → re-arm and wait it out
   }, 5000));
 }
-// Adaptive background pull(+push) of the ACTIVE repo workspace only, when idle; backs off when nothing changes.
+// Adaptive background pull(+push) of EVERY repo workspace that has a live tab, when that ws is idle; backs
+// off globally when nothing changed anywhere. (Tabs span workspaces, so more than one can be live at once.)
 function startPoll() {
   const tick = async () => {
-    const ws = activeWorkspace;
-    if (ws && ws.kind === 'repo' && ws.syncSessions && !ws.needsClone && !genBusy && !syncLock.has(ws.id)) {
+    const seen = new Set(); let changed = false;
+    for (const rec of ptys.values()) {
+      const ws = rec.ws;
+      if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) continue;
+      if (seen.has(ws.id)) continue; seen.add(ws.id);
+      if (wsHasBusyTab(ws.id) || syncLock.has(ws.id)) continue;
       const r = await doSync(ws, 'sync', {});
-      pollDelay = (r && (r.imported || r.updated || r.pushed)) ? SYNC_MIN : Math.min(SYNC_MAX, Math.round(pollDelay * 1.5));
+      if (r && (r.imported || r.updated || r.pushed)) changed = true;
     }
+    pollDelay = changed ? SYNC_MIN : Math.min(SYNC_MAX, Math.round(pollDelay * 1.5));
     setTimeout(tick, pollDelay);
   };
   setTimeout(tick, pollDelay);
 }
-// Hook events are also forwarded raw to the renderer; here we track turn busy/idle + push after each turn.
-function handleHook(line) {
+// Hook events are also forwarded raw to the renderer; here we track per-tab turn busy/idle + push the tab's
+// workspace after each turn. tabId comes from which per-tab hooks file the line was read from.
+function handleHook(tabId, line) {
   let ev = ''; try { ev = JSON.parse(line).hook_event_name || ''; } catch {}
-  if (ev === 'UserPromptSubmit') setGenBusy(true);
-  else if (ev === 'Stop') { setGenBusy(false); schedulePush(); }
+  if (ev === 'UserPromptSubmit') setGenBusy(tabId, true);
+  else if (ev === 'Stop') { setGenBusy(tabId, false); const r = ptys.get(tabId); schedulePush(r && r.ws); }
 }
 // Clone an existing (invited) repo workspace into ~/.claudible/repos/<slug> if it isn't local yet.
 function ensureClone(ws) {
@@ -416,7 +485,8 @@ ipcMain.handle('workspace:open', async (e, id) => {
   }
   if (myGen !== openGen) return { ok: false, error: 'superseded' };   // a newer open started during our clone → stand down
   activeWorkspace = ws; registry.activeId = id; saveRegistry();
-  respawnPty('');                                                  // '' = resume most-recent conversation in that cwd
+  const fr = fgRec(); if (fr) fr.ws = ws;                          // re-point the foreground tab at the new workspace (other tabs keep running)
+  respawnPty(fgTabId, '');                                         // '' = resume most-recent conversation in that cwd
   pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
   if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
   return { ok: true };
@@ -440,7 +510,8 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
         const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
           repoUrl: repoUrl || undefined, owner: owner || undefined, createdAt: Date.now() };
         registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
-        respawnPty(fresh ? 'new' : '');
+        const fr = fgRec(); if (fr) fr.ws = ws;                       // re-point the foreground tab at the new workspace
+        respawnPty(fgTabId, fresh ? 'new' : '');
         resolve({ ok: true, workspace: ws });
       };
       if (r.ok) return attach(r.repoUrl, r.owner, true);
@@ -535,44 +606,86 @@ ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch 
 ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } catch {} });   // host → guests chat
 ipcMain.handle('share:status', () => share.status());
 
-// ---- session tracker: poll runtime/status.json (Windows FS, native read) ----
-let lastStatus = '';
+// ---- session tracker: poll EACH live tab's runtime/tabs/<tab>/status.json (Windows FS, native read) ----
+// Per-tab files (written by session.sh via the inherited CLAUDIBLE_STATUS env) so concurrent sessions
+// never clobber one meter; every 'status' IPC carries its tabId so the renderer routes it to the right tab.
+const lastStatusByTab = new Map();   // tabId -> last raw status json (dedupe)
 function pollStatus() {
   setInterval(() => {
-    try {
-      const raw = fs.readFileSync(STATUS, 'utf8'); if (raw === lastStatus) return; lastStatus = raw;
-      const d = JSON.parse(raw); const c = d.context_window || {}; const cost = d.cost || {};
-      const cu = c.current_usage || null;   // last turn's usage (input/output here are NEW, non-cache)
-      win.webContents.send('status', {
-        ctxPct: c.used_percentage, costUsd: cost.total_cost_usd,
-        newTok: cu ? ((cu.input_tokens || 0) + (cu.output_tokens || 0)) : null,  // genuinely-new tokens, excl. cache
-        usageKey: cu ? `${cu.input_tokens}:${cu.output_tokens}:${cu.cache_read_input_tokens}:${cu.cache_creation_input_tokens}` : null,
-        model: d.model && d.model.display_name, fast: d.fast_mode,
-      });
-    } catch {}
+    for (const [tabId, rec] of ptys) {
+      try {
+        const raw = fs.readFileSync(path.join(RT, 'tabs', rec.runtimeId, 'status.json'), 'utf8');
+        if (raw === lastStatusByTab.get(tabId)) continue; lastStatusByTab.set(tabId, raw);
+        const d = JSON.parse(raw); const c = d.context_window || {}; const cost = d.cost || {};
+        if (d.session_id) rec.sessionId = d.session_id;   // the live session id — used to locate this tab's workflow/swarm agents
+        const cu = c.current_usage || null;   // last turn's usage (input/output here are NEW, non-cache)
+        win.webContents.send('status', {
+          tabId,
+          ctxPct: c.used_percentage, costUsd: cost.total_cost_usd,
+          newTok: cu ? ((cu.input_tokens || 0) + (cu.output_tokens || 0)) : null,  // genuinely-new tokens, excl. cache
+          usageKey: cu ? `${cu.input_tokens}:${cu.output_tokens}:${cu.cache_read_input_tokens}:${cu.cache_creation_input_tokens}` : null,
+          model: d.model && d.model.display_name, fast: d.fast_mode,
+        });
+      } catch {}
+    }
   }, 1200);
 }
 
-// ---- hook events: poll runtime/hooks.ndjson for appended lines ----
-let hookOffset = 0, hookBuf = '';
+// ---- hook events: poll EACH live tab's runtime/tabs/<tab>/hooks.ndjson for appended lines ----
+const hookState = new Map();   // tabId -> { offset, buf } (independent tail cursor per tab)
 function pollHooks() {
   setInterval(() => {
-    try {
-      const st = fs.statSync(HOOKS);
-      if (st.size < hookOffset) { hookOffset = 0; hookBuf = ''; }     // truncated (new session)
-      if (st.size === hookOffset) return;
-      const fd = fs.openSync(HOOKS, 'r'); const buf = Buffer.alloc(st.size - hookOffset);
-      fs.readSync(fd, buf, 0, buf.length, hookOffset); fs.closeSync(fd);
-      hookOffset = st.size; hookBuf += buf.toString('utf8');
-      let i; while ((i = hookBuf.indexOf('\n')) >= 0) { const l = hookBuf.slice(0, i).trim(); hookBuf = hookBuf.slice(i + 1); if (l) { handleHook(l); win.webContents.send('hook:line', l); } }
-    } catch {}
+    for (const [tabId, rec] of ptys) {
+      let s = hookState.get(tabId); if (!s) { s = { offset: 0, buf: '' }; hookState.set(tabId, s); }
+      try {
+        const p = path.join(RT, 'tabs', rec.runtimeId, 'hooks.ndjson');
+        const st = fs.statSync(p);
+        if (st.size < s.offset) { s.offset = 0; s.buf = ''; }     // truncated (this tab's pty respawned)
+        if (st.size === s.offset) continue;
+        const fd = fs.openSync(p, 'r'); const buf = Buffer.alloc(st.size - s.offset);
+        fs.readSync(fd, buf, 0, buf.length, s.offset); fs.closeSync(fd);
+        s.offset = st.size; s.buf += buf.toString('utf8');
+        let i; while ((i = s.buf.indexOf('\n')) >= 0) { const l = s.buf.slice(0, i).trim(); s.buf = s.buf.slice(i + 1); if (l) { handleHook(tabId, l); win.webContents.send('hook:line', { tabId, line: l }); } }
+      } catch {}
+    }
   }, 80);   // poll often so a finished reply reaches the renderer (and TTS) with minimal lag
 }
 ipcMain.handle('hook:test', async () => {
   const ts = Date.now();
-  try { fs.appendFileSync(HOOKS, JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: 'hook link OK', sent_ms: ts }) + '\n'); } catch {}
+  const rec = fgRec();
+  try { if (rec) fs.appendFileSync(path.join(RT, 'tabs', rec.runtimeId, 'hooks.ndjson'), JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: 'hook link OK', sent_ms: ts }) + '\n'); } catch {}
   return ts;
 });
+
+// ---- workflow / swarm agents: the Workflow tool spawns agents OUTSIDE the Task-hook path, so the Agents
+// tab can't see them via hooks. They DO write per-agent files under the session's subagents dir (in WSL's
+// ~/.claude, off the Windows FS), so we read them WSL-side (wsl/workflows.sh) and push live state to the
+// renderer. We poll only the FOREGROUND tab (the one whose Agents pane is visible), adaptively. ----
+function runWorkflows(ws, sid) {
+  return new Promise((resolve) => {
+    const s = String(sid || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!APPDIR_WSL || !s) return resolve([]);
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/workflows.sh' '${s}'`],
+      { encoding: 'utf8', timeout: 12000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+        if (err) return resolve([]);
+        try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+      });
+  });
+}
+function startWorkflowPoll() {
+  let delay = 2500;
+  const tick = async () => {
+    const rec = ptys.get(fgTabId);
+    if (rec && rec.sessionId) {
+      const wfs = await runWorkflows(rec.ws, rec.sessionId);
+      try { win && win.webContents.send('workflow:agents', { tabId: fgTabId, workflows: wfs }); } catch {}
+      const running = Array.isArray(wfs) && wfs.some((w) => w.running > 0);
+      delay = running ? 1200 : (Array.isArray(wfs) && wfs.length ? 2500 : 5000);   // fast while a swarm runs, lazy when idle
+    } else { delay = 4000; }
+    setTimeout(tick, delay);
+  };
+  setTimeout(tick, 2500);
+}
 
 // ---- audio (in main: no renderer CORS) ----
 ipcMain.handle('stt', async (e, arrayBuf) => {
@@ -624,7 +737,7 @@ process.on('unhandledRejection', (e) => console.error('[claudible] unhandledReje
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
-  try { ptyProc && ptyProc.kill(); } catch {}
+  try { for (const { proc } of ptys.values()) { try { proc.kill(); } catch {} } ptys.clear(); } catch {}
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   try { share.stop(); } catch {}
   app.quit();

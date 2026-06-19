@@ -113,17 +113,74 @@
     #agents-pane.show{display:flex}
     .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
     .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.6;max-width:300px}
-    .agent-row{display:flex;align-items:flex-start;gap:10px;padding:10px 11px;border:1px solid var(--hairline);border-radius:9px;
-      background:linear-gradient(180deg,#131519,#0e1013);margin-bottom:7px}
-    .agent-row .agent-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px;background:#3a3f47}
+    .agents-empty-ico{display:block;width:36px;height:36px;margin:0 auto 13px;opacity:.5}
+    .agents-empty-ico svg{width:36px;height:36px}
+    .agents-section{font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-faint);margin:6px 0 8px;padding-left:2px}
+    /* agent row — shared by Task subagents and swarm agents */
+    .agent-row{display:flex;align-items:flex-start;gap:10px;padding:9px 11px;border:1px solid var(--hairline);border-radius:9px;
+      background:linear-gradient(180deg,#131519,#0e1013);margin-bottom:7px;transition:transform .14s,border-color .14s,box-shadow .14s;
+      animation:agentIn .26s cubic-bezier(.2,.7,.3,1) both}
+    .agent-row:hover{transform:translateX(2px);border-color:rgba(255,255,255,.15)}
+    .agent-row .agent-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px;background:#3a3f47;position:relative}
     .agent-row.running .agent-dot{background:var(--amber);box-shadow:0 0 9px -1px var(--amber);animation:micpulse 1s ease-in-out infinite}
+    .agent-row.running .agent-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--amber);opacity:.5;animation:agentRing 1.4s ease-out infinite}
     .agent-row.done .agent-dot{background:#5fb487;box-shadow:0 0 8px -2px #5fb487}
     .agent-row.err .agent-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
-    .agent-name{font-size:12px;color:var(--ink);line-height:1.35;word-break:break-word}
+    .agent-body{flex:1;min-width:0}
+    .agent-name{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .agent-meta{margin-top:3px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    .agent-row.running .agent-meta{color:var(--amber)}
+    /* swarm card — a workflow with a live progress bar + animated accent */
+    .wf-card{position:relative;overflow:hidden;border:1px solid var(--hairline);border-radius:12px;padding:11px 12px 12px;margin-bottom:11px;
+      background:linear-gradient(180deg,#15181e,#0e1014);box-shadow:inset 0 1px 0 var(--sheen),0 6px 20px -16px #000}
+    .wf-card.live{border-color:rgba(230,168,77,.38);box-shadow:inset 0 1px 0 var(--sheen),0 0 24px -14px var(--amber)}
+    .wf-card.live::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+      background:linear-gradient(90deg,transparent,var(--amber),transparent);background-size:200% 100%;animation:wfsweep 2.1s linear infinite}
+    .wf-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+    .wf-ico{width:24px;height:24px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:7px;
+      color:var(--ink-dim);background:#1b1f26;border:1px solid var(--hairline)}
+    .wf-ico svg{width:15px;height:15px}
+    .wf-card.live .wf-ico{color:var(--amber);box-shadow:0 0 14px -5px var(--amber)}
+    .wf-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+    .wf-name{font-size:12px;color:var(--ink);font-weight:500;letter-spacing:.01em}
+    .wf-sub{font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+    .wf-count{flex:none;font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;display:flex;gap:8px;align-items:center}
+    .wf-run{color:var(--amber)} .wf-done{color:#5fb487}
+    .wf-bar{position:relative;height:4px;border-radius:3px;background:#1a1d23;overflow:hidden;margin-bottom:10px}
+    .wf-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#5fb487,#6aa6e0);transition:width .45s cubic-bezier(.4,0,.2,1)}
+    .wf-card.live .wf-bar::after{content:'';position:absolute;inset:0;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent);background-size:200% 100%;animation:wfshimmer 1.6s linear infinite}
+    .wf-agents{display:flex;flex-direction:column;gap:6px}
+    .wf-agents .agent-row{margin-bottom:0;padding:7px 10px;background:linear-gradient(180deg,#111317,#0c0e11)}
+    @keyframes agentIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+    @keyframes agentRing{0%{transform:scale(.7);opacity:.6}100%{transform:scale(1.3);opacity:0}}
+    @keyframes wfsweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
+    @keyframes wfshimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
     #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
-      padding:10px 12px;flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
+      flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
+    /* one xterm mount per tab, stacked; only the active tab shows. Padding lives here so the xterm stays inset. */
+    .term-host{position:absolute;inset:0;display:none;padding:10px 12px}
+    .term-host.active{display:block}
+    /* tab strip — one chip per live session/pty (the active chip = the visible terminal) */
+    .tabstrip{display:flex;align-items:center;gap:6px;flex:none;height:32px;padding:0 2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+    .tabstrip::-webkit-scrollbar{height:0}
+    .tab{display:flex;align-items:center;gap:7px;flex:none;max-width:200px;height:24px;padding:0 6px 0 11px;cursor:pointer;
+      font-size:11px;color:var(--ink-faint);background:linear-gradient(180deg,#16181d,#0f1115);
+      border:1px solid var(--hairline);border-radius:8px;box-shadow:inset 0 1px 0 var(--sheen);transition:color .15s,border-color .15s}
+    .tab:hover{color:var(--ink-dim)}
+    .tab.active{color:var(--ink);border-color:var(--live);box-shadow:inset 0 1px 0 var(--sheen),0 0 0 1px rgba(196,52,52,.25)}
+    .tab .tab-name{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tab.busy .tab-name{color:var(--amber)}
+    .tab .tab-x{flex:none;width:15px;height:15px;line-height:13px;text-align:center;border:none;border-radius:4px;
+      background:none;color:var(--ink-faint);font-size:14px;cursor:pointer;padding:0}
+    .tab .tab-x:hover{color:var(--ink);background:#2a2e36}
+    .tab-add{flex:none;width:24px;height:24px;border:1px solid var(--hairline);border-radius:8px;cursor:pointer;
+      background:linear-gradient(180deg,#16181d,#0f1115);color:var(--ink-dim);font-size:15px;line-height:1;box-shadow:inset 0 1px 0 var(--sheen)}
+    .tab-add:hover:not(:disabled){color:var(--ink);border-color:var(--ink-faint)}
+    .tab-add:disabled{opacity:.4;cursor:default}
+    /* sidebar rows already open in a tab get a subtle left accent */
+    .sess.open-in-tab{border-left:2px solid var(--live)}
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
@@ -413,8 +470,9 @@
       background:none;color:var(--ink-faint);cursor:pointer;display:flex;box-shadow:none;flex:none;transition:all .15s}
     .ws-chip .ws-share{margin-left:auto}                    /* push actions to the right edge of the chip */
     .ws-chip .ws-share svg,.ws-chip .ws-invite svg,.ws-chip .ws-sync svg{width:13px;height:13px;display:block}
-    .ws-chip.shared .ws-share{color:#5fb487}               /* green eye = currently shared with guests */
-    .ws-chip .ws-sync.on{color:#6aa6e0}                    /* blue cloud = sessions sync is on */
+    .ws-chip .ws-actsep{width:1px;height:13px;background:var(--hairline);margin:0 3px;flex:none}   /* divides GUESTS (eye/invite) from SYNC (cloud) */
+    .ws-chip.shared .ws-share{color:#5fb487}               /* green eye = live screen-share is ON (guests can watch) */
+    .ws-chip .ws-sync.on{color:#6aa6e0}                    /* blue cloud = GitHub session-sync is ON */
     .ws-chip .ws-sync.syncing{color:#6aa6e0;animation:ws-sync-pulse 1s ease-in-out infinite}
     .ws-chip .ws-sync.err{color:#d2685f}
     @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -596,6 +654,7 @@
       </div>
     </aside>
     <div class="center">
+      <div class="tabstrip" id="tabstrip"></div>
       <div class="termrow">
       <div id="terminal">
       <button class="termtab tr" id="savetab" title="Save session">
