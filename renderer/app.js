@@ -144,6 +144,7 @@ function setActiveTab(tabId) {
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
   try { rec.term.refresh(0, rec.term.rows - 1); } catch {}   // force a repaint of the freshly-shown (was-hidden) buffer
   repaintTracker(rec);                             // project this tab's tracker into #trk-*
+  _agentsSig = '';                                 // force an agents rebuild for THIS tab (the sig guard is module-global)
   renderAgents();                                  // …and its agents into the agents pane
   updateScrollbar();
   renderTabStrip();
@@ -232,7 +233,7 @@ function repaintTracker(t) {
 }
 function resetStats(t) {
   t = t || AT(); if (!t) return;
-  t.baseCost = null; t.sessTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.sessionLog.length = 0; t.curCtxPct = null;
+  t.baseCost = null; t.sessTok = 0; t.agentTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.sessionLog.length = 0; t.curCtxPct = null;
   if (t.tabId === activeTabId) { repaintTracker(t); pushTracker(); }
 }
 claudible.onStatus((s) => {
@@ -605,7 +606,8 @@ claudible.onHookLine((tabId, line) => {
     onAgentDone(t, o);
   }
 });
-// Subagent/swarm token usage (the statusLine meter only sees the main thread) — fold into the token counter.
+// Subagent/swarm token usage for THIS app-session (main baselines it per session; the statusLine meter only
+// sees the main thread) — fold into the token counter.
 claudible.onAgentTokens((tabId, agentTok) => {
   const t = tabs.get(tabId); if (!t) return;
   t.agentTok = agentTok || 0;
@@ -676,7 +678,7 @@ function renderAgents() {
   // el.innerHTML='' every poll, which restarted the CSS entry animations = the "flashing". When unchanged,
   // just advance the elapsed timers in place.
   const sig = JSON.stringify([
-    liveWf.map((w) => [w.wf, w.running, w.agents.filter((a) => a.status === 'running').map((a) => a.id)]),
+    liveWf.map((w) => [w.wf, w.running, w.done, w.agents.filter((a) => a.status === 'running').map((a) => a.id)]),
     taskAgents.map((a) => a.desc + a.status),
   ]);
   if (sig === _agentsSig) {
@@ -1426,8 +1428,14 @@ function onWsPointerUp() {
 }
 async function deleteWorkspace(w) {
   let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
-  if (r && r.ok) { if (r.activeId) activeWsId = r.activeId; await refreshWorkspaces(); refreshSessions(); }
-  else toast((r && r.error) || 'delete failed');
+  if (r && r.ok) {
+    if (r.activeId) activeWsId = r.activeId;
+    // A background tab may still name the just-deleted workspace; main already repointed its pty to the
+    // fallback, but the renderer tab record's wsId would otherwise let a later setActiveTab set activeWsId
+    // to a workspace that no longer exists (blank chips + empty sessions header). Repoint those tabs too.
+    for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }
+    await refreshWorkspaces(); refreshSessions();
+  } else toast((r && r.error) || 'delete failed');
 }
 // ---- git push / pull: clicking a menu item writes the command into the live terminal (like the cmd bar) ----
 function openGitMenu() {

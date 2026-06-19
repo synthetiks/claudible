@@ -564,6 +564,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws || ws.id === 'legacy') return resolve({ ok: false, error: 'cannot delete this workspace' });
   const fallback = registry.workspaces.find((w) => w.id === 'legacy') || registry.workspaces.find((w) => w.id !== id);
+  openGen++;   // supersede any in-flight workspace:open clone for the workspace being deleted (mirrors create/switch)
   const fgWasHere = !!(fgRec() && fgRec().ws && fgRec().ws.id === id);
   for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id) rec.ws = fallback; }   // repoint any tab inside it
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
@@ -573,7 +574,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const finish = () => resolve({ ok: true, activeId: registry.activeId });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (APPDIR_WSL && slug && (ws.kind === 'local' || ws.kind === 'repo')) {
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/delete-workspace.sh' '${ws.kind}' '${slug}'`],
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/delete-workspace.sh' '${ws.kind}' '${slug}'`],
       { encoding: 'utf8', timeout: 20000 }, finish);
   } else finish();
 }));
@@ -698,7 +699,15 @@ function pollAgentTokens() {
         { encoding: 'utf8', timeout: 10000 }, (err, stdout) => {
           if (err) return;
           const n = parseInt(String(stdout).trim(), 10);
-          if (Number.isFinite(n)) { try { win && win.webContents.send('agent-tokens', { tabId, agentTok: n }); } catch {} }
+          if (!Number.isFinite(n)) return;
+          // agent-tokens.sh returns an ABSOLUTE all-time total for the session id. Baseline it the first time we
+          // see each session (and re-baseline when the tab's session changes — e.g. a resume into a different
+          // conversation) so the meter shows only THIS app-session's new agent work, mirroring the cost/sessTok
+          // delta-since-launch baselines. Without this, resuming a session that ever ran a swarm would show its
+          // entire historical agent total (tens of millions of tokens) the instant it loads.
+          if (rec.agentTokSid !== sid) { rec.agentTokSid = sid; rec.agentTokBase = n; }
+          const delta = Math.max(0, n - (rec.agentTokBase || 0));
+          try { win && win.webContents.send('agent-tokens', { tabId, agentTok: delta }); } catch {}
         });
     }
   }, 8000);

@@ -10,6 +10,9 @@ case "$kind" in
   repo)  dir="$HOME/.claudible/repos/$slug" ;;
   *) printf '{"ok":false,"error":"bad kind"}'; exit 0 ;;
 esac
+# Custom-save-location workspaces store their real folder in CLAUDIBLE_WS_DIR (emitted by wsEnv); prefer it so we
+# trash the actual directory rather than the default-location guess above (mirrors the other SDIR-aware scripts).
+[ -n "${CLAUDIBLE_WS_DIR:-}" ] && dir="$CLAUDIBLE_WS_DIR"
 [ -d "$dir" ] || { printf '{"ok":true,"note":"already gone"}'; exit 0; }
 trash="$HOME/.claudible/trash"; mkdir -p "$trash" 2>/dev/null
 ts="$(date +%Y%m%d-%H%M%S)"

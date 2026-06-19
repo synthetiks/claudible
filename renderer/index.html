@@ -78,16 +78,6 @@
         rgba(255,255,255,.11) calc(10% - 1px),rgba(255,255,255,.11) 10%)}
     .ctxpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
       font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--silver);text-shadow:0 1px 3px #000,0 0 2px #000}
-    /* push-to-talk hint under the Talk button — <kbd> rendered as a physical key cap */
-    .ptt-hint{margin-top:7px;display:flex;align-items:center;justify-content:center;gap:6px;
-      font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint)}
-    .ptt-hint.live{color:var(--live)}
-    kbd{font-family:inherit;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:var(--silver);
-      background:linear-gradient(180deg,#1c1f25,#0f1115);border:1px solid var(--hairline);
-      border-bottom-color:#05060a;border-radius:5px;padding:3px 7px;line-height:1;text-transform:none;
-      box-shadow:inset 0 1px 0 var(--sheen),0 1.5px 0 #05060a,0 2px 3px -1px #000}
-    .ptt-hint.live kbd{color:var(--live);border-color:rgba(229,86,75,.5);
-      box-shadow:inset 0 1px 0 var(--sheen),0 0 10px -2px rgba(229,86,75,.6)}
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
