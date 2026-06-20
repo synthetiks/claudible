@@ -302,6 +302,7 @@ ipcMain.handle('share:start', async (e, opts) => {
 ipcMain.handle('share:stop', async () => {
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   cloudflaredProc = null; shareBaseUrl = null;
+  stopAdvertiseHeartbeat();                              // no longer hosting → stop re-stamping presence
   share.stop();
   return { ok: true };
 });
@@ -325,13 +326,29 @@ function runPresence(args, cb) {
       cb && cb(r);
     });
 }
+// Keep my presence fresh while I'm hosting. Peers ignore advertisements older than a few minutes (so a crashed
+// host stops showing as "live"), so a still-live host must re-stamp its ts periodically. The timer lives in MAIN
+// on purpose — renderer timers get throttled when the window is backgrounded, which is exactly when we must NOT
+// silently go stale. Each beat is one tiny presence-set commit; a ~2 min cadence keeps the git noise low.
+let advertiseTimer = null, advertisedSid = null;
+function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; }
+function startAdvertiseHeartbeat(sid) {
+  advertisedSid = sid;                                   // a session switch just re-points which sid we re-stamp
+  if (advertiseTimer) return;
+  advertiseTimer = setInterval(() => {
+    const st = share.status();
+    if (!advertisedSid || !st.running || !shareBaseUrl || !st.token) return;   // not hosting this beat — unadvertise/stop tear the timer down
+    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}'`, () => {});
+  }, 120000);
+  if (advertiseTimer.unref) advertiseTimer.unref();
+}
 ipcMain.handle('live:advertise', (e, sessionId) => new Promise((resolve) => {
   const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
   const st = share.status();
   if (!sid || !st.running || !shareBaseUrl || !st.token) return resolve({ ok: false, error: 'not live' });
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}'`, (r) => resolve(r || { ok: false }));
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}'`, (r) => { if (r && r.ok) startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
 }));
-ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
+ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
 ipcMain.handle('live:join', (e, peer) => {
   try {

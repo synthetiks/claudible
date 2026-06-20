@@ -928,6 +928,7 @@ shareBtn.addEventListener('click', async () => {
     shareBtn.disabled = true;
     await claudible.shareStop();
     sharing = false; shareUI(false);
+    autoLiveSuppressed = true;                      // a deliberate stop sticks — don't let auto-live re-share until you switch workspaces
     updateAdvertise();                              // stop advertising — no longer hosting a live session
     shareLink.style.display = 'none'; shareLink.value = '';
     shareOut.textContent = 'sharing stopped'; shareOut.className = 'out';
@@ -1355,13 +1356,36 @@ function updateAdvertise() {
   advertisedSession = want;
   try { want ? claudible.liveAdvertise(want) : claudible.liveUnadvertise(); } catch (e) {}
 }
+// ---- Auto-live (Phase D): in a repo workspace you've already marked shareable, opening a session spins up the
+// tunnel automatically so a collaborator can just "Join live" — no manual "start sharing" click. The gate is the
+// EXISTING per-workspace `shared` consent (the guest mirror stays paused for non-shared workspaces), so this adds
+// no new exposure. `autoLiveSuppressed` lets a manual "Stop sharing" stick until you switch workspaces.
+let autoLiveStarting = false, autoLiveSuppressed = false;
+async function maybeAutoLive() {
+  if (loadPrefs().autoLive === false) return;                                  // global escape hatch (default on)
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  if (!(aw && aw.kind === 'repo' && aw.shared && activeSession)) return;       // only a shareable repo workspace with a live session
+  if (sharing || autoLiveStarting || autoLiveSuppressed) return;
+  autoLiveStarting = true;
+  try {
+    hostDisplayName = loadPrefs().hostName || 'Host';                          // no name prompt — reuse the last one
+    const r = await claudible.shareStart({ readOnly: false, name: hostDisplayName });   // co-drive, so a peer can actually work
+    if (r && r.ok) {
+      sharing = true; shareUI(true); showLink(r.url);
+      shareOut.textContent = (r.remote === false) ? 'live · local only (tunnel off)' : 'live · collaborators here can join';
+      shareOut.className = 'out live';
+      updateAdvertise();                                                       // publish presence now that we're hosting
+    }
+  } catch (e) {}
+  autoLiveStarting = false;
+}
 // Poll the shared branch for collaborators who are live (only in a repo workspace). Re-render on change.
 async function pollLivePeers() {
   const aw = workspaces.find((w) => w.id === activeWsId);
   if (!(aw && aw.kind === 'repo')) { if (livePeers.length) { livePeers = []; livePeersSig = ''; refreshSessions(); } return; }
   let peers = []; try { peers = await claudible.livePeers(); } catch (e) {}
   const now = Date.now() / 1000;
-  peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 120));   // drop stale (>2 min)
+  peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 300));   // drop stale (>5 min; a live host re-stamps every ~2 min)
   const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts]).sort());
   if (sig === livePeersSig) return;
   livePeersSig = sig; livePeers = peers; refreshSessions();
@@ -1601,6 +1625,7 @@ async function refreshSessions() {
   }
   const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
+  maybeAutoLive();                                                                  // shared repo workspace + a session open → auto-spin the tunnel so a peer can just Join
 }
 // A live, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
 // switch to it; the ▾ menu renames or CLOSES it (nothing to delete on disk). Mirrors a saved row's look.
@@ -2003,6 +2028,7 @@ async function switchWorkspace(id) {
   const t = AT(); if (!t) return;
   activeWsId = id; t.wsId = id; t.session = ''; t.label = '';
   activeSession = null; t.curSessionLabel = '';   // the conversation list is about to change entirely
+  autoLiveSuppressed = false;                      // a fresh workspace re-enables auto-live (clears any earlier manual stop)
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
   try { await claudible.workspaceOpen(id); } catch {}
@@ -2075,7 +2101,7 @@ $('invite-name-in').addEventListener('keydown', (e) => {
 claudible.onWorkspaceActiveChanged((id) => {
   if (id === activeWsId) return;
   const t = AT();
-  activeWsId = id; activeSession = null;
+  activeWsId = id; activeSession = null; autoLiveSuppressed = false;
   if (t) { t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t); }   // main re-pointed the foreground tab
   refreshWorkspaces(); refreshSessions(); renderTabStrip();
 });
