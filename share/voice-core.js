@@ -55,6 +55,7 @@
       if (peers[peerId]) return peers[peerId];
       var pc = new RTCPeerConnection(ICE);
       var audioEl = document.createElement('audio'); audioEl.autoplay = true; audioEl.dataset.peer = peerId;
+      audioEl.style.display = 'none';   // audio plays fine hidden; never let it participate in page layout (e.g. the guest's CSS grid)
       (document.body || document.documentElement).appendChild(audioEl);
       peers[peerId] = { pc: pc, audioEl: audioEl };
       if (localStream) localStream.getTracks().forEach(function (t) { pc.addTrack(t, localStream); });
