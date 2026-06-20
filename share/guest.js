@@ -374,7 +374,7 @@ try {
   if (typeof makeVoiceRoom === 'function') {
     voice = makeVoiceRoom({
       myId: function () { return myPid; },
-      sendAudio: function (b64) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'audio', data: b64 })); },
+      sendAudio: function (b64, sr) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'audio', data: b64, sr: sr })); },
       setJoined: function (j) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: j ? 'voice-join' : 'voice-leave' })); },
       onUi: renderVoiceUi,
     });
@@ -446,7 +446,7 @@ function connect() {
       } else if (msg.type === 'voice-members') {
         voice.setMembers(msg.members || []);
       } else if (msg.type === 'audio') {
-        voice.pushAudio(msg.from, msg.data);
+        voice.pushAudio(msg.from, msg.data, msg.sr);
       }
     } else {
       term.write(new Uint8Array(ev.data));   // raw terminal output

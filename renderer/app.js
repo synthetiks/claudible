@@ -880,11 +880,11 @@ try {
   if (typeof makeVoiceRoom === 'function') {
     hostVoice = makeVoiceRoom({
       myId: () => 'host',
-      sendAudio: (b64) => { try { claudible.voiceAudio(b64); } catch {} },
+      sendAudio: (b64, sr) => { try { claudible.voiceAudio(b64, sr); } catch {} },
       setJoined: (j) => { try { claudible.voiceJoin(j); } catch {} },
       onUi: renderHostVoiceUi,
     });
-    try { claudible.onShareAudio((p) => hostVoice.pushAudio(p.from, p.data)); } catch {}
+    try { claudible.onShareAudio((p) => hostVoice.pushAudio(p.from, p.data, p.sr)); } catch {}
     try { claudible.onVoiceMembers((m) => hostVoice.setMembers(m)); } catch {}
     if ($('hv-btn')) $('hv-btn').addEventListener('click', () => { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); });
     if ($('hv-mute')) $('hv-mute').addEventListener('click', () => hostVoice.toggleMute());

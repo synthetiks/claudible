@@ -96,9 +96,9 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (t && t.readyState === t.OPEN) { try { t.send(JSON.stringify({ type: 'rtc', from: 'host', kind, data })); } catch {} }
   }
   function hostVoiceSet(on) { hostVoice = !!on; broadcastVoice(); }
-  function audioFromHost(data) {                                  // host's audio frame → every voice guest
+  function audioFromHost(data, sr) {                              // host's audio frame → every voice guest
     if (typeof data !== 'string') return;
-    const aout = JSON.stringify({ type: 'audio', from: 'host', data: data });
+    const aout = JSON.stringify({ type: 'audio', from: 'host', data: data, sr: sr });
     for (const c of clients) { if (voiceGuests.has(c._pid) && c.readyState === c.OPEN) { try { c.send(aout); } catch {} } }
   }
 
@@ -202,9 +202,9 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       // members may send/receive; nothing reaches a non-participant or a paused/non-shared workspace.
       if (msg.type === 'audio' && typeof msg.data === 'string') {
         if (!voiceGuests.has(ws._pid)) return;
-        const aout = JSON.stringify({ type: 'audio', from: ws._pid, data: msg.data });
+        const aout = JSON.stringify({ type: 'audio', from: ws._pid, data: msg.data, sr: msg.sr });
         for (const c of clients) { if (c !== ws && voiceGuests.has(c._pid) && c.readyState === c.OPEN) { try { c.send(aout); } catch {} } }
-        if (hostVoice) { try { onAudio && onAudio({ from: ws._pid, data: msg.data }); } catch {} }
+        if (hostVoice) { try { onAudio && onAudio({ from: ws._pid, data: msg.data, sr: msg.sr }); } catch {} }
         return;
       }
     });
