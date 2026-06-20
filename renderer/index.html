@@ -434,6 +434,17 @@
       font-size:15px;line-height:1;color:var(--ink-dim);background:none;
       border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
     .ws-add:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
+    .ws-info{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0;
+      border:1px solid var(--hairline);border-radius:50%;background:transparent;color:var(--ink-faint);
+      font:italic 600 11px/1 Georgia,"Times New Roman",serif;cursor:pointer;flex:none}
+    .ws-info:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
+    /* "what's a workspace?" popover — anchored under the ⓘ by JS; teaches the concept without crowding the sidebar */
+    .ws-info-pop{position:fixed;z-index:80;width:250px;padding:13px 15px;border:1px solid var(--hairline);border-radius:11px;
+      background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:11.5px;line-height:1.5;color:var(--ink-dim)}
+    .ws-info-pop b{color:var(--silver)}
+    .ws-info-pop .wt{display:block;font-size:12px;color:var(--ink);margin-bottom:5px}
+    .ws-info-pop p{margin:0 0 7px}
+    .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:none;display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto;
       padding:0 14px 13px;border-bottom:1px solid var(--hairline)}   /* the divider between workspaces and sessions */
     /* SESSIONS section header — names the active workspace so it's clear these conversations live inside it */
@@ -698,6 +709,7 @@
       <div class="ws-section-head">
         <span>workspaces</span>
         <span class="sh-actions">
+          <button class="ws-info" id="ws-info" title="What's a workspace?" aria-label="What's a workspace?">i</button>
           <button class="ws-add" id="ws-add" title="New workspace">+</button>
           <button class="panel-close" id="sidebar-close" title="Hide panel">‹</button>
         </span>
@@ -927,15 +939,15 @@
   <div class="approve" id="ws-modal">
     <div class="box">
       <h3>New workspace</h3>
-      <p>A workspace is its own folder. Keep it local, or back it with a private GitHub repo you can build together.</p>
+      <p>A workspace points Claude at a project folder — it works inside those files, and you review &amp; revert its changes there. (<b>My Sessions</b> is the default, with no project folder.)</p>
       <div class="choice-row">
         <div class="choice sel" id="ch-local" data-kind="local">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <div><div class="ct">Local workspace</div><div class="cd">A private folder on your machine. Never leaves your computer.</div></div>
+          <div><div class="ct">Local workspace</div><div class="cd">Point Claude at a folder on your machine. Private to you.</div></div>
         </div>
         <div class="choice" id="ch-repo" data-kind="repo">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-          <div><div class="ct">Repo workspace</div><div class="cd">Creates a private GitHub repo and clones it — so you can build it together.</div></div>
+          <div><div class="ct">Shared repo workspace</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team, so you can build (and go live) together.</div></div>
         </div>
       </div>
       <input type="text" id="ws-name-in" maxlength="60" placeholder="Workspace name (letters, numbers, dashes)" />

@@ -1733,9 +1733,16 @@ function renderWsChips() {
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
     chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (w.shared ? ' shared' : '');
-    chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
+    chip.title = w.kind === 'legacy' ? 'Default space — quick chats, not tied to a project folder'
+      : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — shared GitHub repo; sessions sync with your team')
+      : (w.label + ' — a project folder on your machine (private to you)');
     chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
+    if (w.kind === 'legacy') {                                         // a tiny tag so "My Sessions" reads as the default, not a project
+      const tag = document.createElement('span'); tag.textContent = 'default';
+      tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-left:4px';
+      chip.appendChild(tag);
+    }
     // Right edge: a passive status dot (at-a-glance share/sync state) + a single ▾ that opens the options
     // menu. All actions (share, invite, sync, rename, delete) now live in that menu so the chip stays clean
     // and the full workspace name is readable — no row of icons crowding it out.
@@ -1774,6 +1781,33 @@ function renderWsChips() {
   const aw = workspaces.find((w) => w.id === activeWsId);
   const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
 }
+// "What's a workspace?" — one click on the ⓘ explains the concept, so the sidebar stays clean (no inline paragraphs).
+let wsInfoPop = null;
+function closeWsInfo() {
+  if (!wsInfoPop) return;
+  wsInfoPop.remove(); wsInfoPop = null;
+  document.removeEventListener('mousedown', onWsInfoOutside, true);
+  document.removeEventListener('keydown', onWsInfoKey, true);
+}
+function onWsInfoOutside(e) { if (wsInfoPop && !wsInfoPop.contains(e.target) && e.target.id !== 'ws-info') closeWsInfo(); }
+function onWsInfoKey(e) { if (e.key === 'Escape') closeWsInfo(); }
+function openWsInfo() {
+  if (wsInfoPop) { closeWsInfo(); return; }
+  const anchor = $('ws-info'); if (!anchor) return;
+  const pop = document.createElement('div'); pop.className = 'ws-info-pop';
+  pop.innerHTML = '<span class="wt"><b>What’s a workspace?</b></span>'
+    + '<p>A folder Claude works in — it edits those files, and you review changes there.</p>'
+    + '<p><b>My Sessions</b> is the default (no project). The <b>+</b> adds one for a specific project — kept on your machine, or backed by a private GitHub repo to build with your team.</p>';
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
+  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  wsInfoPop = pop;
+  setTimeout(() => { document.addEventListener('mousedown', onWsInfoOutside, true); document.addEventListener('keydown', onWsInfoKey, true); }, 0);
+}
+(function () { const b = $('ws-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openWsInfo(); }); })();
+// First launch: pop the explainer once so new users learn the concept; afterwards it lives behind the ⓘ.
+{ const _wp = loadPrefs(); if (!_wp.wsHintSeen) { savePrefs({ wsHintSeen: true }); setTimeout(() => { try { openWsInfo(); } catch (e) {} }, 1000); } }
 // workspace drag-reorder (mirrors session rows) + right-click delete
 let wsdrag = null;
 function onWsPointerDown(e, chip, w) {
