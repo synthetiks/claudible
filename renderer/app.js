@@ -732,27 +732,7 @@ function buildTranscript() {
   const body = (at ? at.sessionLog : []).map((turn) => `[${turn.role}]\n${turn.text}\n`).join('\n');
   return head + (body || '(no turns recorded this session yet)') + '\n';
 }
-$('savetab').addEventListener('click', async () => {
-  const lbl = $('savetab').querySelector('.lbl');
-  const r = await claudible.saveSession(buildTranscript());
-  if (r && r.saved) { lbl.textContent = 'saved ✓'; setTimeout(() => { lbl.textContent = 'save session'; }, 1800); }
-  else if (r && r.error) { lbl.textContent = 'save failed'; setTimeout(() => { lbl.textContent = 'save session'; }, 1800); }
-});
-
-// ---------- Clear input (pop-out tab, bottom-right) ----------
-// One click wipes whatever you've typed/dictated in Claude's prompt box — no holding backspace.
-// Sequence = space + Esc-Esc (empirically the ONLY thing that clears every input state: single-line
-// cursor-anywhere AND multi-line). The leading space is a guard: Esc-Esc on an EMPTY field opens
-// Claude's "Rewind" picker, so we inject one throwaway char first => Esc-Esc always takes the
-// clear-draft path, then clears the space too. Sent RAW (not via send(), which would append Enter
-// and submit). Note: if clicked WHILE Claude is generating, the Esc interrupts the reply (and may
-// leave a stray space) — harmless and recoverable; clear is meant for the idle/just-dictated case.
-$('cleartab').addEventListener('click', () => {
-  sendInput('\x20\x1b\x1b');
-  setTimeout(() => term.focus(), 0);
-  const lbl = $('cleartab').querySelector('.lbl');
-  lbl.textContent = 'cleared ✓'; setTimeout(() => { lbl.textContent = 'clear input'; }, 1200);
-});
+// (save-session and clear-input toolbar buttons removed — sessions auto-save; the git button now sits bottom-right)
 
 // ---------- right-click menu: Copy / Paste / Select All (terminal + selectable UI text) ----------
 // Electron ships no default context menu and xterm copies nothing on its own, so wire one up. Copy uses
@@ -823,14 +803,13 @@ window.addEventListener('contextmenu', (e) => {
 // the link, and the approve-guest prompt. Two controls protect access: (1) you approve each new guest
 // before any data flows, (2) the link is consumed once that guest is approved.
 let sharing = false;
-const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out'), shareNew = $('share-newlink');
+const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out');
 function shareUI(on) {
-  shareBtn.textContent = on ? 'Stop sharing' : 'Invite to workspace';
+  shareBtn.textContent = on ? 'Stop sharing' : 'Share a live link';
   shareBtn.classList.toggle('live', on);
   setActive('lbl-share', on);
   setDot('d-share', on ? 'ok' : '');
   $('share-ro').disabled = on;                 // mode is fixed for the life of a session
-  shareNew.style.display = on ? 'block' : 'none';
   document.querySelector('.body').classList.toggle('sharing', on);   // reveal/hide the chat column
   if (on) { chatReset(); renderRoster([]); }                         // show "you" in the roster the moment sharing starts
 }
@@ -994,14 +973,7 @@ shareLink.addEventListener('click', () => {
   shareOut.textContent = 'link copied ✓';
   setTimeout(() => { if (sharing) shareOut.textContent = prev; }, 1200);
 });
-// rotate the invite link — the old one stops working for NEW joins; people already in stay connected
-shareNew.addEventListener('click', async () => {
-  shareNew.disabled = true;
-  let r; try { r = await claudible.shareNewLink(); } catch (e) { r = null; }
-  shareNew.disabled = false;
-  if (r && r.ok) { showLink(r.url); shareOut.textContent = 'fresh invite link — the old one is now dead'; shareOut.className = 'out live'; }
-  else { shareOut.textContent = 'could not make a new link'; }
-});
+// (the "New link" button was removed — the same link works for everyone you invite; nothing to rotate)
 // reflect connected viewers while sharing
 claudible.onShareGuests((n) => {
   if (!sharing) return;
