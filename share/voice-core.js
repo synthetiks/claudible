@@ -4,9 +4,15 @@
 //   window.makeVoiceRoom({ myId(), send(to,kind,data), setJoined(bool), onUi(state) })
 (function () {
   'use strict';
+  // STUN handles most home networks; the TURN relay is the fallback that makes audio cross strict/symmetric
+  // NATs (where two peers can't connect directly). The TURN entries are Metered's free public OpenRelay —
+  // best-effort; for production, run your own TURN. CSP connect-src already allows stun:/turn:/turns:.
   var ICE = { iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ] };
 
   window.makeVoiceRoom = function (opts) {
