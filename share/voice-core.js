@@ -65,15 +65,22 @@
       } catch (e) {}
     }
 
+    // *** THE BUG ***: RTCSessionDescription / RTCIceCandidate are platform objects that Electron IPC's
+    // structured clone CANNOT serialize, so the HOST's offer/answer/ICE were silently dropped (DataCloneError,
+    // swallowed) and the connection FAILED. Convert to PLAIN objects (toJSON) before sending so they survive
+    // BOTH transports: IPC (host) and JSON.stringify (guest).
+    function ser(o) { return (o && typeof o.toJSON === 'function') ? o.toJSON() : o; }
+    function flushIce(rec) { if (!rec) return; var q = rec.pendingIce; rec.pendingIce = []; q.forEach(function (c) { try { rec.pc.addIceCandidate(c).catch(function () {}); } catch (e) {} }); }
+
     function makePeer(peerId) {
       if (peers[peerId]) return peers[peerId];
       var pc = new RTCPeerConnection(ICE);
       var audioEl = document.createElement('audio'); audioEl.autoplay = true; audioEl.dataset.peer = peerId;
       audioEl.volume = 1;
       sink().appendChild(audioEl);   // off-screen SINK (out of layout) — NOT display:none, which can block audio playback
-      peers[peerId] = { pc: pc, audioEl: audioEl };
+      peers[peerId] = { pc: pc, audioEl: audioEl, pendingIce: [], remoteSet: false };
       if (localStream) localStream.getTracks().forEach(function (t) { pc.addTrack(t, localStream); });
-      pc.onicecandidate = function (e) { if (e.candidate) opts.send(peerId, 'ice', e.candidate); };
+      pc.onicecandidate = function (e) { if (e.candidate) opts.send(peerId, 'ice', ser(e.candidate)); };
       pc.ontrack = function (e) {
         audioEl.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
         try { var pr = audioEl.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (x) {}   // autoplay can be blocked → call play() explicitly
@@ -92,7 +99,7 @@
     function offerTo(peerId) {
       var rec = makePeer(peerId);
       rec.pc.createOffer().then(function (o) { return rec.pc.setLocalDescription(o); })
-        .then(function () { opts.send(peerId, 'offer', rec.pc.localDescription); })
+        .then(function () { opts.send(peerId, 'offer', ser(rec.pc.localDescription)); })
         .catch(function () {});
     }
     // Reconcile peer connections against the current room membership. Deterministic initiator (the smaller
@@ -136,14 +143,15 @@
         var rec = makePeer(sig.from);
         if (sig.kind === 'offer') {
           rec.pc.setRemoteDescription(sig.data)
-            .then(function () { return rec.pc.createAnswer(); })
+            .then(function () { rec.remoteSet = true; flushIce(rec); return rec.pc.createAnswer(); })
             .then(function (a) { return rec.pc.setLocalDescription(a); })
-            .then(function () { opts.send(sig.from, 'answer', rec.pc.localDescription); })
+            .then(function () { opts.send(sig.from, 'answer', ser(rec.pc.localDescription)); })
             .catch(function () {});
         } else if (sig.kind === 'answer') {
-          rec.pc.setRemoteDescription(sig.data).catch(function () {});
+          rec.pc.setRemoteDescription(sig.data).then(function () { rec.remoteSet = true; flushIce(rec); }).catch(function () {});
         } else if (sig.kind === 'ice') {
-          rec.pc.addIceCandidate(sig.data).catch(function () {});
+          if (rec.remoteSet) { try { rec.pc.addIceCandidate(sig.data).catch(function () {}); } catch (e) {} }
+          else rec.pendingIce.push(sig.data);   // ICE before the remote description → buffer, then flush
         }
       },
     };
