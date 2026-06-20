@@ -6,7 +6,7 @@
 //   returns { join, leave, toggleMute, isJoined, setMembers, pushAudio(fromId, b64, sampleRate) }
 (function () {
   'use strict';
-  var TX_RATE = 24000;  // preferred capture rate — wideband voice; the ACTUAL rate travels with every frame
+  var FALLBACK_RATE = 48000;  // only used if a frame somehow arrives without its own sample rate
   var GATE = 0.012;     // RMS threshold for the "speaking" dots
   var JITTER = 0.15;    // playout cushion (s): schedule this far ahead so network jitter doesn't underrun (= crackle)
   var MAXBUF = 0.5;     // if buffered latency grows past this, resync (trim) instead of drifting
@@ -38,6 +38,8 @@
     var inCtx = null, outCtx = null, micSrc = null, proc = null, zero = null, localStream = null;
     var playHead = {};   // sender id -> next scheduled output time
     var srcs = {};       // sender id -> [still-pending BufferSources], so a resync can cancel the backlog
+    var gains = {};      // sender id -> GainNode — playback routes src -> gain -> destination (per-person volume)
+    var volume = {};     // sender id -> volume multiplier the LISTENER chose (persists across re-created nodes)
 
     function ui() {
       try {
@@ -62,11 +64,22 @@
       if (outCtx.state === 'suspended') { try { outCtx.resume(); } catch (e) {} }
       return outCtx;
     }
+    // one GainNode per sender → lets the listener set how loud they hear each person (src -> gain -> speakers)
+    function gainFor(from, ctx) {
+      var g = gains[from];
+      if (!g) {
+        g = ctx.createGain();
+        g.gain.value = (from in volume) ? volume[from] : 1;
+        g.connect(ctx.destination);
+        gains[from] = g;
+      }
+      return g;
+    }
     function startCapture(stream) {
       try {
-        try { inCtx = new (AC())({ sampleRate: TX_RATE }); } catch (e) { inCtx = new (AC())(); }
+        inCtx = new (AC())();                                    // capture at the device's NATIVE rate (usually 48k)
         if (inCtx.state === 'suspended') { try { inCtx.resume(); } catch (e) {} }
-        var rate = inCtx.sampleRate;                              // actual rate (browser may not honor TX_RATE) — sent per frame
+        var rate = inCtx.sampleRate;                              // send THIS exact rate so playback needs NO resample (resampling each 40ms buffer on its own = boundary crackle)
         micSrc = inCtx.createMediaStreamSource(stream);
         var buf = 256; while (buf < rate * 0.04 && buf < 16384) buf <<= 1;   // ~40ms blocks regardless of the rate
         proc = inCtx.createScriptProcessor(buf, 1, 1);
@@ -82,6 +95,16 @@
         micSrc.connect(proc); proc.connect(zero); zero.connect(inCtx.destination);
       } catch (e) {}
     }
+    // Mobile: locking the phone / backgrounding the tab suspends the audio contexts (mic stops, playback stops).
+    // The server now holds our seat across the brief disconnect, so just RESUME the contexts when we return and
+    // voice keeps working without rejoining.
+    try {
+      document.addEventListener('visibilitychange', function () {
+        if (!joined || document.hidden) return;
+        try { if (inCtx && inCtx.state === 'suspended') inCtx.resume(); } catch (e) {}
+        try { if (outCtx && outCtx.state === 'suspended') outCtx.resume(); } catch (e) {}
+      });
+    } catch (e) {}
 
     return {
       isJoined: function () { return joined; },
@@ -101,7 +124,8 @@
         try { if (inCtx) inCtx.close(); } catch (e) {}
         if (localStream) { localStream.getTracks().forEach(function (t) { t.stop(); }); localStream = null; }
         for (var id in srcs) { if (srcs[id]) srcs[id].forEach(function (s) { try { s.stop(); } catch (e) {} }); }
-      inCtx = micSrc = proc = zero = null; speaking = {}; playHead = {}; srcs = {}; ui();
+        for (var gid in gains) { try { gains[gid].disconnect(); } catch (e) {} }
+        inCtx = micSrc = proc = zero = null; speaking = {}; playHead = {}; srcs = {}; gains = {}; ui();   // keep `volume` so per-person levels survive a rejoin
       },
       toggleMute: function () {
         muted = !muted;
@@ -110,6 +134,14 @@
         ui();
       },
       setMembers: function (list) { members = Array.isArray(list) ? list : []; ui(); },
+      // listener-side per-person volume: 0 = muted … 1 = normal … up to 4x. Applies live and persists across rejoin.
+      setVolume: function (from, mult) {
+        var v = Math.max(0, Math.min(4, +mult)); if (!isFinite(v)) v = 1;
+        volume[from] = v;
+        if (gains[from]) { try { gains[from].gain.value = v; } catch (e) {} }
+        return v;
+      },
+      getVolume: function (from) { return (from in volume) ? volume[from] : 1; },
       // an audio frame arrived from another voice member → decode + schedule playback behind a jitter buffer
       pushAudio: function (from, b64, sr) {
         if (!joined || !b64) return;
@@ -117,7 +149,7 @@
           var f32 = int16ToFloat(int16FromB64(b64));
           setSpeaking(from, rms(f32) > GATE);
           var ctx = ensureOut();
-          var rate = sr || TX_RATE;
+          var rate = sr || FALLBACK_RATE;
           var now = ctx.currentTime, t = playHead[from] || 0, resync = false;
           if (t < now + 0.02) { t = now + JITTER; resync = true; }          // underrun / first frame → (re)build the cushion
           else if (t > now + MAXBUF) { t = now + JITTER; resync = true; }   // overrun → trim the latency back down
@@ -130,7 +162,7 @@
             for (var k = 0; k < n; k++) f32[k] *= k / n;
           }
           var ab = ctx.createBuffer(1, f32.length, rate); ab.getChannelData(0).set(f32);   // browser resamples rate->ctx cleanly
-          var src = ctx.createBufferSource(); src.buffer = ab; src.connect(ctx.destination);
+          var src = ctx.createBufferSource(); src.buffer = ab; src.connect(gainFor(from, ctx));
           if (!srcs[from]) srcs[from] = [];
           var bag = srcs[from]; bag.push(src);
           src.onended = function () { var i = bag.indexOf(src); if (i >= 0) bag.splice(i, 1); };   // prune once played

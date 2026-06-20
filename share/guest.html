@@ -135,6 +135,15 @@
     @media (max-width:760px){ .wrap{max-width:100vw;overflow:auto} #terminal{width:max-content} }
     body.mobile .wrap{max-width:100vw;overflow:auto}
     body.mobile #terminal{width:max-content;min-height:100%}   /* fill the pane's height so collapsing the chat grows the terminal box down (not just empty space) */
+    /* "jump to bottom" — mobile only. Snaps the terminal/chat to the latest so you don't drag back down by hand.
+       Sits just above the chat panel; rides lower when the chat is collapsed to the slim bar. */
+    .jumpbtn{position:fixed;right:16px;bottom:calc(32svh + 16px);z-index:7;display:none;width:44px;height:44px;border-radius:50%;
+      border:1px solid var(--hairline);background:linear-gradient(180deg,#232732,#171a20);color:var(--ink);
+      font-size:21px;line-height:1;cursor:pointer;align-items:center;justify-content:center;
+      box-shadow:0 8px 22px rgba(0,0,0,.5);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+    .jumpbtn:active{transform:scale(.92)}
+    body.mobile .jumpbtn{display:flex}
+    body.mobile.chat-collapsed .jumpbtn{bottom:calc(env(safe-area-inset-bottom,0px) + 62px)}
     /* faint vignette for depth — same premium feel as the host cockpit */
     body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
       background:radial-gradient(120% 120% at 50% 40%, transparent 62%, rgba(0,0,0,.32) 100%)}
@@ -317,6 +326,7 @@
       </div>
     </div>
   </div>
+  <button class="jumpbtn" id="jumpbtn" type="button" aria-label="Jump to latest" title="Jump to latest">↓</button>
   <div class="foot">
     <span class="st"><span id="stxt">connecting…</span></span>
     <span style="margin-left:auto">viewing — host controls the session</span>

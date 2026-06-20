@@ -78,6 +78,11 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   const byPid = new Map();           // pid -> ws (find the target of a relayed signal)
   const voiceGuests = new Set();     // pids of guests currently in the voice room (mic on)
   let hostVoice = false;             // is the host in the voice room?
+  // A guest whose socket dropped but may still reconnect: a mobile lock / tab background closes the WS, then the
+  // guest auto-reconnects with their resume token. Keyed by that token — we HOLD the "left" announcement and their
+  // voice seat for a grace window, cancelling both if they return in time (so a phone lock isn't a fake departure).
+  const pendingDrops = new Map();    // resume token -> { timer, wasVoice, name }
+  const REJOIN_GRACE = Number(process.env.CLAUDIBLE_REJOIN_GRACE_MS) || 45000;
   function voiceMembers() {
     const m = [];
     if (hostVoice) m.push({ id: 'host', name: hostName });
@@ -142,8 +147,12 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     ws.binaryType = 'nodebuffer';
     clients.add(ws);
     ws._pid = 'g' + (++pidSeq); byPid.set(ws._pid, ws);   // stable peer-id for voice signaling
+    // Returning from a transient drop within the grace window → cancel the pending "left" and restore voice.
+    const back = (mode === 'resume' && resumeTok) ? pendingDrops.get(resumeTok) : null;
+    if (back) { clearTimeout(back.timer); pendingDrops.delete(resumeTok); if (back.wasVoice) voiceGuests.add(ws._pid); }
     ws._presence = 'active'; roster.set(name, 'active');
     notifyGuests(); notifyRoster();
+    if (back && back.wasVoice) broadcastVoice();           // re-list them as a voice member under the new pid
     try {
       ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused, pid: ws._pid, voice: voiceMembers() }));
       // Never replay status/scrollback while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
@@ -208,7 +217,31 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         return;
       }
     });
-    const drop = () => { if (clients.delete(ws)) { byPid.delete(ws._pid); const wasVoice = voiceGuests.delete(ws._pid); roster.set(ws._name, 'gone'); notifyGuests(); notifyRoster(); systemChat(ws._name + ' left'); if (wasVoice) broadcastVoice(); } };
+    const drop = () => {
+      if (!clients.delete(ws)) return;
+      byPid.delete(ws._pid);
+      const wasVoice = voiceGuests.delete(ws._pid);
+      notifyGuests();
+      const tok = ws._resume, who = ws._name;
+      if (tok) {
+        // Don't cry "left" the instant the socket closes — a backgrounded tab / locked phone reconnects with this
+        // token. Show them amber ("away") and wait out the grace window; only a real, lasting departure announces.
+        roster.set(who, 'idle'); notifyRoster();
+        const prev = pendingDrops.get(tok); if (prev) clearTimeout(prev.timer);
+        const timer = setTimeout(() => {
+          pendingDrops.delete(tok);
+          roster.set(who, 'gone'); notifyRoster();
+          systemChat(who + ' left');
+          if (wasVoice) broadcastVoice();
+        }, REJOIN_GRACE);
+        if (timer && timer.unref) timer.unref();
+        pendingDrops.set(tok, { timer, wasVoice, name: who });
+      } else {
+        roster.set(who, 'gone'); notifyRoster();
+        systemChat(who + ' left');
+        if (wasVoice) broadcastVoice();
+      }
+    };
     ws.on('close', drop);
     ws.on('error', drop);
   }
@@ -316,6 +349,8 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     server = null; wss = null; port = null; ring = Buffer.alloc(0);
     linkToken = null; resumeTokens.clear(); paused = false; workspaces = [];
     byPid.clear(); voiceGuests.clear(); hostVoice = false; pidSeq = 0;
+    for (const [, p] of pendingDrops) { try { clearTimeout(p.timer); } catch {} }
+    pendingDrops.clear();
   }
 
   function status() {

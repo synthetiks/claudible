@@ -839,7 +839,7 @@ function renderRoster(roster) {
   el.innerHTML = '';
   const you = document.createElement('span'); you.className = 'rmember you';
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
-  you.appendChild(document.createTextNode((hostDisplayName || 'You') + ' · you'));
+  you.appendChild(document.createTextNode(hostDisplayName || 'You'));
   el.appendChild(you);
   (roster || []).forEach((g) => {
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
@@ -852,6 +852,48 @@ function renderRoster(roster) {
 }
 claudible.onShareRoster((roster) => renderRoster(roster));
 
+// floating per-person VOLUME control — right-click a voice member to set how loud YOU hear them (listener-side,
+// 0–200%). Local only; never changes what anyone else hears. Persists across rejoin via the voice room's volume map.
+let volPop = null;
+function closeVolumePopover() {
+  if (!volPop) return;
+  volPop.remove(); volPop = null;
+  document.removeEventListener('mousedown', onVolOutside, true);
+  document.removeEventListener('keydown', onVolKey, true);
+}
+function onVolOutside(e) { if (volPop && !volPop.contains(e.target)) closeVolumePopover(); }
+function onVolKey(e) { if (e.key === 'Escape') closeVolumePopover(); }
+function openVolumePopover(anchor, id, name, room) {
+  closeVolumePopover();
+  const cur = Math.round((room.getVolume ? room.getVolume(id) : 1) * 100);
+  const pop = document.createElement('div');
+  pop.style.cssText = 'position:fixed;z-index:9999;display:flex;flex-direction:column;gap:8px;min-width:190px;padding:11px 13px;border:1px solid #2b2f37;border-radius:11px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-family:inherit;color:#e7eaef';
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9097a1;gap:10px';
+  const hn = document.createElement('span'); hn.textContent = '🔊 ' + name;
+  hn.style.cssText = 'font-weight:600;color:#cfd6df;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  const pct = document.createElement('span'); pct.textContent = cur + '%'; pct.style.cssText = 'font-variant-numeric:tabular-nums';
+  head.appendChild(hn); head.appendChild(pct);
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = '0'; slider.max = '200'; slider.step = '5'; slider.value = String(cur);
+  slider.style.cssText = 'width:100%;accent-color:#5fb487;cursor:pointer';
+  const apply = (v) => { pct.textContent = v + '%'; try { room.setVolume(id, v / 100); } catch (e) {} };
+  slider.addEventListener('input', () => apply(+slider.value));
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px';
+  const mk = (txt, val) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+    b.style.cssText = 'flex:1;font:inherit;font-size:10.5px;color:#9097a1;background:#191c22;border:1px solid #2b2f37;border-radius:7px;padding:5px 0;cursor:pointer';
+    b.addEventListener('click', () => { slider.value = String(val); apply(val); }); return b; };
+  row.appendChild(mk('Mute', 0)); row.appendChild(mk('100%', 100)); row.appendChild(mk('Max', 200));
+  pop.appendChild(head); pop.appendChild(slider); pop.appendChild(row);
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  let left = Math.min(r.left, window.innerWidth - pop.offsetWidth - 8);
+  let top = r.top - pop.offsetHeight - 8; if (top < 8) top = r.bottom + 8;
+  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = top + 'px';
+  volPop = pop;
+  setTimeout(() => { document.addEventListener('mousedown', onVolOutside, true); document.addEventListener('keydown', onVolKey, true); }, 0);
+}
+
 // ---- host voice room: peer-to-peer audio with viewers (signaling bridged through main) ----
 function renderHostVoiceUi(st) {
   const btn = $('hv-btn'), mute = $('hv-mute'), box = $('hv-members'); if (!btn) return;
@@ -863,12 +905,17 @@ function renderHostVoiceUi(st) {
   if (box) {
     box.innerHTML = '';
     ((st && st.members) || []).forEach((m) => {
-      const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '') + (m.conn ? ' c-' + m.conn : '');
+      const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '') + (m.conn ? ' c-' + m.conn : '');
       const d = document.createElement('span'); d.className = 'd';
-      let label = m.self ? 'you' : m.name;
+      let label = m.name;
       if (!m.self && m.conn && m.conn !== 'connected') label += ' · ' + m.conn;   // surface connecting/failed for diagnosis
       const nm = document.createElement('span'); nm.textContent = label;
-      el.title = m.self ? 'you' : ('connection: ' + (m.conn || '?'));
+      if (m.self) { el.title = 'you'; }
+      else {                                                            // right-click → set how loud you hear this person
+        el.title = 'Right-click to adjust ' + m.name + "'s volume";
+        el.style.cursor = 'context-menu';
+        el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openVolumePopover(el, m.id, m.name, hostVoice); });
+      }
       el.appendChild(d); el.appendChild(nm); box.appendChild(el);
     });
   }

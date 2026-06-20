@@ -343,6 +343,73 @@ $('browse-x').addEventListener('click', closeBrowse);
 $('browse-back').addEventListener('click', browseBack);
 
 // ---- voice room: peer-to-peer audio with the host & other viewers (signaling relayed over our WS) ----
+// floating per-person VOLUME control — right-click (or long-press on touch) a voice member to set how loud YOU
+// hear them (0–200%). Local to this viewer; never changes what anyone else hears. Survives a rejoin.
+var volPop = null;
+function closeVolumePopover() {
+  if (!volPop) return;
+  if (volPop.parentNode) volPop.parentNode.removeChild(volPop);
+  volPop = null;
+  document.removeEventListener('mousedown', onVolOutside, true);
+  document.removeEventListener('touchstart', onVolOutside, true);
+  document.removeEventListener('keydown', onVolKey, true);
+}
+function onVolOutside(e) { if (volPop && !volPop.contains(e.target)) closeVolumePopover(); }
+function onVolKey(e) { if (e.key === 'Escape') closeVolumePopover(); }
+function openVolumePopover(anchor, id, name, room) {
+  closeVolumePopover();
+  var cur = Math.round((room.getVolume ? room.getVolume(id) : 1) * 100);
+  var pop = document.createElement('div');
+  pop.style.cssText = 'position:fixed;z-index:9999;display:flex;flex-direction:column;gap:8px;min-width:200px;padding:12px 14px;border:1px solid #2b2f37;border-radius:12px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-family:inherit;color:#e7eaef';
+  var head = document.createElement('div');
+  head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9097a1;gap:10px';
+  var hn = document.createElement('span'); hn.textContent = '🔊 ' + name;
+  hn.style.cssText = 'font-weight:600;color:#cfd6df;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  var pct = document.createElement('span'); pct.textContent = cur + '%'; pct.style.cssText = 'font-variant-numeric:tabular-nums';
+  head.appendChild(hn); head.appendChild(pct);
+  var slider = document.createElement('input');
+  slider.type = 'range'; slider.min = '0'; slider.max = '200'; slider.step = '5'; slider.value = String(cur);
+  slider.style.cssText = 'width:100%;accent-color:#5fb487;cursor:pointer;height:24px';
+  function apply(v) { pct.textContent = v + '%'; try { room.setVolume(id, v / 100); } catch (e) {} }
+  slider.addEventListener('input', function () { apply(+slider.value); });
+  var rowx = document.createElement('div'); rowx.style.cssText = 'display:flex;gap:6px';
+  function mk(txt, val) {
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+    b.style.cssText = 'flex:1;font:inherit;font-size:11px;color:#9097a1;background:#191c22;border:1px solid #2b2f37;border-radius:7px;padding:7px 0;cursor:pointer';
+    b.addEventListener('click', function () { slider.value = String(val); apply(val); }); return b;
+  }
+  rowx.appendChild(mk('Mute', 0)); rowx.appendChild(mk('100%', 100)); rowx.appendChild(mk('Max', 200));
+  pop.appendChild(head); pop.appendChild(slider); pop.appendChild(rowx);
+  document.body.appendChild(pop);
+  var r = anchor.getBoundingClientRect();
+  var left = Math.min(r.left, window.innerWidth - pop.offsetWidth - 8);
+  var top = r.top - pop.offsetHeight - 8; if (top < 8) top = r.bottom + 8;
+  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = top + 'px';
+  volPop = pop;
+  setTimeout(function () {
+    document.addEventListener('mousedown', onVolOutside, true);
+    document.addEventListener('touchstart', onVolOutside, true);
+    document.addEventListener('keydown', onVolKey, true);
+  }, 0);
+}
+// long-press helper for touch devices (no right-click): fire after a steady ~480ms hold
+function attachLongPress(el, cb) {
+  var timer = null;
+  function clear() { if (timer) { clearTimeout(timer); timer = null; } }
+  el.addEventListener('touchstart', function () { clear(); timer = setTimeout(function () { timer = null; cb(); }, 480); }, { passive: true });
+  el.addEventListener('touchend', clear);
+  el.addEventListener('touchmove', clear);
+  el.addEventListener('touchcancel', clear);
+}
+// "jump to bottom" — snap the terminal (and chat) to the latest, so a viewer who scrolled up doesn't have to
+// drag all the way back down. Wired to the mobile floating button.
+function jumpToBottom() {
+  try { if (typeof term !== 'undefined' && term && term.scrollToBottom) term.scrollToBottom(); } catch (e) {}
+  try { var w = document.querySelector('.wrap'); if (w) w.scrollTop = w.scrollHeight; } catch (e) {}
+  try { var cl = $('chat-log'); if (cl) cl.scrollTop = cl.scrollHeight; } catch (e) {}
+}
+(function () { var jb = $('jumpbtn'); if (jb) jb.addEventListener('click', jumpToBottom); })();
+
 function renderVoiceUi(st) {
   var btn = $('voice-btn'), mute = $('voice-mute'), box = $('voice-members');
   if (!btn) return;
@@ -357,10 +424,19 @@ function renderVoiceUi(st) {
       var el = document.createElement('div');
       el.className = 'vm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '') + (m.conn ? ' c-' + m.conn : '');
       var dot = document.createElement('span'); dot.className = 'vmdot';
-      var label = (m.id === 'host' ? (hostName || 'host') : m.name) + (m.self ? ' (you)' : '');
+      var label = (m.id === 'host' ? (hostName || 'host') : m.name);
       if (!m.self && m.conn && m.conn !== 'connected') label += ' · ' + m.conn;   // surface connecting/failed for diagnosis
       var nm = document.createElement('span'); nm.textContent = label;
-      el.title = m.self ? 'you' : ('connection: ' + (m.conn || '?'));
+      if (m.self) { el.title = 'you'; }
+      else {                                                            // right-click / long-press → set how loud you hear them
+        var who = (m.id === 'host' ? (hostName || 'host') : m.name);
+        el.title = 'Adjust ' + who + "'s volume";
+        el.style.cursor = 'context-menu';
+        (function (mid, mname) {
+          el.addEventListener('contextmenu', function (ev) { ev.preventDefault(); openVolumePopover(el, mid, mname, voice); });
+          attachLongPress(el, function () { openVolumePopover(el, mid, mname, voice); });
+        })(m.id, who);
+      }
       el.appendChild(dot); el.appendChild(nm); box.appendChild(el);
     });
   }
