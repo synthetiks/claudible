@@ -26,6 +26,7 @@ const ASSETS = {
   '/xterm.css':    { file: path.join(NM, '@xterm/xterm/css/xterm.css'),        type: 'text/css; charset=utf-8' },
   '/addon-fit.js': { file: path.join(NM, '@xterm/addon-fit/lib/addon-fit.js'), type: 'text/javascript; charset=utf-8' },
   '/guest.js':     { file: path.join(__dirname, 'guest.js'),                   type: 'text/javascript; charset=utf-8' },
+  '/voice-core.js':{ file: path.join(__dirname, 'voice-core.js'),             type: 'text/javascript; charset=utf-8' },
   '/logo.png':     { file: path.join(__dirname, '..', 'assets', 'logo.png'),   type: 'image/png' },
 };
 const GUEST_HTML = path.join(__dirname, 'guest.html');
@@ -59,7 +60,7 @@ function cleanName(n, fallback) {
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript } = {}) {
+function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onRtc, onVoiceMembers } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let linkToken = null, hostName = 'Host';
   let cols = 120, rows = 32;
@@ -71,6 +72,30 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   const resumeTokens = new Set();   // one private reconnect token per approved guest
   const pending = new Map();
   let pendingSeq = 0;
+  // ---- voice room (WebRTC mesh) ----  every participant has a stable id; the host is 'host', guests are 'gN'.
+  // The server is ONLY a signaling relay (offer/answer/ICE) + membership tracker — no audio flows through it.
+  let pidSeq = 0;
+  const byPid = new Map();           // pid -> ws (find the target of a relayed signal)
+  const voiceGuests = new Set();     // pids of guests currently in the voice room (mic on)
+  let hostVoice = false;             // is the host in the voice room?
+  function voiceMembers() {
+    const m = [];
+    if (hostVoice) m.push({ id: 'host', name: hostName });
+    for (const ws of clients) { if (voiceGuests.has(ws._pid)) m.push({ id: ws._pid, name: ws._name }); }
+    return m;
+  }
+  function broadcastVoice() {
+    const members = voiceMembers();
+    const s = JSON.stringify({ type: 'voice-members', members });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+    try { onVoiceMembers && onVoiceMembers(members); } catch {}   // keep the host UI in sync too
+  }
+  function rtcFromHost(to, kind, data) {                          // host → a specific guest's peer
+    if (to === 'host') return;
+    const t = byPid.get(to);
+    if (t && t.readyState === t.OPEN) { try { t.send(JSON.stringify({ type: 'rtc', from: 'host', kind, data })); } catch {} }
+  }
+  function hostVoiceSet(on) { hostVoice = !!on; broadcastVoice(); }
 
   const notifyGuests = () => { try { onGuests && onGuests(clients.size); } catch {} };
   // presence roster — name -> 'active'(green) | 'idle'(amber/AFK) | 'gone'(red, closed tab). 'gone' is kept so the
@@ -111,10 +136,11 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     else { ws._resume = resumeTok; }
     ws.binaryType = 'nodebuffer';
     clients.add(ws);
+    ws._pid = 'g' + (++pidSeq); byPid.set(ws._pid, ws);   // stable peer-id for voice signaling
     ws._presence = 'active'; roster.set(name, 'active');
     notifyGuests(); notifyRoster();
     try {
-      ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused }));
+      ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused, pid: ws._pid, voice: voiceMembers() }));
       // Never replay status/scrollback while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
       if (!paused && lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
       if (!paused && ring.length) ws.send(ring);
@@ -156,9 +182,19 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (readOnly || paused) return;   // paused = host on a private/non-granted workspace; never inject into it
         try { onInput && onInput(msg.data); } catch {}
+        return;
+      }
+      // ---- voice room (allowed even for VIEW-ONLY guests — talking is not terminal control) ----
+      if (msg.type === 'voice-join') { voiceGuests.add(ws._pid); broadcastVoice(); return; }
+      if (msg.type === 'voice-leave') { if (voiceGuests.delete(ws._pid)) broadcastVoice(); return; }
+      if (msg.type === 'rtc' && typeof msg.to === 'string') {           // relay one WebRTC signal, stamped with the sender's id
+        const payload = { type: 'rtc', from: ws._pid, kind: msg.kind, data: msg.data };
+        if (msg.to === 'host') { try { onRtc && onRtc(payload); } catch {} }
+        else { const t = byPid.get(msg.to); if (t && t.readyState === t.OPEN) { try { t.send(JSON.stringify(payload)); } catch {} } }
+        return;
       }
     });
-    const drop = () => { if (clients.delete(ws)) { roster.set(ws._name, 'gone'); notifyGuests(); notifyRoster(); systemChat(ws._name + ' left'); } };
+    const drop = () => { if (clients.delete(ws)) { byPid.delete(ws._pid); const wasVoice = voiceGuests.delete(ws._pid); roster.set(ws._name, 'gone'); notifyGuests(); notifyRoster(); systemChat(ws._name + ' left'); if (wasVoice) broadcastVoice(); } };
     ws.on('close', drop);
     ws.on('error', drop);
   }
@@ -265,13 +301,14 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     try { server && server.close(); } catch {}
     server = null; wss = null; port = null; ring = Buffer.alloc(0);
     linkToken = null; resumeTokens.clear(); paused = false; workspaces = [];
+    byPid.clear(); voiceGuests.clear(); hostVoice = false; pidSeq = 0;
   }
 
   function status() {
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, decideApproval, status };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, decideApproval, status, rtcFromHost, hostVoiceSet };
 }
 
 module.exports = { createShareServer };

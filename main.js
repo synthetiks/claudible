@@ -64,7 +64,14 @@ const share = createShareServer({
         reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
       });
   },
+  // Voice room (WebRTC) — the server is signaling-only; audio is peer-to-peer. Bridge the host cockpit's
+  // signaling (over IPC) to/from guests (over the share WS): a guest's signal addressed to 'host' arrives
+  // here, and the host's outgoing signals + voice membership go back to the cockpit renderer.
+  onRtc: (payload) => { try { win && win.webContents.send('share:rtc', payload); } catch {} },
+  onVoiceMembers: (members) => { try { win && win.webContents.send('share:voice-members', members); } catch {} },
 });
+ipcMain.on('share:rtc-send', (e, { to, kind, data } = {}) => { try { share.rtcFromHost(to, kind, data); } catch {} });
+ipcMain.on('share:voice', (e, { join } = {}) => { try { share.hostVoiceSet(!!join); } catch {} });
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
 const RT = path.join(__dirname, 'runtime');   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)

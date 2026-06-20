@@ -68,6 +68,11 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareClaimed: (cb) => ipcRenderer.on('share:claimed', () => cb()),
   onShareApproval: (cb) => ipcRenderer.on('share:approval', (_e, info) => cb(info)),
   onShareApprovalCancel: (cb) => ipcRenderer.on('share:approval-cancel', (_e, id) => cb(id)),
+  // voice room (WebRTC signaling bridged through main; audio is peer-to-peer)
+  voiceJoin: (join) => ipcRenderer.send('share:voice', { join }),
+  rtcSend: (to, kind, data) => ipcRenderer.send('share:rtc-send', { to, kind, data }),
+  onShareRtc: (cb) => ipcRenderer.on('share:rtc', (_e, p) => cb(p)),
+  onVoiceMembers: (cb) => ipcRenderer.on('share:voice-members', (_e, m) => cb(m)),
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   saveSession: (text) => ipcRenderer.invoke('save-session', text),

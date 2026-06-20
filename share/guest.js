@@ -75,6 +75,7 @@ term.open($('terminal'));
 
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
 var grantedWs = [], wsPaused = false, lastLiveId = null;   // granted workspace library + private-pause state
+var myPid = null;                                          // our voice-room peer id (from the hello)
 // The connection indicator now lives on the top session chip's dot (green = live, red = down, amber = connecting).
 function setStatus(txt, cls) {
   var s = $('stxt'); if (s) s.textContent = txt;
@@ -341,6 +342,34 @@ $('browse-open').addEventListener('click', openBrowse);
 $('browse-x').addEventListener('click', closeBrowse);
 $('browse-back').addEventListener('click', browseBack);
 
+// ---- voice room: peer-to-peer audio with the host & other viewers (signaling relayed over our WS) ----
+function renderVoiceUi(st) {
+  var btn = $('voice-btn'), mute = $('voice-mute'), box = $('voice-members');
+  if (!btn) return;
+  if (st && st.error === 'mic-denied') { btn.textContent = '🎙 Mic blocked'; btn.classList.remove('on'); return; }
+  var joined = !!(st && st.joined);
+  btn.textContent = joined ? '🎙 Leave voice' : '🎙 Join voice';
+  btn.classList.toggle('on', joined);
+  if (mute) { mute.style.display = joined ? '' : 'none'; mute.textContent = (st && st.muted) ? 'Unmute' : 'Mute'; mute.classList.toggle('muted', !!(st && st.muted)); }
+  if (box) {
+    box.innerHTML = '';
+    ((st && st.members) || []).forEach(function (m) {
+      var el = document.createElement('div'); el.className = 'vm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '');
+      var dot = document.createElement('span'); dot.className = 'vmdot';
+      var nm = document.createElement('span'); nm.textContent = (m.id === 'host' ? (hostName || 'host') : m.name) + (m.self ? ' (you)' : '');
+      el.appendChild(dot); el.appendChild(nm); box.appendChild(el);
+    });
+  }
+}
+var voice = makeVoiceRoom({
+  myId: function () { return myPid; },
+  send: function (to, kind, data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'rtc', to: to, kind: kind, data: data })); },
+  setJoined: function (j) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: j ? 'voice-join' : 'voice-leave' })); },
+  onUi: renderVoiceUi,
+});
+$('voice-btn').addEventListener('click', function () { if (voice.isJoined()) voice.leave(); else voice.join().catch(function () {}); });
+$('voice-mute').addEventListener('click', function () { voice.toggleMute(); });
+
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss' : 'ws';
   var cred = (resume ? ('r=' + encodeURIComponent(resume)) : ('t=' + encodeURIComponent(token))) + '&n=' + encodeURIComponent(myName);
@@ -355,6 +384,8 @@ function connect() {
       if (msg.type === 'hello') {
         gotHello = true;
         readOnly = !!msg.readOnly;
+        myPid = msg.pid || null;                                // our voice-room peer id
+        if (Array.isArray(msg.voice)) voice.setMembers(msg.voice);   // who's already in the voice room
         if (msg.host) hostName = msg.host;
         $('ro').style.display = readOnly ? '' : 'none';
         document.body.classList.toggle('ro', readOnly);
@@ -398,6 +429,10 @@ function connect() {
         if (browseView === 'sessions' && msg.wsId === browseWsId) { lastSessions = Array.isArray(msg.list) ? msg.list : []; renderBrowseSessions(lastSessions); }
       } else if (msg.type === 'ws-transcript') {
         if (browseView === 'transcript' && msg.wsId === browseWsId && msg.sessionId === browseSessionId) renderTranscript(Array.isArray(msg.msgs) ? msg.msgs : []);
+      } else if (msg.type === 'voice-members') {
+        voice.setMembers(msg.members || []);
+      } else if (msg.type === 'rtc') {
+        voice.handleSignal(msg);
       }
     } else {
       term.write(new Uint8Array(ev.data));   // raw terminal output

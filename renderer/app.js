@@ -851,6 +851,36 @@ function renderRoster(roster) {
   });
 }
 claudible.onShareRoster((roster) => renderRoster(roster));
+
+// ---- host voice room: peer-to-peer audio with viewers (signaling bridged through main) ----
+function renderHostVoiceUi(st) {
+  const btn = $('hv-btn'), mute = $('hv-mute'), box = $('hv-members'); if (!btn) return;
+  if (st && st.error === 'mic-denied') { btn.textContent = '🎙 Mic blocked'; btn.classList.remove('on'); return; }
+  const joined = !!(st && st.joined);
+  btn.textContent = joined ? '🎙 Leave voice' : '🎙 Join voice';
+  btn.classList.toggle('on', joined);
+  if (mute) { mute.style.display = joined ? '' : 'none'; mute.textContent = (st && st.muted) ? 'Unmute' : 'Mute'; mute.classList.toggle('muted', !!(st && st.muted)); }
+  if (box) {
+    box.innerHTML = '';
+    ((st && st.members) || []).forEach((m) => {
+      const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '');
+      const d = document.createElement('span'); d.className = 'd';
+      const nm = document.createElement('span'); nm.textContent = m.self ? 'you' : m.name;
+      el.appendChild(d); el.appendChild(nm); box.appendChild(el);
+    });
+  }
+}
+const hostVoice = makeVoiceRoom({
+  myId: () => 'host',
+  send: (to, kind, data) => { try { claudible.rtcSend(to, kind, data); } catch {} },
+  setJoined: (j) => { try { claudible.voiceJoin(j); } catch {} },
+  onUi: renderHostVoiceUi,
+});
+try { claudible.onShareRtc((p) => hostVoice.handleSignal(p)); } catch {}
+try { claudible.onVoiceMembers((m) => hostVoice.setMembers(m)); } catch {}
+if ($('hv-btn')) $('hv-btn').addEventListener('click', () => { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); });
+if ($('hv-mute')) $('hv-mute').addEventListener('click', () => hostVoice.toggleMute());
+
 function showLink(url) {
   shareLink.value = url; shareLink.style.display = 'block'; shareLink.style.opacity = '1';
   shareLink.title = 'Click to copy';

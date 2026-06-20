@@ -161,6 +161,21 @@
     .browse-open{margin-left:auto;flex:none;padding:5px 11px;border:1px solid var(--hairline);border-radius:8px;
       background:var(--sheen);color:var(--ink-dim);font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
     .browse-open:hover{color:var(--ink);border-color:rgba(255,255,255,.25)}
+    /* voice room bar */
+    .voicebar{display:flex;align-items:center;gap:9px;padding:7px 16px;border-bottom:1px solid var(--hairline);
+      background:linear-gradient(180deg,#0b0d11,#090a0c);overflow-x:auto}
+    .voice-btn,.voice-mute{flex:none;padding:5px 12px;border:1px solid var(--hairline);border-radius:8px;
+      background:#16181d;color:var(--ink-dim);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
+    .voice-btn:hover,.voice-mute:hover{color:var(--ink);border-color:rgba(255,255,255,.25)}
+    .voice-btn.on{color:#fff;border-color:var(--ok);background:rgba(95,180,135,.16)}
+    .voice-mute.muted{color:#fff;border-color:var(--live);background:rgba(229,86,75,.16)}
+    .voice-members{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .vm{display:flex;align-items:center;gap:6px;flex:none;padding:4px 9px;border:1px solid var(--hairline);
+      border-radius:999px;background:#101216;font-size:11px;color:var(--ink-dim)}
+    .vm .vmdot{width:7px;height:7px;border-radius:50%;background:#3a3f47;transition:.12s}
+    .vm.speaking{color:var(--ink);border-color:var(--ok)}
+    .vm.speaking .vmdot{background:#5fb487;box-shadow:0 0 8px 0 #5fb487}
+    .vm.self{border-color:rgba(255,255,255,.22)}
     /* read-only browse panel: workspaces → sessions → transcript, all without touching the live terminal */
     .browse{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg);z-index:8}
     .browse.show{display:flex}
@@ -244,6 +259,11 @@
     <div class="wschips" id="wschips"></div>
     <button class="browse-open" id="browse-open" type="button" title="Read any shared session — without changing the live view">Browse sessions</button>
   </div>
+  <div class="voicebar" id="voicebar">
+    <button class="voice-btn" id="voice-btn" type="button" title="Talk with the host & other viewers (peer-to-peer audio)">🎙 Join voice</button>
+    <button class="voice-mute" id="voice-mute" type="button" style="display:none">Mute</button>
+    <div class="voice-members" id="voice-members"></div>
+  </div>
   <div class="main">
     <div class="wrap">
       <div id="terminal"></div>
@@ -305,6 +325,7 @@
 
   <script src="/xterm.js"></script>
   <script src="/addon-fit.js"></script>
+  <script src="/voice-core.js"></script>
   <script src="/guest.js"></script>
 </body>
 </html>
