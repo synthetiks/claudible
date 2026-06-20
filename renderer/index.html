@@ -547,8 +547,10 @@
     .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
     .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
     .share-dock input[type=text]{margin-bottom:0;font-size:11px;padding:9px 10px}
-    /* voice room (host) */
-    .voicerow{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+    /* voice room (host) — a compact strip at the top of the viewer chat panel */
+    .voicerow{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:9px 12px;border-bottom:1px solid var(--hairline-soft);
+      background:linear-gradient(180deg,#0c0e12,#0a0b0d);flex:none}
+    .hv-members:empty{display:none}
     .hv-btn,.hv-mute{width:auto;flex:none;padding:6px 11px;font-size:11px;border-radius:8px;box-shadow:none}
     .hv-btn.on{color:#fff;border-color:#5fb487;background:rgba(95,180,135,.16)}
     .hv-mute.muted{color:#fff;border-color:var(--live);background:rgba(229,86,75,.16)}
@@ -739,11 +741,6 @@
         <input type="text" id="share-link" readonly placeholder="invite link" style="display:none" title="Click to copy" />
         <button id="share-newlink" style="display:none">New link</button>
         <div class="out share-out" id="share-out">invite a teammate to your shared workspaces</div>
-        <div class="voicerow" id="voicerow">
-          <button id="hv-btn" class="hv-btn" title="Talk with viewers (peer-to-peer audio)">🎙 Join voice</button>
-          <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
-          <div class="hv-members" id="hv-members"></div>
-        </div>
       </div>
     </aside>
     <div class="center">
@@ -793,6 +790,11 @@
     </div><!-- /center -->
     <div class="chat" id="chat">
       <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><span class="chat-roster" id="chat-roster"></span></div>
+      <div class="voicerow" id="voicerow">
+        <button id="hv-btn" class="hv-btn" title="Talk with your viewers">🎙 Join voice</button>
+        <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
+        <div class="hv-members" id="hv-members"></div>
+      </div>
       <div class="chat-log" id="chat-log"></div>
       <div class="chat-input">
         <input type="text" id="chat-in" placeholder="message your viewer — Claude won't see this" maxlength="2000" />
