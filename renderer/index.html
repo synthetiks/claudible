@@ -417,6 +417,14 @@
     .sess:hover .sess-menu-btn,.sess.menu-open .sess-menu-btn{opacity:1}   /* hover-revealed; stays lit while its menu is open */
     .sess-menu-btn:hover,.sess.menu-open .sess-menu-btn{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .sess.renaming .sess-menu-btn{display:none}   /* nothing floats over the rename input while editing */
+    /* per-row alert badges: red = a collaborator deleted this on GitHub; amber = edited on both machines (diverged) */
+    .sess-delbadge,.sess-divbadge{position:absolute;top:6px;right:34px;width:18px;height:18px;padding:0;
+      display:flex;align-items:center;justify-content:center;border-radius:50%;font:inherit;font-size:11px;
+      font-weight:800;line-height:1;cursor:pointer;border:1px solid;transition:transform .12s}
+    .sess-delbadge{color:#fff;background:var(--live);border-color:var(--live);box-shadow:0 0 8px -2px var(--live)}
+    .sess-divbadge{color:#1a1205;background:#e0a93b;border-color:#e0a93b;box-shadow:0 0 8px -2px #e0a93b}
+    .sess-delbadge:hover,.sess-divbadge:hover{transform:scale(1.12)}
+    .sess.renaming .sess-delbadge,.sess.renaming .sess-divbadge{display:none}
     /* inline rename input (replaces the title while editing) */
     .sess-rename{width:100%;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:4px 7px;margin-bottom:3px}
@@ -860,12 +868,11 @@
       <div class="sec">
         <div class="label">default effort</div>
         <div class="effort-row" id="effort-row">
-          <button class="eff-pill" data-eff="">default</button>
-          <button class="eff-pill" data-eff="low">low</button>
           <button class="eff-pill" data-eff="medium">medium</button>
           <button class="eff-pill" data-eff="high">high</button>
           <button class="eff-pill" data-eff="xhigh">xhigh</button>
           <button class="eff-pill" data-eff="max">max</button>
+          <button class="eff-pill" data-eff="ultracode">ultracode</button>
         </div>
         <div class="out">remembered across launches · applies to new sessions you open</div>
       </div>

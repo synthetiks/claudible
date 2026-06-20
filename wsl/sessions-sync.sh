@@ -46,6 +46,11 @@ PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
 # dir name is attacker-controlled and cannot be a trust signal. session.sh consults this same file.
 FSET="$PROJ/.claudible-foreign"
 mark_foreign() { grep -qxF -- "$1" "$FSET" 2>/dev/null || printf '%s\n' "$1" >> "$FSET"; }
+# A true fork (same id edited on both machines) is recorded here so sessions.sh can flag a per-row "diverged"
+# badge; cleared the moment the fork resolves (clean import / fast-forward / identical / local-ahead).
+DDSET="$PROJ/.claudible-diverged"
+mark_diverged() { grep -qxF -- "$1" "$DDSET" 2>/dev/null || printf '%s\n' "$1" >> "$DDSET"; }
+clear_diverged() { [ -e "$DDSET" ] || return 0; { grep -vxF -- "$1" "$DDSET" 2>/dev/null || true; } > "$DDSET.tmp"; mv -f "$DDSET.tmp" "$DDSET" 2>/dev/null; }
 # Install a branch transcript so it is ONLY ever visible in final, already-foreign, already-aged form:
 # record foreign FIRST, copy to a temp, age the temp, then atomically rename into place. This closes the
 # TOCTOU window in which a concurrently-spawned session.sh could observe a trusted, current-mtime
@@ -160,10 +165,9 @@ purge_tombstoned() {
   for id in $(tombstone_ids); do
     case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
     gitwt rm -q -f --ignore-unmatch -- "sessions/*/$id.jsonl" >/dev/null 2>&1   # quoted: git does the glob (all author dirs), not the shell
-    if [ -e "$PROJ/$id.jsonl" ]; then
-      mkdir -p "$HOME/.claudible/trash" 2>/dev/null
-      mv -f "$PROJ/$id.jsonl" "$HOME/.claudible/trash/$id.$(date +%Y%m%d-%H%M%S).deleted.jsonl" 2>/dev/null
-    fi
+    # The recipient's LOCAL copy is intentionally KEPT — sessions.sh flags it 'deletedRemote' so the user gets a
+    # red "!" prompt (Fully delete / Keep locally). It can never be re-shared (export skips tombstoned ids), and
+    # the deleter's own copy was already trashed by the delete op. So no local trash here.
   done
 }
 apply_tombstones() { purge_tombstoned; }   # import_sessions calls this name — keep the shim
@@ -181,16 +185,16 @@ import_sessions() {
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
     dest="$PROJ/$id.jsonl"
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
-      import_file "$f" "$dest" "$id" && IMPORTED=$((IMPORTED+1)); continue
+      import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); clear_diverged "$id"; }; continue
     fi
-    cmp -s "$f" "$dest" && continue                                 # identical → leave trust status unchanged
+    if cmp -s "$f" "$dest"; then clear_diverged "$id"; continue; fi  # identical → leave trust status unchanged, resolve any fork flag
     dsz="$(wc -c < "$dest" 2>/dev/null || echo 0)"
     if [ "$(wc -c < "$f")" -gt "$dsz" ] && head -c "$dsz" "$f" | cmp -s - "$dest"; then
-      import_file "$f" "$dest" "$id" && UPDATED=$((UPDATED+1))       # remote = local + more turns → ff (now foreign)
+      import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); clear_diverged "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
-      :                                                             # local is ahead of remote → our push handles it
+      clear_diverged "$id"                                          # local is ahead of remote → our push handles it
     else
-      DIVERGED=$((DIVERGED+1))                                      # true fork → leave local untouched, flag it
+      DIVERGED=$((DIVERGED+1)); mark_diverged "$id"                 # true fork → leave local untouched, flag it per-row
     fi
   done
   return 0

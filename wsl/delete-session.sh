@@ -27,6 +27,10 @@ trash="$HOME/.claudible/trash"
 mkdir -p "$trash" 2>/dev/null
 ts="$(date +%Y%m%d-%H%M%S)"
 if mv -f "$src" "$trash/$id.$ts.jsonl" 2>/dev/null; then
+  # drop any "kept"/"diverged" flags for this id so a future same-id session can't inherit a stale badge
+  for sc in "$PROJ/.claudible-kept" "$PROJ/.claudible-diverged"; do
+    [ -e "$sc" ] && { { grep -vxF -- "$id" "$sc" 2>/dev/null || true; } > "$sc.tmp"; mv -f "$sc.tmp" "$sc" 2>/dev/null; }
+  done
   printf '{"ok":true}'
 else
   printf '{"ok":false,"error":"move failed"}'

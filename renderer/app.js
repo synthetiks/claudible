@@ -1316,7 +1316,7 @@ const sessListEl = $('sess-list');
 const bodyEl = document.querySelector('.body');
 // activeSession / workspaces / activeWsId are declared up top (near the tabs Map) so the tab-strip boot can
 // reference them. The conversation order is stored PER workspace so switching libraries never reshuffles another's.
-function orderKey() { return 'wsOrder_' + activeWsId; }
+function orderKey() { return 'wsOrder2_' + activeWsId; }   // v2: re-seed from the shared `created` order (drops divergent per-machine v1 orders)
 function getOrder() { return loadPrefs()[orderKey()] || []; }
 function setOrder(order) { savePrefs({ [orderKey()]: order }); }
 function relTime(sec) {
@@ -1336,7 +1336,7 @@ function mergeSessionOrder(saved, list) {
   const savedSet = new Set(saved);
   const kept = saved.filter((id) => ids.has(id));                                   // keep saved order; drop deleted
   const fresh = list.filter((s) => !savedSet.has(s.id))
-                    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))                // new ones: chronological, newest first
+                    .sort((a, b) => ((b.created || b.mtime || 0) - (a.created || a.mtime || 0)))   // by SHARED created time → same order for every collaborator
                     .map((s) => s.id);
   return [...fresh, ...kept];
 }
@@ -1445,6 +1445,17 @@ function renderSessionRow(s) {
   row.appendChild(p); row.appendChild(m);
   const _lp = livePeers.find((x) => x.session === s.id);
   if (_lp) row.appendChild(makeLiveBadge(_lp));                      // a collaborator is live in THIS session → join natively
+  if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → red "!" prompt
+    const db = document.createElement('button');
+    db.className = 'sess-delbadge'; db.textContent = '!'; db.title = 'Deleted from GitHub by a collaborator';
+    db.addEventListener('click', (e) => { e.stopPropagation(); openDeletedRemoteModal(s); });
+    row.appendChild(db);
+  } else if (s.diverged) {                                           // same session edited on both machines → amber "!"
+    const vb = document.createElement('button');
+    vb.className = 'sess-divbadge'; vb.textContent = '!'; vb.title = 'Edited on both machines — your copy and the shared copy differ';
+    vb.addEventListener('click', (e) => { e.stopPropagation(); openDivergedInfo(s); });
+    row.appendChild(vb);
+  }
   // A single ▾ opens the per-session options menu (Rename / Export / Delete) — mirrors the workspace ▾ menu,
   // so the row stays a clean title with nothing crowding it and no inline confirm strip to overflow.
   const mb = document.createElement('button');
@@ -1615,6 +1626,58 @@ async function deleteSession(id, scope) {
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions(); renderTabStrip();
 }
+// Lightweight centered choice modal (self-contained; labels/subs are static strings we control). Resolves the
+// chosen key, or null on Cancel / backdrop / Esc.
+function modalChoice({ title, body, choices }) {
+  return new Promise((resolve) => {
+    const back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+    const box = document.createElement('div');
+    box.style.cssText = 'min-width:320px;max-width:440px;padding:20px;border:1px solid #2b2f37;border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
+    const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px';
+    const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:16px';
+    const list = document.createElement('div'); list.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    box.appendChild(h); box.appendChild(bd); box.appendChild(list);
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
+    const close = (k) => { try { back.remove(); } catch {} document.removeEventListener('keydown', onKey, true); resolve(k); };
+    (choices || []).forEach((c) => {
+      const b = document.createElement('button'); b.type = 'button';
+      const lab = document.createElement('span'); lab.textContent = c.label; lab.style.cssText = 'font-weight:600';
+      b.appendChild(lab);
+      if (c.sub) { const sb = document.createElement('span'); sb.textContent = c.sub; sb.style.cssText = 'display:block;font-size:10.5px;font-weight:400;color:#8a929d;margin-top:2px'; b.appendChild(sb); }
+      const danger = c.danger ? 'border-color:#7a3030;color:#ff8e8e;background:rgba(150,40,40,.12)' : 'border-color:#2b2f37;color:#cfd6df;background:#191c22';
+      b.style.cssText = `text-align:left;font:inherit;font-size:12.5px;padding:9px 12px;border:1px solid;border-radius:9px;cursor:pointer;${danger}`;
+      b.addEventListener('click', () => close(c.key));
+      list.appendChild(b);
+    });
+    back.addEventListener('mousedown', (e) => { if (e.target === back) close(null); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(back); back.appendChild(box);
+  });
+}
+// A collaborator deleted this session on GitHub — let the user fully delete their local copy or keep it.
+async function openDeletedRemoteModal(s) {
+  const name = sessTitle(s);
+  const choice = await modalChoice({
+    title: 'Session deleted on GitHub',
+    body: 'A collaborator deleted “' + name + '” from the shared workspace. Your local copy is still here — delete it too, or keep it on this machine?',
+    choices: [
+      { key: 'delete', label: 'Fully delete', sub: 'Remove it from this machine too. It stays deleted for everyone.', danger: true },
+      { key: 'keep', label: 'Keep locally', sub: 'Keep your copy here. It won’t be re-shared, and this alert clears.' },
+      { key: 'cancel', label: 'Cancel' },
+    ],
+  });
+  if (choice === 'delete') await deleteSession(s.id, 'local');       // already tombstoned on the branch → just trash the local copy
+  else if (choice === 'keep') { try { await claudible.sessionKeep(s.id); } catch (e) {} refreshSessions(); }
+}
+// Same session edited on both machines (true fork) — informational.
+function openDivergedInfo(s) {
+  modalChoice({
+    title: 'This session diverged',
+    body: '“' + sessTitle(s) + '” was edited on both machines, so your copy and the shared copy differ and can’t auto-merge. Keep working in whichever copy you want; the badge clears once they line up again.',
+    choices: [{ key: 'ok', label: 'Got it' }],
+  });
+}
 async function refreshSessions() {
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
@@ -1770,6 +1833,11 @@ function renderWsChips() {
       const tag = document.createElement('span'); tag.textContent = 'default';
       tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-left:4px';
       chip.appendChild(tag);
+    } else if (w.kind === 'repo' && w.needsClone) {                    // invited but not cloned yet → click to choose where it saves
+      const tag = document.createElement('span'); tag.textContent = 'invited';
+      tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ok,#5fb487);margin-left:4px';
+      chip.appendChild(tag);
+      chip.title = (w.owner ? w.owner + '/' + (w.slug || w.label) : w.label) + ' — invited shared workspace · click to choose where to save it';
     }
     // Right edge: a passive status dot (at-a-glance share/sync state) + a single ▾ that opens the options
     // menu. All actions (share, invite, sync, rename, delete) now live in that menu so the chip stays clean
@@ -1863,8 +1931,28 @@ function onWsPointerUp() {
     workspaces.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));   // keep the local array in sync with the DOM order
     claudible.workspaceReorder(order).catch(() => {});
   } else {
-    switchWorkspace(d.id);                                                  // plain click → switch workspace
+    const w = workspaces.find((x) => x.id === d.id);
+    if (w && w.kind === 'repo' && w.needsClone) openAcceptInviteModal(w);   // invited workspace → choose where to save it, then clone
+    else switchWorkspace(d.id);                                             // plain click → switch workspace
   }
+}
+// Accept an invited GitHub workspace: choose where it clones (default vs a folder you pick), then open it.
+async function openAcceptInviteModal(w) {
+  const slug = w.slug || w.label || '';
+  const choice = await modalChoice({
+    title: 'Add shared workspace',
+    body: (w.owner ? w.owner + '/' + slug : slug) + ' — choose where it lives on your machine. This is your local copy of a shared repo; sessions still sync with the team.',
+    choices: [
+      { key: 'default', label: 'Default location', sub: '~/.claudible/repos/' + slug },
+      { key: 'custom', label: 'Choose folder…', sub: 'Pick any folder — it clones into <folder>/' + slug },
+      { key: 'cancel', label: 'Cancel' },
+    ],
+  });
+  if (choice !== 'default' && choice !== 'custom') return;
+  toast('Adding ' + slug + '…');
+  let r = null; try { r = await claudible.workspaceAcceptInvite(w.id, choice === 'default'); } catch (e) {}
+  if (r && r.ok) { await refreshWorkspaces(); switchWorkspace(w.id); }
+  else if (!r || r.error !== 'cancelled') toast('Could not add: ' + ((r && r.error) || 'unknown'));
 }
 async function deleteWorkspace(w) {
   let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}

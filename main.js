@@ -103,7 +103,10 @@ function buildBoot(session, ws, tabId) {
   if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
   const tab = tabRuntimeId(tabId);                                                       // per-tab runtime path key (matches session.sh)
-  const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(registry.effort) ? ` CLAUDIBLE_EFFORT='${registry.effort}'` : '';
+  // 'ultracode' isn't a CLI --effort value; it launches at xhigh and we inject `/effort ultracode` once the
+  // session settles (see spawnPty) to add the orchestration mode. Everything else maps 1:1.
+  const effLevel = registry.effort === 'ultracode' ? 'xhigh' : registry.effort;
+  const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(effLevel) ? ` CLAUDIBLE_EFFORT='${effLevel}'` : '';
   const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + ' ' + wsEnv(ws) + ' ';
   return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
 }
@@ -172,6 +175,23 @@ function createWindow() {
 }
 
 // ---- embedded live Claude TUI (one pty per tab) ----
+// Ultracode effort isn't a CLI flag — after claude has rendered and its output has SETTLED (it's idle waiting for
+// input, past any trust prompt and not mid-stream), type `/effort ultracode` once to switch the session into
+// ultracode mode (xhigh reasoning + workflow orchestration). Best-effort: a missed inject just leaves xhigh.
+function armUltracode(tabId, proc) {
+  const startedAt = Date.now();
+  const t = setInterval(() => {
+    const r = ptys.get(tabId);
+    if (!r || r.proc !== proc || r.ultraDone) { clearInterval(t); return; }
+    // Only inject once claude has ACTUALLY rendered (sawData) and then gone quiet — never on a slow blank start.
+    if (r.sawData && Date.now() - startedAt > 1500 && Date.now() - r.lastData > 1000) {
+      r.ultraDone = true; clearInterval(t);
+      try { proc.write('/effort ultracode\r'); } catch {}
+    }
+  }, 400);
+  if (t.unref) t.unref();
+  const r0 = ptys.get(tabId); if (r0) r0.ultraTimer = t;
+}
 function spawnPty(tabId, cols, rows, ws, session) {
   if (!tabId) return;
   if (ptys.has(tabId) || !nodePty) {
@@ -187,8 +207,9 @@ function spawnPty(tabId, cols, rows, ws, session) {
       // node_modules/node-pty/lib/conpty_console_list_agent.js + the uncaughtException net below.
     });
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
-      runtimeId: tabRuntimeId(tabId), busy: false, busyTimer: null };
+      runtimeId: tabRuntimeId(tabId), busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
+    if (registry.effort === 'ultracode') armUltracode(tabId, proc);   // switch the new session into ultracode mode once it settles
     if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
     if (tabId === fgTabId) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the foreground tab drives the guest mirror
     // Handlers are guarded by `ptys.get(tabId)?.proc === proc` so a soon-to-die OLD pty (during a session
@@ -198,11 +219,13 @@ function spawnPty(tabId, cols, rows, ws, session) {
       win.webContents.send('pty:data', { tabId, data: d });
       if (tabId === fgTabId) share.broadcast(d);           // tee ONLY the foreground stream to guests
       const r = ptys.get(tabId);
+      if (r) { r.lastData = Date.now(); r.sawData = true; }   // feed the ultracode settle-detector (and prove claude rendered)
       if (r && !r.trustDone && /trust this folder/i.test(d)) { r.trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
     });
     proc.onExit(() => {
       if (ptys.get(tabId)?.proc !== proc) return;          // an intentional switch already replaced us
       const r = ptys.get(tabId); const rws = r && r.ws;
+      if (r && r.ultraTimer) { try { clearInterval(r.ultraTimer); } catch {} }
       const msg = '\r\n[claudible] session ended\r\n';
       win.webContents.send('pty:data', { tabId, data: msg });
       if (tabId === fgTabId) { share.broadcast(msg); share.resetRing(); }
@@ -413,6 +436,19 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
         });
     });
 }));
+// "Keep locally" a session a collaborator deleted on GitHub: record the id (.claudible-kept) so the red "!"
+// badge clears. The transcript stays on disk; it's tombstoned on the branch so it can never be re-shared.
+ipcMain.handle('session:keep', (e, arg) => new Promise((resolve) => {
+  const id = (typeof arg === 'string') ? arg : (arg && arg.id);
+  const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/session-keep.sh' '${sid}'`],
+    { encoding: 'utf8' }, (err, stdout) => {
+      if (err) { console.error('[claudible] session-keep:', err.message); return resolve({ ok: false, error: 'exec' }); }
+      let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
+      resolve(r.ok ? r : { ok: false, error: (r.error || 'keep failed') });
+    });
+}));
 
 // ---- shared-session sync (repo workspaces) -----------------------------------------------------
 // Copy this workspace's Claude transcripts to/from collaborators over an ISOLATED orphan branch
@@ -513,11 +549,13 @@ function ensureClone(ws) {
     const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
     const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!slug || !owner) return resolve({ ok: false, error: 'bad workspace' });
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/clone-workspace.sh' '${owner}' '${slug}'`],
+    const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? ws.path : '';   // the invitee's chosen clone dir (else the script's default)
+    const dirArg = wsp ? ` '${wsp}'` : '';
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/clone-workspace.sh' '${owner}' '${slug}'${dirArg}`],
       { encoding: 'utf8', timeout: 300000 }, (err, stdout) => {
         if (err) return resolve({ ok: false, error: 'clone exec' });
         let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-        if (r.ok) { delete ws.needsClone; saveRegistry(); }
+        if (r.ok) { if (wsp && r.path) ws.path = r.path; delete ws.needsClone; saveRegistry(); }
         resolve(r.ok ? { ok: true } : { ok: false, error: r.error || 'clone failed' });
       });
   });
@@ -603,6 +641,30 @@ ipcMain.handle('workspace:open', async (e, id) => {
   pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
   if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
   return { ok: true };
+});
+// Accept an invited repo workspace, letting the user choose WHERE it clones. useDefault → the script's
+// ~/.claudible/repos/<slug>; otherwise a native folder picker, cloning into <chosen>/<slug>. Stamps ws.path so
+// every downstream script (sessions, sync, claude) runs in that dir via CLAUDIBLE_WS_DIR.
+ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
+  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  if (ws.kind !== 'repo') return { ok: false, error: 'not a repo workspace' };
+  const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (!slug) return { ok: false, error: 'bad workspace' };
+  if (payload && payload.useDefault) {
+    if (ws.path) { delete ws.path; saveRegistry(); }                 // default location → drop any prior custom path
+  } else {
+    let res; try { res = await dialog.showOpenDialog(win, { title: 'Choose where to save this shared workspace', properties: ['openDirectory', 'createDirectory'] }); } catch { res = { canceled: true }; }
+    if (res.canceled || !res.filePaths || !res.filePaths.length) return { ok: false, error: 'cancelled' };
+    let wslp = '';
+    try { wslp = cp.execFileSync('wsl.exe', ['wslpath', '-u', res.filePaths[0].replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); } catch {}
+    if (!wslp || /['"]/.test(wslp)) return { ok: false, error: 'could not use that folder' };
+    ws.path = `${wslp.replace(/\/+$/, '')}/${slug}`;                 // clone into <chosen>/<slug> (mirrors create-workspace's <parent>/<slug>)
+    saveRegistry();
+  }
+  const c = await ensureClone(ws);                                  // honors ws.path; clears needsClone on success
+  if (!c.ok && !(payload && payload.useDefault) && ws.path) { delete ws.path; saveRegistry(); }   // failed custom clone → don't leave a dangling path
+  return c.ok ? { ok: true, path: ws.path || null } : { ok: false, error: c.error || 'clone failed' };
 });
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
 ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
@@ -700,7 +762,7 @@ ipcMain.handle('workspace:reorder', (e, ids) => {
 // Default reasoning effort — persisted in the registry, applied to every new session via buildBoot (CLAUDIBLE_EFFORT).
 ipcMain.handle('effort:get', () => registry.effort || '');
 ipcMain.handle('effort:set', (e, level) => {
-  registry.effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(level) ? level : '';
+  registry.effort = ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'].includes(level) ? level : '';
   saveRegistry();
   return { ok: true, effort: registry.effort };
 });

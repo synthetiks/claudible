@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionList: () => ipcRenderer.invoke('session:list'),
   sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
   sessionDelete: (id, scope) => ipcRenderer.invoke('session:delete', { id, scope }),
+  sessionKeep: (id) => ipcRenderer.invoke('session:keep', { id }),   // "keep locally" a session deleted on GitHub
   exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
   // diff review (what Claude changed in the workspace's git repo)
   diffList: () => ipcRenderer.invoke('diff:list'),
@@ -24,6 +25,7 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),
   workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
+  workspaceAcceptInvite: (id, useDefault) => ipcRenderer.invoke('workspace:acceptInvite', { id, useDefault: !!useDefault }),   // choose clone dir + clone
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   workspaceRename: (id, label) => ipcRenderer.invoke('workspace:rename', { id, label }),
   workspaceDelete: (id) => ipcRenderer.invoke('workspace:delete', id),

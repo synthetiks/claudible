@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Claudible — clone an EXISTING repo workspace you've been invited to, into ~/.claudible/repos/<slug>.
 # Used by discovery (and lazily on first open) so a collaborator's workspace becomes usable locally.
-# Args: $1 = owner (github login), $2 = slug. Both strict [A-Za-z0-9-]. Emits one JSON line.
+# Args: $1 = owner (github login), $2 = slug (both strict [A-Za-z0-9-]); $3 = optional custom absolute WSL dir
+# (already validated by main.js) — when omitted, clone into ~/.claudible/repos/<slug>. Emits one JSON line; on
+# success it echoes the resolved "path" so main can record it (ws.path -> CLAUDIBLE_WS_DIR).
 set -u
 owner="${1:-}"
 slug="${2:-}"
+dir_in="${3:-}"
 case "$owner" in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad owner"}'; exit 0 ;; esac
 case "$slug"  in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad slug"}'; exit 0 ;; esac
+case "$dir_in" in *\'* | *\"*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac   # shell/JSON injection guard
 
-dir="$HOME/.claudible/repos/$slug"
-if [ -d "$dir/.git" ]; then printf '{"ok":true,"already":true,"slug":"%s"}' "$slug"; exit 0; fi   # already cloned
+if [ -n "$dir_in" ]; then dir="$dir_in"; else dir="$HOME/.claudible/repos/$slug"; fi
+if [ -d "$dir/.git" ]; then printf '{"ok":true,"already":true,"slug":"%s","path":"%s"}' "$slug" "$dir"; exit 0; fi   # already cloned
 command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed in WSL"}'; exit 0; }
-mkdir -p "$HOME/.claudible/repos" 2>/dev/null
+mkdir -p "$(dirname "$dir")" 2>/dev/null
 if gh repo clone "$owner/$slug" "$dir" >/dev/null 2>&1; then
-  printf '{"ok":true,"slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' "$slug" "$owner" "$owner" "$slug"
+  printf '{"ok":true,"slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","path":"%s"}' "$slug" "$owner" "$owner" "$slug" "$dir"
 else
   rm -rf "$dir" 2>/dev/null
   printf '{"ok":false,"error":"clone failed (check access to %s/%s)"}' "$owner" "$slug"
