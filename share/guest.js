@@ -361,14 +361,24 @@ function renderVoiceUi(st) {
     });
   }
 }
-var voice = makeVoiceRoom({
-  myId: function () { return myPid; },
-  send: function (to, kind, data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'rtc', to: to, kind: kind, data: data })); },
-  setJoined: function (j) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: j ? 'voice-join' : 'voice-leave' })); },
-  onUi: renderVoiceUi,
-});
-$('voice-btn').addEventListener('click', function () { if (voice.isJoined()) voice.leave(); else voice.join().catch(function () {}); });
-$('voice-mute').addEventListener('click', function () { voice.toggleMute(); });
+// `voice` is referenced by the message handlers, so it must ALWAYS be a valid object — even if the voice
+// feature is unavailable. A no-op stub is the fallback; the whole setup is guarded so a missing/failed
+// voice module can NEVER take down the terminal mirror (which is wired further down, after this).
+var voice = { isJoined: function () { return false; }, join: function () { return Promise.resolve(); },
+  leave: function () {}, toggleMute: function () {}, setMembers: function () {}, handleSignal: function () {} };
+try {
+  if (typeof makeVoiceRoom === 'function') {
+    voice = makeVoiceRoom({
+      myId: function () { return myPid; },
+      send: function (to, kind, data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'rtc', to: to, kind: kind, data: data })); },
+      setJoined: function (j) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: j ? 'voice-join' : 'voice-leave' })); },
+      onUi: renderVoiceUi,
+    });
+    var _vb = $('voice-btn'), _vm = $('voice-mute');
+    if (_vb) _vb.addEventListener('click', function () { if (voice.isJoined()) voice.leave(); else voice.join().catch(function () {}); });
+    if (_vm) _vm.addEventListener('click', function () { voice.toggleMute(); });
+  } else { var _vbar = $('voicebar'); if (_vbar) _vbar.style.display = 'none'; }
+} catch (e) { try { var _vbar2 = $('voicebar'); if (_vbar2) _vbar2.style.display = 'none'; } catch (x) {} }
 
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss' : 'ws';

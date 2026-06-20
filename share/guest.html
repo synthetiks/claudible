@@ -6,7 +6,7 @@
   <!-- Guest viewer for a shared Claudible terminal. Assets are served same-origin by share/server.js;
        the only network it touches is its own host (the static libs + the WebSocket). -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; object-src 'none'; base-uri 'none'" />
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: stun: turn: turns:; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'" />
   <title>Claudible — shared session</title>
   <link rel="stylesheet" href="/xterm.css" />
   <style>

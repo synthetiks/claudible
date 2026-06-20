@@ -870,16 +870,23 @@ function renderHostVoiceUi(st) {
     });
   }
 }
-const hostVoice = makeVoiceRoom({
-  myId: () => 'host',
-  send: (to, kind, data) => { try { claudible.rtcSend(to, kind, data); } catch {} },
-  setJoined: (j) => { try { claudible.voiceJoin(j); } catch {} },
-  onUi: renderHostVoiceUi,
-});
-try { claudible.onShareRtc((p) => hostVoice.handleSignal(p)); } catch {}
-try { claudible.onVoiceMembers((m) => hostVoice.setMembers(m)); } catch {}
-if ($('hv-btn')) $('hv-btn').addEventListener('click', () => { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); });
-if ($('hv-mute')) $('hv-mute').addEventListener('click', () => hostVoice.toggleMute());
+// Guarded so a missing/failed voice module can NEVER break the cockpit (which would also kill screen-share).
+// hostVoice is always a valid object (no-op stub fallback).
+let hostVoice = { isJoined: () => false, join: () => Promise.resolve(), leave: () => {}, toggleMute: () => {}, setMembers: () => {}, handleSignal: () => {} };
+try {
+  if (typeof makeVoiceRoom === 'function') {
+    hostVoice = makeVoiceRoom({
+      myId: () => 'host',
+      send: (to, kind, data) => { try { claudible.rtcSend(to, kind, data); } catch {} },
+      setJoined: (j) => { try { claudible.voiceJoin(j); } catch {} },
+      onUi: renderHostVoiceUi,
+    });
+    try { claudible.onShareRtc((p) => hostVoice.handleSignal(p)); } catch {}
+    try { claudible.onVoiceMembers((m) => hostVoice.setMembers(m)); } catch {}
+    if ($('hv-btn')) $('hv-btn').addEventListener('click', () => { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); });
+    if ($('hv-mute')) $('hv-mute').addEventListener('click', () => hostVoice.toggleMute());
+  } else { const vr = $('voicerow'); if (vr) vr.style.display = 'none'; }
+} catch (e) { try { const vr = $('voicerow'); if (vr) vr.style.display = 'none'; } catch (x) {} }
 
 function showLink(url) {
   shareLink.value = url; shareLink.style.display = 'block'; shareLink.style.opacity = '1';
