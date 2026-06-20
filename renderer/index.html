@@ -398,7 +398,7 @@
     .sess:hover{border-color:rgba(255,255,255,.2)}
     .sess.active{border-color:var(--live);box-shadow:0 0 14px -7px var(--live)}
     .sess.dragging{opacity:.55;border-color:rgba(255,255,255,.32);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
-    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:70px}
+    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
     /* live (unsaved) session rows: a blue dotted accent so they read as "running, not yet saved" */
     .sess.sess-live{border-style:dashed}
@@ -408,42 +408,20 @@
     .sess.busy .sess-livedot{animation:ws-sync-pulse 1s ease-in-out infinite}
     .sess.busy.open-in-tab,.sess.busy.sess-live{border-color:var(--live)}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
-    /* hover trash → inline confirm → soft-delete (recoverable, moves to ~/.claudible/trash) */
-    .sess-del{position:absolute;top:6px;right:6px;width:auto;padding:4px;border:1px solid transparent;border-radius:7px;
-      background:none;color:var(--ink-faint);opacity:0;cursor:pointer;display:flex;box-shadow:none;
+    /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
+       stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
+    .sess-menu-btn{position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;
+      width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
+      color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
       transition:opacity .15s,color .15s,border-color .15s,background .15s}
-    .sess:hover .sess-del{opacity:1}
-    .sess-del:hover{color:var(--live);border-color:rgba(229,86,75,.4);background:rgba(229,86,75,.1)}
-    .sess-del svg{width:13px;height:13px;display:block}
-    /* rename pencil — left of the trash, hover-revealed */
-    .sess-edit{position:absolute;top:6px;right:30px;width:auto;padding:4px;border:1px solid transparent;border-radius:7px;
-      background:none;color:var(--ink-faint);opacity:0;cursor:pointer;display:flex;box-shadow:none;
-      transition:opacity .15s,color .15s,border-color .15s,background .15s}
-    .sess:hover .sess-edit{opacity:1}
-    .sess-edit:hover{color:var(--ink);border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.05)}
-    .sess-edit svg{width:13px;height:13px;display:block}
-    .sess.confirming .sess-edit{display:none}
-    /* export-as-replay — left of the pencil, hover-revealed */
-    .sess-export{position:absolute;top:6px;right:54px;width:auto;padding:4px;border:1px solid transparent;border-radius:7px;
-      background:none;color:var(--ink-faint);opacity:0;cursor:pointer;display:flex;box-shadow:none;
-      transition:opacity .15s,color .15s,border-color .15s,background .15s}
-    .sess:hover .sess-export{opacity:1}
-    .sess-export:hover{color:var(--accent,#6aa6e0);border-color:rgba(106,166,224,.4);background:rgba(106,166,224,.1)}
-    .sess-export svg{width:13px;height:13px;display:block}
-    .sess.confirming .sess-export{display:none}
-    .sess-export:disabled{opacity:.4;cursor:default}
+    .sess-menu-btn svg{width:15px;height:15px;display:block}
+    .sess:hover .sess-menu-btn,.sess.menu-open .sess-menu-btn{opacity:1}   /* hover-revealed; stays lit while its menu is open */
+    .sess-menu-btn:hover,.sess.menu-open .sess-menu-btn{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    .sess.renaming .sess-menu-btn{display:none}   /* nothing floats over the rename input while editing */
     /* inline rename input (replaces the title while editing) */
     .sess-rename{width:100%;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:4px 7px;margin-bottom:3px}
     .sess-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
-    .sess-confirm{position:absolute;inset:0;display:none;align-items:center;gap:6px;padding:0 9px;border-radius:9px;
-      background:linear-gradient(90deg,rgba(14,16,19,.45),var(--panel) 34%)}
-    .sess.confirming .sess-confirm{display:flex}
-    .sess.confirming .sess-del{display:none}
-    .sess-confirm .lbl{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim);margin-right:auto}
-    .sess-confirm button{width:auto;padding:5px 10px;font-size:10px;letter-spacing:.06em;border-radius:7px;box-shadow:none}
-    .sess-yes{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b)}
-    .sess-no{color:var(--ink-dim)}
     /* workspace bar — the two-level top of the sidebar (which library the sessions below belong to) */
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
@@ -919,6 +897,9 @@
 
   <!-- per-workspace options (▾): populated dynamically by openWsMenu() -->
   <div id="ws-menu" class="ctxmenu ws-menu" style="display:none"></div>
+
+  <!-- per-session options (▾): populated dynamically by openSessMenu() (reuses the .ws-menu look) -->
+  <div id="sess-menu" class="ctxmenu ws-menu" style="display:none"></div>
 
   <div class="approve" id="approve">
     <div class="box">

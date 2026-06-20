@@ -1369,6 +1369,7 @@ function mergeSessionOrder(saved, list) {
 const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
 const SHARE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><polyline points="8 7 12 3 16 7"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+const CARET_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';   // ▾ options-menu trigger (shared by workspace chips and session rows)
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
 // Manual session title override (user-set — no auto-titling), stored per id in prefs; falls back to the preview.
 function sessTitle(s) { const t = (loadPrefs().sessionTitles || {})[s.id]; return t || s.preview; }
@@ -1426,45 +1427,17 @@ function renderSessionRow(s) {
   row.appendChild(p); row.appendChild(m);
   const _lp = livePeers.find((x) => x.session === s.id);
   if (_lp) row.appendChild(makeLiveBadge(_lp));                      // a collaborator is live in THIS session → join natively
-  const del = document.createElement('button');
-  del.className = 'sess-del'; del.title = 'Delete session'; del.setAttribute('aria-label', 'Delete session');
-  del.innerHTML = TRASH_SVG;
-  del.addEventListener('click', (e) => { e.stopPropagation(); row.classList.add('confirming'); });
-  const conf = document.createElement('div'); conf.className = 'sess-confirm';
-  const aw = workspaces.find((w) => w.id === activeWsId);
-  const synced = !!(aw && aw.kind === 'repo');                       // a shared/repo session may also live on GitHub
-  const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'Delete?';
-  const yes = document.createElement('button'); yes.className = 'sess-yes'; yes.textContent = synced ? 'Just me' : 'Delete';
-  yes.title = synced ? 'Remove from this machine (may sync back from GitHub)' : 'Move to trash (recoverable)';
-  const no = document.createElement('button'); no.className = 'sess-no'; no.textContent = 'Cancel';
-  yes.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id, 'local'); });
-  no.addEventListener('click', (e) => { e.stopPropagation(); row.classList.remove('confirming'); });
-  conf.appendChild(lbl); conf.appendChild(yes);
-  if (synced) {                                                      // delete from GitHub too, for everyone (won't resurrect)
-    const all = document.createElement('button'); all.className = 'sess-yes'; all.textContent = 'Everywhere';
-    all.title = 'Also delete from GitHub for everyone — can’t be undone';
-    all.style.cssText = 'color:#e5564b;border-color:rgba(229,86,75,.5)';
-    all.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id, 'everywhere'); });
-    conf.appendChild(all);
-  }
-  conf.appendChild(no);
-  const edit = document.createElement('button');
-  edit.className = 'sess-edit'; edit.title = 'Rename session'; edit.setAttribute('aria-label', 'Rename session');
-  edit.innerHTML = PENCIL_SVG;
-  edit.addEventListener('click', (e) => { e.stopPropagation(); startSessEdit(row, p, s); });
-  const exp = document.createElement('button');
-  exp.className = 'sess-export'; exp.title = 'Export as a shareable HTML replay'; exp.setAttribute('aria-label', 'Export session');
-  exp.innerHTML = SHARE_SVG;
-  exp.addEventListener('click', async (e) => {
+  // A single ▾ opens the per-session options menu (Rename / Export / Delete) — mirrors the workspace ▾ menu,
+  // so the row stays a clean title with nothing crowding it and no inline confirm strip to overflow.
+  const mb = document.createElement('button');
+  mb.className = 'sess-menu-btn'; mb.title = 'Session options'; mb.setAttribute('aria-label', 'Session options');
+  mb.innerHTML = CARET_SVG;
+  mb.addEventListener('click', (e) => {
     e.stopPropagation();
-    exp.disabled = true; let r = null;
-    try { r = await claudible.exportSession(s.id); } catch {}
-    exp.disabled = false;
-    if (r && r.saved) toast('Replay saved · ' + r.saved.replace(/^.*[\\/]/, ''));
-    else if (r && r.canceled) { /* user dismissed the save dialog */ }
-    else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
+    const wasOpen = sessMenuFor === ('s:' + s.id); closeSessMenu();
+    if (!wasOpen) openSessMenu(mb, row, savedSessMenuItems(row, p, s), 's:' + s.id);
   });
-  row.appendChild(exp); row.appendChild(edit); row.appendChild(del); row.appendChild(conf);
+  row.appendChild(mb);
   row.addEventListener('pointerdown', (e) => onSessPointerDown(e, row, s));
   row.addEventListener('pointermove', onSessPointerMove);
   row.addEventListener('pointerup', onSessPointerUp);
@@ -1475,6 +1448,7 @@ function renderSessionRow(s) {
 // Inline rename: pencil → editable input in place of the title; Enter/blur saves, Esc cancels. Stored in prefs.
 function startSessEdit(row, p, s) {
   if (row.querySelector('.sess-rename')) return;
+  row.classList.add('renaming');                                      // hide the ▾ so nothing floats over the input
   const inp = document.createElement('input');
   inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = sessTitle(s);
   p.style.display = 'none'; row.insertBefore(inp, p);
@@ -1490,19 +1464,87 @@ function startSessEdit(row, p, s) {
       p.textContent = t || s.preview;
       { const at = AT(); if (at && s.id === activeSession) { at.curSessionLabel = p.textContent; pushTracker(); } }   // mirror the new title to guests
     }
-    try { inp.remove(); } catch {} p.style.display = '';
+    try { inp.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
   inp.addEventListener('pointerdown', (e) => e.stopPropagation());   // don't start a row drag / open
   inp.addEventListener('click', (e) => e.stopPropagation());
 }
+// ---- per-session options (▾) menu: Rename / Export / Delete live here so each row stays a clean title ----
+// Mirrors the workspace ▾ menu (same .ws-menu look) and, like the workspace delete, confirms via the native
+// dialog — so there's no inline confirm strip to overflow the narrow row.
+function doExportSession(s) {
+  claudible.exportSession(s.id).then((r) => {
+    if (r && r.saved) toast('Replay saved · ' + r.saved.replace(/^.*[\\/]/, ''));
+    else if (r && r.canceled) { /* user dismissed the save dialog */ }
+    else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
+  }).catch(() => toast('Export failed'));
+}
+function savedSessMenuItems(row, p, s) {
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  const synced = !!(aw && aw.kind === 'repo');                       // a shared/repo session may also live on GitHub
+  const items = [
+    { icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this session (local label only).', act: () => startSessEdit(row, p, s) },
+    { icon: SHARE_SVG, label: 'Export replay…', hint: 'Save this session as a shareable HTML replay.', act: () => doExportSession(s) },
+    { sep: true },
+  ];
+  if (synced) {                                                      // a synced session can be removed locally or for everyone
+    items.push({ icon: TRASH_SVG, label: 'Delete for me', hint: 'Remove from this machine (may sync back from GitHub).',
+      act: () => { if (confirm('Delete “' + sessTitle(s) + '” from this machine?\nIt may sync back if a collaborator still has it. Moves to ~/.claudible/trash (recoverable).')) deleteSession(s.id, 'local'); } });
+    items.push({ icon: TRASH_SVG, label: 'Delete everywhere', danger: true, hint: 'Also delete from GitHub for everyone — can’t be undone.',
+      act: () => { if (confirm('Delete “' + sessTitle(s) + '” everywhere?\nThis removes it from GitHub for everyone and can’t be undone.')) deleteSession(s.id, 'everywhere'); } });
+  } else {
+    items.push({ icon: TRASH_SVG, label: 'Delete', danger: true, hint: 'Move to trash (recoverable).',
+      act: () => { if (confirm('Delete “' + sessTitle(s) + '”?\nMoves to ~/.claudible/trash (recoverable).')) deleteSession(s.id, 'local'); } });
+  }
+  return items;
+}
+function liveSessMenuItems(row, p, rec) {
+  return [
+    { icon: PENCIL_SVG, label: 'Rename', hint: 'Name this live session (until it’s saved).', act: () => startLiveRename(row, p, rec) },
+    { sep: true },
+    { icon: TRASH_SVG, label: 'Close session', danger: true, hint: 'Close this tab — nothing is saved to delete yet.',
+      act: () => { if (tabs.size <= 1) { toast('This is your only open session'); return; } if (confirm('Close this live session?\nIt isn’t saved yet, so closing discards it.')) closeTab(rec.tabId); } },
+  ];
+}
+let sessMenuFor = null;     // key ('s:'+id saved | 't:'+tabId live) of the row whose ▾ menu is open (null = closed)
+let sessMenuRow = null;     // the row element, so it can be un-highlighted when the menu closes
+function openSessMenu(btn, row, items, key) {
+  const m = $('sess-menu'); if (!m) return;
+  m.innerHTML = '';
+  items.forEach((it) => {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'ws-menu-sep'; m.appendChild(s); return; }
+    const b = document.createElement('button');
+    b.className = 'ctxitem ws-mi' + (it.danger ? ' danger' : '');
+    if (it.hint) b.title = it.hint;                          // short hover description of what this action does
+    b.innerHTML = '<span class="ws-mi-ic">' + it.icon + '</span><span class="ws-mi-lb"></span>';
+    b.querySelector('.ws-mi-lb').textContent = it.label;     // textContent → labels can't inject markup
+    b.addEventListener('click', (e) => { e.stopPropagation(); closeSessMenu(); it.act(); });
+    m.appendChild(b);
+  });
+  // Drop down from the ▾, right-aligned to it; flip above if it would overflow the viewport bottom; clamp to screen.
+  m.style.display = 'block';
+  const r = btn.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.round(Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8))) + 'px';
+  m.style.top = (r.bottom + 5 + mh > window.innerHeight - 8 ? Math.max(8, r.top - 5 - mh) : r.bottom + 5) + 'px';
+  sessMenuFor = key; sessMenuRow = row; row.classList.add('menu-open');
+}
+function closeSessMenu() {
+  const m = $('sess-menu'); if (m) m.style.display = 'none';
+  if (sessMenuRow) { sessMenuRow.classList.remove('menu-open'); sessMenuRow = null; }
+  sessMenuFor = null;
+}
+document.addEventListener('click', (e) => {
+  if (sessMenuFor && !e.target.closest('#sess-menu') && !e.target.closest('.sess-menu-btn')) closeSessMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sessMenuFor) closeSessMenu(); });
 // pointer-drag reorder with a movement threshold: a plain click opens; a drag past 5px reorders the DOM
-// live and persists the new order. A press on the trash / confirm controls never starts a drag or open.
+// live and persists the new order. A press on the ▾ menu or the rename input never starts a drag or open.
 let sdrag = null;
 function onSessPointerDown(e, row, s) {
   if (e.button !== 0) return;
-  if (e.target.closest('.sess-del') || e.target.closest('.sess-confirm') || e.target.closest('.sess-edit') || e.target.closest('.sess-export') || e.target.closest('.sess-rename') || row.classList.contains('confirming')) return;
+  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || row.classList.contains('renaming')) return;
   sdrag = { id: s.id, label: sessTitle(s), row, startY: e.clientY, moved: false, pid: e.pointerId };
   try { row.setPointerCapture(e.pointerId); } catch {}
 }
@@ -1549,6 +1591,7 @@ async function deleteSession(id, scope) {
 }
 async function refreshSessions() {
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
+  closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
   if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
   let list = []; try { list = await claudible.sessionList(); } catch {}
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
@@ -1588,7 +1631,7 @@ async function refreshSessions() {
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
 }
 // A live, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
-// switch to it, pencil to name it, trash to CLOSE it (nothing to delete on disk). Mirrors a saved row's look.
+// switch to it; the ▾ menu renames or CLOSES it (nothing to delete on disk). Mirrors a saved row's look.
 function renderLiveTabRow(rec) {
   const row = document.createElement('div');
   row.className = 'sess sess-live' + (rec.tabId === activeTabId ? ' active' : '') + (rec.busy ? ' busy' : '');
@@ -1597,29 +1640,23 @@ function renderLiveTabRow(rec) {
   const m = document.createElement('div'); m.className = 'sess-meta';
   m.innerHTML = '<span class="sess-livedot"></span>' + (rec.busy ? 'working…' : 'live · unsaved');
   row.appendChild(p); row.appendChild(m);
-  const edit = document.createElement('button');
-  edit.className = 'sess-edit'; edit.title = 'Rename session'; edit.setAttribute('aria-label', 'Rename session');
-  edit.innerHTML = PENCIL_SVG;
-  edit.addEventListener('click', (e) => { e.stopPropagation(); startLiveRename(row, p, rec); });
-  const del = document.createElement('button');
-  del.className = 'sess-del'; del.title = 'Close session'; del.setAttribute('aria-label', 'Close session');
-  del.innerHTML = TRASH_SVG;
-  del.addEventListener('click', (e) => { e.stopPropagation(); if (tabs.size <= 1) { toast('This is your only open session'); return; } row.classList.add('confirming'); });
-  const conf = document.createElement('div'); conf.className = 'sess-confirm';
-  const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'Close?';
-  const yes = document.createElement('button'); yes.className = 'sess-yes'; yes.textContent = 'Close';
-  const no = document.createElement('button'); no.className = 'sess-no'; no.textContent = 'Cancel';
-  yes.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
-  no.addEventListener('click', (e) => { e.stopPropagation(); row.classList.remove('confirming'); });
-  conf.appendChild(lbl); conf.appendChild(yes); conf.appendChild(no);
-  row.appendChild(edit); row.appendChild(del); row.appendChild(conf);
-  row.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('.sess-rename') || row.classList.contains('confirming')) return; setActiveTab(rec.tabId); });
+  const mb = document.createElement('button');
+  mb.className = 'sess-menu-btn'; mb.title = 'Session options'; mb.setAttribute('aria-label', 'Session options');
+  mb.innerHTML = CARET_SVG;
+  mb.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const wasOpen = sessMenuFor === ('t:' + rec.tabId); closeSessMenu();
+    if (!wasOpen) openSessMenu(mb, row, liveSessMenuItems(row, p, rec), 't:' + rec.tabId);
+  });
+  row.appendChild(mb);
+  row.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('.sess-rename') || row.classList.contains('renaming')) return; setActiveTab(rec.tabId); });
   row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setActiveTab(rec.tabId); } });
   return row;
 }
 // Rename a live (unsaved) session: stored on the tab record's label (mirrors the saved-row rename UX).
 function startLiveRename(row, p, rec) {
   if (row.querySelector('.sess-rename')) return;
+  row.classList.add('renaming');                                      // hide the ▾ so nothing floats over the input
   const inp = document.createElement('input');
   inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = rec.label || '';
   p.style.display = 'none'; row.insertBefore(inp, p);
@@ -1632,7 +1669,7 @@ function startLiveRename(row, p, rec) {
       p.textContent = rec.label || 'New session';
       if (rec.tabId === activeTabId) { rec.curSessionLabel = p.textContent; pushTracker(); }   // mirror to guests
     }
-    try { inp.remove(); } catch {} p.style.display = '';
+    try { inp.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
@@ -1687,7 +1724,6 @@ const EYE_ON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 const PERSON_ADD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>';
 const CLOUD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
-const CARET_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';   // TRASH_SVG already declared above (reused by the menu)
 const wsSyncState = {};   // ws id -> { status:'syncing'|'idle'|'error', synced, diverged } (live, from main)
 let wsMenuFor = null;     // id of the workspace whose ▾ options menu is currently open (null = closed)
 function renderWsChips() {
