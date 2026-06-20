@@ -875,16 +875,16 @@ function renderHostVoiceUi(st) {
 }
 // Guarded so a missing/failed voice module can NEVER break the cockpit (which would also kill screen-share).
 // hostVoice is always a valid object (no-op stub fallback).
-let hostVoice = { isJoined: () => false, join: () => Promise.resolve(), leave: () => {}, toggleMute: () => {}, setMembers: () => {}, handleSignal: () => {} };
+let hostVoice = { isJoined: () => false, join: () => Promise.resolve(), leave: () => {}, toggleMute: () => {}, setMembers: () => {}, pushAudio: () => {} };
 try {
   if (typeof makeVoiceRoom === 'function') {
     hostVoice = makeVoiceRoom({
       myId: () => 'host',
-      send: (to, kind, data) => { try { claudible.rtcSend(to, kind, data); } catch {} },
+      sendAudio: (b64) => { try { claudible.voiceAudio(b64); } catch {} },
       setJoined: (j) => { try { claudible.voiceJoin(j); } catch {} },
       onUi: renderHostVoiceUi,
     });
-    try { claudible.onShareRtc((p) => hostVoice.handleSignal(p)); } catch {}
+    try { claudible.onShareAudio((p) => hostVoice.pushAudio(p.from, p.data)); } catch {}
     try { claudible.onVoiceMembers((m) => hostVoice.setMembers(m)); } catch {}
     if ($('hv-btn')) $('hv-btn').addEventListener('click', () => { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); });
     if ($('hv-mute')) $('hv-mute').addEventListener('click', () => hostVoice.toggleMute());

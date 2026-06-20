@@ -60,7 +60,7 @@ function cleanName(n, fallback) {
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onRtc, onVoiceMembers } = {}) {
+function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onRtc, onVoiceMembers, onAudio } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let linkToken = null, hostName = 'Host';
   let cols = 120, rows = 32;
@@ -96,6 +96,11 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (t && t.readyState === t.OPEN) { try { t.send(JSON.stringify({ type: 'rtc', from: 'host', kind, data })); } catch {} }
   }
   function hostVoiceSet(on) { hostVoice = !!on; broadcastVoice(); }
+  function audioFromHost(data) {                                  // host's audio frame → every voice guest
+    if (typeof data !== 'string') return;
+    const aout = JSON.stringify({ type: 'audio', from: 'host', data: data });
+    for (const c of clients) { if (voiceGuests.has(c._pid) && c.readyState === c.OPEN) { try { c.send(aout); } catch {} } }
+  }
 
   const notifyGuests = () => { try { onGuests && onGuests(clients.size); } catch {} };
   // presence roster — name -> 'active'(green) | 'idle'(amber/AFK) | 'gone'(red, closed tab). 'gone' is kept so the
@@ -187,10 +192,19 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       // ---- voice room (allowed even for VIEW-ONLY guests — talking is not terminal control) ----
       if (msg.type === 'voice-join') { voiceGuests.add(ws._pid); broadcastVoice(); return; }
       if (msg.type === 'voice-leave') { if (voiceGuests.delete(ws._pid)) broadcastVoice(); return; }
-      if (msg.type === 'rtc' && typeof msg.to === 'string') {           // relay one WebRTC signal, stamped with the sender's id
+      if (msg.type === 'rtc' && typeof msg.to === 'string') {           // (legacy) relay one WebRTC signal
         const payload = { type: 'rtc', from: ws._pid, kind: msg.kind, data: msg.data };
         if (msg.to === 'host') { try { onRtc && onRtc(payload); } catch {} }
         else { const t = byPid.get(msg.to); if (t && t.readyState === t.OPEN) { try { t.send(JSON.stringify(payload)); } catch {} } }
+        return;
+      }
+      // Server-relayed voice: fan a guest's audio frame out to the OTHER voice members + the host. Only voice
+      // members may send/receive; nothing reaches a non-participant or a paused/non-shared workspace.
+      if (msg.type === 'audio' && typeof msg.data === 'string') {
+        if (!voiceGuests.has(ws._pid)) return;
+        const aout = JSON.stringify({ type: 'audio', from: ws._pid, data: msg.data });
+        for (const c of clients) { if (c !== ws && voiceGuests.has(c._pid) && c.readyState === c.OPEN) { try { c.send(aout); } catch {} } }
+        if (hostVoice) { try { onAudio && onAudio({ from: ws._pid, data: msg.data }); } catch {} }
         return;
       }
     });
@@ -308,7 +322,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, decideApproval, status, rtcFromHost, hostVoiceSet };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, decideApproval, status, rtcFromHost, hostVoiceSet, audioFromHost };
 }
 
 module.exports = { createShareServer };

@@ -1,36 +1,47 @@
-// Claudible — voice-room core (WebRTC audio mesh). Loaded by BOTH the guest viewer and the host cockpit so
-// the logic stays identical. Transport-agnostic: the caller supplies send()/setJoined() and feeds in the
-// member list + incoming signals. Audio is peer-to-peer; only offer/answer/ICE pass through the relay.
-//   window.makeVoiceRoom({ myId(), send(to,kind,data), setJoined(bool), onUi(state) })
+// Claudible — voice room over the share WebSocket (SERVER-RELAYED audio). Replaces peer-to-peer WebRTC, which
+// can't connect two home users behind NAT without a TURN server (and the free public TURN we tried is dead).
+// Mic is captured as 16 kHz mono PCM, base64'd, and relayed by the share server to the other voice members —
+// the SAME proven path the terminal mirror uses, so it works regardless of NAT / STUN / TURN / CSP.
+//   window.makeVoiceRoom({ myId(), sendAudio(b64), setJoined(bool), onUi(state) })
+//   returns { join, leave, toggleMute, isJoined, setMembers, pushAudio(fromId, b64) }
 (function () {
   'use strict';
-  // STUN handles most home networks; the TURN relay is the fallback that makes audio cross strict/symmetric
-  // NATs (where two peers can't connect directly). The TURN entries are Metered's free public OpenRelay —
-  // best-effort; for production, run your own TURN. CSP connect-src already allows stun:/turn:/turns:.
-  var ICE = { iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  ] };
+  var SR = 16000;       // transmit sample rate (plenty for voice)
+  var FRAME = 2048;     // ScriptProcessor block size (at the input device rate)
+  var GATE = 0.012;     // RMS threshold for the "speaking" dots
+
+  function b64FromInt16(i16) {
+    var bytes = new Uint8Array(i16.buffer, i16.byteOffset, i16.byteLength), s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  function int16FromB64(b64) {
+    var s = atob(b64), n = s.length, bytes = new Uint8Array(n);
+    for (var i = 0; i < n; i++) bytes[i] = s.charCodeAt(i);
+    return new Int16Array(bytes.buffer, 0, n >> 1);
+  }
+  function downsample(buf, inRate, outRate) {
+    if (outRate >= inRate) return buf;
+    var ratio = inRate / outRate, len = Math.round(buf.length / ratio), out = new Float32Array(len);
+    for (var i = 0; i < len; i++) out[i] = buf[Math.min(Math.round(i * ratio), buf.length - 1)];
+    return out;
+  }
+  function floatToInt16(f32) {
+    var i16 = new Int16Array(f32.length);
+    for (var i = 0; i < f32.length; i++) { var s = Math.max(-1, Math.min(1, f32[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+    return i16;
+  }
+  function int16ToFloat(i16) {
+    var f32 = new Float32Array(i16.length);
+    for (var i = 0; i < i16.length; i++) f32[i] = i16[i] / 0x8000;
+    return f32;
+  }
+  function rms(f32) { var s = 0; for (var i = 0; i < f32.length; i++) s += f32[i] * f32[i]; return Math.sqrt(s / (f32.length || 1)); }
 
   window.makeVoiceRoom = function (opts) {
-    var joined = false, muted = false, localStream = null, ac = null, sinkEl = null;
-    var peers = {};      // peerId -> { pc, audioEl }
-    var members = [];    // [{id,name}]
-    var speaking = {};   // id ('self'|peerId) -> bool
-
-    // Hidden, off-screen container for the remote <audio> sinks — positioned (so it's OUT of any CSS grid),
-    // but NOT display:none (which can suspend playback in some engines).
-    function sink() {
-      if (!sinkEl) {
-        sinkEl = document.createElement('div'); sinkEl.setAttribute('aria-hidden', 'true');
-        sinkEl.style.cssText = 'position:fixed;left:-2px;bottom:-2px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
-        (document.body || document.documentElement).appendChild(sinkEl);
-      }
-      return sinkEl;
-    }
+    var joined = false, muted = false, members = [], speaking = {}, quiet = {};
+    var inCtx = null, outCtx = null, micSrc = null, proc = null, zero = null, localStream = null;
+    var playHead = {};   // sender id -> next scheduled output time
 
     function ui() {
       try {
@@ -38,121 +49,83 @@
         opts.onUi && opts.onUi({
           joined: joined, muted: muted,
           members: members.map(function (m) {
-            var isSelf = m.id === me, rec = peers[m.id];
-            // per-peer WebRTC state, surfaced to the chips: new/connecting/connected/failed/disconnected
-            var conn = isSelf ? 'self' : (rec ? (rec.pc.connectionState || rec.pc.iceConnectionState || 'connecting') : (joined ? 'connecting' : 'idle'));
-            return { id: m.id, name: m.name, self: isSelf, speaking: !!speaking[isSelf ? 'self' : m.id], conn: conn };
+            var isSelf = m.id === me;
+            // the WS IS the connection, so anyone in the room is "connected"
+            return { id: m.id, name: m.name, self: isSelf, speaking: !!speaking[isSelf ? 'self' : m.id], conn: isSelf ? 'self' : 'connected' };
           }),
         });
       } catch (e) {}
     }
-
-    // crude voice-activity detection per stream (drives the "speaking" dots)
-    function monitor(key, stream) {
+    function setSpeaking(key, on) {
+      if (on) { clearTimeout(quiet[key]); quiet[key] = setTimeout(function () { if (speaking[key]) { speaking[key] = false; ui(); } }, 320); }
+      if (on !== !!speaking[key]) { speaking[key] = on; ui(); }
+    }
+    function AC() { return window.AudioContext || window.webkitAudioContext; }
+    function ensureOut() {
+      if (!outCtx) outCtx = new (AC())();
+      if (outCtx.state === 'suspended') { try { outCtx.resume(); } catch (e) {} }
+      return outCtx;
+    }
+    function startCapture(stream) {
       try {
-        if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
-        var src = ac.createMediaStreamSource(stream), an = ac.createAnalyser();
-        an.fftSize = 512; src.connect(an);
-        var buf = new Uint8Array(an.frequencyBinCount);
-        (function tick() {
-          if (key === 'self' ? !localStream : !peers[key]) return;   // stream gone → stop
-          an.getByteFrequencyData(buf);
-          var sum = 0; for (var i = 0; i < buf.length; i++) sum += buf[i];
-          var sp = (sum / buf.length) > 12 && !(key === 'self' && muted);
-          if (sp !== speaking[key]) { speaking[key] = sp; ui(); }
-          setTimeout(tick, 140);
-        })();
+        inCtx = new (AC())();
+        if (inCtx.state === 'suspended') { try { inCtx.resume(); } catch (e) {} }
+        micSrc = inCtx.createMediaStreamSource(stream);
+        proc = inCtx.createScriptProcessor(FRAME, 1, 1);
+        proc.onaudioprocess = function (e) {
+          if (!joined) return;
+          var input = e.inputBuffer.getChannelData(0);
+          setSpeaking('self', rms(input) > GATE && !muted);
+          if (muted) return;
+          opts.sendAudio(b64FromInt16(floatToInt16(downsample(input, inCtx.sampleRate, SR))));
+        };
+        // route through a SILENT gain so the ScriptProcessor actually runs but the mic isn't echoed locally
+        zero = inCtx.createGain(); zero.gain.value = 0;
+        micSrc.connect(proc); proc.connect(zero); zero.connect(inCtx.destination);
       } catch (e) {}
-    }
-
-    // *** THE BUG ***: RTCSessionDescription / RTCIceCandidate are platform objects that Electron IPC's
-    // structured clone CANNOT serialize, so the HOST's offer/answer/ICE were silently dropped (DataCloneError,
-    // swallowed) and the connection FAILED. Convert to PLAIN objects (toJSON) before sending so they survive
-    // BOTH transports: IPC (host) and JSON.stringify (guest).
-    function ser(o) { return (o && typeof o.toJSON === 'function') ? o.toJSON() : o; }
-    function flushIce(rec) { if (!rec) return; var q = rec.pendingIce; rec.pendingIce = []; q.forEach(function (c) { try { rec.pc.addIceCandidate(c).catch(function () {}); } catch (e) {} }); }
-
-    function makePeer(peerId) {
-      if (peers[peerId]) return peers[peerId];
-      var pc = new RTCPeerConnection(ICE);
-      var audioEl = document.createElement('audio'); audioEl.autoplay = true; audioEl.dataset.peer = peerId;
-      audioEl.volume = 1;
-      sink().appendChild(audioEl);   // off-screen SINK (out of layout) — NOT display:none, which can block audio playback
-      peers[peerId] = { pc: pc, audioEl: audioEl, pendingIce: [], remoteSet: false };
-      if (localStream) localStream.getTracks().forEach(function (t) { pc.addTrack(t, localStream); });
-      pc.onicecandidate = function (e) { if (e.candidate) opts.send(peerId, 'ice', ser(e.candidate)); };
-      pc.ontrack = function (e) {
-        audioEl.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
-        try { var pr = audioEl.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (x) {}   // autoplay can be blocked → call play() explicitly
-        monitor(peerId, audioEl.srcObject);
-      };
-      pc.onconnectionstatechange = function () { ui(); if (pc.connectionState === 'closed') removePeer(peerId); };   // surface state to the chips
-      pc.oniceconnectionstatechange = function () { ui(); };
-      return peers[peerId];
-    }
-    function removePeer(peerId) {
-      var rec = peers[peerId]; if (!rec) return;
-      try { rec.pc.close(); } catch (e) {}
-      try { rec.audioEl.srcObject = null; rec.audioEl.remove(); } catch (e) {}
-      delete peers[peerId]; delete speaking[peerId]; ui();
-    }
-    function offerTo(peerId) {
-      var rec = makePeer(peerId);
-      rec.pc.createOffer().then(function (o) { return rec.pc.setLocalDescription(o); })
-        .then(function () { opts.send(peerId, 'offer', ser(rec.pc.localDescription)); })
-        .catch(function () {});
-    }
-    // Reconcile peer connections against the current room membership. Deterministic initiator (the smaller
-    // id "calls") avoids glare; the other side creates its peer when the offer arrives.
-    function reconcile() {
-      if (!joined) return;
-      var me = opts.myId(), present = {};
-      members.forEach(function (m) {
-        if (m.id === me) return;
-        present[m.id] = true;
-        if (!peers[m.id] && me < m.id) offerTo(m.id);
-      });
-      Object.keys(peers).forEach(function (id) { if (!present[id]) removePeer(id); });
     }
 
     return {
       isJoined: function () { return joined; },
       join: function () {
         if (joined) return Promise.resolve();
-        return navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function (s) {
+        return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }).then(function (s) {
           localStream = s; joined = true; muted = false;
-          opts.setJoined(true); monitor('self', s); reconcile(); ui();
+          opts.setJoined(true); ensureOut(); startCapture(s); ui();
         }).catch(function (e) { try { opts.onUi && opts.onUi({ joined: false, muted: false, members: [], error: 'mic-denied' }); } catch (x) {} throw e; });
       },
       leave: function () {
         if (!joined) return;
         joined = false; opts.setJoined(false);
-        Object.keys(peers).forEach(removePeer);
+        try { if (proc) { proc.onaudioprocess = null; proc.disconnect(); } } catch (e) {}
+        try { if (zero) zero.disconnect(); } catch (e) {}
+        try { if (micSrc) micSrc.disconnect(); } catch (e) {}
+        try { if (inCtx) inCtx.close(); } catch (e) {}
         if (localStream) { localStream.getTracks().forEach(function (t) { t.stop(); }); localStream = null; }
-        speaking = {}; ui();
+        inCtx = micSrc = proc = zero = null; speaking = {}; playHead = {}; ui();
       },
       toggleMute: function () {
-        if (!localStream) return; muted = !muted;
-        localStream.getAudioTracks().forEach(function (t) { t.enabled = !muted; });
-        if (muted) speaking['self'] = false;
+        muted = !muted;
+        if (localStream) localStream.getAudioTracks().forEach(function (t) { t.enabled = !muted; });
+        if (muted) setSpeaking('self', false);
         ui();
       },
-      setMembers: function (list) { members = Array.isArray(list) ? list : []; reconcile(); ui(); },
-      handleSignal: function (sig) {
-        if (!joined || !sig || !sig.from) return;     // ignore signals when we're not in the room
-        var rec = makePeer(sig.from);
-        if (sig.kind === 'offer') {
-          rec.pc.setRemoteDescription(sig.data)
-            .then(function () { rec.remoteSet = true; flushIce(rec); return rec.pc.createAnswer(); })
-            .then(function (a) { return rec.pc.setLocalDescription(a); })
-            .then(function () { opts.send(sig.from, 'answer', ser(rec.pc.localDescription)); })
-            .catch(function () {});
-        } else if (sig.kind === 'answer') {
-          rec.pc.setRemoteDescription(sig.data).then(function () { rec.remoteSet = true; flushIce(rec); }).catch(function () {});
-        } else if (sig.kind === 'ice') {
-          if (rec.remoteSet) { try { rec.pc.addIceCandidate(sig.data).catch(function () {}); } catch (e) {} }
-          else rec.pendingIce.push(sig.data);   // ICE before the remote description → buffer, then flush
-        }
+      setMembers: function (list) { members = Array.isArray(list) ? list : []; ui(); },
+      // an audio frame arrived from another voice member → decode + schedule playback (small jitter buffer)
+      pushAudio: function (from, b64) {
+        if (!joined || !b64) return;
+        try {
+          var f32 = int16ToFloat(int16FromB64(b64));
+          setSpeaking(from, rms(f32) > GATE);
+          var ctx = ensureOut();
+          var ab = ctx.createBuffer(1, f32.length, SR); ab.getChannelData(0).set(f32);
+          var src = ctx.createBufferSource(); src.buffer = ab; src.connect(ctx.destination);
+          var now = ctx.currentTime;
+          var start = Math.max(now + 0.05, playHead[from] || 0);
+          if (start > now + 0.6) start = now + 0.05;   // drift guard: if the queue ran away, resync
+          src.start(start);
+          playHead[from] = start + ab.duration;
+        } catch (e) {}
       },
     };
   };

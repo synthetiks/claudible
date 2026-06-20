@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld('claudible', {
   rtcSend: (to, kind, data) => ipcRenderer.send('share:rtc-send', { to, kind, data }),
   onShareRtc: (cb) => ipcRenderer.on('share:rtc', (_e, p) => cb(p)),
   onVoiceMembers: (cb) => ipcRenderer.on('share:voice-members', (_e, m) => cb(m)),
+  voiceAudio: (b64) => ipcRenderer.send('share:audio-send', b64),                 // cockpit mic frame → guests
+  onShareAudio: (cb) => ipcRenderer.on('share:audio', (_e, p) => cb(p)),           // guest voice frame → cockpit
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   saveSession: (text) => ipcRenderer.invoke('save-session', text),

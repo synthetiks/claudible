@@ -69,9 +69,11 @@ const share = createShareServer({
   // here, and the host's outgoing signals + voice membership go back to the cockpit renderer.
   onRtc: (payload) => { try { win && win.webContents.send('share:rtc', payload); } catch {} },
   onVoiceMembers: (members) => { try { win && win.webContents.send('share:voice-members', members); } catch {} },
+  onAudio: (frame) => { try { win && win.webContents.send('share:audio', frame); } catch {} },   // a guest's voice frame → cockpit
 });
 ipcMain.on('share:rtc-send', (e, { to, kind, data } = {}) => { try { share.rtcFromHost(to, kind, data); } catch {} });
 ipcMain.on('share:voice', (e, { join } = {}) => { try { share.hostVoiceSet(!!join); } catch {} });
+ipcMain.on('share:audio-send', (e, data) => { try { share.audioFromHost(data); } catch {} });   // cockpit's voice frame → guests
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
 const RT = path.join(__dirname, 'runtime');   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)

@@ -369,12 +369,12 @@ function renderVoiceUi(st) {
 // feature is unavailable. A no-op stub is the fallback; the whole setup is guarded so a missing/failed
 // voice module can NEVER take down the terminal mirror (which is wired further down, after this).
 var voice = { isJoined: function () { return false; }, join: function () { return Promise.resolve(); },
-  leave: function () {}, toggleMute: function () {}, setMembers: function () {}, handleSignal: function () {} };
+  leave: function () {}, toggleMute: function () {}, setMembers: function () {}, pushAudio: function () {} };
 try {
   if (typeof makeVoiceRoom === 'function') {
     voice = makeVoiceRoom({
       myId: function () { return myPid; },
-      send: function (to, kind, data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'rtc', to: to, kind: kind, data: data })); },
+      sendAudio: function (b64) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'audio', data: b64 })); },
       setJoined: function (j) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: j ? 'voice-join' : 'voice-leave' })); },
       onUi: renderVoiceUi,
     });
@@ -445,8 +445,8 @@ function connect() {
         if (browseView === 'transcript' && msg.wsId === browseWsId && msg.sessionId === browseSessionId) renderTranscript(Array.isArray(msg.msgs) ? msg.msgs : []);
       } else if (msg.type === 'voice-members') {
         voice.setMembers(msg.members || []);
-      } else if (msg.type === 'rtc') {
-        voice.handleSignal(msg);
+      } else if (msg.type === 'audio') {
+        voice.pushAudio(msg.from, msg.data);
       }
     } else {
       term.write(new Uint8Array(ev.data));   // raw terminal output
