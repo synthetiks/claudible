@@ -354,9 +354,13 @@ function renderVoiceUi(st) {
   if (box) {
     box.innerHTML = '';
     ((st && st.members) || []).forEach(function (m) {
-      var el = document.createElement('div'); el.className = 'vm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '');
+      var el = document.createElement('div');
+      el.className = 'vm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '') + (m.conn ? ' c-' + m.conn : '');
       var dot = document.createElement('span'); dot.className = 'vmdot';
-      var nm = document.createElement('span'); nm.textContent = (m.id === 'host' ? (hostName || 'host') : m.name) + (m.self ? ' (you)' : '');
+      var label = (m.id === 'host' ? (hostName || 'host') : m.name) + (m.self ? ' (you)' : '');
+      if (!m.self && m.conn && m.conn !== 'connected') label += ' · ' + m.conn;   // surface connecting/failed for diagnosis
+      var nm = document.createElement('span'); nm.textContent = label;
+      el.title = m.self ? 'you' : ('connection: ' + (m.conn || '?'));
       el.appendChild(dot); el.appendChild(nm); box.appendChild(el);
     });
   }

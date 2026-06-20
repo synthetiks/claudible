@@ -16,10 +16,21 @@
   ] };
 
   window.makeVoiceRoom = function (opts) {
-    var joined = false, muted = false, localStream = null, ac = null;
+    var joined = false, muted = false, localStream = null, ac = null, sinkEl = null;
     var peers = {};      // peerId -> { pc, audioEl }
     var members = [];    // [{id,name}]
     var speaking = {};   // id ('self'|peerId) -> bool
+
+    // Hidden, off-screen container for the remote <audio> sinks — positioned (so it's OUT of any CSS grid),
+    // but NOT display:none (which can suspend playback in some engines).
+    function sink() {
+      if (!sinkEl) {
+        sinkEl = document.createElement('div'); sinkEl.setAttribute('aria-hidden', 'true');
+        sinkEl.style.cssText = 'position:fixed;left:-2px;bottom:-2px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
+        (document.body || document.documentElement).appendChild(sinkEl);
+      }
+      return sinkEl;
+    }
 
     function ui() {
       try {
@@ -27,7 +38,10 @@
         opts.onUi && opts.onUi({
           joined: joined, muted: muted,
           members: members.map(function (m) {
-            return { id: m.id, name: m.name, self: m.id === me, speaking: !!speaking[m.id === me ? 'self' : m.id] };
+            var isSelf = m.id === me, rec = peers[m.id];
+            // per-peer WebRTC state, surfaced to the chips: new/connecting/connected/failed/disconnected
+            var conn = isSelf ? 'self' : (rec ? (rec.pc.connectionState || rec.pc.iceConnectionState || 'connecting') : (joined ? 'connecting' : 'idle'));
+            return { id: m.id, name: m.name, self: isSelf, speaking: !!speaking[isSelf ? 'self' : m.id], conn: conn };
           }),
         });
       } catch (e) {}
@@ -55,15 +69,18 @@
       if (peers[peerId]) return peers[peerId];
       var pc = new RTCPeerConnection(ICE);
       var audioEl = document.createElement('audio'); audioEl.autoplay = true; audioEl.dataset.peer = peerId;
-      audioEl.style.display = 'none';   // audio plays fine hidden; never let it participate in page layout (e.g. the guest's CSS grid)
-      (document.body || document.documentElement).appendChild(audioEl);
+      audioEl.volume = 1;
+      sink().appendChild(audioEl);   // off-screen SINK (out of layout) — NOT display:none, which can block audio playback
       peers[peerId] = { pc: pc, audioEl: audioEl };
       if (localStream) localStream.getTracks().forEach(function (t) { pc.addTrack(t, localStream); });
       pc.onicecandidate = function (e) { if (e.candidate) opts.send(peerId, 'ice', e.candidate); };
-      pc.ontrack = function (e) { audioEl.srcObject = e.streams[0]; monitor(peerId, e.streams[0]); };
-      pc.onconnectionstatechange = function () {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') removePeer(peerId);
+      pc.ontrack = function (e) {
+        audioEl.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+        try { var pr = audioEl.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (x) {}   // autoplay can be blocked → call play() explicitly
+        monitor(peerId, audioEl.srcObject);
       };
+      pc.onconnectionstatechange = function () { ui(); if (pc.connectionState === 'closed') removePeer(peerId); };   // surface state to the chips
+      pc.oniceconnectionstatechange = function () { ui(); };
       return peers[peerId];
     }
     function removePeer(peerId) {

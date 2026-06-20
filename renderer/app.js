@@ -863,9 +863,12 @@ function renderHostVoiceUi(st) {
   if (box) {
     box.innerHTML = '';
     ((st && st.members) || []).forEach((m) => {
-      const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '');
+      const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '') + (m.conn ? ' c-' + m.conn : '');
       const d = document.createElement('span'); d.className = 'd';
-      const nm = document.createElement('span'); nm.textContent = m.self ? 'you' : m.name;
+      let label = m.self ? 'you' : m.name;
+      if (!m.self && m.conn && m.conn !== 'connected') label += ' · ' + m.conn;   // surface connecting/failed for diagnosis
+      const nm = document.createElement('span'); nm.textContent = label;
+      el.title = m.self ? 'you' : ('connection: ' + (m.conn || '?'));
       el.appendChild(d); el.appendChild(nm); box.appendChild(el);
     });
   }

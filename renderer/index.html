@@ -558,6 +558,12 @@
     .hvm .d{width:6px;height:6px;border-radius:50%;background:#3a3f47;transition:.12s}
     .hvm.speaking{color:var(--ink);border-color:#5fb487}
     .hvm.speaking .d{background:#5fb487;box-shadow:0 0 7px 0 #5fb487}
+    /* per-peer WebRTC state (diagnostic) */
+    .hvm.c-connecting,.hvm.c-new,.hvm.c-checking{border-color:rgba(224,169,59,.5);color:#e0a93b}
+    .hvm.c-connecting .d,.hvm.c-new .d,.hvm.c-checking .d{background:#e0a93b}
+    .hvm.c-connected .d{background:#5fb487}
+    .hvm.c-failed,.hvm.c-disconnected,.hvm.c-closed{border-color:rgba(229,86,75,.6);color:#e5564b}
+    .hvm.c-failed .d,.hvm.c-disconnected .d,.hvm.c-closed .d{background:#e5564b}
     .share-btn{width:100%}
     /* settings drawer — slimmer, tighter, less clunky */
     .drawer{width:338px}
