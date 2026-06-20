@@ -312,6 +312,46 @@ ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time
 });
 ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, !!(arg && arg.ok)));   // host's verdict
 
+// ---- Live sessions: advertise the session I'm hosting (presence on the shared branch) so a collaborator in
+// the same workspace can JOIN it natively — no link to paste. Join opens the proven guest page in a Claudible
+// window (reuses the whole mirror/chat/voice stack), so it's "through Claudible", not an external browser. ----
+const liveWindows = new Set();
+function runPresence(args, cb) {
+  if (!APPDIR_WSL) return cb && cb(null);
+  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/sessions-sync.sh' ${args}`],
+    { encoding: 'utf8', timeout: 45000 }, (err, stdout) => {
+      if (err) return cb && cb(null);
+      let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
+      cb && cb(r);
+    });
+}
+ipcMain.handle('live:advertise', (e, sessionId) => new Promise((resolve) => {
+  const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
+  const st = share.status();
+  if (!sid || !st.running || !shareBaseUrl || !st.token) return resolve({ ok: false, error: 'not live' });
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}'`, (r) => resolve(r || { ok: false }));
+}));
+ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
+ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
+ipcMain.handle('live:join', (e, peer) => {
+  try {
+    const url = String((peer && peer.url) || '');
+    const tok = String((peer && peer.token) || '').replace(/[^A-Za-z0-9._~-]/g, '');
+    const okUrl = /^https:\/\/[A-Za-z0-9.:/_-]+$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
+    if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
+    const who = String((peer && peer.login) || '').replace(/[^A-Za-z0-9 _.-]/g, '');
+    const w = new BrowserWindow({
+      width: 1200, height: 800, backgroundColor: '#070809',
+      title: 'Claudible — live session' + (who ? ' · ' + who : ''),
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    });
+    try { w.removeMenu(); } catch {}
+    w.loadURL(`${url}/?t=${tok}`);
+    liveWindows.add(w); w.on('closed', () => liveWindows.delete(w));
+    return { ok: true };
+  } catch (err) { return { ok: false, error: String(err.message || err) }; }
+});
+
 // ---- sessions (list / switch) ----
 function listSessions() {
   return new Promise((resolve) => {

@@ -23,7 +23,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|presence-set|presence-clear|presence-list) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -270,6 +270,48 @@ case "$op" in
     done
     [ "$pushed" = 1 ] || fail "push failed (no access, or network)"
     emit "{\"ok\":true,\"op\":\"delete\",\"id\":\"$did\"}"
+    ;;
+  presence-set)
+    # Advertise "I'm live in session $2, joinable at $3 with token $4" so a collaborator in this workspace can
+    # join natively — no link to paste. One small file per author under live/. Ignored by the session import.
+    ensure_worktree || fail "could not set up the sessions branch"
+    psid="${2:-}"; purl="${3:-}"; ptok="${4:-}"
+    case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$purl" in https://*|http://127.0.0.1:*|http://localhost:*) ;; *) fail "bad url" ;; esac
+    case "$purl" in *[!A-Za-z0-9:/._-]*) fail "bad url" ;; esac
+    case "$ptok" in '' | *[!A-Za-z0-9._~-]*) fail "bad token" ;; esac
+    pull_branch || fail "pull failed"
+    mkdir -p "$WT/live" 2>/dev/null
+    printf '{"login":"%s","session":"%s","url":"%s","token":"%s","ts":%s}\n' "$author" "$psid" "$purl" "$ptok" "$(date +%s)" > "$WT/live/$author.json"
+    gitwt add -A -- "live/$author.json" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence $author" >/dev/null 2>&1
+    for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+    emit "{\"ok\":true,\"op\":\"presence-set\"}"
+    ;;
+  presence-clear)
+    ensure_worktree || fail "could not set up the sessions branch"
+    pull_branch || fail "pull failed"
+    if [ -e "$WT/live/$author.json" ]; then
+      gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
+      gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence clear $author" >/dev/null 2>&1
+      for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+    fi
+    emit "{\"ok\":true,\"op\":\"presence-clear\"}"
+    ;;
+  presence-list)
+    # Read every collaborator's live/*.json straight off origin via fetch + git show — NO worktree merge, so this
+    # frequent (~10s) poll can never fight the background sync's merge on the same worktree. Renderer filters stale ts.
+    ensure_worktree || fail "could not set up the sessions branch"
+    git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+    out=""
+    for path in $(git -C "$WT" ls-tree -r --name-only "origin/$BR" -- live/ 2>/dev/null); do
+      case "$path" in live/*.json) ;; *) continue ;; esac
+      [ "$path" = "live/$author.json" ] && continue                  # skip my own advertisement
+      line="$(git -C "$WT" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r')"
+      case "$line" in '{'*'}') ;; *) continue ;; esac                # only well-formed single-object lines
+      [ -n "$out" ] && out="$out,$line" || out="$line"
+    done
+    emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[$out]}"
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

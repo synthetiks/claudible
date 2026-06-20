@@ -75,6 +75,11 @@ contextBridge.exposeInMainWorld('claudible', {
   onVoiceMembers: (cb) => ipcRenderer.on('share:voice-members', (_e, m) => cb(m)),
   voiceAudio: (b64, sr) => ipcRenderer.send('share:audio-send', { data: b64, sr }),   // cockpit mic frame (+ rate) → guests
   onShareAudio: (cb) => ipcRenderer.on('share:audio', (_e, p) => cb(p)),           // guest voice frame → cockpit
+  // live sessions — advertise the session I'm hosting; discover + join a collaborator's live session natively
+  liveAdvertise: (sessionId) => ipcRenderer.invoke('live:advertise', sessionId),
+  liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
+  livePeers: () => ipcRenderer.invoke('live:peers'),
+  liveJoin: (peer) => ipcRenderer.invoke('live:join', peer),
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   saveSession: (text) => ipcRenderer.invoke('save-session', text),

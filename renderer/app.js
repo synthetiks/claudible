@@ -26,6 +26,7 @@ let tabSeq = 0;
 const newTabId = () => 'tab-' + (++tabSeq);
 // Declared here (not in the sessions section) so the tab-strip boot below can reference them safely:
 let activeSession = null;                       // the ACTIVE tab's session id (mirrors AT().session) — drives sidebar row highlight
+let livePeers = [], livePeersSig = '', advertisedSession = null;   // collaborators live in this repo workspace + my own advertised session
 let workspaces = [], activeWsId = 'legacy';     // the sidebar library = the active tab's workspace
 let sidebarReady = false;                        // set true once the sessions/workspace section has initialized (TDZ guard for the boot tab)
 function AT() { return tabs.get(activeTabId) || null; }
@@ -948,6 +949,7 @@ shareBtn.addEventListener('click', async () => {
     shareBtn.disabled = true;
     await claudible.shareStop();
     sharing = false; shareUI(false);
+    updateAdvertise();                              // stop advertising — no longer hosting a live session
     shareLink.style.display = 'none'; shareLink.value = '';
     shareOut.textContent = 'sharing stopped'; shareOut.className = 'out';
     shareBtn.disabled = false;
@@ -973,6 +975,7 @@ async function doStartSharing() {
     return;
   }
   sharing = true; shareUI(true);
+  updateAdvertise();                                // in a repo workspace, the active session is now joinable natively
   showLink(r.url);
   const mode = readOnly ? ' · view-only' : '';
   shareOut.textContent = (r.remote === false)
@@ -1370,6 +1373,49 @@ let sessIndex = {};                                                             
 // Manual session title override (user-set — no auto-titling), stored per id in prefs; falls back to the preview.
 function sessTitle(s) { const t = (loadPrefs().sessionTitles || {})[s.id]; return t || s.preview; }
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
+// ---- Live sessions: advertise the session I'm hosting; discover + join a collaborator's, natively ----
+// Advertise only changes when it actually changes (avoids spamming presence pushes).
+function updateAdvertise() {
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  const want = (sharing && aw && aw.kind === 'repo' && activeSession) ? activeSession : null;
+  if (want === advertisedSession) return;
+  advertisedSession = want;
+  try { want ? claudible.liveAdvertise(want) : claudible.liveUnadvertise(); } catch (e) {}
+}
+// Poll the shared branch for collaborators who are live (only in a repo workspace). Re-render on change.
+async function pollLivePeers() {
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  if (!(aw && aw.kind === 'repo')) { if (livePeers.length) { livePeers = []; livePeersSig = ''; refreshSessions(); } return; }
+  let peers = []; try { peers = await claudible.livePeers(); } catch (e) {}
+  const now = Date.now() / 1000;
+  peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 120));   // drop stale (>2 min)
+  const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts]).sort());
+  if (sig === livePeersSig) return;
+  livePeersSig = sig; livePeers = peers; refreshSessions();
+}
+setInterval(pollLivePeers, 10000);
+function makeLiveBadge(peer) {
+  const b = document.createElement('button'); b.className = 'sess-livebadge';
+  b.textContent = '● Join live' + (peer.login ? ' · ' + peer.login : '');
+  b.title = 'Join ' + (peer.login || 'the host') + '’s live session — opens in Claudible';
+  b.style.cssText = 'margin-left:6px;flex:none;font:inherit;font-size:10px;font-weight:600;color:#fff;background:rgba(95,180,135,.2);border:1px solid var(--ok,#5fb487);border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap';
+  b.addEventListener('click', (e) => { e.stopPropagation(); joinLive(peer); });
+  return b;
+}
+async function joinLive(peer) {
+  try { const r = await claudible.liveJoin(peer); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
+  catch (e) { toast('Could not join'); }
+}
+// a collaborator is live in a session we don't have locally yet → a joinable row of its own
+function renderLivePeerRow(peer) {
+  const row = document.createElement('div'); row.className = 'sess sess-peer-live';
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = 'Live session';
+  const m = document.createElement('div'); m.className = 'sess-meta'; m.textContent = (peer.login || 'a collaborator') + ' is live now';
+  row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer));
+  row.style.cursor = 'pointer';
+  row.addEventListener('click', () => joinLive(peer));
+  return row;
+}
 function renderSessionRow(s) {
   const row = document.createElement('div');
   row.className = 'sess' + (s.id === activeSession ? ' active' : '') + (sessionOpenInTab(s.id) ? ' open-in-tab' : '');
@@ -1378,6 +1424,8 @@ function renderSessionRow(s) {
   const m = document.createElement('div'); m.className = 'sess-meta';
   m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
   row.appendChild(p); row.appendChild(m);
+  const _lp = livePeers.find((x) => x.session === s.id);
+  if (_lp) row.appendChild(makeLiveBadge(_lp));                      // a collaborator is live in THIS session → join natively
   const del = document.createElement('button');
   del.className = 'sess-del'; del.title = 'Delete session'; del.setAttribute('aria-label', 'Delete session');
   del.innerHTML = TRASH_SVG;
@@ -1532,6 +1580,10 @@ async function refreshSessions() {
   sessListEl.innerHTML = '';
   ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
   liveTabs.forEach((rec) => sessListEl.appendChild(renderLiveTabRow(rec)));          // live, not-yet-saved sessions, appended below
+  if (livePeers.length) {                                                            // a collaborator is live in a session we don't have locally yet
+    const _localIds = new Set(ordered.map((s) => s.id));
+    livePeers.forEach((p) => { if (!_localIds.has(p.session)) sessListEl.appendChild(renderLivePeerRow(p)); });
+  }
   const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
 }
@@ -1620,6 +1672,7 @@ async function openSession(id, label) {
   t.label = (id === 'new') ? 'New session' : (label || 'Session');
   t.curSessionLabel = (id === 'new') ? 'New session' : (label || '');      // mirrored to guests
   activeSession = (id === 'new') ? null : id;
+  updateAdvertise();                                  // if I'm sharing in a repo workspace, advertise the now-active session
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
   t.term.reset();                                     // clear this tab's view
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
