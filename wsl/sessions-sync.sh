@@ -23,7 +23,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete|presence-set|presence-clear|presence-list) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|presence-set|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -139,20 +139,34 @@ pull_branch() {
 # A session the user deleted "everywhere" leaves a positive marker on the branch (an ADD, so it propagates
 # even though commit_and_push refuses to propagate plain removals). We never import or re-publish a
 # tombstoned id, and we trash any local copy — so the delete reaches every collaborator on their next pull.
-tombstoned() { [ -e "$WT/sessions/.tombstones/$1" ]; }
-apply_tombstones() {
-  [ -d "$WT/sessions/.tombstones" ] || return 0
-  local t id
-  for t in "$WT"/sessions/.tombstones/*; do
-    [ -e "$t" ] || continue
-    id="$(basename "$t")"
+tombstoned() {   # disk OR HEAD: the resurrection bug IS the worktree tombstone going missing while it lives in HEAD
+  [ -e "$WT/sessions/.tombstones/$1" ] && return 0
+  gitwt cat-file -e "HEAD:sessions/.tombstones/$1" 2>/dev/null
+}
+# Every id ever tombstoned — UNION of the worktree dir AND HEAD. Reading HEAD is load-bearing: a sibling sync
+# sharing this single worktree can race its index/checkout and momentarily drop the tombstone from disk while it
+# is still committed in HEAD; a disk-only scan would then skip exactly the file that must be purged.
+tombstone_ids() {
+  { ls "$WT/sessions/.tombstones" 2>/dev/null
+    gitwt ls-tree --name-only "HEAD:sessions/.tombstones" 2>/dev/null
+  } | sort -u
+}
+# Make tombstones AUTHORITATIVE, not merely honored: STAGE the removal of the deleted transcript from EVERY
+# author dir (git rm stages it, unlike commit_and_push's --ignore-removal, so the deletion self-propagates and
+# self-heals no matter who re-added the file), and trash any local copy so this machine can never re-export it.
+# Idempotent; a no-op when nothing is tombstoned.
+purge_tombstoned() {
+  local id
+  for id in $(tombstone_ids); do
     case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+    gitwt rm -q -f --ignore-unmatch -- "sessions/*/$id.jsonl" >/dev/null 2>&1   # quoted: git does the glob (all author dirs), not the shell
     if [ -e "$PROJ/$id.jsonl" ]; then
       mkdir -p "$HOME/.claudible/trash" 2>/dev/null
       mv -f "$PROJ/$id.jsonl" "$HOME/.claudible/trash/$id.$(date +%Y%m%d-%H%M%S).deleted.jsonl" 2>/dev/null
     fi
   done
 }
+apply_tombstones() { purge_tombstoned; }   # import_sessions calls this name — keep the shim
 import_sessions() {
   mkdir -p "$PROJ" 2>/dev/null
   apply_tombstones                                                  # honor collaborators' "delete everywhere"
@@ -206,7 +220,8 @@ export_sessions() {
 
 # Commit staged session changes and push, retrying once through a fetch+merge on a non-ff rejection.
 commit_and_push() {
-  gitwt add --ignore-removal -- . >/dev/null 2>&1   # never propagate deletions (a partial checkout must not delete others' sessions)
+  purge_tombstoned                                  # STAGE removal of any tombstoned file FIRST (authoritative deletion)
+  gitwt add --ignore-removal -- . >/dev/null 2>&1   # never propagate INCIDENTAL deletions (a partial checkout must not delete others' sessions)
   if ! gitwt diff --cached --quiet >/dev/null 2>&1; then
     gitwt commit -m "claudible: sync sessions ($author)" >/dev/null 2>&1
   fi
@@ -215,6 +230,9 @@ commit_and_push() {
     gitwt push origin "$BR" >/dev/null 2>&1 && return 0
     git -C "$WT" rev-parse "@{upstream}" >/dev/null 2>&1 || gitwt branch --set-upstream-to="origin/$BR" "$BR" >/dev/null 2>&1
     pull_branch || return 1                                          # integrate the new remote tip, then retry
+    purge_tombstoned                                                 # the merge may have re-introduced a raced re-add — purge + re-stage before retrying
+    gitwt add --ignore-removal -- . >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: sync sessions ($author)" >/dev/null 2>&1
   done
   return 1
 }
@@ -312,6 +330,70 @@ case "$op" in
       [ -n "$out" ] && out="$out,$line" || out="$line"
     done
     emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[$out]}"
+    ;;
+  title-set)
+    # Share a session's display NAME across the workspace: merge {id:{title,ts}} into my OWN meta/<author>.json
+    # (one file per author => disjoint paths => conflict-free, exactly like sessions/<author>/ and live/). The name
+    # arrives base64 in $3 so arbitrary text — quotes, spaces, unicode — can never break the shell. Empty => clear.
+    ensure_worktree || fail "could not set up the sessions branch"
+    tid="${2:-}"; tb64="${3:-}"
+    case "$tid" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$tb64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
+    pull_branch || fail "pull failed"
+    mkdir -p "$WT/meta" 2>/dev/null
+    CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" python3 - <<'PY' || fail "title write failed"
+import json, os, time, base64
+f = os.environ['CL_FILE']; i = os.environ['CL_ID']
+try:
+    n = base64.b64decode(os.environ.get('CL_B64', '')).decode('utf-8', 'replace')
+except Exception:
+    n = ''
+n = ''.join(c for c in n if ord(c) >= 32)[:200].strip()   # strip control chars/newlines, cap length
+try:
+    d = json.load(open(f))
+    if not isinstance(d, dict): d = {}
+except Exception:
+    d = {}
+d[i] = {"title": n, "ts": int(time.time())}
+tmp = f + '.tmp'
+json.dump(d, open(tmp, 'w'), ensure_ascii=False)
+os.replace(tmp, f)
+PY
+    gitwt add -- "meta/$author.json" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: title $author" >/dev/null 2>&1
+    for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+    emit "{\"ok\":true,\"op\":\"title-set\"}"
+    ;;
+  title-list)
+    # Resolve every id to its newest title across all authors (last-writer-wins by ts). Read straight off origin
+    # via fetch + show — NO worktree merge — like presence-list, so this poll never fights the background sync.
+    ensure_worktree || fail "could not set up the sessions branch"
+    git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+    CL_WT="$WT" CL_BR="$BR" python3 - <<'PY' || fail "title read failed"
+import json, os, subprocess
+wt = os.environ['CL_WT']; br = os.environ['CL_BR']
+def git(*a):
+    return subprocess.run(['git', '-C', wt, *a], capture_output=True, text=True).stdout
+paths = [p for p in git('ls-tree', '-r', '--name-only', 'origin/' + br, '--', 'meta/').split('\n')
+         if p.endswith('.json')]
+best = {}   # id -> (ts, title)
+for p in paths:
+    try:
+        d = json.loads(git('show', 'origin/%s:%s' % (br, p)) or '{}')
+    except Exception:
+        continue
+    if not isinstance(d, dict):
+        continue
+    for i, v in d.items():
+        if not isinstance(v, dict):
+            continue
+        ts = v.get('ts', 0); t = v.get('title', '')
+        if not isinstance(ts, (int, float)) or not isinstance(t, str):
+            continue
+        if i not in best or ts > best[i][0]:
+            best[i] = (ts, t)
+print(json.dumps({"ok": True, "op": "title-list", "titles": {i: t for i, (ts, t) in best.items()}}))
+PY
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

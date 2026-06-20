@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('claudible', {
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
   livePeers: () => ipcRenderer.invoke('live:peers'),
   liveJoin: (peer) => ipcRenderer.invoke('live:join', peer),
+  // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
+  titleSet: (id, name) => ipcRenderer.invoke('title:set', { id, name }),
+  titleList: () => ipcRenderer.invoke('title:list'),
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   saveSession: (text) => ipcRenderer.invoke('save-session', text),

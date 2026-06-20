@@ -27,6 +27,7 @@ const newTabId = () => 'tab-' + (++tabSeq);
 // Declared here (not in the sessions section) so the tab-strip boot below can reference them safely:
 let activeSession = null;                       // the ACTIVE tab's session id (mirrors AT().session) — drives sidebar row highlight
 let livePeers = [], livePeersSig = '', advertisedSession = null;   // collaborators live in this repo workspace + my own advertised session
+let remoteTitles = {}, titlesSig = '', lastTitlePoll = 0;   // session names shared across the workspace (id -> title), polled from the branch
 let workspaces = [], activeWsId = 'legacy';     // the sidebar library = the active tab's workspace
 let sidebarReady = false;                        // set true once the sessions/workspace section has initialized (TDZ guard for the boot tab)
 function AT() { return tabs.get(activeTabId) || null; }
@@ -1344,8 +1345,14 @@ const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const SHARE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><polyline points="8 7 12 3 16 7"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 const CARET_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';   // ▾ options-menu trigger (shared by workspace chips and session rows)
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
-// Manual session title override (user-set — no auto-titling), stored per id in prefs; falls back to the preview.
-function sessTitle(s) { const t = (loadPrefs().sessionTitles || {})[s.id]; return t || s.preview; }
+// Session title: prefer the workspace-shared name (so everyone in a repo workspace sees the SAME title), then a
+// local-only override (legacy/local workspaces, or before the first poll), then the transcript-derived preview.
+function sessTitle(s) {
+  const shared = remoteTitles[s.id];
+  if (shared) return shared;
+  const t = (loadPrefs().sessionTitles || {})[s.id];
+  return t || s.preview;
+}
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
 // ---- Live sessions: advertise the session I'm hosting; discover + join a collaborator's, natively ----
 // Advertise only changes when it actually changes (avoids spamming presence pushes).
@@ -1391,6 +1398,21 @@ async function pollLivePeers() {
   livePeersSig = sig; livePeers = peers; refreshSessions();
 }
 setInterval(pollLivePeers, 10000);
+// Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
+// can't spam branch reads; a forced call (after my own rename's push) bypasses the throttle. Re-render on change.
+async function pollTitles(force) {
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  if (!(aw && aw.kind === 'repo')) { remoteTitles = {}; titlesSig = ''; return; }
+  const now = Date.now();
+  if (!force && now - lastTitlePoll < 15000) return;
+  lastTitlePoll = now;
+  let m = {}; try { m = await claudible.titleList(); } catch (e) {}
+  if (!m || typeof m !== 'object') m = {};
+  const sig = JSON.stringify(Object.entries(m).sort());
+  if (sig === titlesSig) return;
+  titlesSig = sig; remoteTitles = m; refreshSessions();
+}
+setInterval(pollTitles, 20000);
 function makeLiveBadge(peer) {
   const b = document.createElement('button'); b.className = 'sess-livebadge';
   b.textContent = '● Join live' + (peer.login ? ' · ' + peer.login : '');
@@ -1457,7 +1479,15 @@ function startSessEdit(row, p, s) {
       const titles = loadPrefs().sessionTitles || {};
       if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
       savePrefs({ sessionTitles: titles });
-      p.textContent = t || s.preview;
+      // In a repo workspace, publish the name so EVERY collaborator sees it (last-writer-wins on the branch).
+      // Optimistically reflect it locally so the row updates instantly; a forced poll reconciles after the push.
+      const _aw = workspaces.find((w) => w.id === activeWsId);
+      if (_aw && _aw.kind === 'repo') {
+        const shared = (t && t !== s.preview) ? t : '';
+        if (shared) remoteTitles[s.id] = shared; else delete remoteTitles[s.id];
+        try { claudible.titleSet(s.id, shared).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
+      }
+      p.textContent = sessTitle(s);
       { const at = AT(); if (at && s.id === activeSession) { at.curSessionLabel = p.textContent; pushTracker(); } }   // mirror the new title to guests
     }
     try { inp.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
@@ -1626,6 +1656,7 @@ async function refreshSessions() {
   const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
   maybeAutoLive();                                                                  // shared repo workspace + a session open → auto-spin the tunnel so a peer can just Join
+  pollTitles();                                                                     // refresh workspace-shared names (throttled inside)
 }
 // A live, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
 // switch to it; the ▾ menu renames or CLOSES it (nothing to delete on disk). Mirrors a saved row's look.
@@ -2029,6 +2060,7 @@ async function switchWorkspace(id) {
   activeWsId = id; t.wsId = id; t.session = ''; t.label = '';
   activeSession = null; t.curSessionLabel = '';   // the conversation list is about to change entirely
   autoLiveSuppressed = false;                      // a fresh workspace re-enables auto-live (clears any earlier manual stop)
+  lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
   try { await claudible.workspaceOpen(id); } catch {}
@@ -2101,7 +2133,7 @@ $('invite-name-in').addEventListener('keydown', (e) => {
 claudible.onWorkspaceActiveChanged((id) => {
   if (id === activeWsId) return;
   const t = AT();
-  activeWsId = id; activeSession = null; autoLiveSuppressed = false;
+  activeWsId = id; activeSession = null; autoLiveSuppressed = false; lastTitlePoll = 0; titlesSig = '';
   if (t) { t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t); }   // main re-pointed the foreground tab
   refreshWorkspaces(); refreshSessions(); renderTabStrip();
 });

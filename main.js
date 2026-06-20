@@ -350,6 +350,15 @@ ipcMain.handle('live:advertise', (e, sessionId) => new Promise((resolve) => {
 }));
 ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
+// Shared session names: publish my rename to meta/<login>.json on the branch; read the merged (last-writer-wins)
+// map back. The name goes out-of-band as base64 so arbitrary text can never break the shell command.
+ipcMain.handle('title:set', (e, { id, name }) => new Promise((resolve) => {
+  const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (!sid) return resolve({ ok: false });
+  const b64 = Buffer.from(String(name == null ? '' : name)).toString('base64');
+  runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }));
+}));
+ipcMain.handle('title:list', () => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {})); }));
 ipcMain.handle('live:join', (e, peer) => {
   try {
     const url = String((peer && peer.url) || '');
