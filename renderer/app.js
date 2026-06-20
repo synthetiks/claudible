@@ -1156,27 +1156,60 @@ drawerScrim.addEventListener('click', () => openDrawer(false));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) openDrawer(false); });
 
 // ---------- Diff Review: what Claude changed in the active workspace's git repo, revert per hunk/file ----------
+let _diffTimer = null;
 function openDiff(open) {
   const p = $('diffpanel'), s = $('diff-scrim'); if (!p) return;
   p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
   p.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) refreshDiff();
+  if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
+  if (open) { refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open
 }
-async function refreshDiff() {
+let _diffSig = '', _diffBusy = false;
+async function refreshDiff(opts) {
   const body = $('diff-body'); if (!body) return;
-  body.innerHTML = '<div class="diff-empty">reading changes…</div>';
+  const quiet = opts && opts.quiet;                                    // auto-refresh: don't flash "reading…" or rebuild if unchanged
+  if (quiet && _diffBusy) return;                                      // a refresh is already in flight — don't stack WSL spawns
+  if (!quiet) body.innerHTML = '<div class="diff-empty">reading changes…</div>';
+  _diffBusy = true;
   let r = null; try { r = await claudible.diffList(); } catch {}
-  if (!r || !r.ok) { body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
-  if (!r.repo) { body.innerHTML = '<div class="diff-empty">This workspace isn’t a git repo — nothing to review.<br>Diff review works in repo workspaces (or any folder that’s a git repo).</div>'; return; }
-  const files = r.files || [], untracked = r.untracked || [];
-  if (!files.length && !untracked.length) { body.innerHTML = '<div class="diff-empty">No changes — the working tree is clean. ✨</div>'; return; }
+  _diffBusy = false;
+  if (!r || !r.ok) { if (!quiet) body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
+  if (!r.repo) { _diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This workspace isn’t a git repo — nothing to review.<br>Diff review works in repo workspaces (or any folder that’s a git repo).</div>'; return; }
+  const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
+  // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
+  const sig = JSON.stringify({ f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
+  if (quiet && sig === _diffSig) return;
+  _diffSig = sig;
+  if (!files.length && !untracked.length && !committed.length) { body.innerHTML = '<div class="diff-empty">No changes yet — nothing in the working tree or recent commits. ✨</div>'; return; }
   body.innerHTML = '';
-  files.forEach((f) => body.appendChild(renderDiffFile(f)));
-  if (untracked.length) {
-    const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'new files (untracked)';
+  if (files.length || untracked.length) {
+    const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'uncommitted — in the working tree';
     body.appendChild(lbl);
-    untracked.forEach((p) => body.appendChild(renderUntracked(p)));
+    files.forEach((f) => body.appendChild(renderDiffFile(f, false)));
+    if (untracked.length) {
+      const ul = document.createElement('div'); ul.className = 'diff-sec-lbl'; ul.textContent = 'new files (untracked)';
+      body.appendChild(ul);
+      untracked.forEach((p) => body.appendChild(renderUntracked(p)));
+    }
   }
+  if (committed.length) {                                              // work Claude already committed — visible, review-only
+    const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl';
+    lbl.textContent = 'recently committed' + (commits.length ? ' · ' + commits.length + ' commit' + (commits.length > 1 ? 's' : '') : '') + ' · review only';
+    body.appendChild(lbl);
+    if (commits.length) body.appendChild(renderCommitList(commits));
+    committed.forEach((f) => body.appendChild(renderDiffFile(f, true)));
+  }
+}
+function renderCommitList(commits) {
+  const box = document.createElement('div'); box.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin:2px 0 8px';
+  commits.forEach((c) => {
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:baseline;gap:8px;font-size:11.5px;line-height:1.4';
+    const h = document.createElement('code'); h.textContent = c.hash; h.style.cssText = 'color:#7f9cff;flex:none;font-size:11px';
+    const s = document.createElement('span'); s.textContent = c.subject; s.title = c.subject; s.style.cssText = 'color:var(--ink,#e7eaef);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0';
+    const m = document.createElement('span'); m.textContent = [c.author, c.date].filter(Boolean).join(' · '); m.style.cssText = 'color:var(--ink-faint,#565c66);flex:none;font-size:10px';
+    row.appendChild(h); row.appendChild(s); row.appendChild(m); box.appendChild(row);
+  });
+  return box;
 }
 async function doDiffRevert(patch, btn, label) {
   btn.disabled = true;
@@ -1184,8 +1217,8 @@ async function doDiffRevert(patch, btn, label) {
   if (r && r.ok) { toast(label || 'Reverted'); refreshDiff(); }
   else { btn.disabled = false; toast((r && r.error) || 'Revert failed'); }
 }
-function renderDiffFile(f) {
-  const card = document.createElement('div'); card.className = 'diff-file';
+function renderDiffFile(f, readOnly) {
+  const card = document.createElement('div'); card.className = 'diff-file' + (readOnly ? ' committed' : '');
   const head = document.createElement('div'); head.className = 'diff-file-head';
   const nm = document.createElement('span'); nm.className = 'diff-path'; nm.textContent = f.path; nm.title = f.path;
   const cnt = document.createElement('span'); cnt.className = 'diff-counts';
@@ -1193,7 +1226,7 @@ function renderDiffFile(f) {
   const del = document.createElement('i'); del.className = 'del'; del.textContent = '-' + (f.deletions || 0);
   cnt.appendChild(add); cnt.appendChild(del);
   head.appendChild(nm); head.appendChild(cnt);
-  if (!f.binary && f.filePatch) {
+  if (!readOnly && !f.binary && f.filePatch) {
     const rb = document.createElement('button'); rb.className = 'diff-revert-file'; rb.textContent = 'Revert file';
     rb.title = 'Undo all of Claude’s changes to this file';
     rb.addEventListener('click', () => doDiffRevert(f.filePatch, rb, 'Reverted ' + f.path));
@@ -1205,10 +1238,14 @@ function renderDiffFile(f) {
     const hk = document.createElement('div'); hk.className = 'diff-hunk';
     const hh = document.createElement('div'); hh.className = 'diff-hunk-head';
     const hl = document.createElement('span'); hl.className = 'diff-hunk-lbl'; hl.textContent = h.header;
-    const rv = document.createElement('button'); rv.className = 'diff-revert-hunk'; rv.textContent = 'Revert';
-    rv.title = 'Undo just this hunk';
-    rv.addEventListener('click', () => doDiffRevert(h.patch, rv, 'Reverted hunk'));
-    hh.appendChild(hl); hh.appendChild(rv); hk.appendChild(hh);
+    hh.appendChild(hl);
+    if (!readOnly) {
+      const rv = document.createElement('button'); rv.className = 'diff-revert-hunk'; rv.textContent = 'Revert';
+      rv.title = 'Undo just this hunk';
+      rv.addEventListener('click', () => doDiffRevert(h.patch, rv, 'Reverted hunk'));
+      hh.appendChild(rv);
+    }
+    hk.appendChild(hh);
     const pre = document.createElement('div'); pre.className = 'diff-lines';
     (h.lines || []).forEach((l) => {
       const ln = document.createElement('div');
