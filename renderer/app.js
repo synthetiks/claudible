@@ -1383,12 +1383,23 @@ function renderSessionRow(s) {
   del.innerHTML = TRASH_SVG;
   del.addEventListener('click', (e) => { e.stopPropagation(); row.classList.add('confirming'); });
   const conf = document.createElement('div'); conf.className = 'sess-confirm';
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  const synced = !!(aw && aw.kind === 'repo');                       // a shared/repo session may also live on GitHub
   const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'Delete?';
-  const yes = document.createElement('button'); yes.className = 'sess-yes'; yes.textContent = 'Delete';
+  const yes = document.createElement('button'); yes.className = 'sess-yes'; yes.textContent = synced ? 'Just me' : 'Delete';
+  yes.title = synced ? 'Remove from this machine (may sync back from GitHub)' : 'Move to trash (recoverable)';
   const no = document.createElement('button'); no.className = 'sess-no'; no.textContent = 'Cancel';
-  yes.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id); });
+  yes.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id, 'local'); });
   no.addEventListener('click', (e) => { e.stopPropagation(); row.classList.remove('confirming'); });
-  conf.appendChild(lbl); conf.appendChild(yes); conf.appendChild(no);
+  conf.appendChild(lbl); conf.appendChild(yes);
+  if (synced) {                                                      // delete from GitHub too, for everyone (won't resurrect)
+    const all = document.createElement('button'); all.className = 'sess-yes'; all.textContent = 'Everywhere';
+    all.title = 'Also delete from GitHub for everyone — can’t be undone';
+    all.style.cssText = 'color:#e5564b;border-color:rgba(229,86,75,.5)';
+    all.addEventListener('click', (e) => { e.stopPropagation(); deleteSession(s.id, 'everywhere'); });
+    conf.appendChild(all);
+  }
+  conf.appendChild(no);
   const edit = document.createElement('button');
   edit.className = 'sess-edit'; edit.title = 'Rename session'; edit.setAttribute('aria-label', 'Rename session');
   edit.innerHTML = PENCIL_SVG;
@@ -1471,7 +1482,7 @@ function onSessPointerUp() {
   }
 }
 const deletingIds = new Set();                                                     // hide rows mid-delete so they can't flash back as "fresh"
-async function deleteSession(id) {
+async function deleteSession(id, scope) {
   if (deletingIds.has(id)) return;
   deletingIds.add(id);
   const order = getOrder().filter((x) => x !== id);
@@ -1484,7 +1495,8 @@ async function deleteSession(id) {
       else { rec.session = next; rec.label = ''; try { await claudible.sessionOpen(rec.tabId, next); } catch {} }
     }
   }
-  try { await claudible.sessionDelete(id); } catch {} finally { deletingIds.delete(id); }
+  let r = null; try { r = await claudible.sessionDelete(id, scope || 'local'); } catch {} finally { deletingIds.delete(id); }
+  if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions(); renderTabStrip();
 }
 async function refreshSessions() {

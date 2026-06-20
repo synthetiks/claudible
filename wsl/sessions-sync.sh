@@ -23,7 +23,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -136,8 +136,26 @@ pull_branch() {
 # SECURITY: transcripts from ANOTHER author dir are untrusted. We (a) record their ids in a sidecar so
 # session.sh resumes them sandboxed and never auto-opens them, and (b) age their mtime into the past so
 # the most-recent-local heuristic can never select one. A basic JSONL sanity check rejects junk files.
+# A session the user deleted "everywhere" leaves a positive marker on the branch (an ADD, so it propagates
+# even though commit_and_push refuses to propagate plain removals). We never import or re-publish a
+# tombstoned id, and we trash any local copy — so the delete reaches every collaborator on their next pull.
+tombstoned() { [ -e "$WT/sessions/.tombstones/$1" ]; }
+apply_tombstones() {
+  [ -d "$WT/sessions/.tombstones" ] || return 0
+  local t id
+  for t in "$WT"/sessions/.tombstones/*; do
+    [ -e "$t" ] || continue
+    id="$(basename "$t")"
+    case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+    if [ -e "$PROJ/$id.jsonl" ]; then
+      mkdir -p "$HOME/.claudible/trash" 2>/dev/null
+      mv -f "$PROJ/$id.jsonl" "$HOME/.claudible/trash/$id.$(date +%Y%m%d-%H%M%S).deleted.jsonl" 2>/dev/null
+    fi
+  done
+}
 import_sessions() {
   mkdir -p "$PROJ" 2>/dev/null
+  apply_tombstones                                                  # honor collaborators' "delete everywhere"
   IMPORTED=0; UPDATED=0; DIVERGED=0
   [ -d "$WT/sessions" ] || return 0
   local f id dest dsz
@@ -145,6 +163,7 @@ import_sessions() {
     [ -e "$f" ] || continue
     id="$(basename "$f" .jsonl)"
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac  # reject leading/trailing-dash ids (argv tricks)
+    tombstoned "$id" && continue                                    # deleted everywhere → never re-import
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
     dest="$PROJ/$id.jsonl"
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
@@ -175,6 +194,7 @@ export_sessions() {
     id="$(basename "$f" .jsonl)"
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac
     [ "$id" = "$LIVE" ] && continue                                  # never sync the currently-live session
+    tombstoned "$id" && continue                                    # deleted everywhere → never re-publish
     grep -qxF -- "$id" "$FSET" 2>/dev/null && continue              # imported (foreign) → never republish under our name
     m="$(stat -c %Y "$f" 2>/dev/null || echo 0)"; age=$(( $(date +%s) - m ))   # torn-write guard: skip a file still
     [ "$age" -ge 0 ] && [ "$age" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ] && continue   # being written (~2s); ignore future mtimes (clock skew)
@@ -226,6 +246,30 @@ case "$op" in
     export_sessions
     commit_and_push || fail "push failed (no access, or network)"
     emit "{\"ok\":true,\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"pushed\":$PUSHED}"
+    ;;
+  delete)
+    # "Delete everywhere": drop a tombstone on the branch + remove the transcript from EVERY author dir, so
+    # the session can't resurrect on anyone's sync. Arg $2 = id.
+    ensure_worktree || fail "could not set up the sessions branch"
+    did="${2:-}"
+    case "$did" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    pull_branch || fail "pull failed"
+    mkdir -p "$WT/sessions/.tombstones" 2>/dev/null
+    : > "$WT/sessions/.tombstones/$did"                    # positive marker (an ADD → propagates)
+    rm -f "$WT"/sessions/*/"$did.jsonl" 2>/dev/null        # remove from every author dir on the branch
+    if [ -e "$PROJ/$did.jsonl" ]; then                     # and locally (recoverable trash)
+      mkdir -p "$HOME/.claudible/trash" 2>/dev/null
+      mv -f "$PROJ/$did.jsonl" "$HOME/.claudible/trash/$did.$(date +%Y%m%d-%H%M%S).deleted.jsonl" 2>/dev/null
+    fi
+    gitwt add -A >/dev/null 2>&1                           # stage the tombstone ADD + the explicit removals (intended here, unlike sync)
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: delete session $did" >/dev/null 2>&1
+    pushed=0
+    for i in 1 2 3; do
+      if gitwt push origin "$BR" >/dev/null 2>&1; then pushed=1; break; fi
+      pull_branch || break                                 # integrate the new tip (keeps our commit), then retry
+    done
+    [ "$pushed" = 1 ] || fail "push failed (no access, or network)"
+    emit "{\"ok\":true,\"op\":\"delete\",\"id\":\"$did\"}"
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

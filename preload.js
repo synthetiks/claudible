@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // sessions (switcher)
   sessionList: () => ipcRenderer.invoke('session:list'),
   sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
-  sessionDelete: (id) => ipcRenderer.invoke('session:delete', id),
+  sessionDelete: (id, scope) => ipcRenderer.invoke('session:delete', { id, scope }),
   exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
   // diff review (what Claude changed in the workspace's git repo)
   diffList: () => ipcRenderer.invoke('diff:list'),
