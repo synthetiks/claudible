@@ -510,6 +510,25 @@ function playChime() {
     });
   } catch (e) {}
 }
+// quick rising two-note "blip" — distinct from the chat chime; played when someone joins your live session
+let _joinCtx = null;
+function playJoin() {
+  try {
+    _joinCtx = _joinCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (_joinCtx.state === 'suspended') _joinCtx.resume();
+    const ctx = _joinCtx, t0 = ctx.currentTime;
+    const note = (f, start, dur) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      og.gain.setValueAtTime(0.0001, start);
+      og.gain.exponentialRampToValueAtTime(0.13, start + 0.015);
+      og.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      o.connect(og); og.connect(ctx.destination); o.start(start); o.stop(start + dur + 0.02);
+    };
+    note(660, t0, 0.16);
+    note(990, t0 + 0.12, 0.22);
+  } catch (e) {}
+}
 // collapse / expand the voice-out text box
 $('tts-collapse').addEventListener('click', () => {
   $('tts-wrap').classList.toggle('min');
@@ -859,18 +878,13 @@ function renderLiveBar() {
   const you = document.createElement('span'); you.className = 'live-member you';
   const yd = document.createElement('span'); yd.className = 'md ok'; you.appendChild(yd);
   you.appendChild(document.createTextNode(youName())); mem.appendChild(you);
-  if (!lastRoster.length) {
-    const w = document.createElement('span'); w.className = 'live-waiting'; w.textContent = 'waiting for someone to join…';
-    mem.appendChild(w);
-  } else {
-    lastRoster.forEach((g) => {
-      const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
-      const m = document.createElement('span'); m.className = 'live-member' + (g.state === 'gone' ? ' gone' : '');
-      m.title = g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'left');
-      const d = document.createElement('span'); d.className = 'md ' + cls;
-      m.appendChild(d); m.appendChild(document.createTextNode(g.name)); mem.appendChild(m);
-    });
-  }
+  lastRoster.forEach((g) => {                       // just you until someone joins — no "waiting…" filler
+    const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
+    const m = document.createElement('span'); m.className = 'live-member' + (g.state === 'gone' ? ' gone' : '');
+    m.title = g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'left');
+    const d = document.createElement('span'); d.className = 'md ' + cls;
+    m.appendChild(d); m.appendChild(document.createTextNode(g.name)); mem.appendChild(m);
+  });
 }
 claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
 
@@ -1016,7 +1030,9 @@ shareLink.addEventListener('click', () => {
 // (the "New link" button was removed — the same link works for everyone you invite; nothing to rotate)
 // reflect connected viewers; a join (collab or web) reveals the chat panel, web-share also updates its status line
 claudible.onShareGuests((n) => {
+  const joined = n > guestCount;                   // someone new connected to the live session
   guestCount = n; refreshChatPanel();
+  if (joined && chimeOn) playJoin();               // little sound on a join (respects the chat-chime mute)
   if (webShare) {
     shareOut.textContent = n > 0 ? (n + ' viewer' + (n === 1 ? '' : 's') + ' connected') : 'waiting for people to join';
     shareOut.className = 'out live';

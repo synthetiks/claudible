@@ -555,7 +555,6 @@
     .live-member .md.ok{background:var(--ok,#5fb487)}
     .live-member .md.idle{background:#e0a93b}
     .live-member .md.gone{background:var(--live,#e5564b)}
-    .live-waiting{font-size:11px;color:var(--ink-faint);font-style:italic}
     .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #2b2f37;border-radius:8px;background:#14171c;color:var(--ink);font:inherit;font-size:12.5px;outline:none}
     .name-field:focus{border-color:rgba(95,180,135,.5)}
     .share-dock input[type=text]{margin-bottom:0;font-size:11px;padding:9px 10px}
@@ -748,11 +747,12 @@
         <div class="sharelbl" id="lbl-share">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
           <span>share live</span><span class="dot" id="d-share"></span>
+          <button class="ws-info" type="button" aria-label="About sharing a live link" title="Makes a public web link (via a secure tunnel) so anyone — even without Claudible — can watch this terminal live in their browser, with chat &amp; voice. You approve each viewer, and ‘view-only’ stops them typing. Teammates who have Claudible don’t need this — they just Join from the synced workspace.">i</button>
           <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
         </div>
         <button id="share-btn" class="share-btn">Share a live link</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
-        <div class="out share-out" id="share-out">A link so anyone can watch this session live — chat &amp; voice too. (People with Claudible can just join from the workspace.)</div>
+        <div class="out share-out" id="share-out">A web link for people without Claudible.</div>
       </div>
     </aside>
     <div class="center">
@@ -831,7 +831,6 @@
       <div class="sec">
         <div class="label">your name in synced sessions</div>
         <input type="text" id="collab-name-in" class="name-field" maxlength="40" placeholder="e.g. MK" autocomplete="off" />
-        <div class="out">How collaborators see you when you’re in a synced session — the Join-live badge, the live roster &amp; chat. (The bottom-left “Share a live link” keeps its own name prompt for web viewers.)</div>
       </div>
       <div class="sec">
         <div class="label" id="lbl-in">
