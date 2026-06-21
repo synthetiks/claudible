@@ -541,6 +541,7 @@
     .sharelbl.active{color:var(--ink)}
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
     .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
+    #d-share:not(.ok):not(.work):not(.bad){visibility:hidden}   /* the web-share status light: only show it once a link is starting/live/failed */
     .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
     /* live collab bar: shows that the session is live + who has joined it */
     .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
@@ -747,7 +748,7 @@
         <div class="sharelbl" id="lbl-share">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
           <span>share live</span><span class="dot" id="d-share"></span>
-          <button class="ws-info" type="button" aria-label="About sharing a live link" title="Makes a public web link (via a secure tunnel) so anyone — even without Claudible — can watch this terminal live in their browser, with chat &amp; voice. You approve each viewer, and ‘view-only’ stops them typing. Teammates who have Claudible don’t need this — they just Join from the synced workspace.">i</button>
+          <button class="ws-info" id="share-info" type="button" aria-label="About sharing a live link" title="About sharing a live link">i</button>
           <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
         </div>
         <button id="share-btn" class="share-btn">Share a live link</button>

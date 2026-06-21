@@ -1981,6 +1981,34 @@ function openWsInfo() {
 (function () { const b = $('ws-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openWsInfo(); }); })();
 // First launch: pop the explainer once so new users learn the concept; afterwards it lives behind the ⓘ.
 { const _wp = loadPrefs(); if (!_wp.wsHintSeen) { savePrefs({ wsHintSeen: true }); setTimeout(() => { try { openWsInfo(); } catch (e) {} }, 1000); } }
+// the bottom-left "share live" ⓘ — same click-popover as the workspace one, but anchored ABOVE the icon (the
+// share dock sits at the screen bottom). Explains what the web link is vs. just joining in Claudible.
+let shareInfoPop = null;
+function closeShareInfo() {
+  if (!shareInfoPop) return;
+  shareInfoPop.remove(); shareInfoPop = null;
+  document.removeEventListener('mousedown', onShareInfoOutside, true);
+  document.removeEventListener('keydown', onShareInfoKey, true);
+}
+function onShareInfoOutside(e) { if (shareInfoPop && !shareInfoPop.contains(e.target) && e.target.id !== 'share-info') closeShareInfo(); }
+function onShareInfoKey(e) { if (e.key === 'Escape') closeShareInfo(); }
+function openShareInfo() {
+  if (shareInfoPop) { closeShareInfo(); return; }
+  const anchor = $('share-info'); if (!anchor) return;
+  const pop = document.createElement('div'); pop.className = 'ws-info-pop';
+  pop.innerHTML = '<span class="wt"><b>Share a live link</b></span>'
+    + '<p>Makes a public web link (a secure tunnel) so anyone — even without Claudible — can watch this terminal live in their browser, with chat &amp; voice.</p>'
+    + '<p>You approve every viewer before they see anything, and <b>view-only</b> stops them typing.</p>'
+    + '<p>Teammates who have Claudible don’t need this — they just <b>Join</b> from the synced workspace.</p>';
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
+  let top = r.top - pop.offsetHeight - 6; if (top < 8) top = r.bottom + 6;   // prefer above; fall below only if it'd clip the top
+  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = top + 'px';
+  shareInfoPop = pop;
+  setTimeout(() => { document.addEventListener('mousedown', onShareInfoOutside, true); document.addEventListener('keydown', onShareInfoKey, true); }, 0);
+}
+(function () { const b = $('share-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openShareInfo(); }); })();
 // workspace drag-reorder (mirrors session rows) + right-click delete
 let wsdrag = null;
 function onWsPointerDown(e, chip, w) {
