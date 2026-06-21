@@ -78,10 +78,10 @@ contextBridge.exposeInMainWorld('claudible', {
   voiceAudio: (b64, sr) => ipcRenderer.send('share:audio-send', { data: b64, sr }),   // cockpit mic frame (+ rate) → guests
   onShareAudio: (cb) => ipcRenderer.on('share:audio', (_e, p) => cb(p)),           // guest voice frame → cockpit
   // live sessions — advertise the session I'm hosting; discover + join a collaborator's live session natively
-  liveAdvertise: (sessionId) => ipcRenderer.invoke('live:advertise', sessionId),
+  liveAdvertise: (sessionId, name) => ipcRenderer.invoke('live:advertise', { sessionId, name }),
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
   livePeers: () => ipcRenderer.invoke('live:peers'),
-  liveJoin: (peer) => ipcRenderer.invoke('live:join', peer),
+  liveJoin: (peer, name) => ipcRenderer.invoke('live:join', { peer, name }),
   // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
   titleSet: (id, name) => ipcRenderer.invoke('title:set', { id, name }),
   titleList: () => ipcRenderer.invoke('title:list'),

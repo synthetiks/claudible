@@ -828,12 +828,16 @@ function refreshChatPanel() {
   chatPanelShown = show;
 }
 // presence roster in the chat header: you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light
+// Your collab display name (settings) — what teammates see when you're in a synced session. Falls back to the
+// web-share name then a generic label. Used for the live bar, your roster chip, advertising, and joining.
+function collabName() { return (loadPrefs().collabName || '').trim(); }
+function youName() { return collabLive ? (collabName() || 'You') : (hostDisplayName || collabName() || 'You'); }
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
   const you = document.createElement('span'); you.className = 'rmember you';
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
-  you.appendChild(document.createTextNode(hostDisplayName || 'You'));
+  you.appendChild(document.createTextNode(youName()));
   el.appendChild(you);
   (roster || []).forEach((g) => {
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
@@ -844,7 +848,31 @@ function renderRoster(roster) {
     el.appendChild(m);
   });
 }
-claudible.onShareRoster((roster) => renderRoster(roster));
+// The cockpit LIVE bar: visible whenever this session is live (synced collab) — shows you + everyone who's joined.
+let lastRoster = [];
+function renderLiveBar() {
+  const bar = $('livebar'); if (!bar) return;
+  if (!collabLive) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  const mem = $('live-members'); if (!mem) return;
+  mem.innerHTML = '';
+  const you = document.createElement('span'); you.className = 'live-member you';
+  const yd = document.createElement('span'); yd.className = 'md ok'; you.appendChild(yd);
+  you.appendChild(document.createTextNode(youName())); mem.appendChild(you);
+  if (!lastRoster.length) {
+    const w = document.createElement('span'); w.className = 'live-waiting'; w.textContent = 'waiting for someone to join…';
+    mem.appendChild(w);
+  } else {
+    lastRoster.forEach((g) => {
+      const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
+      const m = document.createElement('span'); m.className = 'live-member' + (g.state === 'gone' ? ' gone' : '');
+      m.title = g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'left');
+      const d = document.createElement('span'); d.className = 'md ' + cls;
+      m.appendChild(d); m.appendChild(document.createTextNode(g.name)); mem.appendChild(m);
+    });
+  }
+}
+claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
 
 // floating per-person VOLUME control — right-click a voice member to set how loud YOU hear them (listener-side,
 // 0–200%). Local only; never changes what anyone else hears. Persists across rejoin via the voice room's volume map.
@@ -1139,6 +1167,19 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
     toast(set ? ('Default effort: ' + set + ' — applies to new sessions') : 'Default effort cleared');
   }));
 })();
+// collab display name — what teammates see when you're in a synced session. Persist on edit, update your own
+// roster/bar instantly, and (debounced) re-publish the live presence so the "Join live" badge shows the new name.
+(function () {
+  const inp = $('collab-name-in'); if (!inp) return;
+  inp.value = loadPrefs().collabName || '';
+  let t = null;
+  inp.addEventListener('input', () => {
+    const v = inp.value.trim().slice(0, 40);
+    savePrefs({ collabName: v });
+    renderRoster(lastRoster); renderLiveBar();
+    clearTimeout(t); t = setTimeout(() => { if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v); } catch (e) {} } }, 500);
+  });
+})();
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));
@@ -1373,7 +1414,7 @@ function updateAdvertise() {
   const want = (tunnelUp && aw && aw.kind === 'repo' && aw.syncSessions && activeSession) ? activeSession : null;
   if (want === advertisedSession) return;
   advertisedSession = want;
-  try { want ? claudible.liveAdvertise(want) : claudible.liveUnadvertise(); } catch (e) {}
+  try { want ? claudible.liveAdvertise(want, collabName()) : claudible.liveUnadvertise(); } catch (e) {}
 }
 // ---- Collaboration tunnel: keep the single share server matching what's actually wanted — a manual web link
 // (webShare) OR a synced session a peer can join (collabLive). The bottom-left indicator is driven SEPARATELY
@@ -1386,10 +1427,11 @@ async function ensureTunnel() {
   try {
     if (want) {
       const ro = (!collabLive && webShare) ? !!$('share-ro').checked : false;   // collab is always co-drive
-      const r = await claudible.shareStart({ readOnly: ro, name: loadPrefs().hostName || 'Host' });
+      const nm = (collabLive ? collabName() : '') || loadPrefs().hostName || 'Host';   // collab uses your settings name
+      const r = await claudible.shareStart({ readOnly: ro, name: nm });
       if (r && r.ok) { tunnelUp = true; lastShareUrl = r.url; lastShareRemote = r.remote; lastShareNote = r.note; lastShareReadOnly = !!r.readOnly; }
     } else {
-      await claudible.shareStop(); tunnelUp = false; lastShareUrl = ''; guestCount = 0;   // no tunnel → no viewers → panel can close
+      await claudible.shareStop(); tunnelUp = false; lastShareUrl = ''; guestCount = 0; lastRoster = [];   // no tunnel → no viewers
     }
   } catch (e) {}
   tunnelBusy = false;
@@ -1403,6 +1445,7 @@ function updateCollab() {
   const aw = workspaces.find((w) => w.id === activeWsId);
   collabLive = !!(aw && aw.kind === 'repo' && aw.syncSessions && activeSession);
   ensureTunnel();
+  renderLiveBar();                                  // show/hide the in-session "● Live · who's here" bar
 }
 // Poll the shared branch for collaborators who are live (only in a repo workspace). Re-render on change.
 async function pollLivePeers() {
@@ -1433,21 +1476,21 @@ async function pollTitles(force) {
 setInterval(pollTitles, 20000);
 function makeLiveBadge(peer) {
   const b = document.createElement('button'); b.className = 'sess-livebadge';
-  b.textContent = '● Join live' + (peer.login ? ' · ' + peer.login : '');
-  b.title = 'Join ' + (peer.login || 'the host') + '’s live session — opens in Claudible';
+  b.textContent = '● Join live' + ((peer.name || peer.login) ? ' · ' + (peer.name || peer.login) : '');
+  b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — opens in Claudible';
   b.style.cssText = 'margin-left:6px;flex:none;font:inherit;font-size:10px;font-weight:600;color:#fff;background:rgba(95,180,135,.2);border:1px solid var(--ok,#5fb487);border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap';
   b.addEventListener('click', (e) => { e.stopPropagation(); joinLive(peer); });
   return b;
 }
 async function joinLive(peer) {
-  try { const r = await claudible.liveJoin(peer); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
+  try { const r = await claudible.liveJoin(peer, collabName()); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
   catch (e) { toast('Could not join'); }
 }
 // a collaborator is live in a session we don't have locally yet → a joinable row of its own
 function renderLivePeerRow(peer) {
   const row = document.createElement('div'); row.className = 'sess sess-peer-live';
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = 'Live session';
-  const m = document.createElement('div'); m.className = 'sess-meta'; m.textContent = (peer.login || 'a collaborator') + ' is live now';
+  const m = document.createElement('div'); m.className = 'sess-meta'; m.textContent = (peer.name || peer.login || 'a collaborator') + ' is live now';
   row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer));
   row.style.cursor = 'pointer';
   row.addEventListener('click', () => joinLive(peer));

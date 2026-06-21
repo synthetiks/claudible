@@ -297,14 +297,19 @@ case "$op" in
     # Advertise "I'm live in session $2, joinable at $3 with token $4" so a collaborator in this workspace can
     # join natively — no link to paste. One small file per author under live/. Ignored by the session import.
     ensure_worktree || fail "could not set up the sessions branch"
-    psid="${2:-}"; purl="${3:-}"; ptok="${4:-}"
+    psid="${2:-}"; purl="${3:-}"; ptok="${4:-}"; pname_b64="${5:-}"
     case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
     case "$purl" in https://*|http://127.0.0.1:*|http://localhost:*) ;; *) fail "bad url" ;; esac
     case "$purl" in *[!A-Za-z0-9:/._-]*) fail "bad url" ;; esac
     case "$ptok" in '' | *[!A-Za-z0-9._~-]*) fail "bad token" ;; esac
+    case "$pname_b64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
+    # The chosen display name arrives base64 (arbitrary text); decode then strip JSON-breakers (quotes, backslashes,
+    # control chars incl. newlines) so it drops safely into the one-line JSON. Renderer falls back to login if empty.
+    pname=""
+    [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
     pull_branch || fail "pull failed"
     mkdir -p "$WT/live" 2>/dev/null
-    printf '{"login":"%s","session":"%s","url":"%s","token":"%s","ts":%s}\n' "$author" "$psid" "$purl" "$ptok" "$(date +%s)" > "$WT/live/$author.json"
+    printf '{"login":"%s","session":"%s","url":"%s","token":"%s","name":"%s","ts":%s}\n' "$author" "$psid" "$purl" "$ptok" "$pname" "$(date +%s)" > "$WT/live/$author.json"
     gitwt add -A -- "live/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence $author" >/dev/null 2>&1
     for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done

@@ -641,6 +641,15 @@ function startJoin() {
   connect();
 }
 (function nameGate() {
+  // A native Claudible join passes the chosen display name as ?n=… → skip the gate entirely and connect.
+  var fromUrl = (new URLSearchParams(location.search).get('n') || '').trim().slice(0, 40);
+  if (fromUrl) {
+    myName = fromUrl;
+    try { sessionStorage.setItem(NAME_KEY, myName); } catch (e) {}
+    var ov = $('name-overlay'); if (ov) ov.style.display = 'none';
+    connect();
+    return;
+  }
   var saved = '';
   try { saved = sessionStorage.getItem(NAME_KEY) || ''; } catch (e) {}
   $('name-in').value = saved;

@@ -542,6 +542,22 @@
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
     .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
     .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
+    /* live collab bar: shows that the session is live + who has joined it */
+    .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
+    .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#5fb487);box-shadow:0 0 8px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
+    @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.35}}
+    .livebar .live-txt{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ok,#5fb487);flex:none}
+    .live-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px;color:var(--ink-dim);min-width:0}
+    .live-member{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid #2b2f37;border-radius:999px;background:#191c22;white-space:nowrap}
+    .live-member.you{border-color:rgba(95,180,135,.35)}
+    .live-member.gone{opacity:.5;text-decoration:line-through}
+    .live-member .md{width:6px;height:6px;border-radius:50%;flex:none;background:#5a6270}
+    .live-member .md.ok{background:var(--ok,#5fb487)}
+    .live-member .md.idle{background:#e0a93b}
+    .live-member .md.gone{background:var(--live,#e5564b)}
+    .live-waiting{font-size:11px;color:var(--ink-faint);font-style:italic}
+    .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #2b2f37;border-radius:8px;background:#14171c;color:var(--ink);font:inherit;font-size:12.5px;outline:none}
+    .name-field:focus{border-color:rgba(95,180,135,.5)}
     .share-dock input[type=text]{margin-bottom:0;font-size:11px;padding:9px 10px}
     /* voice room (host) — a compact strip at the top of the viewer chat panel */
     .voicerow{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:9px 12px;border-bottom:1px solid var(--hairline-soft);
@@ -741,6 +757,11 @@
     </aside>
     <div class="center">
       <div class="tabstrip" id="tabstrip"></div>
+      <!-- LIVE bar: shown when this session is live (synced collab) — who's in it -->
+      <div class="livebar" id="livebar" style="display:none">
+        <span class="live-dot"></span><span class="live-txt">Live</span>
+        <span class="live-members" id="live-members"></span>
+      </div>
       <div class="termrow">
       <div id="terminal">
       <button class="termtab br" id="git-btn" title="Git — push / pull">
@@ -807,6 +828,11 @@
   <div class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-head"><span>settings</span><button id="drawer-close" title="Close">×</button></div>
     <div class="panel">
+      <div class="sec">
+        <div class="label">your name in synced sessions</div>
+        <input type="text" id="collab-name-in" class="name-field" maxlength="40" placeholder="e.g. MK" autocomplete="off" />
+        <div class="out">How collaborators see you when you’re in a synced session — the Join-live badge, the live roster &amp; chat. (The bottom-left “Share a live link” keeps its own name prompt for web viewers.)</div>
+      </div>
       <div class="sec">
         <div class="label" id="lbl-in">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg>

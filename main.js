@@ -363,7 +363,7 @@ function runPresence(args, cb) {
 // host stops showing as "live"), so a still-live host must re-stamp its ts periodically. The timer lives in MAIN
 // on purpose — renderer timers get throttled when the window is backgrounded, which is exactly when we must NOT
 // silently go stale. Each beat is one tiny presence-set commit; a ~2 min cadence keeps the git noise low.
-let advertiseTimer = null, advertisedSid = null;
+let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '';
 function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; }
 function startAdvertiseHeartbeat(sid) {
   advertisedSid = sid;                                   // a session switch just re-points which sid we re-stamp
@@ -371,15 +371,16 @@ function startAdvertiseHeartbeat(sid) {
   advertiseTimer = setInterval(() => {
     const st = share.status();
     if (!advertisedSid || !st.running || !shareBaseUrl || !st.token) return;   // not hosting this beat — unadvertise/stop tear the timer down
-    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}'`, () => {});
+    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, () => {});
   }, 120000);
   if (advertiseTimer.unref) advertiseTimer.unref();
 }
-ipcMain.handle('live:advertise', (e, sessionId) => new Promise((resolve) => {
-  const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
+ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
+  const sid = String((payload && payload.sessionId) || '').replace(/[^A-Za-z0-9-]/g, '');
   const st = share.status();
   if (!sid || !st.running || !shareBaseUrl || !st.token) return resolve({ ok: false, error: 'not live' });
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}'`, (r) => { if (r && r.ok) startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
+  advertisedNameB64 = Buffer.from(String((payload && payload.name) || '')).toString('base64');   // chosen display name → presence (badge/roster)
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { if (r && r.ok) startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
 }));
 ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
@@ -392,20 +393,22 @@ ipcMain.handle('title:set', (e, { id, name }) => new Promise((resolve) => {
   runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }));
 }));
 ipcMain.handle('title:list', () => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {})); }));
-ipcMain.handle('live:join', (e, peer) => {
+ipcMain.handle('live:join', (e, payload) => {
   try {
-    const url = String((peer && peer.url) || '');
-    const tok = String((peer && peer.token) || '').replace(/[^A-Za-z0-9._~-]/g, '');
+    const peer = (payload && payload.peer) || {};
+    const url = String(peer.url || '');
+    const tok = String(peer.token || '').replace(/[^A-Za-z0-9._~-]/g, '');
     const okUrl = /^https:\/\/[A-Za-z0-9.:/_-]+$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
     if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
-    const who = String((peer && peer.login) || '').replace(/[^A-Za-z0-9 _.-]/g, '');
+    const who = String(peer.name || peer.login || '').replace(/[^A-Za-z0-9 _.-]/g, '');
+    const myName = String((payload && payload.name) || '').slice(0, 40);   // how I appear to the host I'm joining
     const w = new BrowserWindow({
       width: 1200, height: 800, backgroundColor: '#070809',
       title: 'Claudible — live session' + (who ? ' · ' + who : ''),
       webPreferences: { nodeIntegration: false, contextIsolation: true },
     });
     try { w.removeMenu(); } catch {}
-    w.loadURL(`${url}/?t=${tok}`);
+    w.loadURL(`${url}/?t=${tok}` + (myName ? `&n=${encodeURIComponent(myName)}` : ''));
     liveWindows.add(w); w.on('closed', () => liveWindows.delete(w));
     return { ok: true };
   } catch (err) { return { ok: false, error: String(err.message || err) }; }
