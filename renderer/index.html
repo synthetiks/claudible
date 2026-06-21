@@ -152,6 +152,15 @@
     /* one xterm mount per tab, stacked; only the active tab shows. Padding lives here so the xterm stays inset. */
     .term-host{position:absolute;inset:0;display:none;padding:10px 12px}
     .term-host.active{display:block}
+    /* native joined-live tab: centered status overlay for the non-streaming states (connecting/paused/…) */
+    .live-ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;
+      padding:0 28px;font-size:12px;line-height:1.5;color:var(--ink-faint,#9097a1);background:rgba(7,8,9,.82);
+      backdrop-filter:blur(2px);z-index:5;pointer-events:none}
+    .live-ov.show{display:flex}
+    .live-ov.bad{color:#e0a0a0}
+    /* a joined peer's session, pinned atop the sidebar list */
+    .sess-joined-live{border-left:2px solid var(--ok,#5fb487)}
+    .sess-joined-live .sess-prev{color:#cfe8da}
     /* tab strip — one chip per live session/pty (the active chip = the visible terminal) */
     /* top tab strip retired — concurrent sessions now live in the left sidebar; kept hidden so old refs are harmless */
     .tabstrip{display:none;align-items:center;gap:6px;flex:none;height:32px;padding:0 2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}

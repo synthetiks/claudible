@@ -81,7 +81,25 @@ contextBridge.exposeInMainWorld('claudible', {
   liveAdvertise: (sessionId, name) => ipcRenderer.invoke('live:advertise', { sessionId, name }),
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
   livePeers: () => ipcRenderer.invoke('live:peers'),
-  liveJoin: (peer, name) => ipcRenderer.invoke('live:join', { peer, name }),
+  liveJoin: (peer, name) => ipcRenderer.invoke('live:join', { peer, name }),   // open the peer's session in a SEPARATE window (fallback)
+  // native joined tab: main holds a client WebSocket to the peer; the renderer draws a normal xterm tab and
+  // co-drives over IPC (the renderer's CSP forbids a wss:// socket, so the socket lives in main).
+  liveConnect: (tabId, peer, name) => ipcRenderer.invoke('live:connect', { tabId, peer, name }),
+  liveDisconnect: (tabId) => ipcRenderer.invoke('live:disconnect', { tabId }),
+  liveInput: (tabId, data) => ipcRenderer.send('live:input', { tabId, data }),          // a keystroke → the peer's terminal
+  liveChatSend: (tabId, text) => ipcRenderer.send('live:chat-send', { tabId, text }),
+  liveVoice: (tabId, join) => ipcRenderer.send('live:voice', { tabId, join }),
+  liveAudioSend: (tabId, data, sr) => ipcRenderer.send('live:audio-send', { tabId, data, sr }),
+  onLiveData: (cb) => ipcRenderer.on('live:data', (_e, { tabId, data }) => cb(tabId, data)),   // raw terminal bytes from the peer
+  onLiveHello: (cb) => ipcRenderer.on('live:hello', (_e, p) => cb(p)),
+  onLiveStatus: (cb) => ipcRenderer.on('live:status', (_e, p) => cb(p)),
+  onLiveSize: (cb) => ipcRenderer.on('live:size', (_e, p) => cb(p)),
+  onLivePaused: (cb) => ipcRenderer.on('live:paused', (_e, p) => cb(p)),
+  onLiveChat: (cb) => ipcRenderer.on('live:chat', (_e, p) => cb(p)),
+  onLiveRoster: (cb) => ipcRenderer.on('live:roster', (_e, p) => cb(p)),
+  onLiveVoiceMembers: (cb) => ipcRenderer.on('live:voice-members', (_e, p) => cb(p)),
+  onLiveAudio: (cb) => ipcRenderer.on('live:audio', (_e, p) => cb(p)),
+  onLiveState: (cb) => ipcRenderer.on('live:state', (_e, p) => cb(p)),
   // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
   titleSet: (id, name) => ipcRenderer.invoke('title:set', { id, name }),
   titleList: () => ipcRenderer.invoke('title:list'),

@@ -111,7 +111,12 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // presence roster — name -> 'active'(green) | 'idle'(amber/AFK) | 'gone'(red, closed tab). 'gone' is kept so the
   // host can see who left; a resume reconnect flips it back to active.
   const roster = new Map();
-  const notifyRoster = () => { try { onRoster && onRoster(Array.from(roster, ([name, state]) => ({ name, state }))); } catch {} };
+  const notifyRoster = () => {
+    const list = Array.from(roster, ([name, state]) => ({ name, state }));
+    try { onRoster && onRoster(list); } catch {}                                  // → host UI
+    const s = JSON.stringify({ type: 'roster', list });                           // → every guest too, so a native joiner can show "who's here"
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  };
   function appendRing(buf) {
     ring = ring.length ? Buffer.concat([ring, buf]) : Buffer.from(buf);
     if (ring.length > RING_CAP) ring = ring.slice(ring.length - RING_CAP);

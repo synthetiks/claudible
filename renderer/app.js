@@ -33,24 +33,36 @@ let sidebarReady = false;                        // set true once the sessions/w
 function AT() { return tabs.get(activeTabId) || null; }
 const termHost = $('terminal');   // wrapper; each tab's xterm mounts in its own .term-host child of this
 // Create a tab's xterm + fit + mount div (hidden until activated). wsId/session bind its pty.
-function makeTab(tabId, wsId, session) {
+function makeTab(tabId, wsId, session, opts) {
+  opts = opts || {};
+  const kind = opts.kind || 'local';                           // 'local' = own pty · 'live' = mirror of a peer's session
   const container = document.createElement('div');
   container.className = 'term-host'; container.dataset.tab = tabId;
   termHost.appendChild(container);
   const t = new Terminal(TERM_OPTS);
   const f = new FitAddon.FitAddon();
   t.loadAddon(f); t.open(container);
-  t.onData((d) => claudible.ptyInput(tabId, d));               // keystrokes → THIS tab's pty
+  if (kind === 'live') t.onData((d) => { const r = tabs.get(tabId); if (r && !r.liveReadOnly) claudible.liveInput(tabId, d); });   // co-drive: keystrokes → the peer's terminal
+  else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
-  const rec = { tabId, term: t, fit: f, container, started: false, wsId: wsId || null, session: session || '',
+  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '',
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, sessionLog: [], curCtxPct: null, curSessionLabel: '',
-    agents: new Map(), workflows: [], agentTok: 0 };
+    agents: new Map(), workflows: [], agentTok: 0,
+    liveReadOnly: false, hostCols: 120, hostRows: 32, liveState: '', liveCost: null, liveTokens: null, hostName: '' };
   tabs.set(tabId, rec);
   return rec;
 }
-function sendInput(d) { if (activeTabId) claudible.ptyInput(activeTabId, d); }   // input always to the active tab
+// Input always to the active tab — its own pty, or (for a joined live tab) the peer's terminal over the WS.
+// This single chokepoint is why every shortcut pill, paste, and the context menu co-drive a live session for free.
+function sendInput(d) {
+  if (!activeTabId) return;
+  const t = tabs.get(activeTabId);
+  if (t && t.kind === 'live') { if (!t.liveReadOnly) claudible.liveInput(activeTabId, d); return; }
+  claudible.ptyInput(activeTabId, d);
+}
 function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
+  if (t.kind === 'live') { fitLiveTab(t); return; }            // a live tab is a fixed-grid remote mirror — never start/resize a local pty
   try {
     t.fit.fit();
     if (t.term.cols < 2 || t.term.rows < 2) return;            // not laid out yet → don't start/resize at 0×0
@@ -128,15 +140,16 @@ function setActiveTab(tabId) {
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
   term = rec.term; fit = rec.fit;
-  try { claudible.tabForeground(tabId); } catch {}   // guests + main's active-workspace follow the foreground tab
-  sync();                                          // fit the now-visible tab + (re)start/resize its pty
+  if (rec.kind !== 'live') { try { claudible.tabForeground(tabId); } catch {} }   // guests + main's active-workspace follow the foreground tab — a live tab must NOT (it would hijack your own outgoing mirror)
+  sync();                                          // fit the now-visible tab + (re)start/resize its pty (or fit the live mirror)
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
   try { rec.term.refresh(0, rec.term.rows - 1); } catch {}   // force a repaint of the freshly-shown (was-hidden) buffer
-  repaintTracker(rec);                             // project this tab's tracker into #trk-*
+  if (rec.kind === 'live') repaintLiveTracker(rec); else repaintTracker(rec);    // project this tab's tracker into #trk-*
   _agentsSig = '';                                 // force an agents rebuild for THIS tab (the sig guard is module-global)
   renderAgents();                                  // …and its agents into the agents pane
   updateScrollbar();
   renderTabStrip();
+  refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined)
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
   if (sidebarReady) {   // guard: the sessions/workspace section's consts aren't initialized during the boot tab
     if (rec.wsId && rec.wsId !== activeWsId) { activeWsId = rec.wsId; renderWsChips(); }   // sidebar library follows the tab's ws
@@ -153,6 +166,7 @@ function newBlankTab(wsId, session) {
 }
 function closeTab(tabId) {
   const rec = tabs.get(tabId); if (!rec || tabs.size <= 1) return;   // never close the last tab
+  if (tabId === liveVoiceTabId) { try { liveVoice.leave(); } catch {} liveVoiceTabId = null; }   // leaving a joined session drops its voice
   try { claudible.tabClose(tabId); } catch {}
   try { rec.term.dispose(); } catch {}
   try { rec.container.remove(); } catch {}
@@ -199,6 +213,7 @@ const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : 
 // Mirror the active tab's tracker (and which session is live) to any shared guests. Guests render verbatim.
 function pushTracker() {
   const t = AT(); if (!t) return;
+  if (t.kind === 'live') return;   // viewing a peer's session — never mirror THEIR tracker to YOUR guests
   try { claudible.shareTracker({ ctxPct: t.curCtxPct, cost: $('trk-cost').textContent, tokens: $('trk-tokens').textContent, session: t.curSessionLabel }); } catch {}
 }
 // Paint the #trk-* gauges from a tab record (called for the active tab on update and on every tab switch).
@@ -841,16 +856,40 @@ function webShareUI(on) {
 // The collaboration chat/voice column appears when you're web-sharing OR a viewer/peer has actually joined — so
 // an idle synced session stays clean, but the panel is there the moment someone's watching.
 function refreshChatPanel() {
-  const show = webShare || guestCount > 0;
+  const t = AT(), liveActive = !!(t && t.kind === 'live');
+  const show = webShare || guestCount > 0 || liveActive;     // also show the panel while viewing a joined session
   document.querySelector('.body').classList.toggle('sharing', show);
-  if (show && !chatPanelShown) { chatReset(); renderRoster([]); }
+  const becameShown = show && !chatPanelShown;
   chatPanelShown = show;
+  if (becameShown) { renderChatLog(); renderRoster(); }      // first reveal → paint the current context (don't yank scroll on every refresh)
+}
+// Re-point all collab UI (chat panel + roster + live-bar + voice) at the active tab's context. Called on tab switch.
+function refreshCollabSurfaces() {
+  refreshChatPanel();
+  if (chatPanelShown) { renderChatLog(); renderRoster(); }   // context changed → repaint chat + roster for the new tab
+  renderLiveBar(); repaintVoiceForActive();
 }
 // presence roster in the chat header: you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light
 // Your collab display name (settings) — what teammates see when you're in a synced session. Falls back to the
 // web-share name then a generic label. Used for the live bar, your roster chip, advertising, and joining.
 function collabName() { return (loadPrefs().collabName || '').trim(); }
-function youName() { return collabLive ? (collabName() || 'You') : (hostDisplayName || collabName() || 'You'); }
+function youName() {
+  const t = AT();
+  if (t && t.kind === 'live') return collabName() || 'You';   // on a joined session you appear by your collab name
+  return collabLive ? (collabName() || 'You') : (hostDisplayName || collabName() || 'You');
+}
+// The "who's here" members for the ACTIVE context: your guests (host-share), or — on a joined tab — the host plus
+// every other participant from that session's roster (you're rendered separately as the "you" chip).
+function activeRosterMembers() {
+  const t = AT();
+  if (t && t.kind === 'live') {
+    const me = collabName() || 'Guest', out = [];   // the name the host's server registered us under (mirror its cleanName fallback) so we don't list ourselves twice
+    if (t.hostName) out.push({ name: t.hostName, state: 'active', host: true });
+    (t.roster || []).forEach((g) => { if (g.name !== me) out.push(g); });
+    return out;
+  }
+  return lastRoster;
+}
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
@@ -858,10 +897,10 @@ function renderRoster(roster) {
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
   you.appendChild(document.createTextNode(youName()));
   el.appendChild(you);
-  (roster || []).forEach((g) => {
+  activeRosterMembers().forEach((g) => {
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
     const m = document.createElement('span'); m.className = 'rmember' + (g.state === 'gone' ? ' gone' : '');
-    m.title = g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab');
+    m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab'));
     const d = document.createElement('span'); d.className = 'rdot ' + cls;
     m.appendChild(d); m.appendChild(document.createTextNode(g.name));
     el.appendChild(m);
@@ -871,17 +910,18 @@ function renderRoster(roster) {
 let lastRoster = [];
 function renderLiveBar() {
   const bar = $('livebar'); if (!bar) return;
-  if (!collabLive) { bar.style.display = 'none'; return; }
+  const t = AT(), liveTab = !!(t && t.kind === 'live');
+  if (!collabLive && !liveTab) { bar.style.display = 'none'; return; }   // show when hosting a synced session OR viewing a joined one
   bar.style.display = 'flex';
   const mem = $('live-members'); if (!mem) return;
   mem.innerHTML = '';
   const you = document.createElement('span'); you.className = 'live-member you';
   const yd = document.createElement('span'); yd.className = 'md ok'; you.appendChild(yd);
   you.appendChild(document.createTextNode(youName())); mem.appendChild(you);
-  lastRoster.forEach((g) => {                       // just you until someone joins — no "waiting…" filler
+  activeRosterMembers().forEach((g) => {            // just you until someone joins — no "waiting…" filler
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
     const m = document.createElement('span'); m.className = 'live-member' + (g.state === 'gone' ? ' gone' : '');
-    m.title = g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'left');
+    m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'left'));
     const d = document.createElement('span'); d.className = 'md ' + cls;
     m.appendChild(d); m.appendChild(document.createTextNode(g.name)); mem.appendChild(m);
   });
@@ -930,8 +970,10 @@ function openVolumePopover(anchor, id, name, room) {
   setTimeout(() => { document.addEventListener('mousedown', onVolOutside, true); document.addEventListener('keydown', onVolKey, true); }, 0);
 }
 
-// ---- host voice room: peer-to-peer audio with viewers (signaling bridged through main) ----
-function renderHostVoiceUi(st) {
+// ---- voice room: relayed audio with participants. TWO instances share ONE UI (#hv-*): `hostVoice` for your own
+// share, `liveVoice` for a session you've JOINED. The UI follows the active tab; each room caches its last state so
+// a tab switch repaints the right one. ----
+function paintVoiceUi(st, room) {
   const btn = $('hv-btn'), mute = $('hv-mute'), box = $('hv-members'); if (!btn) return;
   if (st && st.error === 'mic-denied') { btn.textContent = '🎙 Mic blocked'; btn.classList.remove('on'); return; }
   const joined = !!(st && st.joined);
@@ -950,15 +992,28 @@ function renderHostVoiceUi(st) {
       else {                                                            // right-click → set how loud you hear this person
         el.title = 'Right-click to adjust ' + m.name + "'s volume";
         el.style.cursor = 'context-menu';
-        el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openVolumePopover(el, m.id, m.name, hostVoice); });
+        el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openVolumePopover(el, m.id, m.name, room); });
       }
       el.appendChild(d); el.appendChild(nm); box.appendChild(el);
     });
   }
 }
+function voiceRoom() { const t = AT(); return (t && t.kind === 'live') ? liveVoice : hostVoice; }   // which room the UI is bound to now
+let hostVoiceState = null, liveVoiceState = null;
+function renderHostVoiceUi(st) { hostVoiceState = st; if (voiceRoom() === hostVoice) paintVoiceUi(st, hostVoice); }
+function renderLiveVoiceUi(st) { liveVoiceState = st; if (voiceRoom() === liveVoice) paintVoiceUi(st, liveVoice); }
+function repaintVoiceForActive() {
+  const t = AT();
+  if (t && t.kind === 'live') {
+    if (t.tabId === liveVoiceTabId) paintVoiceUi(liveVoiceState, liveVoice);   // this is the session you're voicing
+    else paintVoiceUi({ joined: false, members: [] }, liveVoice);              // a different live tab → offer "Join voice"
+  } else paintVoiceUi(hostVoiceState, hostVoice);
+}
 // Guarded so a missing/failed voice module can NEVER break the cockpit (which would also kill screen-share).
-// hostVoice is always a valid object (no-op stub fallback).
-let hostVoice = { isJoined: () => false, join: () => Promise.resolve(), leave: () => {}, toggleMute: () => {}, setMembers: () => {}, pushAudio: () => {} };
+// Both rooms are always valid objects (no-op stub fallback).
+const VOICE_STUB = { isJoined: () => false, join: () => Promise.resolve(), leave: () => {}, toggleMute: () => {}, setMembers: () => {}, pushAudio: () => {} };
+let hostVoice = VOICE_STUB, liveVoice = VOICE_STUB;
+let liveVoiceTabId = null;                                  // the live tab whose voice you've joined — audio binds to IT, independent of the active tab
 try {
   if (typeof makeVoiceRoom === 'function') {
     hostVoice = makeVoiceRoom({
@@ -967,10 +1022,24 @@ try {
       setJoined: (j) => { try { claudible.voiceJoin(j); } catch {} },
       onUi: renderHostVoiceUi,
     });
+    liveVoice = makeVoiceRoom({                              // a SECOND room for the session you joined (same relayed-audio protocol)
+      myId: () => { const r = tabs.get(liveVoiceTabId); return r ? (r.livePid || null) : null; },
+      sendAudio: (b64, sr) => { if (liveVoiceTabId) { try { claudible.liveAudioSend(liveVoiceTabId, b64, sr); } catch {} } },
+      setJoined: (j) => { if (liveVoiceTabId) { try { claudible.liveVoice(liveVoiceTabId, j); } catch {} } },
+      onUi: renderLiveVoiceUi,
+    });
     try { claudible.onShareAudio((p) => hostVoice.pushAudio(p.from, p.data, p.sr)); } catch {}
     try { claudible.onVoiceMembers((m) => hostVoice.setMembers(m)); } catch {}
-    if ($('hv-btn')) $('hv-btn').addEventListener('click', () => { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); });
-    if ($('hv-mute')) $('hv-mute').addEventListener('click', () => hostVoice.toggleMute());
+    try { claudible.onLiveAudio((p) => { if (p && p.tabId === liveVoiceTabId) liveVoice.pushAudio(p.from, p.data, p.sr); }); } catch {}
+    try { claudible.onLiveVoiceMembers((p) => { if (p && p.tabId === liveVoiceTabId) liveVoice.setMembers(p.members || []); }); } catch {}
+    if ($('hv-btn')) $('hv-btn').addEventListener('click', () => {
+      const t = AT();
+      if (t && t.kind === 'live') {                                  // joined-session voice (bound to ONE tab at a time)
+        if (liveVoice.isJoined() && liveVoiceTabId === t.tabId) { liveVoice.leave(); liveVoiceTabId = null; }
+        else { if (liveVoice.isJoined()) { try { liveVoice.leave(); } catch {} } liveVoiceTabId = t.tabId; liveVoice.join().catch(() => {}); }   // switch the single live-voice to this tab
+      } else { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); }
+    });
+    if ($('hv-mute')) $('hv-mute').addEventListener('click', () => voiceRoom().toggleMute());
   } else { const vr = $('voicerow'); if (vr) vr.style.display = 'none'; }
 } catch (e) { try { const vr = $('voicerow'); if (vr) vr.style.display = 'none'; } catch (x) {} }
 
@@ -1323,35 +1392,54 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('diffpan
 
 // ---------- viewer chat (human↔human side channel; never reaches Claude/terminal) ----------
 const chatLog = $('chat-log'), chatIn = $('chat-in');
+let hostChat = [];                                   // your host-share chat buffer (you ↔ your guests)
+// The single chat panel is mode-aware: on a joined LIVE tab it shows/drives that session's chat; otherwise your
+// host-share chat. Each live tab keeps its own buffer on its tab record (rec.chat), so switching tabs never mixes them.
+function chatCtx() { const t = AT(); return (t && t.kind === 'live') ? t : null; }   // the live tab in view, or null = host-share
+function chatBufFor(ctx) { return ctx ? (ctx.chat || (ctx.chat = [])) : hostChat; }
 function chatReset() {
-  chatLog.innerHTML = '<div class="chat-empty" id="chat-empty">Messages here go only between you and your viewer — Claude never sees them.</div>';
+  chatLog.innerHTML = '<div class="chat-empty" id="chat-empty">' +
+    (chatCtx() ? 'Chat with everyone in this live session — Claude never sees these messages.'
+               : 'Messages here go only between you and your viewer — Claude never sees them.') + '</div>';
 }
-function addChat(who, text, mine) {
-  const empty = $('chat-empty'); if (empty) empty.remove();
-  const d = document.createElement('div');
-  d.className = 'chat-msg ' + (mine ? 'me' : 'them');
-  const w = document.createElement('span'); w.className = 'who'; w.textContent = who;
-  const body = document.createElement('div'); body.textContent = text;   // textContent → no HTML injection
-  d.appendChild(w); d.appendChild(body); chatLog.appendChild(d);
+// Repaint the single #chat-log from the ACTIVE context's buffer (on every new message + on tab switch).
+function renderChatLog() {
+  const buf = chatBufFor(chatCtx());
+  if (!buf.length) { chatReset(); return; }
+  chatLog.innerHTML = '';
+  buf.forEach((m) => {
+    if (m.sys) { const d = document.createElement('div'); d.className = 'chat-sys'; d.textContent = m.text; chatLog.appendChild(d); return; }
+    const d = document.createElement('div'); d.className = 'chat-msg ' + (m.mine ? 'me' : 'them');
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = m.who;
+    const body = document.createElement('div'); body.textContent = m.text;   // textContent → no HTML injection
+    d.appendChild(w); d.appendChild(body); chatLog.appendChild(d);
+  });
   chatLog.scrollTop = chatLog.scrollHeight;
 }
-function addSystemChat(text) {
-  const empty = $('chat-empty'); if (empty) empty.remove();
-  const d = document.createElement('div'); d.className = 'chat-sys'; d.textContent = text;
-  chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
-}
+// Append to a SPECIFIC buffer; only repaint if that buffer is the one currently on screen.
+function chatAppend(buf, entry, onScreen) { buf.push(entry); if (buf.length > 400) buf.shift(); if (onScreen) renderChatLog(); }
 function sendChat() {
   const text = chatIn.value.trim(); if (!text) return;
-  addChat(hostDisplayName, text, true);
-  claudible.shareSendChat(text);
+  const ctx = chatCtx();
+  if (ctx) { chatAppend(chatBufFor(ctx), { who: youName(), text, mine: true }, true); claudible.liveChatSend(ctx.tabId, text); }   // → the joined session
+  else { chatAppend(hostChat, { who: hostDisplayName, text, mine: true }, true); claudible.shareSendChat(text); }                  // → your guests
   chatIn.value = '';
 }
 $('chat-send').addEventListener('click', sendChat);
 chatIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+// Your host-share guests' chat → the host buffer (shown only when a live tab ISN'T in view).
 claudible.onShareChat((m) => {
   if (!m) return;
-  if (m.role === 'system') addSystemChat(m.text);          // "X joined" / "X left"
-  else if (m.text) { addChat(m.name || 'viewer', m.text, false); if (chimeOn) playChime(); }   // soft ping so you don't miss a codev's chat
+  const onScreen = chatCtx() === null;
+  if (m.role === 'system') chatAppend(hostChat, { sys: true, text: m.text }, onScreen);   // "X joined" / "X left"
+  else if (m.text) { chatAppend(hostChat, { who: m.name || 'viewer', text: m.text, mine: false }, onScreen); if (chimeOn) playChime(); }
+});
+// A JOINED session's chat → that live tab's own buffer.
+claudible.onLiveChat((p) => {
+  if (!p) return; const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
+  const buf = chatBufFor(rec), onScreen = activeTabId === p.tabId;
+  if (p.role === 'system') chatAppend(buf, { sys: true, text: p.text }, onScreen);
+  else if (p.text) { chatAppend(buf, { who: p.name || rec.hostName || 'host', text: p.text, mine: false }, onScreen); if (chimeOn) playChime(); }   // chime even if the live tab is backgrounded (parity with host chat)
 });
 chatReset();
 
@@ -1458,6 +1546,7 @@ async function ensureTunnel() {
 // Collaboration follows the per-workspace "Sync sessions" toggle: a synced repo session means a collaborator can
 // Join live, automatically — no manual sharing. Recomputed whenever the active workspace/session/sync changes.
 function updateCollab() {
+  if (AT() && AT().kind === 'live') { renderLiveBar(); return; }   // viewing a peer's session — DON'T recompute your own share off the live tab's (null) session, or you'd drop your own tunnel + guests
   const aw = workspaces.find((w) => w.id === activeWsId);
   collabLive = !!(aw && aw.kind === 'repo' && aw.syncSessions && activeSession);
   ensureTunnel();
@@ -1493,12 +1582,20 @@ setInterval(pollTitles, 20000);
 function makeLiveBadge(peer) {
   const b = document.createElement('button'); b.className = 'sess-livebadge';
   b.textContent = '● Join live' + ((peer.name || peer.login) ? ' · ' + (peer.name || peer.login) : '');
-  b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — opens in Claudible';
+  b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — co-drive it right here in Claudible';
   b.style.cssText = 'margin-left:6px;flex:none;font:inherit;font-size:10px;font-weight:600;color:#fff;background:rgba(95,180,135,.2);border:1px solid var(--ok,#5fb487);border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap';
+  b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // default: native, in this same window
+  return b;
+}
+// optional fallback: pop the peer's live session into a SEPARATE window (the old behavior)
+function makeWindowBtn(peer) {
+  const b = document.createElement('button');
+  b.textContent = '⤢'; b.title = 'Open ' + (peer.name || peer.login || 'the host') + '’s live session in a separate window';
+  b.style.cssText = 'margin-left:4px;flex:none;font:inherit;font-size:11px;line-height:1;color:var(--ink-faint,#8a92a0);background:transparent;border:1px solid #2b2f37;border-radius:7px;padding:3px 7px;cursor:pointer';
   b.addEventListener('click', (e) => { e.stopPropagation(); joinLive(peer); });
   return b;
 }
-async function joinLive(peer) {
+async function joinLive(peer) {   // separate-window fallback
   try { const r = await claudible.liveJoin(peer, collabName()); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
   catch (e) { toast('Could not join'); }
 }
@@ -1507,11 +1604,132 @@ function renderLivePeerRow(peer) {
   const row = document.createElement('div'); row.className = 'sess sess-peer-live';
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = 'Live session';
   const m = document.createElement('div'); m.className = 'sess-meta'; m.textContent = (peer.name || peer.login || 'a collaborator') + ' is live now';
-  row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer));
+  row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer)); row.appendChild(makeWindowBtn(peer));
   row.style.cursor = 'pointer';
-  row.addEventListener('click', () => joinLive(peer));
+  row.addEventListener('click', () => openLiveTab(peer));
   return row;
 }
+// ---- native joined-session tab: render + drive a peer's live session inside the cockpit -----------------
+const LIVE_STATE_LABEL = { '': 'live', live: 'live', connecting: 'connecting…', pending: 'waiting for host…', reconnecting: 'reconnecting…', paused: 'paused', denied: 'declined', offline: 'ended' };
+// Sizing: a guest can't resize the host's pty, so we mirror the host's FIXED grid and scale the font to contain
+// it in the pane (never a CSS transform — that breaks xterm's char metrics + text selection).
+function fitLiveTab(rec) {
+  if (!rec || rec.kind !== 'live' || !rec.container) return;
+  const cols = rec.hostCols || 120, rows = rec.hostRows || 32;
+  const cs = getComputedStyle(rec.container);
+  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const pw = rec.container.clientWidth - padX, ph = rec.container.clientHeight - padY;
+  if (pw <= 0 || ph <= 0) return;
+  const wFont = pw / (cols * 0.6), hFont = ph / (rows * 1.18);       // largest font whose whole grid still fits
+  const fs = Math.max(6, Math.min(30, Math.floor(Math.min(wFont, hFont))));
+  try { if (rec.term.options.fontSize !== fs) rec.term.options.fontSize = fs; } catch {}
+  try { rec.term.resize(cols, rows); } catch {}
+}
+// Per-tab overlay for the non-streaming states (connecting / waiting / reconnecting / paused / declined / offline).
+function setLiveState(rec, state, detail) {
+  if (!rec || rec.kind !== 'live') return;
+  rec.liveState = state || '';
+  const meta = document.querySelector('[data-livetab="' + rec.tabId + '"] .sess-meta');
+  if (meta) meta.innerHTML = '<span class="sess-livedot"></span>joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live');
+  let ov = rec.container.querySelector('.live-ov');
+  if (!(state && state !== 'live')) { if (ov) ov.classList.remove('show'); return; }
+  if (!ov) { ov = document.createElement('div'); ov.className = 'live-ov'; rec.container.appendChild(ov); }
+  const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'the host';
+  ov.textContent = ({
+    connecting: 'Connecting to ' + who + '’s live session…',
+    pending: 'Waiting for ' + who + ' to let you in…',
+    reconnecting: 'Reconnecting…',
+    paused: who + ' stepped into a private workspace — the mirror is paused.',
+    denied: 'Connection declined' + (detail ? ' (' + detail + ')' : '') + '.',
+    offline: 'This live session is unavailable — it may have ended.',
+  })[state] || state;
+  ov.classList.toggle('bad', state === 'denied' || state === 'offline');
+  ov.classList.add('show');
+}
+// The joined tab's tracker shows the HOST's pre-formatted ctx%/cost/tokens (there's no local pty to compute from).
+function repaintLiveTracker(rec) {
+  if (!rec) return;
+  const pct = rec.curCtxPct, bar = $('trk-ctxbar');
+  if (typeof pct === 'number') {
+    $('trk-ctx').textContent = 'CONTEXT ' + pct + '%';
+    $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
+    bar.classList.toggle('warn', pct >= 70 && pct < 85);
+    bar.classList.toggle('crit', pct >= 85);
+    bar.title = 'host context window used';
+  } else {
+    $('trk-ctx').textContent = 'CONTEXT —'; $('trk-ctxfill').style.width = '2%';
+    bar.classList.remove('warn', 'crit'); bar.title = 'host context window used';
+  }
+  $('trk-cost').textContent = rec.liveCost != null ? rec.liveCost : '$0.00'; $('trk-cost').title = 'host session cost';
+  $('trk-tokens').textContent = rec.liveTokens != null ? rec.liveTokens : '0'; $('trk-tokens').title = 'host session tokens';
+}
+// Open (or focus) a peer's live session as a native tab in THIS window.
+function openLiveTab(peer) {
+  if (!peer) return;
+  for (const r of tabs.values()) { if (r.kind === 'live' && r.peer && r.peer.session === peer.session) { setActiveTab(r.tabId); return; } }   // already joined → just focus it
+  if (tabs.size >= MAX_TABS) { toast('Tab limit reached (' + MAX_TABS + ')'); return; }
+  const id = newTabId();
+  const who = peer.name || peer.login || 'collaborator';
+  const rec = makeTab(id, null, '', { kind: 'live', peer });
+  rec.label = 'Live · ' + who; rec.curSessionLabel = 'Live · ' + who; rec.hostName = who;
+  setActiveTab(id);
+  setLiveState(rec, 'connecting');
+  refreshSessions();                                                 // surface the joined-tab row immediately
+  claudible.liveConnect(id, peer, collabName()).then((r) => {
+    if (!r || !r.ok) { setLiveState(rec, 'offline'); toast('Could not join: ' + ((r && r.error) || 'unknown')); }
+  }).catch(() => setLiveState(rec, 'offline'));
+}
+// A joined live session as a sidebar row (pinned at the top): click to switch, ✕ to leave.
+function renderJoinedTabRow(rec) {
+  const row = document.createElement('div');
+  row.className = 'sess sess-joined-live' + (rec.tabId === activeTabId ? ' active' : '');
+  row.dataset.livetab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
+  const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator';
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + who + '’s session';
+  const m = document.createElement('div'); m.className = 'sess-meta';
+  m.innerHTML = '<span class="sess-livedot"></span>joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live');
+  row.appendChild(p); row.appendChild(m);
+  const xb = document.createElement('button');
+  xb.className = 'sess-menu-btn'; xb.title = 'Leave this live session'; xb.setAttribute('aria-label', 'Leave live session');
+  xb.textContent = '✕';
+  xb.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
+  row.appendChild(xb);
+  row.addEventListener('click', (e) => { if (e.target.closest('button')) return; setActiveTab(rec.tabId); });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setActiveTab(rec.tabId); } });
+  return row;
+}
+// ---- live-session IPC: bytes/control from the peer (relayed by main's client WebSocket) ----------------
+claudible.onLiveData((tabId, data) => {
+  const rec = tabs.get(tabId); if (!rec || rec.kind !== 'live') return;
+  const u8 = (data instanceof Uint8Array) ? data : (data && data.buffer ? new Uint8Array(data.buffer) : new Uint8Array(data || []));
+  const b = rec.term.buffer.active, wasBottom = b.viewportY >= b.baseY;
+  rec.term.write(u8, () => { if (tabId === activeTabId) { if (wasBottom) rec.term.scrollToBottom(); updateScrollbar(); } });
+});
+claudible.onLiveHello((p) => {
+  const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
+  rec.liveReadOnly = !!p.readOnly; rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows;
+  rec.livePid = p.pid || null; if (p.host) rec.hostName = p.host;
+  setLiveState(rec, p.paused ? 'paused' : 'live');
+  if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { rec.term.focus(); } catch {} } }
+});
+claudible.onLiveRoster((p) => {
+  const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
+  rec.roster = Array.isArray(p.list) ? p.list : [];
+  if (activeTabId === p.tabId) { renderRoster(); renderLiveBar(); }
+});
+claudible.onLiveSize((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') { rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows; if (p.tabId === activeTabId) fitLiveTab(rec); } });
+claudible.onLivePaused((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') setLiveState(rec, p.paused ? 'paused' : 'live'); });
+claudible.onLiveState((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') setLiveState(rec, p.state, p.reason); });
+claudible.onLiveStatus((p) => {
+  const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
+  const s = p.status || {};
+  if (typeof s.ctxPct === 'number') rec.curCtxPct = s.ctxPct;
+  if (s.cost != null) rec.liveCost = String(s.cost).slice(0, 16);          // host-provided (untrusted) — textContent + length-capped
+  if (s.tokens != null) rec.liveTokens = String(s.tokens).slice(0, 16);
+  if (s.session != null && s.session) rec.curSessionLabel = 'Live · ' + String(s.session).slice(0, 80);
+  if (p.tabId === activeTabId) repaintLiveTracker(rec);
+});
 function renderSessionRow(s) {
   const row = document.createElement('div');
   row.className = 'sess' + (s.id === activeSession ? ' active' : '') + (sessionOpenInTab(s.id) ? ' open-in-tab' : '');
@@ -1521,7 +1739,7 @@ function renderSessionRow(s) {
   m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
   row.appendChild(p); row.appendChild(m);
   const _lp = livePeers.find((x) => x.session === s.id);
-  if (_lp) row.appendChild(makeLiveBadge(_lp));                      // a collaborator is live in THIS session → join natively
+  if (_lp) { row.appendChild(makeLiveBadge(_lp)); row.appendChild(makeWindowBtn(_lp)); }   // a collaborator is live in THIS session → join natively (or ⤢ in a window)
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → red "!" prompt
     const db = document.createElement('button');
     db.className = 'sess-delbadge'; db.textContent = '!'; db.title = 'Deleted from GitHub by a collaborator';
@@ -1770,7 +1988,8 @@ async function refreshSessions() {
   // empty-session boot tab ('') is excluded: it resolves to the most-recent saved row via reconcile, so it
   // must not flash a phantom "New session" at launch.
   const liveTabs = Array.from(tabs.values()).filter((r) => r.wsId === activeWsId && r.session !== '' && !savedIds.has(r.session));
-  if (!list.length && !liveTabs.length) {
+  const joinedLive = Array.from(tabs.values()).filter((r) => r.kind === 'live');   // peers' sessions I've joined (cross-workspace) → always reachable
+  if (!list.length && !liveTabs.length && !joinedLive.length) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
@@ -1787,6 +2006,7 @@ async function refreshSessions() {
   const at = AT();
   if (at && act && !at.curSessionLabel) { at.curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
   sessListEl.innerHTML = '';
+  joinedLive.forEach((rec) => sessListEl.appendChild(renderJoinedTabRow(rec)));      // peers' live sessions I've joined — pinned at the top
   ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
   liveTabs.forEach((rec) => sessListEl.appendChild(renderLiveTabRow(rec)));          // live, not-yet-saved sessions, appended below
   if (livePeers.length) {                                                            // a collaborator is live in a session we don't have locally yet
@@ -2249,7 +2469,13 @@ async function refreshWorkspaces() {
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
 async function switchWorkspace(id) {
   if (id === activeWsId) return;
-  const t = AT(); if (!t) return;
+  let t = AT();
+  if (t && t.kind === 'live') {                     // viewing a peer's session — a workspace switch applies to YOUR own tab, never the live mirror
+    const local = [...tabs.values()].find((r) => r.kind !== 'live');
+    if (!local) { toast('Open one of your own sessions first'); return; }
+    setActiveTab(local.tabId); t = local;
+  }
+  if (!t) return;
   activeWsId = id; t.wsId = id; t.session = ''; t.label = '';
   activeSession = null; t.curSessionLabel = '';   // the conversation list is about to change entirely
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace

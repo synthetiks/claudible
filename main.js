@@ -23,6 +23,11 @@ const ptys = new Map();
 let fgTabId = null;
 const tabIntent = new Map();   // tabId -> { ws, session } recorded by tab:open, consumed by the next pty:start
 function fgRec() { return ptys.get(fgTabId) || null; }
+// Native live-join: a JOINED peer session is NOT a local pty — it's a CLIENT WebSocket (held in main because the
+// renderer's CSP forbids a wss:// socket) that mirrors a peer's terminal into a cockpit tab. Kept entirely
+// separate from `ptys`/`fgTabId` so watching/co-driving a peer NEVER touches the user's own outgoing share.
+const { WebSocket: LiveSocket } = require('ws');
+const liveTabs = new Map();    // tabId -> { ws, url, token, name, hostCols, hostRows, pid, readOnly, resume, retry, closed, peer }
 // Live terminal sharing: server runs locally (loopback); cloudflared carries the last hop. See share/.
 let cloudflaredProc = null, shareBaseUrl = null;
 const share = createShareServer({
@@ -270,6 +275,7 @@ function respawnPty(tabId, session) {
 // Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points
 // the single guest mirror at this tab and keeps the global active-workspace notion in lockstep with it.
 function setForegroundTab(tabId) {
+  if (liveTabs.has(tabId)) return;   // a joined live tab is a remote mirror, not a local pty — it must NEVER become the foreground/shared tab (would pause + wipe + black-hole the user's own outgoing share)
   fgTabId = tabId;   // record intent even if the pty hasn't spawned yet — spawnPty wires the mirror once it has
   const rec = ptys.get(tabId);
   if (rec && rec.ws && registry.activeId !== rec.ws.id) { activeWorkspace = rec.ws; registry.activeId = rec.ws.id; saveRegistry(); }
@@ -304,9 +310,83 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   setGenBusy(tabId, false);
   ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId); tabIntent.delete(tabId);
   if (rec) { try { rec.proc.kill(); } catch {} }
+  liveDisconnect(tabId);                                               // also drop a joined live socket if this was a live tab
   if (fgTabId === tabId) fgTabId = ptys.keys().next().value || null;   // renderer will foreground the next tab explicitly
   return { ok: true };
 });
+
+// ---- native live-join: client WebSocket(s) to peers' share servers (one per joined tab) ----------
+// The cockpit speaks the EXACT guest protocol (share/server.js): binary frames = terminal bytes, JSON = control
+// (hello/status/size/paused/chat/roster/voice-members/audio/pending/denied). Each frame is relayed to the
+// renderer over IPC tagged by tabId; the renderer draws a normal xterm tab and sends input/chat/audio back.
+// Terminal bytes are forwarded RAW (never base64); the remote stream is treated as untrusted (parsed defensively).
+function liveSend(tabId, channel, payload) { try { win && win.webContents.send(channel, Object.assign({ tabId }, payload || {})); } catch {} }
+function liveForward(tabId, type, obj) {
+  const r = liveTabs.get(tabId);
+  if (r && r.ws && r.ws.readyState === LiveSocket.OPEN) { try { r.ws.send(JSON.stringify(Object.assign({ type }, obj))); } catch {} }
+}
+function openLiveSocket(tabId) {
+  const r = liveTabs.get(tabId); if (!r || r.closed) return;
+  const cred = r.resume ? ('r=' + encodeURIComponent(r.resume)) : ('t=' + encodeURIComponent(r.token));
+  const wsUrl = r.url.replace(/^http/i, 'ws') + '/?' + cred + (r.name ? '&n=' + encodeURIComponent(r.name) : '');
+  let sock; try { sock = new LiveSocket(wsUrl); } catch (err) { return liveSend(tabId, 'live:state', { state: 'offline' }); }
+  r.ws = sock; sock.binaryType = 'nodebuffer';
+  let gotHello = false;
+  sock.on('open', () => { r.retry = 0; liveSend(tabId, 'live:state', { state: 'connecting' }); });
+  sock.on('message', (data, isBinary) => {
+    if (isBinary) { try { win && win.webContents.send('live:data', { tabId, data }); } catch {} return; }   // raw terminal bytes
+    let m = null; try { m = JSON.parse(data.toString()); } catch {} if (!m) return;
+    switch (m.type) {
+      case 'hello':
+        gotHello = true; r.pid = m.pid || null; r.readOnly = !!m.readOnly;
+        r.hostCols = m.cols || r.hostCols || 120; r.hostRows = m.rows || r.hostRows || 32;
+        if (m.resume) r.resume = m.resume;
+        liveSend(tabId, 'live:hello', { readOnly: r.readOnly, cols: r.hostCols, rows: r.hostRows, host: m.host, you: m.you, pid: r.pid, paused: !!m.paused, voice: Array.isArray(m.voice) ? m.voice : [] });
+        break;
+      case 'status': liveSend(tabId, 'live:status', { status: m.status || {} }); break;
+      case 'size': r.hostCols = m.cols || r.hostCols; r.hostRows = m.rows || r.hostRows; liveSend(tabId, 'live:size', { cols: r.hostCols, rows: r.hostRows }); break;
+      case 'paused': liveSend(tabId, 'live:paused', { paused: !!m.paused }); break;
+      case 'chat': liveSend(tabId, 'live:chat', { role: m.role, name: m.name, text: m.text }); break;
+      case 'roster': liveSend(tabId, 'live:roster', { list: Array.isArray(m.list) ? m.list : [] }); break;
+      case 'voice-members': liveSend(tabId, 'live:voice-members', { members: Array.isArray(m.members) ? m.members : [] }); break;
+      case 'audio': liveSend(tabId, 'live:audio', { from: m.from, data: m.data, sr: m.sr }); break;
+      case 'pending': liveSend(tabId, 'live:state', { state: 'pending' }); break;
+      case 'denied': r.closed = true; liveSend(tabId, 'live:state', { state: 'denied', reason: m.reason || '' }); break;
+      default: break;   // workspaces / ws-sessions / ws-transcript / rtc: unused by the native joined tab
+    }
+  });
+  sock.on('close', () => {
+    r.ws = null; if (r.closed) return;
+    const warm = gotHello || r.resume;                     // we were admitted (resume token proves it) → reconnect indefinitely
+    if (!warm) { r.coldTries = (r.coldTries || 0) + 1; if (r.coldTries > 5) { liveSend(tabId, 'live:state', { state: 'offline' }); return; } }   // cold: host tunnel may just be slow to come up — try a few times, then give up
+    r.retry = Math.min(r.retry + 1, 6);
+    liveSend(tabId, 'live:state', { state: warm ? 'reconnecting' : 'offline' });
+    r.retryTimer = setTimeout(() => openLiveSocket(tabId), (warm ? 500 : 3000) * r.retry);
+    if (r.retryTimer.unref) r.retryTimer.unref();
+  });
+  sock.on('error', () => { try { sock.close(); } catch {} });
+}
+function liveConnect(tabId, peer, name) {
+  const url = String((peer && peer.url) || '');
+  const tok = String((peer && peer.token) || '').replace(/[^A-Za-z0-9._~-]/g, '');
+  const okUrl = /^https:\/\/[A-Za-z0-9.:/_-]+$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
+  if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
+  liveDisconnect(tabId);                                  // replace any prior socket bound to this tab
+  liveTabs.set(tabId, { ws: null, url, token: tok, name: String(name || '').slice(0, 40), hostCols: 120, hostRows: 32, pid: null, readOnly: false, resume: null, retry: 0, closed: false, peer });
+  openLiveSocket(tabId);
+  return { ok: true };
+}
+function liveDisconnect(tabId) {
+  const r = liveTabs.get(tabId); if (!r) return;
+  r.closed = true; try { r.retryTimer && clearTimeout(r.retryTimer); } catch {} try { r.ws && r.ws.close(); } catch {}   // stop any in-flight reconnect too
+  liveTabs.delete(tabId);
+}
+ipcMain.handle('live:connect', (e, { tabId, peer, name } = {}) => liveConnect(tabId, peer, name));
+ipcMain.handle('live:disconnect', (e, { tabId } = {}) => { liveDisconnect(tabId); return { ok: true }; });
+ipcMain.on('live:input', (e, { tabId, data } = {}) => liveForward(tabId, 'input', { data: String(data == null ? '' : data) }));   // a keystroke → the peer's foreground pty
+ipcMain.on('live:chat-send', (e, { tabId, text } = {}) => liveForward(tabId, 'chat', { text: String(text == null ? '' : text).slice(0, 2000) }));
+ipcMain.on('live:voice', (e, { tabId, join } = {}) => liveForward(tabId, join ? 'voice-join' : 'voice-leave', {}));
+ipcMain.on('live:audio-send', (e, { tabId, data, sr } = {}) => liveForward(tabId, 'audio', { data, sr }));
 
 // ---- live terminal sharing (local server + cloudflared tunnel) ----
 ipcMain.handle('share:start', async (e, opts) => {
@@ -1061,6 +1141,7 @@ process.on('unhandledRejection', (e) => console.error('[claudible] unhandledReje
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   try { for (const { proc } of ptys.values()) { try { proc.kill(); } catch {} } ptys.clear(); } catch {}
+  try { for (const id of [...liveTabs.keys()]) liveDisconnect(id); } catch {}   // close any joined peer sockets
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   try { share.stop(); } catch {}
   app.quit();
