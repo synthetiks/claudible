@@ -10,6 +10,10 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
+// TEMP diagnostics: surface uncaught errors (DevTools is disabled in this build) — toast + console
+// (main mirrors the console to .claudible-debug.log). Remove once the Join-live issue is found.
+window.addEventListener('error', (e) => { try { console.error('[uncaught]', (e && e.message) || e, (e && e.filename || '') + ':' + (e && e.lineno)); toast('Err: ' + ((e && e.message) || e)); } catch (x) {} });
+window.addEventListener('unhandledrejection', (e) => { try { const r = e && e.reason; console.error('[unhandledrejection]', (r && (r.stack || r.message)) || r); } catch (x) {} });
 
 // ---------- embedded live TUI (one xterm per tab; only the foreground tab's container is visible) ----------
 const BASE_LH = 1.15;   // terminal line-height
@@ -1584,7 +1588,7 @@ function makeLiveBadge(peer) {
   b.textContent = '● Join live' + ((peer.name || peer.login) ? ' · ' + (peer.name || peer.login) : '');
   b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — co-drive it right here in Claudible';
   b.style.cssText = 'margin-left:6px;flex:none;font:inherit;font-size:10px;font-weight:600;color:#fff;background:rgba(95,180,135,.2);border:1px solid var(--ok,#5fb487);border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap';
-  b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // default: native, in this same window
+  b.addEventListener('click', (e) => { e.stopPropagation(); console.log('[live] badge clicked'); openLiveTab(peer); });   // default: native, in this same window
   return b;
 }
 // optional fallback: pop the peer's live session into a SEPARATE window (the old behavior)
@@ -1596,8 +1600,9 @@ function makeWindowBtn(peer) {
   return b;
 }
 async function joinLive(peer) {   // separate-window fallback
-  try { const r = await claudible.liveJoin(peer, collabName()); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
-  catch (e) { toast('Could not join'); }
+  console.log('[live] joinLive called — name=', peer && (peer.name || peer.login), 'session=', peer && peer.session);
+  try { const r = await claudible.liveJoin(peer, collabName()); console.log('[live] liveJoin result:', JSON.stringify(r)); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
+  catch (e) { console.error('[live] joinLive THREW:', e); toast('Could not join: ' + ((e && e.message) || e)); }
 }
 // a collaborator is live in a session we don't have locally yet → a joinable row of its own
 function renderLivePeerRow(peer) {
@@ -1666,6 +1671,8 @@ function repaintLiveTracker(rec) {
 }
 // Open (or focus) a peer's live session as a native tab in THIS window.
 function openLiveTab(peer) {
+ try {
+  console.log('[live] openLiveTab called — name=', peer && (peer.name || peer.login), 'session=', peer && peer.session, 'hasUrl=', !!(peer && peer.url), 'hasTok=', !!(peer && peer.token), 'tabs=', tabs.size);
   if (!peer) return;
   for (const r of tabs.values()) { if (r.kind === 'live' && r.peer && r.peer.session === peer.session) { setActiveTab(r.tabId); return; } }   // already joined → just focus it
   if (tabs.size >= MAX_TABS) { toast('Tab limit reached (' + MAX_TABS + ')'); return; }
@@ -1677,8 +1684,10 @@ function openLiveTab(peer) {
   setLiveState(rec, 'connecting');
   refreshSessions();                                                 // surface the joined-tab row immediately
   claudible.liveConnect(id, peer, collabName()).then((r) => {
+    console.log('[live] liveConnect result:', JSON.stringify(r));
     if (!r || !r.ok) { setLiveState(rec, 'offline'); toast('Could not join: ' + ((r && r.error) || 'unknown')); }
-  }).catch(() => setLiveState(rec, 'offline'));
+  }).catch((err) => { console.error('[live] liveConnect rejected:', err); setLiveState(rec, 'offline'); });
+ } catch (e) { console.error('[live] openLiveTab THREW:', e && (e.stack || e.message || e)); toast('Join failed: ' + ((e && e.message) || e)); }
 }
 // A joined live session as a sidebar row (pinned at the top): click to switch, ✕ to leave.
 function renderJoinedTabRow(rec) {

@@ -166,8 +166,24 @@ function createWindow() {
   // attempt to open new windows — defense-in-depth for distributed Electron software.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  // --- TEMP diagnostics: DevTools is disabled in this build, so capture the renderer's console + crashes to a
+  //     file (.claudible-debug.log) AND force-open DevTools, so a silent click failure becomes visible. ---
+  const dbgLog = path.join(__dirname, '.claudible-debug.log');
+  const dbg = (s) => { try { fs.appendFileSync(dbgLog, new Date().toISOString() + ' ' + s + '\n'); } catch {} };
+  try { fs.writeFileSync(dbgLog, new Date().toISOString() + ' [start] Claudible launched\n'); } catch {}
+  win.webContents.on('console-message', (...a) => {
+    let lvl, msg = '', src = '';
+    const M = { debug: 0, verbose: 0, info: 1, log: 1, warning: 2, warn: 2, error: 3 };
+    if (typeof a[1] === 'number') { lvl = a[1]; msg = a[2]; src = (a[4] || '') + ':' + a[3]; }
+    else { const o = a[0] || {}; lvl = (M[o.level] != null) ? M[o.level] : 1; msg = (o.message != null) ? o.message : ''; src = (o.sourceId || '') + ':' + (o.lineNumber || ''); }
+    dbg('[console L' + lvl + '] ' + msg + '  (' + src + ')');
+  });
+  win.webContents.on('render-process-gone', (e, d) => dbg('[render-process-gone] ' + JSON.stringify(d)));
+  win.webContents.on('preload-error', (e, p, err) => dbg('[preload-error] ' + p + ' ' + (err && err.message)));
+  win.webContents.on('unresponsive', () => dbg('[unresponsive]'));
   win.loadFile('renderer/index.html');
   win.webContents.once('did-finish-load', () => {   // one-shot, scoped to this contents: a reload won't stack a 2nd set of pollers/timers
+    try { win.webContents.openDevTools({ mode: 'detach' }); } catch {}   // TEMP: force-open DevTools (Ctrl+Shift+I is dead in this build)
     startVoiceServices();   // idempotent; ensures STT/TTS are up even when launched via `npm start`
     pollStatus(); pollHooks(); pollAgentTokens();
     // spawn-on-size fallback: if the renderer never reports a size, seed the first tab ('main') at a default
