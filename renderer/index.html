@@ -579,24 +579,37 @@
     .hvm.c-failed,.hvm.c-disconnected,.hvm.c-closed{border-color:rgba(229,86,75,.6);color:#e5564b}
     .hvm.c-failed .d,.hvm.c-disconnected .d,.hvm.c-closed .d{background:#e5564b}
     .share-btn{width:100%}
-    /* settings drawer — slimmer, tighter, less clunky */
-    .drawer{width:338px}
-    .drawer .panel{padding:4px 16px 18px}
-    .drawer .sec{padding:11px 2px}
-    .drawer .label{margin-bottom:8px;font-size:10.5px}
-    .drawer button.primary{padding:9px 12px;font-size:12px}        /* Talk — was an oversized block */
-    .drawer #speak{padding:8px 12px;font-size:11.5px}              /* Speak — was an oversized block */
-    .drawer .voices{margin-bottom:8px}
-    .drawer .ptt-key-row{margin-top:8px}
-    .drawer .out{margin-top:8px}
-    .drawer .speakrow{margin-top:9px}
-    .drawer .speedrow{margin-top:9px}
-    .drawer .transcript{max-height:120px}
+    /* ── settings drawer: compact, sleek, consistent (width/panel padding set on the base rule below) ── */
+    .drawer .sec{padding:13px 0}
+    .drawer .sec:last-child{border-bottom:none}
+    .drawer .label{margin-bottom:9px;font-size:10px;letter-spacing:.16em}
+    .drawer .label .ico{width:13px;height:13px}
+    .drawer .label .collapse{font-size:15px}
+    .drawer .name-field{padding:7px 11px;font-size:12px}
+    /* voice in — a slim Talk button + a compact key row; the status line takes no space until it has text */
+    .drawer button.primary{padding:8px 12px;font-size:12px;border-radius:8px}
+    .drawer .ptt-key-row{margin-top:8px;font-size:10.5px}
+    .drawer .keycap-btn{padding:5px 11px;font-size:10.5px}
+    .drawer .sec > .out{margin-top:8px;min-height:0;font-size:11px}
+    .drawer .transcript{max-height:110px;font-size:11.5px;padding:8px 10px}
+    /* voice out — voice pills with an inline ▶ test button, then tight Always-Speak + speed rows */
+    .drawer .voices{gap:5px;margin-bottom:0}
+    .drawer .vpill{padding:7px 4px;font-size:10.5px}
+    .drawer .vtest{width:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0 13px;font-size:12px;border-radius:8px;color:var(--ink-dim)}
+    .drawer #tts-wrap:not(.min){margin-top:8px}
+    .drawer #tts-in{padding:7px 10px;font-size:11.5px}
+    .drawer .speakrow{margin-top:10px}
+    .drawer .speedrow{margin-top:10px}
+    .drawer .speedlbl{font-size:10.5px}
+    /* alerts + effort — tighter toggles/pills */
+    .drawer .toggle{font-size:9.5px}
+    .drawer .effort-row{gap:5px;margin-bottom:6px}
+    .drawer .eff-pill{padding:4px 9px;font-size:10px}
     /* Settings button (top bar) — opens the slide-in drawer holding voice/commands/share */
     /* drawer + scrim */
     .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity .2s}
     .drawer-scrim.open{opacity:1;pointer-events:auto}
-    .drawer{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:384px;max-width:92vw;display:flex;flex-direction:column;
+    .drawer{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:340px;max-width:92vw;display:flex;flex-direction:column;
       transform:translateX(102%);transition:transform .22s ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
       border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
     .drawer.open{transform:translateX(0)}
@@ -604,7 +617,7 @@
       font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
     .drawer-head button{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
     .drawer-head button:hover{color:var(--ink)}
-    .drawer .panel{flex:1;overflow:auto;padding:2px 16px 18px}
+    .drawer .panel{flex:1;overflow:auto;padding:0 16px 16px}
     /* Diff Review panel — a wider right-side slide-in (mirrors the drawer mechanism) */
     .diffpanel{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:540px;max-width:94vw;display:flex;flex-direction:column;
       transform:translateX(102%);transition:transform .22s ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
@@ -857,11 +870,11 @@
           <button class="vpill on" data-voice="af_bella">Bella<i>♀</i></button>
           <button class="vpill" data-voice="af_heart">Heart<i>♀</i></button>
           <button class="vpill" data-voice="am_michael">Michael<i>♂</i></button>
+          <button id="speak" class="vtest" title="Test the selected voice">▶</button>
         </div>
         <div class="collapsible min" id="tts-wrap">
-          <input type="text" id="tts-in" value="Type here, then hit Speak to test how this voice sounds." placeholder="Type a line to test the selected voice…" />
+          <input type="text" id="tts-in" value="Type here, then hit ▶ to test how this voice sounds." placeholder="Type a line to test the selected voice…" />
         </div>
-        <button id="speak">Speak</button>
         <div class="speakrow">
           <label class="toggle on" id="always-toggle">
             <input type="checkbox" id="always-speak" checked />
