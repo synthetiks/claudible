@@ -803,16 +803,29 @@ window.addEventListener('contextmenu', (e) => {
 // colleague over a ONE-TIME link. The server runs in the main process; here we drive the lifecycle,
 // the link, and the approve-guest prompt. Two controls protect access: (1) you approve each new guest
 // before any data flows, (2) the link is consumed once that guest is approved.
-let sharing = false;
+// Two independent reasons the share tunnel runs: COLLAB (a synced session — Crazy can Join live, invisible in
+// the bottom-left) and WEB (you pressed "Share a live link" — shows the active indicator). Tunnel is up iff either.
+let webShare = false;        // manual web link active → drives the bottom-left "sharing" indicator ONLY
+let collabLive = false;      // active workspace is a synced repo session → wants the tunnel for native peer-join
+let tunnelUp = false, tunnelBusy = false;          // is the share server actually running / a start-stop in flight
+let guestCount = 0, chatPanelShown = false;
+let lastShareUrl = '', lastShareRemote = true, lastShareNote = null, lastShareReadOnly = false;
 const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out');
-function shareUI(on) {
+// The bottom-left indicator reflects ONLY a manual web link (never collab) — collaboration stays invisible here.
+function webShareUI(on) {
   shareBtn.textContent = on ? 'Stop sharing' : 'Share a live link';
   shareBtn.classList.toggle('live', on);
   setActive('lbl-share', on);
   setDot('d-share', on ? 'ok' : '');
-  $('share-ro').disabled = on;                 // mode is fixed for the life of a session
-  document.querySelector('.body').classList.toggle('sharing', on);   // reveal/hide the chat column
-  if (on) { chatReset(); renderRoster([]); }                         // show "you" in the roster the moment sharing starts
+  if (!on) { shareLink.style.display = 'none'; shareLink.value = ''; }
+}
+// The collaboration chat/voice column appears when you're web-sharing OR a viewer/peer has actually joined — so
+// an idle synced session stays clean, but the panel is there the moment someone's watching.
+function refreshChatPanel() {
+  const show = webShare || guestCount > 0;
+  document.querySelector('.body').classList.toggle('sharing', show);
+  if (show && !chatPanelShown) { chatReset(); renderRoster([]); }
+  chatPanelShown = show;
 }
 // presence roster in the chat header: you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light
 function renderRoster(roster) {
@@ -925,14 +938,11 @@ function showLink(url) {
 }
 let hostDisplayName = 'Host';
 shareBtn.addEventListener('click', async () => {
-  if (sharing) {
+  if (webShare) {                                   // stop the WEB link only — collab keeps the tunnel if it still needs it
     shareBtn.disabled = true;
-    await claudible.shareStop();
-    sharing = false; shareUI(false);
-    autoLiveSuppressed = true;                      // a deliberate stop sticks — don't let auto-live re-share until you switch workspaces
-    updateAdvertise();                              // stop advertising — no longer hosting a live session
-    shareLink.style.display = 'none'; shareLink.value = '';
-    shareOut.textContent = 'sharing stopped'; shareOut.className = 'out';
+    webShare = false; webShareUI(false);
+    await ensureTunnel();
+    shareOut.textContent = 'web link stopped'; shareOut.className = 'out';
     shareBtn.disabled = false;
     return;
   }
@@ -948,19 +958,19 @@ async function doStartSharing() {
   shareBtn.disabled = true;
   shareOut.textContent = 'starting tunnel…'; shareOut.className = 'out';
   setDot('d-share', 'work');
-  const readOnly = $('share-ro').checked;
-  let r; try { r = await claudible.shareStart({ readOnly, name: hostDisplayName }); } catch (e) { r = { ok: false, error: String(e) }; }
+  webShare = true;
+  await ensureTunnel();                             // starts the tunnel (or reuses the one collab already has up)
   shareBtn.disabled = false;
-  if (!r || !r.ok) {
-    setDot('d-share', 'bad'); shareOut.textContent = 'share failed: ' + ((r && r.error) || 'unknown'); shareOut.className = 'out';
+  if (!tunnelUp) {
+    webShare = false; webShareUI(false); await ensureTunnel();
+    setDot('d-share', 'bad'); shareOut.textContent = 'share failed — could not start the tunnel'; shareOut.className = 'out';
     return;
   }
-  sharing = true; shareUI(true);
-  updateAdvertise();                                // in a repo workspace, the active session is now joinable natively
-  showLink(r.url);
-  const mode = readOnly ? ' · view-only' : '';
-  shareOut.textContent = (r.remote === false)
-    ? 'local link only (tunnel off)' + mode + ' — ' + (r.note || '')
+  webShareUI(true);
+  showLink(lastShareUrl);
+  const mode = lastShareReadOnly ? ' · view-only' : '';   // the ACTUAL server mode (collab co-drive may override the checkbox)
+  shareOut.textContent = (lastShareRemote === false)
+    ? 'local link only (tunnel off)' + mode + ' — ' + (lastShareNote || '')
     : 'invite link — share with your team' + mode;
   shareOut.className = 'out live';
 }
@@ -973,14 +983,16 @@ shareLink.addEventListener('click', () => {
   shareLink.select(); claudible.clipWrite(shareLink.value);
   const prev = shareOut.textContent;
   shareOut.textContent = 'link copied ✓';
-  setTimeout(() => { if (sharing) shareOut.textContent = prev; }, 1200);
+  setTimeout(() => { if (webShare) shareOut.textContent = prev; }, 1200);
 });
 // (the "New link" button was removed — the same link works for everyone you invite; nothing to rotate)
-// reflect connected viewers while sharing
+// reflect connected viewers; a join (collab or web) reveals the chat panel, web-share also updates its status line
 claudible.onShareGuests((n) => {
-  if (!sharing) return;
-  shareOut.textContent = n > 0 ? (n + ' viewer' + (n === 1 ? '' : 's') + ' connected') : 'waiting for people to join';
-  shareOut.className = 'out live';
+  guestCount = n; refreshChatPanel();
+  if (webShare) {
+    shareOut.textContent = n > 0 ? (n + ' viewer' + (n === 1 ? '' : 's') + ' connected') : 'waiting for people to join';
+    shareOut.className = 'out live';
+  }
   if (n > 0) pushTracker();   // make sure a just-joined guest sees the current tracker
 });
 
@@ -1358,33 +1370,39 @@ function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === ac
 // Advertise only changes when it actually changes (avoids spamming presence pushes).
 function updateAdvertise() {
   const aw = workspaces.find((w) => w.id === activeWsId);
-  const want = (sharing && aw && aw.kind === 'repo' && activeSession) ? activeSession : null;
+  const want = (tunnelUp && aw && aw.kind === 'repo' && aw.syncSessions && activeSession) ? activeSession : null;
   if (want === advertisedSession) return;
   advertisedSession = want;
   try { want ? claudible.liveAdvertise(want) : claudible.liveUnadvertise(); } catch (e) {}
 }
-// ---- Auto-live (Phase D): in a repo workspace you've already marked shareable, opening a session spins up the
-// tunnel automatically so a collaborator can just "Join live" — no manual "start sharing" click. The gate is the
-// EXISTING per-workspace `shared` consent (the guest mirror stays paused for non-shared workspaces), so this adds
-// no new exposure. `autoLiveSuppressed` lets a manual "Stop sharing" stick until you switch workspaces.
-let autoLiveStarting = false, autoLiveSuppressed = false;
-async function maybeAutoLive() {
-  if (loadPrefs().autoLive === false) return;                                  // global escape hatch (default on)
-  const aw = workspaces.find((w) => w.id === activeWsId);
-  if (!(aw && aw.kind === 'repo' && aw.shared && activeSession)) return;       // only a shareable repo workspace with a live session
-  if (sharing || autoLiveStarting || autoLiveSuppressed) return;
-  autoLiveStarting = true;
+// ---- Collaboration tunnel: keep the single share server matching what's actually wanted — a manual web link
+// (webShare) OR a synced session a peer can join (collabLive). The bottom-left indicator is driven SEPARATELY
+// (webShareUI), so collaboration never lights up as "sharing live". ----
+async function ensureTunnel() {
+  if (tunnelBusy) return;                                  // an op is in flight; it reconciles at the end
+  const want = webShare || collabLive;
+  if (want === tunnelUp) { refreshChatPanel(); updateAdvertise(); return; }
+  tunnelBusy = true;
   try {
-    hostDisplayName = loadPrefs().hostName || 'Host';                          // no name prompt — reuse the last one
-    const r = await claudible.shareStart({ readOnly: false, name: hostDisplayName });   // co-drive, so a peer can actually work
-    if (r && r.ok) {
-      sharing = true; shareUI(true); showLink(r.url);
-      shareOut.textContent = (r.remote === false) ? 'live · local only (tunnel off)' : 'live · collaborators here can join';
-      shareOut.className = 'out live';
-      updateAdvertise();                                                       // publish presence now that we're hosting
+    if (want) {
+      const ro = (!collabLive && webShare) ? !!$('share-ro').checked : false;   // collab is always co-drive
+      const r = await claudible.shareStart({ readOnly: ro, name: loadPrefs().hostName || 'Host' });
+      if (r && r.ok) { tunnelUp = true; lastShareUrl = r.url; lastShareRemote = r.remote; lastShareNote = r.note; lastShareReadOnly = !!r.readOnly; }
+    } else {
+      await claudible.shareStop(); tunnelUp = false; lastShareUrl = ''; guestCount = 0;   // no tunnel → no viewers → panel can close
     }
   } catch (e) {}
-  autoLiveStarting = false;
+  tunnelBusy = false;
+  try { $('share-ro').disabled = tunnelUp; } catch (e) {}   // view-only can only be chosen when starting a FRESH tunnel
+  refreshChatPanel(); updateAdvertise();
+  if ((webShare || collabLive) !== tunnelUp) ensureTunnel();   // desired state changed mid-flight → reconcile
+}
+// Collaboration follows the per-workspace "Sync sessions" toggle: a synced repo session means a collaborator can
+// Join live, automatically — no manual sharing. Recomputed whenever the active workspace/session/sync changes.
+function updateCollab() {
+  const aw = workspaces.find((w) => w.id === activeWsId);
+  collabLive = !!(aw && aw.kind === 'repo' && aw.syncSessions && activeSession);
+  ensureTunnel();
 }
 // Poll the shared branch for collaborators who are live (only in a repo workspace). Re-render on change.
 async function pollLivePeers() {
@@ -1718,7 +1736,7 @@ async function refreshSessions() {
   }
   const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
-  maybeAutoLive();                                                                  // shared repo workspace + a session open → auto-spin the tunnel so a peer can just Join
+  updateCollab();                                                                   // synced repo session → tunnel up so a peer can Join live (no bottom-left indicator)
   pollTitles();                                                                     // refresh workspace-shared names (throttled inside)
 }
 // A live, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
@@ -1985,12 +2003,12 @@ function wsMenuItems(chip, nm, w) {
     if (w.syncSessions) {
       const extra = (st.synced != null ? ' · ' + st.synced + ' synced' : '') + (st.diverged ? ' · ' + st.diverged + ' to review' : '');
       items.push({ icon: CLOUD_SVG, label: (st.status === 'syncing' ? 'Syncing sessions…' : 'Sync sessions now') + extra, on: true,
-        hint: 'Push & pull session transcripts with your collaborators now.', act: () => triggerSyncNow(w) });
-      items.push({ icon: CLOUD_SVG, label: 'Turn off session-sync',
-        hint: 'Stop saving this workspace’s transcripts to its GitHub repo.', act: () => disableSync(w) });
+        hint: 'Collaborating in Claudible: teammates see your sessions and can Join live. Push & pull now.', act: () => triggerSyncNow(w) });
+      items.push({ icon: CLOUD_SVG, label: 'Turn off collaboration',
+        hint: 'Stop sharing this workspace’s sessions — no more sync, and teammates can no longer Join live.', act: () => disableSync(w) });
     } else {
-      items.push({ icon: CLOUD_SVG, label: 'Cloud session-sync…',
-        hint: 'Save your chat transcripts to this repo on GitHub so collaborators can open & resume your sessions.',
+      items.push({ icon: CLOUD_SVG, label: 'Collaborate in Claudible…',
+        hint: 'Sync this workspace’s sessions over its GitHub repo so teammates can open, resume, AND Join your sessions live — no link needed.',
         act: () => openSyncModal(w) });
     }
   }
@@ -2114,7 +2132,7 @@ async function triggerSyncNow(w) {
 // turn sharing OFF (right-click the cloud) — stops publishing; already-committed history stays in the repo
 async function disableSync(w) {
   let r = null; try { r = await claudible.syncSetEnabled(w.id, false); } catch {}
-  if (r && r.ok) { w.syncSessions = false; delete wsSyncState[w.id]; renderWsChips(); }
+  if (r && r.ok) { w.syncSessions = false; delete wsSyncState[w.id]; renderWsChips(); updateCollab(); }   // sync off → collab off (drops the tunnel if no web link)
 }
 // one-time consent modal before turning sharing on (it commits transcripts to the repo)
 let syncWs = null;
@@ -2131,7 +2149,7 @@ async function confirmSync() {
   busy.classList.remove('err'); busy.textContent = 'setting up sharing…'; $('sync-go').disabled = true;
   let r = null; try { r = await claudible.syncSetEnabled(w.id, true); } catch {}
   $('sync-go').disabled = false;
-  if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); }
+  if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); updateCollab(); }   // sync on → a peer can now Join live
   else { busy.textContent = (r && r.error) || 'could not turn on sharing'; busy.classList.add('err'); }
 }
 async function refreshWorkspaces() {
@@ -2147,7 +2165,6 @@ async function switchWorkspace(id) {
   const t = AT(); if (!t) return;
   activeWsId = id; t.wsId = id; t.session = ''; t.label = '';
   activeSession = null; t.curSessionLabel = '';   // the conversation list is about to change entirely
-  autoLiveSuppressed = false;                      // a fresh workspace re-enables auto-live (clears any earlier manual stop)
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
@@ -2221,7 +2238,7 @@ $('invite-name-in').addEventListener('keydown', (e) => {
 claudible.onWorkspaceActiveChanged((id) => {
   if (id === activeWsId) return;
   const t = AT();
-  activeWsId = id; activeSession = null; autoLiveSuppressed = false; lastTitlePoll = 0; titlesSig = '';
+  activeWsId = id; activeSession = null; lastTitlePoll = 0; titlesSig = '';
   if (t) { t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t); }   // main re-pointed the foreground tab
   refreshWorkspaces(); refreshSessions(); renderTabStrip();
 });

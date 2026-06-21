@@ -234,16 +234,20 @@ function spawnPty(tabId, cols, rows, ws, session) {
     });
   } catch (e) { win.webContents.send('pty:data', { tabId, data: `\r\n[claudible] pty spawn failed: ${e.message}\r\n` }); }
 }
+// The live terminal STREAMS for a workspace that's either explicitly screen-shared OR session-synced (so a
+// Claudible collaborator can watch the synced session live). The browsable LIBRARY below stays shared-only, so
+// turning on Sync never exposes your other synced workspaces to a web guest you handed a link to.
+function isShareable(ws) { return !!(ws && (ws.shared || ws.syncSessions)); }
 // The granted workspace library a guest is allowed to see (paths/urls stripped); marks which is live.
 function grantedList() {
   return registry.workspaces.filter((w) => w.shared)
     .map((w) => ({ id: w.id, label: w.label, kind: w.kind, live: w.id === registry.activeId }));
 }
-// Push the current grant state to guests: pause the mirror when the live workspace isn't granted,
+// Push the current grant state to guests: pause the mirror when the live workspace isn't streamable,
 // and refresh the visible library. No-op when not sharing.
 function syncShare() {
   if (!share.status().running) return;
-  try { share.setPaused(!(activeWorkspace && activeWorkspace.shared)); } catch {}
+  try { share.setPaused(!isShareable(activeWorkspace)); } catch {}
   try { share.setWorkspaces(grantedList()); } catch {}
 }
 // Switch a tab's terminal to a chosen session ('new' | <session-id> | '' = resume latest). Kills that
@@ -255,7 +259,7 @@ function respawnPty(tabId, session) {
   const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
   if (tabId === fgTabId) {
     // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
-    try { if (share.status().running) share.setPaused(!(ws && ws.shared)); } catch {}
+    try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {}
   }
   const old = rec && rec.proc;
   ptys.delete(tabId);                                       // drop the entry first → the old handlers' guard goes quiet
@@ -271,7 +275,7 @@ function setForegroundTab(tabId) {
   if (rec && rec.ws && registry.activeId !== rec.ws.id) { activeWorkspace = rec.ws; registry.activeId = rec.ws.id; saveRegistry(); }
   else if (rec && rec.ws) activeWorkspace = rec.ws;
   try { share.resetRing(); share.resetStatus(); } catch {}                        // drop the previous tab's replay/tracker
-  try { if (share.status().running) share.setPaused(!(rec && rec.ws && rec.ws.shared)); } catch {}
+  try { if (share.status().running) share.setPaused(!isShareable(rec && rec.ws)); } catch {}
   if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
   syncShare();
 }
@@ -307,6 +311,12 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
 // ---- live terminal sharing (local server + cloudflared tunnel) ----
 ipcMain.handle('share:start', async (e, opts) => {
   try {
+    // Idempotent: if the tunnel is already up (e.g. collab spun it, then a manual web-share reuses it), return the
+    // existing handle instead of spinning a SECOND cloudflared and orphaning the first.
+    if (share.status().running && shareBaseUrl) {
+      const st0 = share.status();
+      return { ok: true, url: `${shareBaseUrl}/?t=${st0.token}`, localUrl: `${shareBaseUrl}/?t=${st0.token}`, remote: !!cloudflaredProc, note: null, readOnly: st0.readOnly };
+    }
     const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
     const fr0 = fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
     syncShare();                                          // tell guests the granted library + pause if the live ws is private
