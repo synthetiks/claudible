@@ -38,6 +38,13 @@
       font-size:13px;-webkit-font-smoothing:antialiased;
       user-select:none;-webkit-user-select:none;cursor:default;
     }
+    /* sleek, minimal scrollbar everywhere — thin floating thumb, no track. The few areas that hide their
+       scrollbar entirely (terminal, tabstrip, cmdscroll) keep their width:0 overrides via higher specificity. */
+    ::-webkit-scrollbar{width:9px;height:9px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22);background-clip:padding-box}
+    ::-webkit-scrollbar-corner{background:transparent}
     /* keep the terminal + readable text copyable; chrome (labels/buttons) is not selectable */
     #terminal,.out,input,.transcript,.trk,.chat-log{user-select:text;-webkit-user-select:text;cursor:auto}
     /* faint grain/vignette for smoky depth */
@@ -441,7 +448,7 @@
     /* workspace bar — the two-level top of the sidebar (which library the sessions below belong to) */
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
-      font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#6c7480}   /* a touch larger + more visible */
+      font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
     .ws-section-head{padding:14px 14px 9px}
     .sh-actions{display:flex;align-items:center;gap:9px}
     .panel-close{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
@@ -543,8 +550,8 @@
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:14px 14px 16px;display:flex;flex-direction:column;gap:11px}
-    .sharelbl{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}
-    .sharelbl .ico{width:14px;height:14px;color:var(--ink-faint);flex:none;transition:color .2s,filter .2s}
+    .sharelbl{display:flex;align-items:center;gap:8px;font-size:10.7px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}   /* ~2.5% smaller so the row fits */
+    .sharelbl .ico{width:14px;height:14px;color:#5a7468;flex:none;transition:color .2s,filter .2s}   /* very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
     .sharelbl.active{color:var(--ink)}
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
     .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
