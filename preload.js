@@ -2,6 +2,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('claudible', {
+  // Durable settings (your Claudible username + every pref). The preload is SANDBOXED, so it can't touch fs — the
+  // MAIN process owns the file (runtime/settings.json). sendSync gives a synchronous snapshot at load so the
+  // renderer hydrates with no async; main writes synchronously, so a force-kill can't lose the value (the bug
+  // localStorage had — its async LevelDB flush was dropped on a hard kill).
+  settingsInitial: ipcRenderer.sendSync('settings:get'),
+  settingsSave: (obj) => ipcRenderer.send('settings:set', obj),
   // terminal (per-tab: every channel carries a tabId so N live ptys/xterms can coexist)
   ptyStart: (tabId, cols, rows) => ipcRenderer.send('pty:start', { tabId, cols, rows }),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, { tabId, data }) => cb(tabId, data)),

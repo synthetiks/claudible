@@ -82,6 +82,14 @@ ipcMain.on('share:audio-send', (e, p) => { try { share.audioFromHost(p && p.data
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
 const RT = path.join(__dirname, 'runtime');   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)
+// Durable settings (Claudible username + every renderer pref). Lives in gitignored runtime/ so it survives
+// restarts, force-kills (written synchronously) and `git reset --hard`, and never leaks into the public repo.
+// The sandboxed preload can't use fs, so MAIN owns the file; these handlers are registered at top level here
+// (before any window loads) because the preload reads it via a blocking sendSync.
+const SETTINGS_FILE = path.join(RT, 'settings.json');
+function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
+ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
+ipcMain.on('settings:set', (e, obj) => { try { fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); } catch (err) { console.error('[claudible] settings.json:', err.message); } });
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 let APPDIR_WSL = null;

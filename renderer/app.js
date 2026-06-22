@@ -1470,10 +1470,26 @@ claudible.onLiveChat((p) => {
 chatReset();
 
 // ---------- persisted preferences (voice + Always Speak) ----------
-// Stored in the renderer's localStorage (kept in Electron's userData), so they survive app restarts.
+// Persisted to a FILE in the local app folder (runtime/settings.json, via the preload) so your username + every
+// pref survive restarts and hard process kills — localStorage alone loses unflushed writes on a force-kill. An
+// in-memory cache keeps the synchronous get/set API every caller relies on; localStorage stays as a legacy mirror
+// + one-time migration source (so an older install's username carries over to the durable file on first run).
 const PREFS_KEY = 'claudible_prefs';
-function loadPrefs() { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch { return {}; } }
-function savePrefs(patch) { try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(loadPrefs(), patch))); } catch {} }
+function loadPrefs() {
+  if (!loadPrefs._cache) {
+    let disk = {}, ls = {};
+    try { const s = window.claudible && claudible.settingsInitial; if (s && typeof s === 'object') disk = s; } catch {}
+    try { ls = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch {}
+    loadPrefs._cache = Object.assign({}, ls, disk);   // disk is source of truth; ls only fills gaps (migration)
+    try { if (window.claudible && claudible.settingsSave && Object.keys(ls).length && !Object.keys(disk).length) claudible.settingsSave(loadPrefs._cache); } catch {}
+  }
+  return loadPrefs._cache;
+}
+function savePrefs(patch) {
+  const p = loadPrefs(); Object.assign(p, patch);
+  try { if (window.claudible && claudible.settingsSave) claudible.settingsSave(p); } catch {}   // durable, synchronous file write
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch {}                            // legacy mirror
+}
 (function applyPrefs() {
   const p = loadPrefs();
   if (p.voice && document.querySelector('.vpill[data-voice="' + p.voice + '"]')) {
