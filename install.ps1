@@ -35,6 +35,13 @@ if (-not (Test-Node)) {
 Step '1/4' 'Installing dependencies (npm install)...'
 npm install
 if ($LASTEXITCODE -ne 0) { Die "npm install failed (see above)." }
+# node-pty is a NATIVE module: npm fetches a prebuilt compiled for system Node's ABI, but the app runs under
+# Electron - they must match or the embedded Claude terminal (the whole product) fails to load. Rebuild it for Electron.
+Write-Host "  Rebuilding node-pty for Electron..." -ForegroundColor Cyan
+npm run rebuild
+if ($LASTEXITCODE -ne 0) {
+  Die "Rebuilding node-pty for Electron failed - this needs the C++ build toolchain. Install it, then re-run this installer:`n  winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"`n(or install 'Visual Studio Build Tools' and tick the 'Desktop development with C++' workload), then: .\install.ps1"
+}
 
 # WSL2 must exist - `npm run setup` and the app both shell into it.
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { Die "WSL2 isn't installed. Run 'wsl --install' in an admin PowerShell, reboot, then re-run this installer." }

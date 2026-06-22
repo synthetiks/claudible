@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in Claudible! It's an early (v0.1) project, so issues, ideas, and PRs are all
+Thanks for your interest in Claudible! It's an early (v0.2) project, so issues, ideas, and PRs are all
 welcome.
 
 ## Reporting issues

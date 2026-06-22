@@ -9,7 +9,7 @@ Claudible is a thin, local cockpit around the **real Claude Code CLI**. It doesn
 - **Voice services (WSL)** — `wsl/services.sh` keeps local **Whisper** (STT :2022) and **Kokoro** (TTS :8880) running; `setup/setup.sh` installs them.
 
 ## The three planes
-1. **INPUT** — mic → main process → local Whisper → text → `pty.write()` into the live TUI. Hold **Left-Ctrl** (push-to-talk) or click **Talk**.
+1. **INPUT** — mic → main process → local Whisper → text → `pty.write()` into the live TUI. Hold **Left-Alt** (push-to-talk) or click **Talk**.
 2. **OUTPUT** — Claude Code's `Stop` hook appends the reply to `runtime/hooks.ndjson` → the app reads it → local Kokoro speaks it.
 3. **METER** — Claude Code's statusLine writes `runtime/status.json` → the app polls it → context % / cost / tokens.
 

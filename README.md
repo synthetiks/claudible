@@ -41,8 +41,10 @@ Claude Code is brilliant, but it lives in a bare terminal. Claudible gives it th
 - **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
 - **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first — Claudible embeds your already-authenticated session)
 - **Node.js 22.12+** on Windows (Electron 42 requires it)
-- Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
+- **Visual Studio Build Tools** with the **"Desktop development with C++"** workload — the installer rebuilds the native `node-pty` module for Electron, which needs a C++ compiler. Quick install: `winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
+- Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 - **Optional, for remote co-work:** [`cloudflared`](https://github.com/cloudflare/cloudflared) on Windows (`winget install Cloudflare.cloudflared`, or point `CLAUDIBLE_CLOUDFLARED` at the binary). Without it, **Share** still works but the invite link is **localhost/LAN-only**.
+- **Optional, for private-repo workspaces + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
 
 ## Install & run
 **Run in Windows PowerShell, not inside WSL.** (Claudible's app is a *Windows* Electron app that embeds Claude Code running in WSL; running it from inside WSL installs the Linux Electron and dies on `libnspr4.so`.) During beta the repo is **private — you must be added as a collaborator first**, and you need **WSL2** + a **signed-in Claude Code** inside it (see [Prerequisites](#prerequisites)).
@@ -59,6 +61,7 @@ git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershel
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
 npm install        # deps + the small node-pty patch
+npm run rebuild    # rebuild node-pty for Electron's ABI (needs VS Build Tools / Desktop C++)
 npm run setup      # builds the WSL voice services (installs their deps; ~480 MB models on first run)
 npm start          # opens the cockpit
 ```
