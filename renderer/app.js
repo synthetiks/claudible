@@ -2240,6 +2240,7 @@ function openUnameInfo() {
   if (unameInfoPop) { closeUnameInfo(); return; }
   const anchor = $('username-info'); if (!anchor) return;
   const pop = document.createElement('div'); pop.className = 'ws-info-pop';
+  pop.style.zIndex = '9002';   // this ⓘ lives inside the Settings drawer (z-index 9001) — sit above it, not behind
   pop.innerHTML = '<span class="wt"><b>Your Claudible username</b></span>'
     + '<p>The name you appear as when you join (or host) a session through Claudible.</p>'
     + '<p>Stored <b>locally on this machine</b> and remembered for every session.</p>';
