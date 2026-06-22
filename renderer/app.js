@@ -2202,9 +2202,6 @@ function renderWsChips() {
     });
     el.appendChild(chip);
   });
-  // name the active workspace in the SESSIONS header so the two-level relationship is unmistakable
-  const aw = workspaces.find((w) => w.id === activeWsId);
-  const sw = $('sess-ws'); if (sw) sw.textContent = aw ? '· ' + aw.label : '';
 }
 // "What's a workspace?" — one click on the ⓘ explains the concept, so the sidebar stays clean (no inline paragraphs).
 let wsInfoPop = null;
@@ -2450,7 +2447,6 @@ function startWsEdit(chip, nm, w) {
     }
     try { inp.remove(); } catch {} nm.style.display = '';
     nm.textContent = w.label; chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
-    if (w.id === activeWsId) { const sw = $('sess-ws'); if (sw) sw.textContent = '· ' + w.label; }
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
