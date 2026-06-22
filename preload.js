@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // renderer hydrates with no async; main writes synchronously, so a force-kill can't lose the value (the bug
   // localStorage had — its async LevelDB flush was dropped on a hard kill).
   settingsInitial: ipcRenderer.sendSync('settings:get'),
-  settingsSave: (obj) => ipcRenderer.send('settings:set', obj),
+  settingsSave: (obj) => { try { return ipcRenderer.sendSync('settings:set', obj); } catch { return false; } },   // sendSync → main's writeFileSync completes before this returns (durable through a force-kill)
   // terminal (per-tab: every channel carries a tabId so N live ptys/xterms can coexist)
   ptyStart: (tabId, cols, rows) => ipcRenderer.send('pty:start', { tabId, cols, rows }),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, { tabId, data }) => cb(tabId, data)),

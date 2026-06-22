@@ -89,7 +89,7 @@ const RT = path.join(__dirname, 'runtime');   // per-tab status/hooks live under
 const SETTINGS_FILE = path.join(RT, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); } catch (err) { console.error('[claudible] settings.json:', err.message); } });
+ipcMain.on('settings:set', (e, obj) => { try { fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2)
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 let APPDIR_WSL = null;
@@ -124,6 +124,8 @@ function buildBoot(session, ws, tabId) {
   return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
 }
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
+// Sweep orphaned diff-action temp files from a previous run (a crash/kill between write and unlink) — M1.
+try { for (const f of fs.readdirSync(RT)) if (/^diffaction-.*\.tmp$/.test(f)) { try { fs.unlinkSync(path.join(RT, f)); } catch {} } } catch {}
 
 // ---- workspaces registry (each workspace = a directory the sessions live in) ----
 // App-maintained source of truth (we NEVER blanket-scan ~/.claude/projects). A 'legacy' entry points at
@@ -224,10 +226,13 @@ function armUltracode(tabId, proc) {
   if (t.unref) t.unref();
   const r0 = ptys.get(tabId); if (r0) r0.ultraTimer = t;
 }
+// Guarded send: the window can be destroyed mid-flight (a ConPTY may emit a final chunk during shutdown), so pty
+// sends must tolerate a gone webContents instead of throwing into the uncaughtException net.
+function winSend(channel, payload) { try { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); } catch {} }
 function spawnPty(tabId, cols, rows, ws, session) {
   if (!tabId) return;
   if (ptys.has(tabId) || !nodePty) {
-    if (!nodePty && win) win.webContents.send('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${ptyErr})\r\n` });
+    if (!nodePty) winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${ptyErr})\r\n` });
     return;
   }
   ws = ws || activeWorkspace;
@@ -248,7 +253,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // switch on this tab) can't stomp the NEW one's stream — the map entry is replaced/deleted before kill.
     proc.onData(d => {
       if (ptys.get(tabId)?.proc !== proc) return;
-      win.webContents.send('pty:data', { tabId, data: d });
+      winSend('pty:data', { tabId, data: d });
       if (tabId === fgTabId) share.broadcast(d);           // tee ONLY the foreground stream to guests
       const r = ptys.get(tabId);
       if (r) { r.lastData = Date.now(); r.sawData = true; }   // feed the ultracode settle-detector (and prove claude rendered)
@@ -259,12 +264,12 @@ function spawnPty(tabId, cols, rows, ws, session) {
       const r = ptys.get(tabId); const rws = r && r.ws;
       if (r && r.ultraTimer) { try { clearInterval(r.ultraTimer); } catch {} }
       const msg = '\r\n[claudible] session ended\r\n';
-      win.webContents.send('pty:data', { tabId, data: msg });
+      winSend('pty:data', { tabId, data: msg });
       if (tabId === fgTabId) { share.broadcast(msg); share.resetRing(); }
       setGenBusy(tabId, false); ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId);
       schedulePush(rws);                                   // session ended → flush its workspace's transcripts to collaborators
     });
-  } catch (e) { win.webContents.send('pty:data', { tabId, data: `\r\n[claudible] pty spawn failed: ${e.message}\r\n` }); }
+  } catch (e) { winSend('pty:data', { tabId, data: `\r\n[claudible] pty spawn failed: ${e.message}\r\n` }); }
 }
 // The live terminal STREAMS for a workspace that's either explicitly screen-shared OR session-synced (so a
 // Claudible collaborator can watch the synced session live). The browsable LIBRARY below stays shared-only, so
@@ -295,6 +300,9 @@ function respawnPty(tabId, session) {
   }
   const old = rec && rec.proc;
   ptys.delete(tabId);                                       // drop the entry first → the old handlers' guard goes quiet
+  // NB: do NOT clear hookState/lastStatusByTab here. The retained per-tab offset + pollHooks' truncation detection
+  // (st.size < offset → reset, once session.sh actually truncates hooks.ndjson) is what PREVENTS replay; clearing it
+  // would make pollHooks re-read the OLD session's still-on-disk hooks from offset 0 and replay them to TTS.
   if (old) { try { old.kill(); } catch {} }
   spawnPty(tabId, cols, rows, ws, session);
   if (tabId === fgTabId) syncShare();                       // refresh the granted library (live flag) for guests
@@ -305,10 +313,14 @@ function setForegroundTab(tabId) {
   if (liveTabs.has(tabId)) return;   // a joined live tab is a remote mirror, not a local pty — it must NEVER become the foreground/shared tab (would pause + wipe + black-hole the user's own outgoing share)
   fgTabId = tabId;   // record intent even if the pty hasn't spawned yet — spawnPty wires the mirror once it has
   const rec = ptys.get(tabId);
-  if (rec && rec.ws && registry.activeId !== rec.ws.id) { activeWorkspace = rec.ws; registry.activeId = rec.ws.id; saveRegistry(); }
-  else if (rec && rec.ws) activeWorkspace = rec.ws;
+  const intent = tabIntent.get(tabId);
+  const ws = (rec && rec.ws) || (intent && intent.ws) || null;   // resolve THIS tab's workspace even before its pty spawns, so activeWorkspace never desyncs from fgTabId (H1)
+  if (ws && registry.activeId !== ws.id) { activeWorkspace = ws; registry.activeId = ws.id; saveRegistry(); }
+  else if (ws) activeWorkspace = ws;
   try { share.resetRing(); share.resetStatus(); } catch {}                        // drop the previous tab's replay/tracker
-  try { if (share.status().running) share.setPaused(!isShareable(rec && rec.ws)); } catch {}
+  // Only (re)evaluate the mirror pause when we actually KNOW this tab's workspace — pausing on an unknown ws would
+  // wrongly treat it as private and wipe the ring. If the pty hasn't spawned yet, spawnPty wires the mirror on spawn.
+  if (ws) { try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {} }
   if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
   syncShare();
 }
@@ -979,8 +991,9 @@ ipcMain.handle('share:status', () => share.status());
 // Per-tab files (written by session.sh via the inherited CLAUDIBLE_STATUS env) so concurrent sessions
 // never clobber one meter; every 'status' IPC carries its tabId so the renderer routes it to the right tab.
 const lastStatusByTab = new Map();   // tabId -> last raw status json (dedupe)
+const appIntervals = [];   // long-lived poller intervals — cleared on window-all-closed so none leak or fire against a dead window (H3)
 function pollStatus() {
-  setInterval(() => {
+  appIntervals.push(setInterval(() => {
     for (const [tabId, rec] of ptys) {
       try {
         const raw = fs.readFileSync(path.join(RT, 'tabs', rec.runtimeId, 'status.json'), 'utf8');
@@ -998,14 +1011,14 @@ function pollStatus() {
         });
       } catch {}
     }
-  }, 1200);
+  }, 1200));
 }
 
 // ---- agent-token meter: the statusLine usage excludes subagents/swarms, so scan each live tab's
 // subagents dir for the tokens they consumed and forward it. Slow cadence (a cheap python scan). ----
 function pollAgentTokens() {
   if (!APPDIR_WSL) return;
-  setInterval(() => {
+  appIntervals.push(setInterval(() => {
     for (const [tabId, rec] of ptys) {
       const sid = String(rec.sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
       if (!sid) continue;
@@ -1024,12 +1037,12 @@ function pollAgentTokens() {
           try { win && win.webContents.send('agent-tokens', { tabId, agentTok: delta }); } catch {}
         });
     }
-  }, 8000);
+  }, 8000));
 }
 // ---- hook events: poll EACH live tab's runtime/tabs/<tab>/hooks.ndjson for appended lines ----
 const hookState = new Map();   // tabId -> { offset, buf } (independent tail cursor per tab)
 function pollHooks() {
-  setInterval(() => {
+  appIntervals.push(setInterval(() => {
     for (const [tabId, rec] of ptys) {
       let s = hookState.get(tabId); if (!s) { s = { offset: 0, buf: '' }; hookState.set(tabId, s); }
       try {
@@ -1043,7 +1056,7 @@ function pollHooks() {
         let i; while ((i = s.buf.indexOf('\n')) >= 0) { const l = s.buf.slice(0, i).trim(); s.buf = s.buf.slice(i + 1); if (l) { handleHook(tabId, l); win.webContents.send('hook:line', { tabId, line: l }); } }
       } catch {}
     }
-  }, 80);   // poll often so a finished reply reaches the renderer (and TTS) with minimal lag
+  }, 80));   // poll often so a finished reply reaches the renderer (and TTS) with minimal lag
 }
 ipcMain.handle('hook:test', async () => {
   const ts = Date.now();
@@ -1166,14 +1179,17 @@ ipcMain.handle('diff:list', () => new Promise((resolve) => {
 }));
 // Reverse-apply a hunk/file patch, or discard an untracked file. The patch text / target path is written to
 // an APP-controlled temp file and only its path is passed to bash (never the repo data) — no injection.
+let diffActionSeq = 0;
 function diffAction(mode, payload) {
   return new Promise((resolve) => {
     try {
       if (!APPDIR_WSL || typeof payload !== 'string' || !payload) return resolve({ ok: false, error: 'bad args' });
-      const tmp = path.join(RT, 'diffaction.tmp');
+      const name = `diffaction-${process.pid}-${++diffActionSeq}.tmp`;   // unique per action → concurrent revert/discard never read each other's payload (M1)
+      const tmp = path.join(RT, name);
       fs.writeFileSync(tmp, payload, 'utf8');
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/diff-apply.sh' ${mode} '${APPDIR_WSL}/runtime/diffaction.tmp'`],
+      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/diff-apply.sh' ${mode} '${APPDIR_WSL}/runtime/${name}'`],
         { encoding: 'utf8', timeout: 20000 }, (err, stdout) => {
+          try { fs.unlinkSync(tmp); } catch {}   // clean up the temp patch file
           let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
           resolve(r);
         });
@@ -1189,6 +1205,8 @@ process.on('unhandledRejection', (e) => console.error('[claudible] unhandledReje
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
+  try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
+  try { stopAdvertiseHeartbeat(); } catch {}
   try { for (const { proc } of ptys.values()) { try { proc.kill(); } catch {} } ptys.clear(); } catch {}
   try { for (const id of [...liveTabs.keys()]) liveDisconnect(id); } catch {}   // close any joined peer sockets
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
