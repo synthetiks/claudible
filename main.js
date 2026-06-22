@@ -393,10 +393,16 @@ function openLiveSocket(tabId) {
   });
   sock.on('error', () => { try { sock.close(); } catch {} });
 }
+// Peer handles come from a collaborator-WRITABLE shared branch, so a malicious presence entry could point at any
+// origin. Only ever connect to / open a cloudflare quick-tunnel host (what startCloudflared produces) or localhost
+// for dev — never an arbitrary HTTPS host. This is the single allowlist used by both liveConnect and live:join.
+function isTunnelUrl(url) {
+  return /^https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com$/i.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
+}
 function liveConnect(tabId, peer, name) {
   const url = String((peer && peer.url) || '');
   const tok = String((peer && peer.token) || '').replace(/[^A-Za-z0-9._~-]/g, '');
-  const okUrl = /^https:\/\/[A-Za-z0-9.:/_-]+$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
+  const okUrl = isTunnelUrl(url);
   if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
   liveDisconnect(tabId);                                  // replace any prior socket bound to this tab
   liveTabs.set(tabId, { ws: null, url, token: tok, name: String(name || '').slice(0, 40), hostCols: 120, hostRows: 32, pid: null, readOnly: false, resume: null, retry: 0, closed: false, peer });
@@ -416,28 +422,38 @@ ipcMain.on('live:voice', (e, { tabId, join } = {}) => liveForward(tabId, join ? 
 ipcMain.on('live:audio-send', (e, { tabId, data, sr } = {}) => liveForward(tabId, 'audio', { data, sr }));
 
 // ---- live terminal sharing (local server + cloudflared tunnel) ----
-ipcMain.handle('share:start', async (e, opts) => {
-  try {
-    // Idempotent: if the tunnel is already up (e.g. collab spun it, then a manual web-share reuses it), return the
-    // existing handle instead of spinning a SECOND cloudflared and orphaning the first.
-    if (share.status().running && shareBaseUrl) {
-      const st0 = share.status();
-      return { ok: true, url: `${shareBaseUrl}/?t=${st0.token}`, localUrl: `${shareBaseUrl}/?t=${st0.token}`, remote: !!cloudflaredProc, note: null, readOnly: st0.readOnly };
-    }
-    const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
-    const fr0 = fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
-    syncShare();                                          // tell guests the granted library + pause if the live ws is private
-    let base = `http://127.0.0.1:${port}`, remote = false, note = null;
+let shareStartInFlight = null;                            // single-flight lock: a 2nd concurrent start must NOT spawn a 2nd tunnel
+ipcMain.handle('share:start', (e, opts) => {
+  // Concurrent re-entry (double-click, or collab auto-share racing the manual web-share button) → reuse the SAME
+  // in-flight start. Without this both calls pass the "already up" check (shareBaseUrl still null) and each spawns
+  // a cloudflared, orphaning the first tunnel forever (live public URL, no handle to kill).
+  if (shareStartInFlight) return shareStartInFlight;
+  if (share.status().running && shareBaseUrl) {           // already fully up → return the existing handle
+    const st0 = share.status();
+    return { ok: true, url: `${shareBaseUrl}/?t=${st0.token}`, localUrl: `${shareBaseUrl}/?t=${st0.token}`, remote: !!cloudflaredProc, note: null, readOnly: st0.readOnly };
+  }
+  shareStartInFlight = (async () => {
     try {
-      const { proc, url } = await startCloudflared(port);
-      cloudflaredProc = proc;
-      cloudflaredProc.on('exit', () => { cloudflaredProc = null; });
-      base = url; remote = true;                       // public link
-    } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN
-    shareBaseUrl = base;
-    const st = share.status();
-    return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, readOnly: st.readOnly };
-  } catch (err) { return { ok: false, error: String(err.message || err) }; }
+      const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
+      const fr0 = fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
+      syncShare();                                        // tell guests the granted library + pause if the live ws is private
+      let base = `http://127.0.0.1:${port}`, remote = false, note = null;
+      try {
+        try { cloudflaredProc && cloudflaredProc.kill(); } catch {}   // defensive: never leave a prior tunnel orphaned
+        cloudflaredProc = null;
+        const { proc, url } = await startCloudflared(port);
+        if (!share.status().running) { try { proc.kill(); } catch {} return { ok: false, error: 'stopped during start' }; }   // a share:stop landed while we were spawning → reap the tunnel, don't orphan a live public URL
+        cloudflaredProc = proc;
+        cloudflaredProc.on('exit', () => { cloudflaredProc = null; shareBaseUrl = null; });   // tunnel died (self-exit/network) → drop the now-dead public URL so the next start re-establishes a tunnel
+        base = url; remote = true;                       // public link
+      } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN
+      shareBaseUrl = base;
+      const st = share.status();
+      return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, readOnly: st.readOnly };
+    } catch (err) { return { ok: false, error: String(err.message || err) }; }
+  })();
+  shareStartInFlight.finally(() => { shareStartInFlight = null; });   // release the lock once this start settles
+  return shareStartInFlight;
 });
 ipcMain.handle('share:stop', async () => {
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
@@ -505,7 +521,7 @@ ipcMain.handle('live:join', (e, payload) => {
     const peer = (payload && payload.peer) || {};
     const url = String(peer.url || '');
     const tok = String(peer.token || '').replace(/[^A-Za-z0-9._~-]/g, '');
-    const okUrl = /^https:\/\/[A-Za-z0-9.:/_-]+$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
+    const okUrl = isTunnelUrl(url);
     if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
     const who = String(peer.name || peer.login || '').replace(/[^A-Za-z0-9 _.-]/g, '');
     const myName = String((payload && payload.name) || '').slice(0, 40);   // how I appear to the host I'm joining
@@ -515,6 +531,12 @@ ipcMain.handle('live:join', (e, payload) => {
       webPreferences: { nodeIntegration: false, contextIsolation: true },
     });
     try { w.removeMenu(); } catch {}
+    // Lock the join window to the (host-pinned) tunnel origin: deny popups and block navigation anywhere else, so
+    // even a compromised guest page can't redirect this window — carrying the share token in its URL — to an
+    // attacker origin.
+    try { w.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); } catch {}
+    w.webContents.on('will-navigate', (ev, navUrl) => { try { if (!String(navUrl).startsWith(url + '/')) ev.preventDefault(); } catch { try { ev.preventDefault(); } catch {} } });
+    w.webContents.on('will-redirect', (ev, navUrl) => { try { if (!String(navUrl).startsWith(url + '/')) ev.preventDefault(); } catch { try { ev.preventDefault(); } catch {} } });   // 3xx redirects don't re-fire will-navigate — guard them too
     w.loadURL(`${url}/?t=${tok}` + (myName ? `&n=${encodeURIComponent(myName)}` : ''));
     liveWindows.add(w); w.on('closed', () => liveWindows.delete(w));
     return { ok: true };

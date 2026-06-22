@@ -8,8 +8,9 @@
 //     chosen name) before any terminal data flows. A rejected/timed-out/over-cap attempt is closed.
 //   • Reusable, approval-gated link. The shareable token (?t=) is NOT burned on first use — several
 //     people (up to MAX_GUESTS) can join the SAME link, each gated by approval. Each approved guest is
-//     minted its own private resume token (?r=) for silent reconnect/refresh. regenerateLink() rotates
-//     the invite without dropping anyone.
+//     minted its own private resume token (?r=) for silent reconnect/refresh, which is revoked once they
+//     leave for good. regenerateLink() ("new link") is a full reset: it disconnects every current guest and
+//     revokes all tokens, so re-inviting locks out anyone who held the old link.
 //   • Names. Host names itself when sharing; each viewer names itself on join. Approvals and the chat
 //     side-channel show those names, plus system "X joined / X left" lines. Chat never reaches Claude.
 //   • read-only mode lets guests watch (and chat) but not type. A ring buffer replays recent output.
@@ -235,6 +236,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         const prev = pendingDrops.get(tok); if (prev) clearTimeout(prev.timer);
         const timer = setTimeout(() => {
           pendingDrops.delete(tok);
+          resumeTokens.delete(tok);                       // truly left → kill the silent-reconnect token (no indefinite, approval-free rejoin)
           roster.set(who, 'gone'); notifyRoster();
           systemChat(who + ' left');
           if (wasVoice) broadcastVoice();
@@ -306,7 +308,27 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     });
   }
 
-  function regenerateLink() { if (!server) return null; linkToken = newToken(); return linkToken; }   // rotate invite; keeps current guests
+  // "New link" is a full ACCESS RESET, not a soft rotation: disconnect every current guest, revoke all reconnect
+  // tokens + pending drops, then mint a fresh invite — so re-inviting genuinely locks out everyone who held the old
+  // link. (Previously it kept old guests' tokens, letting a departed/denied guest silently rejoin via ?r=.)
+  function regenerateLink() {
+    if (!server) return null;
+    for (const ws of clients) { try { ws.send(JSON.stringify({ type: 'denied', reason: 'revoked' })); } catch {} try { ws.close(); } catch {} }
+    clients.clear(); byPid.clear(); voiceGuests.clear(); roster.clear();
+    for (const [, p] of pendingDrops) { try { clearTimeout(p.timer); } catch {} }
+    pendingDrops.clear();
+    // Drop anyone mid-approval on the OLD link too — else the host approving them later mints a fresh token. Each
+    // entry's finish(false) clears its 90s timer, removes it from `pending`, and denies+closes the socket; then fire
+    // onApprovalCancel explicitly to dismiss the host's stale prompt (the async ws 'close' handler can't — by the
+    // time it runs, pending is already cleared, so it would skip the cancel).
+    for (const [id, p] of Array.from(pending.entries())) { try { p.finish(false); } catch {} try { onApprovalCancel && onApprovalCancel(id); } catch {} }
+    pending.clear();
+    resumeTokens.clear();
+    notifyGuests(); notifyRoster();
+    try { broadcastVoice(); } catch {}                    // voice room is now empty → update the host's view
+    linkToken = newToken();
+    return linkToken;
+  }
 
   function broadcast(data) {
     if (!server || paused) return;     // paused = host is in a private (non-granted) workspace: stream nothing, ring nothing

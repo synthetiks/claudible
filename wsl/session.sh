@@ -37,7 +37,7 @@ HOOKS="$RT/hooks.ndjson"
 # tab's output to its own files based on that tab's Claude process env (env inheritance is verified).
 export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS"
 
-mkdir -p "$SDIR/.claude" "$RT"
+mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
 : > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
 printf '{}' > "$STATUS" # clear stale status so the meter starts blank, not on last session's numbers
 
@@ -77,7 +77,7 @@ cat > "$SDIR/.claude/settings.json" <<EOF
 }
 EOF
 
-cd "$SDIR"
+cd "$SDIR" || { echo "[claudible] FATAL: could not enter the session dir ($SDIR) — refusing to launch Claude (with --dangerously-skip-permissions) in the wrong directory." >&2; exit 1; }
 # Run Claude DIRECTLY — no tmux. tmux uses the terminal's ALTERNATE screen, which has no
 # scrollback, so the mouse wheel can't scroll. Verified: Claude Code uses the NORMAL buffer
 # (+ bracketed paste) and does NOT grab the mouse, so xterm.js scrollback gives clean basic scroll.
