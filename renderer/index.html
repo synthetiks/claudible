@@ -595,6 +595,11 @@
     .drawer .label .ico{width:13px;height:13px}
     .drawer .label .collapse{font-size:15px}
     .drawer .name-field{padding:7px 11px;font-size:12px}
+    .username-row{display:flex;gap:6px;align-items:center;margin-top:2px}
+    .username-row .name-field{flex:1}
+    .name-save{flex:none;width:34px;height:34px;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:#5fb487;font-size:14px;line-height:1;cursor:pointer;transition:background .14s,border-color .14s}
+    .name-save:hover{border-color:rgba(95,180,135,.55);background:rgba(95,180,135,.14)}
+    .linfo{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--ink-faint);border-radius:50%;font-size:9px;font-style:normal;color:var(--ink-dim);cursor:help;vertical-align:middle}
     /* voice in — a slim Talk button + a compact key row; the status line takes no space until it has text */
     .drawer button.primary{padding:8px 12px;font-size:12px;border-radius:8px}
     .drawer .ptt-key-row{margin-top:8px;font-size:10.5px}
@@ -852,8 +857,11 @@
     <div class="drawer-head"><span>settings</span><button id="drawer-close" title="Close">×</button></div>
     <div class="panel">
       <div class="sec">
-        <div class="label">your name in synced sessions</div>
-        <input type="text" id="collab-name-in" class="name-field" maxlength="40" placeholder="e.g. MK" autocomplete="off" />
+        <div class="label">your claudible username <span class="linfo" id="username-info" title="Stored locally on this machine. It's the name you appear as when you join (or host) a session through Claudible.">i</span></div>
+        <div class="username-row">
+          <input type="text" id="collab-name-in" class="name-field" maxlength="40" placeholder="e.g. Developer" autocomplete="off" />
+          <button type="button" id="collab-name-save" class="name-save" title="Save username" aria-label="Save username" style="display:none">✓</button>
+        </div>
       </div>
       <div class="sec">
         <div class="label" id="lbl-in">

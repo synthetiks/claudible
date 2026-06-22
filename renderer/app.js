@@ -1062,14 +1062,15 @@ shareBtn.addEventListener('click', async () => {
     shareBtn.disabled = false;
     return;
   }
-  // ask the host for a display name before sharing (prefilled from last time)
-  $('host-name-in').value = loadPrefs().hostName || '';
+  // ask the host for a display name before sharing (prefilled from your one Claudible username)
+  $('host-name-in').value = collabName() || loadPrefs().hostName || '';
   $('namemodal').classList.add('show');
   setTimeout(() => $('host-name-in').focus(), 30);
 });
 async function doStartSharing() {
-  hostDisplayName = ($('host-name-in').value || '').trim().slice(0, 40) || 'Host';
-  savePrefs({ hostName: hostDisplayName });
+  const typed = ($('host-name-in').value || '').trim().slice(0, 40);
+  hostDisplayName = typed || collabName() || 'Host';
+  if (typed) savePrefs({ collabName: typed });   // one identity: editing the share name updates your Claudible username
   $('namemodal').classList.remove('show');
   shareBtn.disabled = true;
   shareOut.textContent = 'starting tunnel…'; shareOut.className = 'out';
@@ -1260,15 +1261,23 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
 // collab display name — what teammates see when you're in a synced session. Persist on edit, update your own
 // roster/bar instantly, and (debounced) re-publish the live presence so the "Join live" badge shows the new name.
 (function () {
-  const inp = $('collab-name-in'); if (!inp) return;
-  inp.value = loadPrefs().collabName || '';
-  let t = null;
-  inp.addEventListener('input', () => {
+  const inp = $('collab-name-in'), btn = $('collab-name-save'); if (!inp) return;
+  let saved = (loadPrefs().collabName || loadPrefs().hostName || '').trim();   // hostName = lazy migration from the old split identity
+  inp.value = saved;
+  const dirty = () => inp.value.trim() !== saved && !!inp.value.trim();
+  const sync = () => { if (btn) btn.style.display = dirty() ? '' : 'none'; };   // ✓ appears only when there's an unsaved name
+  const save = () => {
     const v = inp.value.trim().slice(0, 40);
-    savePrefs({ collabName: v });
+    if (!v || v === saved) { sync(); return; }
+    saved = v; savePrefs({ collabName: v }); sync();
     renderRoster(lastRoster); renderLiveBar();
-    clearTimeout(t); t = setTimeout(() => { if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v); } catch (e) {} } }, 500);
-  });
+    if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v); } catch (e) {} }
+    try { toast('Username saved'); } catch (e) {}
+  };
+  inp.addEventListener('input', sync);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+  if (btn) btn.addEventListener('click', save);
+  sync();
 })();
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
@@ -1537,7 +1546,7 @@ async function ensureTunnel() {
   try {
     if (want) {
       const ro = (!collabLive && webShare) ? !!$('share-ro').checked : false;   // collab is always co-drive
-      const nm = (collabLive ? collabName() : '') || loadPrefs().hostName || 'Host';   // collab uses your settings name
+      const nm = collabName() || hostDisplayName || 'Host';   // one Claudible username, used hosting + joining
       const r = await claudible.shareStart({ readOnly: ro, name: nm });
       if (r && r.ok) { tunnelUp = true; lastShareUrl = r.url; lastShareRemote = r.remote; lastShareNote = r.note; lastShareReadOnly = !!r.readOnly; }
     } else {
