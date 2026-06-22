@@ -35,33 +35,53 @@ now = time.time()
 RECENT = 900   # prune any workflow with no file activity within this window (15 min)
 STALE = 180    # an agent with no 'result' whose transcript hasn't been written in this long = ended, not running
 
-def head_info(f):
-    """Cheaply read only the head of an agent transcript: its first prompt (label) + first timestamp (start)."""
-    start = None; label = ''
+def short_target(inp):
+    """A compact 'what' for a tool call (filename / command / pattern / url …)."""
+    if not isinstance(inp, dict): return ''
+    for k in ('file_path', 'path', 'command', 'pattern', 'url', 'description', 'subagent_type', 'query', 'prompt'):
+        v = inp.get(k)
+        if isinstance(v, str) and v.strip():
+            v = ' '.join(v.split())
+            if k in ('file_path', 'path'): v = v.rsplit('/', 1)[-1]
+            return v[:52]
+    return ''
+
+def parse_agent(f):
+    """Read an agent transcript fully: prompt (label), start, its tool-call feed, tokens, and final result text."""
+    start = None; label = ''; last_text = ''; tools = []; tokens = 0
     try:
         with open(f, encoding='utf-8') as fh:
             for line in fh:
                 line = line.strip()
-                if not line:
-                    continue
+                if not line: continue
                 try: o = json.loads(line)
                 except Exception: continue
                 if start is None and o.get('timestamp'):
                     try: start = datetime.datetime.fromisoformat(o['timestamp'].replace('Z', '+00:00')).timestamp()
                     except Exception: pass
-                if o.get('type') == 'user' and isinstance(o.get('message'), dict):
-                    c = o['message'].get('content')
-                    if isinstance(c, list):
-                        txt = ' '.join(x.get('text', '') for x in c if isinstance(x, dict) and x.get('type') == 'text')
-                    else:
-                        txt = c if isinstance(c, str) else ''
+                t = o.get('type'); msg = o.get('message')
+                if t == 'user' and isinstance(msg, dict):
+                    c = msg.get('content')
+                    txt = ' '.join(x.get('text', '') for x in c if isinstance(x, dict) and x.get('type') == 'text') if isinstance(c, list) else (c if isinstance(c, str) else '')
                     txt = (txt or '').strip()
-                    if txt and not txt.startswith('<'):
+                    if not label and txt and not txt.startswith('<'):
                         label = ' '.join(txt.split())[:90]
-                        break
+                elif t == 'assistant' and isinstance(msg, dict):
+                    c = msg.get('content')
+                    if isinstance(c, list):
+                        for x in c:
+                            if not isinstance(x, dict): continue
+                            if x.get('type') == 'tool_use':
+                                tools.append({'name': str(x.get('name', ''))[:22], 'target': short_target(x.get('input'))})
+                            elif x.get('type') == 'text' and x.get('text', '').strip():
+                                last_text = x['text'].strip()
+                    u = msg.get('usage') or {}
+                    try: tokens += int(u.get('output_tokens', 0)) + int(u.get('input_tokens', 0))
+                    except Exception: pass
     except Exception:
         pass
-    return label, start
+    return {'label': label, 'start': start, 'tools': tools, 'toolCount': len(tools),
+            'tokens': tokens, 'result': ' '.join(last_text.split())[:280]}
 
 out = []
 wfs = sorted(glob.glob(os.path.join(root, 'wf_*')),
@@ -85,16 +105,19 @@ for wf in wfs[:6]:
     agents = []
     for aid in seen:
         af = os.path.join(wf, 'agent-%s.jsonl' % aid)
-        label, start = head_info(af) if os.path.exists(af) else ('', None)
+        info = parse_agent(af) if os.path.exists(af) else {'label': '', 'start': None, 'tools': [], 'toolCount': 0, 'tokens': 0, 'result': ''}
         last = None
         try: last = int(os.path.getmtime(af))
         except Exception: pass
         # RUNNING only if it has no 'result' AND its transcript was written recently — a swarm killed
         # before writing results would otherwise look 'running' forever (the phantom/flashing bug).
         is_running = (aid not in done) and (last is not None) and ((now - last) <= STALE)
-        agents.append({'id': aid[:9], 'label': label or 'agent',
+        agents.append({'id': aid[:9], 'label': info['label'] or 'agent',
                        'status': 'running' if is_running else 'done',
-                       'start': int(start) if start else None, 'last': last})
+                       'start': int(info['start']) if info['start'] else None, 'last': last,
+                       'tokens': info['tokens'], 'toolCount': info['toolCount'],
+                       'tools': info['tools'][-12:],           # the agent's recent tool-call feed
+                       'result': '' if is_running else info['result']})   # final result once it's done
     if not agents:
         continue
     running = sum(1 for a in agents if a['status'] == 'running')

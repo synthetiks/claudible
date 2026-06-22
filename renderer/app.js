@@ -708,12 +708,17 @@ function fmtDur(sec) {
   return m + 'm' + (s ? ' ' + s + 's' : '');
 }
 const SWARM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="16" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M12 7.2v3.2M10.3 12.1 6.7 14.3M13.7 12.1l3.6 2.2"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>';
-// One row, shared by Task subagents (desc/type/startedAt/durationMs/ok) and workflow agents (label/start/last).
+const expandedAgents = new Set();   // agent ids the user has drilled into — re-applied across rebuilds so live updates don't collapse them
+// One row, shared by Task subagents (desc/type/startedAt/durationMs/ok) and workflow agents — the latter carry a
+// rich payload (tools feed / tokens / result) so their rows are expandable into a live activity cockpit.
 function agentRow(a, nowSec) {
   const running = a.status === 'running';
+  const tools = Array.isArray(a.tools) ? a.tools : [];
+  const rich = tools.length > 0 || !!(a.result && a.result.length) || (a.tokens || 0) > 0;   // workflow agents; Task subagents stay simple
   const row = document.createElement('div');
-  row.className = 'agent-row ' + (running ? 'running' : (a.ok === false ? 'err' : 'done'));
-  const dot = document.createElement('span'); dot.className = 'agent-dot'; row.appendChild(dot);
+  row.className = 'agent-row ' + (running ? 'running' : (a.ok === false ? 'err' : 'done')) + (rich ? ' rich' : '') + (expandedAgents.has(a.id) ? ' expanded' : '');
+  const head = document.createElement('div'); head.className = 'agent-head';
+  const dot = document.createElement('span'); dot.className = 'agent-dot'; head.appendChild(dot);
   const c = document.createElement('div'); c.className = 'agent-body';
   const label = a.desc || a.label || 'agent';
   const name = document.createElement('div'); name.className = 'agent-name'; name.textContent = label; name.title = label; c.appendChild(name);
@@ -723,22 +728,49 @@ function agentRow(a, nowSec) {
   let dur = '';
   if (running) dur = startSec ? fmtDur(nowSec - startSec) : '';
   else dur = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : '');
-  meta.textContent = pre + (running ? 'running' : (a.ok === false ? 'error' : 'done')) + (dur ? ' · ' + dur : '');
-  if (running && startSec) { meta.dataset.start = startSec; meta.dataset.pre = pre; }   // for cheap in-place timer ticks
-  c.appendChild(meta); row.appendChild(c);
+  const tok = (a.tokens || 0) > 0 ? ' · ' + fmtK(a.tokens) + ' tok' : '';
+  meta.textContent = pre + (running ? 'running' : (a.ok === false ? 'error' : 'done')) + (dur ? ' · ' + dur : '') + tok;
+  if (running && startSec) { meta.dataset.start = startSec; meta.dataset.pre = pre; meta.dataset.tok = tok; }   // in-place timer/token ticks
+  c.appendChild(meta);
+  if (tools.length) {   // a "current action" line: the latest tool the agent ran
+    const lt = tools[tools.length - 1];
+    const act = document.createElement('div'); act.className = 'agent-action';
+    act.textContent = (running ? '▸ ' : '✓ ') + lt.name + (lt.target ? ' ' + lt.target : '') + (tools.length > 1 ? '   ' + tools.length + ' tools' : '');
+    c.appendChild(act);
+  }
+  head.appendChild(c);
+  if (rich) { const chev = document.createElement('span'); chev.className = 'agent-chev'; chev.textContent = '⌄'; head.appendChild(chev); }
+  row.appendChild(head);
+  if (rich) {   // expandable detail: the agent's task, its live tool-call feed, and its final result
+    const det = document.createElement('div'); det.className = 'agent-detail';
+    if (label && label !== 'agent') { const task = document.createElement('div'); task.className = 'agent-task'; task.textContent = label; det.appendChild(task); }
+    if (tools.length) {
+      const feed = document.createElement('div'); feed.className = 'agent-feed';
+      tools.forEach((t) => { const r = document.createElement('div'); r.className = 'agent-tool';
+        const b = document.createElement('b'); b.textContent = t.name; const s = document.createElement('span'); s.textContent = t.target || '';
+        r.appendChild(b); r.appendChild(s); feed.appendChild(r); });
+      det.appendChild(feed);
+    }
+    if (!running && a.result) { const res = document.createElement('div'); res.className = 'agent-result'; res.textContent = a.result; det.appendChild(res); }
+    row.appendChild(det);
+    head.addEventListener('click', () => {
+      if (expandedAgents.has(a.id)) { expandedAgents.delete(a.id); row.classList.remove('expanded'); }
+      else { expandedAgents.add(a.id); row.classList.add('expanded'); }
+    });
+  }
   return row;
 }
 let _agentsSig = '';
 function renderAgents() {
   const el = $('agents-list'); if (!el) return;
   const at = AT();
-  const liveWf = ((at && at.workflows) || []).filter((w) => w.running > 0);   // ONLY swarms with a genuinely-live agent
+  const wfs = (at && at.workflows) || [];                                     // ALL recent swarms (script prunes to 15 min) so DONE agents linger too
   const taskAgents = at ? Array.from(at.agents.values()).reverse() : [];      // hook-fed Task subagents (newest first)
   const nowSec = Date.now() / 1000;
   // Unify BOTH kinds (workflow-swarm agents + hook-fed Task subagents) into one list and group by STATUS —
   // Running then Done — so the pane reads like "your agents, at a glance" instead of mixing per-swarm sections.
   const all = [];
-  liveWf.forEach((wf) => (wf.agents || []).forEach((a) => all.push(a)));
+  wfs.forEach((wf) => (wf.agents || []).forEach((a) => all.push(a)));
   taskAgents.forEach((a) => all.push(a));
   const running = all.filter((a) => a.status === 'running');
   const doneAll = all.filter((a) => a.status !== 'running');
@@ -747,10 +779,12 @@ function renderAgents() {
   const done = doneAll.slice(0, 20);                                          // cap the recent-history list
   // Rebuild the DOM only when membership/status actually changes — NOT on every 1s tick (avoids re-flashing the
   // CSS entry animations). When unchanged, just advance the running timers in place.
-  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '')), done.map((a) => (a.desc || a.label || '') + a.status), doneAll.length]);
+  // toolCount + tokens in the sig → the cockpit rebuilds as a running agent does work (new tool calls / tokens),
+  // not just on membership changes. Expanded rows survive it (expandedAgents set); entry animation removed so no flash.
+  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '') + (a.toolCount || 0) + (a.tokens || 0)), done.map((a) => (a.desc || a.label || '') + a.status + (a.toolCount || 0)), doneAll.length]);
   if (sig === _agentsSig) {
     el.querySelectorAll('.agent-meta[data-start]').forEach((m) => {
-      m.textContent = (m.dataset.pre || '') + 'running · ' + fmtDur(nowSec - parseFloat(m.dataset.start));
+      m.textContent = (m.dataset.pre || '') + 'running · ' + fmtDur(nowSec - parseFloat(m.dataset.start)) + (m.dataset.tok || '');
     });
     return;
   }
