@@ -515,7 +515,10 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   const st = share.status();
   if (!sid || !st.running || !shareBaseUrl || !st.token) return resolve({ ok: false, error: 'not live' });
   advertisedNameB64 = Buffer.from(String((payload && payload.name) || '')).toString('base64');   // chosen display name → presence (badge/roster)
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { if (r && r.ok) startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
+  // Start the re-stamp heartbeat even if THIS push failed: we ARE hosting (guarded above), and the 120s beat
+  // retries the push, so a transient blip at advertise time still self-heals — while presence-set now honestly
+  // reports ok:false for this attempt.
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
 }));
 ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));

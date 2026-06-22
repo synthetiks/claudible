@@ -10,9 +10,9 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
-// TEMP diagnostics: surface uncaught errors (DevTools is disabled in this build) — toast + console
-// (main mirrors the console to .claudible-debug.log). Remove once the Join-live issue is found.
-window.addEventListener('error', (e) => { try { console.error('[uncaught]', (e && e.message) || e, (e && e.filename || '') + ':' + (e && e.lineno)); toast('Err: ' + ((e && e.message) || e)); } catch (x) {} });
+// Log uncaught renderer errors to the console (mirrored to .claudible-debug.log in DEBUG builds). No user-facing
+// error toast — end users should never see raw JS error text.
+window.addEventListener('error', (e) => { try { console.error('[uncaught]', (e && e.message) || e, (e && e.filename || '') + ':' + (e && e.lineno)); } catch (x) {} });
 window.addEventListener('unhandledrejection', (e) => { try { const r = e && e.reason; console.error('[unhandledrejection]', (r && (r.stack || r.message)) || r); } catch (x) {} });
 
 // ---------- embedded live TUI (one xterm per tab; only the foreground tab's container is visible) ----------
@@ -2546,7 +2546,7 @@ async function switchWorkspace(id) {
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
-  try { await claudible.workspaceOpen(id); } catch {}
+  try { const r = await claudible.workspaceOpen(id); if (r && r.ok === false && r.error !== 'superseded') toast('Could not switch workspace' + (r.error ? ': ' + r.error : '')); } catch (e) { toast('Could not switch workspace'); }
   refreshSessions();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
@@ -2577,6 +2577,7 @@ async function createWorkspace() {
   let r = null; try { r = await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
   $('ws-create').disabled = false;
   if (!r || !r.ok) { busy.textContent = (r && r.error) || 'creation failed'; busy.classList.add('err'); return; }
+  if (r.note) { try { toast(r.note); } catch {} }   // honest partial-success (e.g. repo created but the discovery marker push failed)
   closeWsModal();                                   // main already switched the foreground tab + respawned a fresh conversation
   { const t = AT(); if (t) { t.wsId = (r.workspace && r.workspace.id) || activeWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; t.term.reset(); resetStats(t); } }
   activeSession = null;

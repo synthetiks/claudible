@@ -7,6 +7,7 @@
 set -u
 LOG="$HOME/.claudible/logs"; mkdir -p "$LOG"
 listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
+command -v ss >/dev/null 2>&1 || echo "[claudible] note: 'ss' not found — can't detect already-running voice services; may try to (re)start them."
 
 # Ports are overridable; if you change them, also point the app's CLAUDIBLE_KOKORO / CLAUDIBLE_WHISPER
 # URLs at the new ports (see README → Configuration) so the client and server agree.
@@ -32,7 +33,9 @@ wait_listen() { local port="$1" secs="${2:-10}" i; for ((i=0; i<secs*2; i++)); d
 # real weights setup.sh downloads. USE_GPU/USE_ONNX=false force CPU; ESPEAK_DATA_PATH is set only if
 # present (Kokoro otherwise uses its bundled espeak loader).
 if ! listening "$KOKORO_PORT"; then
-  if [ -d "$VOICE/kokoro" ]; then
+  if [ -d "$VOICE/kokoro" ] && ! command -v uv >/dev/null 2>&1; then
+    echo "[claudible] kokoro NOT started: 'uv' is missing from PATH — run: npm run setup (it installs uv)."
+  elif [ -d "$VOICE/kokoro" ]; then
     ESPEAK_ENV=""
     for p in /usr/lib/x86_64-linux-gnu/espeak-ng-data /usr/share/espeak-ng-data; do
       [ -d "$p" ] && { ESPEAK_ENV="ESPEAK_DATA_PATH=$p"; break; }
@@ -48,7 +51,9 @@ else echo "[claudible] kokoro already up :$KOKORO_PORT"; fi
 
 # Whisper STT  (OpenAI route + ffmpeg convert)
 if ! listening "$WHISPER_PORT"; then
-  if [ -d "$VOICE/whisper" ]; then
+  if [ -d "$VOICE/whisper" ] && [ ! -x "$VOICE/whisper/build/bin/whisper-server" ]; then
+    echo "[claudible] whisper NOT started: build/bin/whisper-server is missing or not built — run: npm run setup."
+  elif [ -d "$VOICE/whisper" ]; then
     ( cd "$VOICE/whisper" && \
       nohup ./build/bin/whisper-server --host 0.0.0.0 --port "$WHISPER_PORT" -m models/ggml-base.bin \
         --inference-path /v1/audio/transcriptions --convert \

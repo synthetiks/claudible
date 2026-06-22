@@ -49,7 +49,7 @@ const REGISTERED_RE = /Registered tunnel connection/i;
 function awaitUrl(proc, timeoutMs) {
   return new Promise((resolve, reject) => {
     let settled = false, buf = '', url = null, registered = false;
-    const finish = (fn, arg) => { if (settled) return; settled = true; clearTimeout(timer); fn(arg); };
+    const finish = (fn, arg) => { if (settled) return; settled = true; clearTimeout(timer); try { proc.stdout && proc.stdout.removeListener('data', scan); proc.stderr && proc.stderr.removeListener('data', scan); } catch {} buf = ''; fn(arg); };   // detach scanners + drop the growing log buffer once resolved (leak fix)
     const scan = (chunk) => {
       buf += chunk.toString();
       if (!url) { const m = buf.match(URL_RE); if (m) url = m[0]; }

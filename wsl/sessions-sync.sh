@@ -126,10 +126,19 @@ pull_branch() {
   git -C "$WT" show-ref --verify --quiet "refs/remotes/origin/$BR" || return 0   # nothing pushed yet
   gitwt merge --no-edit "origin/$BR" >/dev/null 2>&1 && return 0
   # A conflict should not happen (disjoint per-author paths) but must NEVER wedge sync — pull_branch is the
-  # first gate of every op. Origin wins; our OWN session content is re-derived from $PROJ on the next
-  # export, so reset loses nothing real. This self-heals the one-account-two-machines same-id case.
+  # first gate of every op. Origin wins; our OWN session content is re-derived from $PROJ on the next export, so
+  # reset loses nothing real — EXCEPT tombstones (deletion markers aren't re-derivable). Snapshot any local
+  # tombstones and re-apply them after the reset, so a not-yet-pushed "delete everywhere" survives the conflict
+  # instead of resurrecting the session for collaborators.
   gitwt merge --abort >/dev/null 2>&1
+  local keep; keep="$(tombstone_ids 2>/dev/null)"
   gitwt reset --hard "origin/$BR" >/dev/null 2>&1 || return 1
+  if [ -n "$keep" ]; then
+    mkdir -p "$WT/sessions/.tombstones" 2>/dev/null
+    local t; for t in $keep; do case "$t" in *[!A-Za-z0-9-]*) continue ;; esac; : > "$WT/sessions/.tombstones/$t"; done
+    gitwt add -A -- "sessions/.tombstones" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: preserve local tombstones across conflict reset" >/dev/null 2>&1
+  fi
   return 0
 }
 
@@ -312,18 +321,19 @@ case "$op" in
     printf '{"login":"%s","session":"%s","url":"%s","token":"%s","name":"%s","ts":%s}\n' "$author" "$psid" "$purl" "$ptok" "$pname" "$(date +%s)" > "$WT/live/$author.json"
     gitwt add -A -- "live/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence $author" >/dev/null 2>&1
-    for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
-    emit "{\"ok\":true,\"op\":\"presence-set\"}"
+    pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-set\"}" || emit "{\"ok\":false,\"op\":\"presence-set\",\"error\":\"push failed\"}"
     ;;
   presence-clear)
     ensure_worktree || fail "could not set up the sessions branch"
     pull_branch || fail "pull failed"
+    pushed=1
     if [ -e "$WT/live/$author.json" ]; then
       gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
       gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence clear $author" >/dev/null 2>&1
-      for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+      pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
     fi
-    emit "{\"ok\":true,\"op\":\"presence-clear\"}"
+    [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-clear\"}" || emit "{\"ok\":false,\"op\":\"presence-clear\",\"error\":\"push failed\"}"
     ;;
   presence-list)
     # Read every collaborator's live/*.json straight off origin via fetch + git show — NO worktree merge, so this
@@ -370,8 +380,8 @@ os.replace(tmp, f)
 PY
     gitwt add -- "meta/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: title $author" >/dev/null 2>&1
-    for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
-    emit "{\"ok\":true,\"op\":\"title-set\"}"
+    pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"title-set\"}" || emit "{\"ok\":false,\"op\":\"title-set\",\"error\":\"push failed\"}"
     ;;
   title-list)
     # Resolve every id to its newest title across all authors (last-writer-wins by ts). Read straight off origin

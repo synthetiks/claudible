@@ -50,15 +50,21 @@ case "$kind" in
     mkdir -p "$dir/.claude" 2>/dev/null
     # A committed marker so a collaborator's Claudible can DISCOVER this repo as a workspace (sessions-discover.sh).
     printf '{"claudible":true,"slug":"%s"}\n' "$slug" > "$dir/.claudible-workspace"
+    marker_ok=1
     (
-      cd "$dir" || exit 0
-      git add .gitignore .claudible-workspace >/dev/null 2>&1
-      git -c user.name="$owner" -c user.email="$owner@users.noreply.github.com" \
-          commit -m "claudible: ignore .claude runtime + mark workspace" >/dev/null 2>&1
+      cd "$dir" || exit 1
+      git add .gitignore .claudible-workspace >/dev/null 2>&1 && \
+      git -c user.name="$owner" -c user.email="$owner@users.noreply.github.com" -c commit.gpgsign=false \
+          commit -m "claudible: ignore .claude runtime + mark workspace" >/dev/null 2>&1 && \
       git push >/dev/null 2>&1
-    )
-    printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' \
-      "$slug" "$owner" "$owner" "$slug"
+    ) || marker_ok=0   # &&-chained so marker_ok reflects the WHOLE publish (a failed commit no longer hides behind an up-to-date push); gpgsign disabled so the commit succeeds for gpg/hook users
+    if [ "$marker_ok" = 1 ]; then
+      printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' \
+        "$slug" "$owner" "$owner" "$slug"
+    else
+      printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","note":"repo created, but publishing the discovery marker failed — collaborators may not see it until your next sync"}' \
+        "$slug" "$owner" "$owner" "$slug"
+    fi
     ;;
 
   *)
