@@ -209,11 +209,11 @@
     .cmdscroll-wrap.more-r::after{opacity:1}
     /* track: equal columns sized so EXACTLY 6 fit the viewport (5 inner gaps of 8px = 40px) — narrower pills, more shown */
     .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 40px) / 6);gap:8px;
-      overflow-x:auto;overflow-y:hidden;cursor:grab;touch-action:pan-x}
+      overflow-x:auto;overflow-y:hidden;cursor:grab;touch-action:pan-x;padding-bottom:4px}   /* subtle gap between pills and the scrollbar */
     .cmdscroll:active{cursor:grabbing}
     /* no per-element scrollbar override → inherits the global sleek webkit scrollbar used everywhere else */
     /* clickable scroll arrows over the edge-fades — shown only when there's more to reveal that direction */
-    .cmdarrow{position:absolute;top:0;bottom:0;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;
+    .cmdarrow{position:absolute;top:0;bottom:13px;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;   /* bottom skips the 4px gap + 9px scrollbar so the arrow centers on the pill row, not the scrollbar */
       border:none;background:none;color:var(--ink-dim);font-size:18px;line-height:1;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .16s,color .16s}
     .cmdarrow:hover{color:var(--ink)}
     .cmdarrow-l{left:0}
