@@ -602,8 +602,10 @@
     .drawer .label .collapse{font-size:15px}
     .drawer .name-field{padding:7px 11px;font-size:12px}
     .username-row{display:flex;flex-wrap:nowrap;gap:6px;align-items:stretch;margin-top:2px}
-    .username-row .name-field{flex:1 1 0;min-width:0;width:auto}
-    .name-save{flex:0 0 auto;width:38px;align-self:stretch;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:#5fb487;font-size:14px;line-height:1;cursor:pointer;transition:background .14s,border-color .14s}
+    /* input + ✓ button pinned to the SAME explicit height (border-box is global) so they match exactly —
+       align-self:stretch wasn't equalizing a flex <input> against the button reliably, so don't rely on it */
+    .username-row .name-field{flex:1 1 0;min-width:0;width:auto;height:31px}
+    .name-save{flex:0 0 auto;width:38px;height:31px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:#5fb487;font-size:14px;line-height:1;cursor:pointer;transition:background .14s,border-color .14s}
     .name-save:hover{border-color:rgba(95,180,135,.55);background:rgba(95,180,135,.14)}
     /* saved-username display: shows the name as text with a hover edit (✎) toggle back into the input */
     .username-view{display:flex;align-items:center;gap:8px;margin-top:2px;padding:7px 11px;border:1px solid var(--hairline-soft);border-radius:8px;background:#14171c}
