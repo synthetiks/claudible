@@ -26,7 +26,7 @@ function humanError(code) {
   };
   const c = String(code == null ? '' : code).trim();
   if (map[c]) return map[c];
-  if (/\s/.test(c) && c.length <= 120 && !/[{}<>]|Error:|\bat .*:\d/.test(c)) return c;   // already a human sentence → keep it
+  if (/\s/.test(c) && c.length <= 120 && !/[{}<>]|Error:|\bat .*:\d|\bE[A-Z]{3,}\b|Cannot read prop/.test(c)) return c;   // already a human sentence → keep it (but never a raw node/JS exception)
   return 'something went wrong';
 }
 // Log uncaught renderer errors to the console (mirrored to .claudible-debug.log in DEBUG builds). No user-facing
@@ -772,6 +772,7 @@ function renderAgents() {
   const all = [];
   wfs.forEach((wf) => (wf.agents || []).forEach((a) => all.push(a)));
   taskAgents.forEach((a) => all.push(a));
+  { const liveIds = new Set(all.map((a) => a.id)); for (const id of expandedAgents) if (!liveIds.has(id)) expandedAgents.delete(id); }   // prune expand state for swarms that dropped out — no leak, no stale pre-expand
   const running = all.filter((a) => a.status === 'running');
   const doneAll = all.filter((a) => a.status !== 'running');
   const endSec = (a) => a.last || (a.startedAt ? (a.startedAt + (a.durationMs || 0)) / 1000 : (a.start || 0));

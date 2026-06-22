@@ -48,7 +48,7 @@ def short_target(inp):
 
 def parse_agent(f):
     """Read an agent transcript fully: prompt (label), start, its tool-call feed, tokens, and final result text."""
-    start = None; label = ''; last_text = ''; tools = []; tokens = 0
+    start = None; label = ''; last_text = ''; tools = []; usage = {}; seq = 0
     try:
         with open(f, encoding='utf-8') as fh:
             for line in fh:
@@ -76,12 +76,37 @@ def parse_agent(f):
                             elif x.get('type') == 'text' and x.get('text', '').strip():
                                 last_text = x['text'].strip()
                     u = msg.get('usage') or {}
-                    try: tokens += int(u.get('output_tokens', 0)) + int(u.get('input_tokens', 0))
-                    except Exception: pass
+                    if u:
+                        rid = o.get('requestId') or (msg.get('id') if isinstance(msg, dict) else None)
+                        if not rid: rid = '_l%d' % seq; seq += 1   # no request id -> count this line as its own turn
+                        try:
+                            ent = usage.get(rid)
+                            if ent is None: ent = {'in': 0, 'out': 0}; usage[rid] = ent
+                            ent['in'] = int(u.get('input_tokens', 0) or 0)                       # constant within a turn -> set once
+                            ent['out'] = max(ent['out'], int(u.get('output_tokens', 0) or 0))    # cumulative within a turn -> take the max
+                        except Exception: pass
     except Exception:
         pass
     return {'label': label, 'start': start, 'tools': tools, 'toolCount': len(tools),
-            'tokens': tokens, 'result': ' '.join(last_text.split())[:280]}
+            'tokens': sum(e['in'] + e['out'] for e in usage.values()), 'result': ' '.join(last_text.split())[:280]}
+
+CACHE = os.path.join(root, '.parse-cache.json')
+try:
+    cache = json.load(open(CACHE))
+    if not isinstance(cache, dict): cache = {}
+except Exception:
+    cache = {}
+all_aids = set()
+def cached_parse(af, aid):
+    # done agents are immutable -> reuse the cached parse unless the file's mtime/size changed (a still-running agent)
+    try: st = os.stat(af)
+    except Exception: return parse_agent(af)
+    key = '%d:%d' % (int(st.st_mtime), st.st_size)
+    ent = cache.get(aid)
+    if ent and ent.get('key') == key and 'info' in ent: return ent['info']
+    info = parse_agent(af)
+    cache[aid] = {'key': key, 'info': info}
+    return info
 
 out = []
 wfs = sorted(glob.glob(os.path.join(root, 'wf_*')),
@@ -105,7 +130,8 @@ for wf in wfs[:6]:
     agents = []
     for aid in seen:
         af = os.path.join(wf, 'agent-%s.jsonl' % aid)
-        info = parse_agent(af) if os.path.exists(af) else {'label': '', 'start': None, 'tools': [], 'toolCount': 0, 'tokens': 0, 'result': ''}
+        all_aids.add(aid)
+        info = cached_parse(af, aid) if os.path.exists(af) else {'label': '', 'start': None, 'tools': [], 'toolCount': 0, 'tokens': 0, 'result': ''}
         last = None
         try: last = int(os.path.getmtime(af))
         except Exception: pass
@@ -132,5 +158,10 @@ for wf in wfs[:6]:
     out.append({'wf': os.path.basename(wf), 'mtime': activity,
                 'total': len(agents), 'done': sum(1 for a in agents if a['status'] != 'running'),
                 'running': running, 'agents': agents})
+try:
+    cache = {k: v for k, v in cache.items() if k in all_aids}   # prune ids not seen this run
+    json.dump(cache, open(CACHE + '.tmp', 'w')); os.replace(CACHE + '.tmp', CACHE)
+except Exception:
+    pass
 print(json.dumps(out))
 PY
