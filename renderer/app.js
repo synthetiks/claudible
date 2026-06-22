@@ -10,6 +10,25 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
+// Map internal error CODES (from main.js / the wsl scripts) to plain-English sentences so a toast never shows a
+// raw code like 'bad handle' or a raw JS exception. Already-human messages (a space, sane length, no JSON/stack
+// junk) pass through unchanged; anything else becomes a generic line.
+function humanError(code) {
+  const map = {
+    exec: 'the WSL command could not run', parse: 'could not read the response',
+    'bad handle': 'that live link looks invalid', 'bad url': 'that live link looks invalid',
+    'bad token': 'that live link looks invalid', 'bad id': 'that item could not be found',
+    'not live': "you're not sharing a live session right now", 'bad workspace': 'that workspace is not available',
+    'bad ws': 'that workspace is not available', 'bad args': 'invalid request', 'bad slug': 'that name is not allowed',
+    apply: 'could not apply that change', 'stopped during start': 'sharing was stopped while it was starting',
+    'push failed': 'could not reach the server — check your connection', 'pull failed': 'could not reach the server — check your connection',
+    full: 'the session is full', 'not found': 'not found', unknown: 'something went wrong',
+  };
+  const c = String(code == null ? '' : code).trim();
+  if (map[c]) return map[c];
+  if (/\s/.test(c) && c.length <= 120 && !/[{}<>]|Error:|\bat .*:\d/.test(c)) return c;   // already a human sentence → keep it
+  return 'something went wrong';
+}
 // Log uncaught renderer errors to the console (mirrored to .claudible-debug.log in DEBUG builds). No user-facing
 // error toast — end users should never see raw JS error text.
 window.addEventListener('error', (e) => { try { console.error('[uncaught]', (e && e.message) || e, (e && e.filename || '') + ':' + (e && e.lineno)); } catch (x) {} });
@@ -871,7 +890,7 @@ function webShareUI(on) {
 { const sr = $('share-reset'); if (sr) sr.addEventListener('click', async () => {
     let r = null; try { r = await claudible.shareNewLink(); } catch {}
     if (r && r.ok) { if (r.url) { shareLink.value = r.url; shareLink.style.display = ''; } toast('Access reset — guests disconnected, old link revoked'); }
-    else { toast('Could not reset access' + (r && r.error ? ': ' + r.error : '')); }
+    else { toast('Could not reset access' + (r && r.error ? ': ' + humanError(r.error) : '')); }
   }); }
 // The collaboration chat/voice column appears when you're web-sharing OR a viewer/peer has actually joined — so
 // an idle synced session stays clean, but the panel is there the moment someone's watching.
@@ -1371,7 +1390,7 @@ async function doDiffRevert(patch, btn, label) {
   btn.disabled = true;
   let r = null; try { r = await claudible.diffRevert(patch); } catch {}
   if (r && r.ok) { toast(label || 'Reverted'); refreshDiff(); }
-  else { btn.disabled = false; toast((r && r.error) || 'Revert failed'); }
+  else { btn.disabled = false; toast('Revert failed' + (r && r.error ? ': ' + humanError(r.error) : '')); }
 }
 function renderDiffFile(f, readOnly) {
   const card = document.createElement('div'); card.className = 'diff-file' + (readOnly ? ' committed' : '');
@@ -1421,7 +1440,7 @@ function renderUntracked(p) {
   const db = document.createElement('button'); db.className = 'diff-revert-file'; db.textContent = 'Discard'; db.title = 'Delete this new file';
   db.addEventListener('click', async () => {
     db.disabled = true; let r = null; try { r = await claudible.diffDiscard(p); } catch {}
-    if (r && r.ok) { toast('Discarded ' + p); refreshDiff(); } else { db.disabled = false; toast((r && r.error) || 'Discard failed'); }
+    if (r && r.ok) { toast('Discarded ' + p); refreshDiff(); } else { db.disabled = false; toast('Discard failed' + (r && r.error ? ': ' + humanError(r.error) : '')); }
   });
   head.appendChild(nm); head.appendChild(tag); head.appendChild(db); row.appendChild(head); return row;
 }
@@ -1655,7 +1674,7 @@ function makeWindowBtn(peer) {
 }
 async function joinLive(peer) {   // separate-window fallback
   console.log('[live] joinLive called — name=', peer && (peer.name || peer.login), 'session=', peer && peer.session);
-  try { const r = await claudible.liveJoin(peer, collabName()); console.log('[live] liveJoin result:', JSON.stringify(r)); if (!r || !r.ok) toast('Could not join: ' + ((r && r.error) || 'unknown')); }
+  try { const r = await claudible.liveJoin(peer, collabName()); console.log('[live] liveJoin result:', JSON.stringify(r)); if (!r || !r.ok) toast('Could not join: ' + humanError(r && r.error)); }
   catch (e) { console.error('[live] joinLive THREW:', e); toast('Could not join: ' + ((e && e.message) || e)); }
 }
 // a collaborator is live in a session we don't have locally yet → a joinable row of its own
@@ -1740,7 +1759,7 @@ function openLiveTab(peer) {
   refreshSessions();                                                 // surface the joined-tab row immediately
   claudible.liveConnect(id, peer, collabName()).then((r) => {
     console.log('[live] liveConnect result:', JSON.stringify(r));
-    if (!r || !r.ok) { setLiveState(rec, 'offline'); toast('Could not join: ' + ((r && r.error) || 'unknown')); }
+    if (!r || !r.ok) { setLiveState(rec, 'offline'); toast('Could not join: ' + humanError(r && r.error)); }
   }).catch((err) => { console.error('[live] liveConnect rejected:', err); setLiveState(rec, 'offline'); });
  } catch (e) { console.error('[live] openLiveTab THREW:', e && (e.stack || e.message || e)); toast('Join failed: ' + ((e && e.message) || e)); }
 }
@@ -2359,7 +2378,7 @@ async function openAcceptInviteModal(w) {
   toast('Adding ' + slug + '…');
   let r = null; try { r = await claudible.workspaceAcceptInvite(w.id, choice === 'default'); } catch (e) {}
   if (r && r.ok) { await refreshWorkspaces(); switchWorkspace(w.id); }
-  else if (!r || r.error !== 'cancelled') toast('Could not add: ' + ((r && r.error) || 'unknown'));
+  else if (!r || r.error !== 'cancelled') toast('Could not add: ' + humanError(r && r.error));
 }
 async function deleteWorkspace(w) {
   let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
@@ -2370,7 +2389,7 @@ async function deleteWorkspace(w) {
     // to a workspace that no longer exists (blank chips + empty sessions header). Repoint those tabs too.
     for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }
     await refreshWorkspaces(); refreshSessions();
-  } else toast((r && r.error) || 'delete failed');
+  } else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
 }
 // ---- workspace options (▾) menu: every per-workspace action lives here so the chip stays a clean name ----
 function wsMenuItems(chip, nm, w) {
@@ -2562,7 +2581,7 @@ async function switchWorkspace(id) {
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
-  try { const r = await claudible.workspaceOpen(id); if (r && r.ok === false && r.error !== 'superseded') toast('Could not switch workspace' + (r.error ? ': ' + r.error : '')); } catch (e) { toast('Could not switch workspace'); }
+  try { const r = await claudible.workspaceOpen(id); if (r && r.ok === false && r.error !== 'superseded') toast('Could not switch workspace' + (r.error ? ': ' + humanError(r.error) : '')); } catch (e) { toast('Could not switch workspace'); }
   refreshSessions();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }

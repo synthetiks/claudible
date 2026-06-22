@@ -1196,7 +1196,7 @@ function diffAction(mode, payload) {
           let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
           resolve(r);
         });
-    } catch (err) { resolve({ ok: false, error: String(err) }); }
+    } catch (err) { console.error('[claudible] diffAction:', err && err.message); resolve({ ok: false, error: 'apply' }); }
   });
 }
 ipcMain.handle('diff:revert', (e, patch) => diffAction('apply-reverse', patch));
