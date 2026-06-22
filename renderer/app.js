@@ -396,7 +396,7 @@ function stopCapture() { pttCapturing = false; const b = $('ptt-key-btn'); if (b
 if ($('ptt-key-btn')) $('ptt-key-btn').addEventListener('click', () => { pttCapturing ? stopCapture() : startCapture(); });
 
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
-let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0;
+let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0, fullReadout = true;
 let lastReply = '';                                  // Claude's latest reply (stripped) — the manual "▶ Speak" reads this
 let ttsSpeed = 0;                                    // % faster over baseline (0–25), applied via audio.playbackRate
 let announceOn = true, chimeOn = true;               // factory-on: spoken "task complete" cue + soft chat chime
@@ -410,7 +410,7 @@ function updateVoiceOutBtn() {
 }
 function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
-          .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 3000);
+          .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, fullReadout ? Infinity : 1500);
 }
 function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? '■' : '▶'; b.title = on ? 'Stop' : 'Test the selected voice'; b.classList.toggle('live', on); const vo = $('voice-out'); if (vo) vo.classList.toggle('speaking', on); updateVoiceOutBtn(); }
 function stopSpeech() {
@@ -511,6 +511,7 @@ if (speedRange) {
 // ---- Alerts: announce-when-done + chat chime ----
 if ($('announce-done')) $('announce-done').addEventListener('change', (e) => { announceOn = e.target.checked; $('announce-toggle').classList.toggle('on', announceOn); savePrefs({ announce: announceOn }); });
 if ($('chat-chime')) $('chat-chime').addEventListener('change', (e) => { chimeOn = e.target.checked; $('chime-toggle').classList.toggle('on', chimeOn); savePrefs({ chime: chimeOn }); });
+if ($('full-readout')) $('full-readout').addEventListener('change', (e) => { fullReadout = e.target.checked; $('fullreadout-toggle').classList.toggle('on', fullReadout); savePrefs({ fullReadout: fullReadout }); });
 // soft, relaxing two-tone chime (Web Audio — no asset). Lazy ctx + resume (autoplay parks it until a gesture).
 let _chimeCtx = null;
 function playChime() {
@@ -634,7 +635,7 @@ claudible.onHookLine((tabId, line) => {
         $('tts-in').value = reply;          // populate the (collapsible) box for manual Speak
         updateVoiceOutBtn();                // enable ▶ Speak now that there's a reply
         if (alwaysSpeak) speak(reply);      // auto-speak the reply in the selected voice
-        else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech caps reply at 3000)
+        else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech: full reply, or 1500 when 'Read full replies' is off)
       }
     }
   } else if (o.hook_event_name === 'PreToolUse' && o.tool_name === 'Task') {
@@ -1466,6 +1467,7 @@ function savePrefs(patch) { try { localStorage.setItem(PREFS_KEY, JSON.stringify
   // factory-on (undefined → ON): announce-when-done + chat chime; speed defaults to baseline (0)
   announceOn = p.announce !== false; if ($('announce-done')) { $('announce-done').checked = announceOn; $('announce-toggle').classList.toggle('on', announceOn); }
   chimeOn = p.chime !== false; if ($('chat-chime')) { $('chat-chime').checked = chimeOn; $('chime-toggle').classList.toggle('on', chimeOn); }
+  fullReadout = p.fullReadout !== false; if ($('full-readout')) { $('full-readout').checked = fullReadout; $('fullreadout-toggle').classList.toggle('on', fullReadout); }
   applyTtsSpeed(p.ttsSpeed || 0, false);
   if (p.pttKey) pttKey = p.pttKey;
   applyPttKey();   // render the current push-to-talk key (default or saved)
