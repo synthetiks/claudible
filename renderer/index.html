@@ -597,9 +597,14 @@
     .drawer .name-field{padding:7px 11px;font-size:12px}
     .username-row{display:flex;gap:6px;align-items:center;margin-top:2px}
     .username-row .name-field{flex:1}
-    .name-save{flex:none;width:34px;height:34px;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:#5fb487;font-size:14px;line-height:1;cursor:pointer;transition:background .14s,border-color .14s}
+    .name-save{flex:none;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:#5fb487;font-size:14px;line-height:1;cursor:pointer;transition:background .14s,border-color .14s}
     .name-save:hover{border-color:rgba(95,180,135,.55);background:rgba(95,180,135,.14)}
-    .linfo{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--ink-faint);border-radius:50%;font-size:9px;font-style:normal;color:var(--ink-dim);cursor:help;vertical-align:middle}
+    /* saved-username display: shows the name as text with a hover edit (✎) toggle back into the input */
+    .username-view{display:flex;align-items:center;gap:8px;margin-top:2px;padding:7px 11px;border:1px solid var(--hairline-soft);border-radius:8px;background:#14171c}
+    .username-text{flex:1;font-size:12.5px;color:var(--ink);font-weight:500}
+    .username-edit{flex:none;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink-faint);font-size:12px;cursor:pointer;opacity:0;transition:opacity .14s,color .14s}
+    .username-view:hover .username-edit{opacity:1}
+    .username-edit:hover{color:var(--ink)}
     /* voice in — a slim Talk button + a compact key row; the status line takes no space until it has text */
     .drawer button.primary{padding:8px 12px;font-size:12px;border-radius:8px}
     .drawer .ptt-key-row{margin-top:8px;font-size:10.5px}
@@ -857,10 +862,14 @@
     <div class="drawer-head"><span>settings</span><button id="drawer-close" title="Close">×</button></div>
     <div class="panel">
       <div class="sec">
-        <div class="label">your claudible username <span class="linfo" id="username-info" title="Stored locally on this machine. It's the name you appear as when you join (or host) a session through Claudible.">i</span></div>
-        <div class="username-row">
+        <div class="label">your claudible username <button class="ws-info" id="username-info" type="button" aria-label="About your Claudible username">i</button></div>
+        <div class="username-view" id="username-view" style="display:none">
+          <span class="username-text" id="username-text"></span>
+          <button type="button" class="username-edit" id="username-edit" title="Change username" aria-label="Change username">✎</button>
+        </div>
+        <div class="username-row" id="username-edit-row">
           <input type="text" id="collab-name-in" class="name-field" maxlength="40" placeholder="e.g. Developer" autocomplete="off" />
-          <button type="button" id="collab-name-save" class="name-save" title="Save username" aria-label="Save username" style="display:none">✓</button>
+          <button type="button" id="collab-name-save" class="name-save" title="Save username" aria-label="Save username">✓</button>
         </div>
       </div>
       <div class="sec">

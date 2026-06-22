@@ -1261,23 +1261,35 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
 // collab display name — what teammates see when you're in a synced session. Persist on edit, update your own
 // roster/bar instantly, and (debounced) re-publish the live presence so the "Join live" badge shows the new name.
 (function () {
-  const inp = $('collab-name-in'), btn = $('collab-name-save'); if (!inp) return;
+  const inp = $('collab-name-in'), btn = $('collab-name-save');
+  const view = $('username-view'), textEl = $('username-text'), editBtn = $('username-edit'), editRow = $('username-edit-row');
+  if (!inp) return;
   let saved = (loadPrefs().collabName || loadPrefs().hostName || '').trim();   // hostName = lazy migration from the old split identity
-  inp.value = saved;
-  const dirty = () => inp.value.trim() !== saved && !!inp.value.trim();
-  const sync = () => { if (btn) btn.style.display = dirty() ? '' : 'none'; };   // ✓ appears only when there's an unsaved name
+  function showView() {   // a saved name shows as text + a hover ✎; no name yet → stay in the input
+    if (textEl) textEl.textContent = saved;
+    if (view) view.style.display = saved ? 'flex' : 'none';
+    if (editRow) editRow.style.display = saved ? 'none' : 'flex';
+  }
+  function showEdit() {
+    if (view) view.style.display = 'none';
+    if (editRow) editRow.style.display = 'flex';
+    inp.value = saved; inp.focus(); inp.select();
+  }
   const save = () => {
     const v = inp.value.trim().slice(0, 40);
-    if (!v || v === saved) { sync(); return; }
-    saved = v; savePrefs({ collabName: v }); sync();
+    if (!v) { showView(); return; }                       // empty → just go back to whatever was saved
+    const had = !!saved, changed = v !== saved;
+    saved = v; savePrefs({ collabName: v });
     renderRoster(lastRoster); renderLiveBar();
     if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v); } catch (e) {} }
-    try { toast('Username saved'); } catch (e) {}
+    showView();
+    if (changed) { try { toast(had ? 'Username changed' : 'Username saved'); } catch (e) {} }
   };
-  inp.addEventListener('input', sync);
-  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+  inp.value = saved;
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } else if (e.key === 'Escape') { showView(); } });
   if (btn) btn.addEventListener('click', save);
-  sync();
+  if (editBtn) editBtn.addEventListener('click', showEdit);
+  showView();
 })();
 $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
 $('drawer-close').addEventListener('click', () => openDrawer(false));
@@ -2219,6 +2231,26 @@ function openWsInfo() {
   setTimeout(() => { document.addEventListener('mousedown', onWsInfoOutside, true); document.addEventListener('keydown', onWsInfoKey, true); }, 0);
 }
 (function () { const b = $('ws-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openWsInfo(); }); })();
+// "Your Claudible username" ⓘ — same click-popover as the workspace one.
+let unameInfoPop = null;
+function closeUnameInfo() { if (!unameInfoPop) return; unameInfoPop.remove(); unameInfoPop = null; document.removeEventListener('mousedown', onUnameInfoOutside, true); document.removeEventListener('keydown', onUnameInfoKey, true); }
+function onUnameInfoOutside(e) { if (unameInfoPop && !unameInfoPop.contains(e.target) && e.target.id !== 'username-info') closeUnameInfo(); }
+function onUnameInfoKey(e) { if (e.key === 'Escape') closeUnameInfo(); }
+function openUnameInfo() {
+  if (unameInfoPop) { closeUnameInfo(); return; }
+  const anchor = $('username-info'); if (!anchor) return;
+  const pop = document.createElement('div'); pop.className = 'ws-info-pop';
+  pop.innerHTML = '<span class="wt"><b>Your Claudible username</b></span>'
+    + '<p>The name you appear as when you join (or host) a session through Claudible.</p>'
+    + '<p>Stored <b>locally on this machine</b> and remembered for every session.</p>';
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
+  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  unameInfoPop = pop;
+  setTimeout(() => { document.addEventListener('mousedown', onUnameInfoOutside, true); document.addEventListener('keydown', onUnameInfoKey, true); }, 0);
+}
+(function () { const b = $('username-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openUnameInfo(); }); })();
 // First launch: pop the explainer once so new users learn the concept; afterwards it lives behind the ⓘ.
 { const _wp = loadPrefs(); if (!_wp.wsHintSeen) { savePrefs({ wsHintSeen: true }); setTimeout(() => { try { openWsInfo(); } catch (e) {} }, 1000); } }
 // the bottom-left "share live" ⓘ — same click-popover as the workspace one, but anchored ABOVE the icon (the
