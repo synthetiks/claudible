@@ -410,7 +410,7 @@ function updateVoiceOutBtn() {
 }
 function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
-          .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 2000);
+          .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, 3000);
 }
 function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? '■' : '▶'; b.title = on ? 'Stop' : 'Test the selected voice'; b.classList.toggle('live', on); const vo = $('voice-out'); if (vo) vo.classList.toggle('speaking', on); updateVoiceOutBtn(); }
 function stopSpeech() {
@@ -634,7 +634,7 @@ claudible.onHookLine((tabId, line) => {
         $('tts-in').value = reply;          // populate the (collapsible) box for manual Speak
         updateVoiceOutBtn();                // enable ▶ Speak now that there's a reply
         if (alwaysSpeak) speak(reply);      // auto-speak the reply in the selected voice
-        else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech caps reply at 2000)
+        else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech caps reply at 3000)
       }
     }
   } else if (o.hook_event_name === 'PreToolUse' && o.tool_name === 'Task') {
