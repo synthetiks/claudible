@@ -405,7 +405,7 @@ let announceOn = true, chimeOn = true;               // factory-on: spoken "task
 function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
   const speaking = ttsBusy || !!ttsAudio;
-  b.textContent = speaking ? '◼ Speaking' : '▶ Speak';
+  b.textContent = speaking ? '◼ Stop' : '▶ Speak';   // short labels so the button stays narrow (uppercased via CSS)
   b.disabled = !speaking && !lastReply;
   b.title = speaking ? 'Stop speaking' : (lastReply ? "Speak Claude's latest reply" : 'Nothing to speak yet');
 }
