@@ -209,9 +209,20 @@
     .cmdscroll-wrap.more-r::after{opacity:1}
     /* track: equal columns sized so EXACTLY 6 fit the viewport (5 inner gaps of 8px = 40px) — narrower pills, more shown */
     .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 40px) / 6);gap:8px;
-      overflow-x:auto;overflow-y:hidden;scrollbar-width:none;cursor:grab;touch-action:pan-x}
+      overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;cursor:grab;touch-action:pan-x}
     .cmdscroll:active{cursor:grabbing}
-    .cmdscroll::-webkit-scrollbar{height:0;width:0}
+    .cmdscroll::-webkit-scrollbar{height:7px}
+    /* clickable scroll arrows over the edge-fades — shown only when there's more to reveal that direction */
+    .cmdarrow{position:absolute;top:0;bottom:0;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;
+      border:none;background:none;color:var(--ink-dim);font-size:18px;line-height:1;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .16s,color .16s}
+    .cmdarrow:hover{color:var(--ink)}
+    .cmdarrow-l{left:0}
+    .cmdarrow-r{right:0}
+    .cmdscroll-wrap.more-l .cmdarrow-l{opacity:1;pointer-events:auto}
+    .cmdscroll-wrap.more-r .cmdarrow-r{opacity:1;pointer-events:auto}
+    /* /clear is destructive — tint it so it never reads identical to /help */
+    .cmdscroll .cmdpill[data-cmd="/clear"]{color:var(--live-soft);border-color:rgba(229,86,75,.28)}
+    .cmdscroll .cmdpill[data-cmd="/clear"]:hover{color:#fff;border-color:rgba(229,86,75,.6);box-shadow:inset 0 1px 0 var(--sheen),0 4px 18px -8px rgba(229,86,75,.5)}
     .cmdscroll .cmdpill{min-width:0;width:auto;padding:8px 10px;
       font-size:11.5px;letter-spacing:.02em;color:var(--ink-dim);white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis;text-align:center;
@@ -594,6 +605,9 @@
     .hvm.c-failed,.hvm.c-disconnected,.hvm.c-closed{border-color:rgba(229,86,75,.6);color:#e5564b}
     .hvm.c-failed .d,.hvm.c-disconnected .d,.hvm.c-closed .d{background:#e5564b}
     .share-btn{width:100%}
+    .share-reset{width:100%;padding:7px;font-size:10.5px;letter-spacing:.04em;color:var(--ink-dim);
+      background:none;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:color .15s,border-color .15s}
+    .share-reset:hover{color:var(--live-soft);border-color:rgba(229,86,75,.4)}
     /* ── settings drawer: compact, sleek, consistent (width/panel padding set on the base rule below) ── */
     .drawer .sec{padding:13px 0}
     .drawer .sec:last-child{border-bottom:none}
@@ -750,18 +764,18 @@
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins">⚙</button>
     </div>
     <div class="vgroup">
-      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop recording">
-        <span class="vdot"></span><span class="vstat" id="vin-stat">Record</span>
+      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
+        <span class="vdot"></span><span class="vstat" id="vin-stat">Talk</span>
       </button>
       <div class="vbox vout" id="voice-out" title="Claude's voice output">
         <span class="vdot" id="vout-dot"></span>
         <button class="vstop" id="vout-stop" type="button" title="Speak Claude's latest reply" disabled>▶ Speak</button>
-        <button class="vauto on" id="vout-auto" aria-pressed="true" title="Always speak Claude's replies">auto</button>
+        <button class="vauto on" id="vout-auto" aria-pressed="true" title="Auto-speak Claude's replies">Auto-speak</button>
       </div>
     </div>
     <span class="trk" title="session usage">
       <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">CONTEXT —</span></span>
-      <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>
+      <b id="trk-cost" hidden>$0.00</b><!-- session cost now lives in the context-bar tooltip; tokens stay visible -->
       <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
     </span>
   </div>
@@ -792,6 +806,7 @@
           <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
         </div>
         <button id="share-btn" class="share-btn">Share a live link</button>
+        <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
         <div class="out share-out" id="share-out">A web link for people without Claudible.</div>
       </div>
@@ -818,6 +833,8 @@
       </div><!-- /termrow -->
       <div class="cmdbar" title="One-tap commands — runs in the live terminal · scroll or drag for more">
         <div class="cmdscroll-wrap">
+          <button class="cmdarrow cmdarrow-l" id="cmd-left" type="button" aria-label="Scroll commands left">‹</button>
+          <button class="cmdarrow cmdarrow-r" id="cmd-right" type="button" aria-label="Scroll commands right">›</button>
           <div class="cmdscroll" id="cmdscroll">
             <button class="cmdpill" data-cmd="/model">/model</button>
             <button class="cmdpill" data-cmd="/effort">/effort</button>
@@ -913,7 +930,7 @@
           <label class="toggle on" id="always-toggle">
             <input type="checkbox" id="always-speak" checked />
             <span class="sw"></span>
-            <span class="tlabel">Always Speak</span>
+            <span class="tlabel">Auto-speak</span>
           </label>
           <span class="out" id="tts-out"></span>
         </div>
@@ -931,7 +948,7 @@
 
       <div class="sec">
         <div class="label">alerts</div>
-        <label class="toggle on" id="announce-toggle" title="When Claude finishes a long reply (and Always Speak is off), say “The task is complete.”">
+        <label class="toggle on" id="announce-toggle" title="When Claude finishes a long reply (and Auto-speak is off), say “The task is complete.”">
           <input type="checkbox" id="announce-done" checked />
           <span class="sw"></span>
           <span class="tlabel">Announce when done</span>

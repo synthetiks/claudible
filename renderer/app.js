@@ -235,6 +235,7 @@ function repaintTracker(t) {
     bar.classList.remove('warn', 'crit'); bar.title = 'context window used';
   }
   $('trk-cost').textContent = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
+  if (bar) bar.title = bar.title + ' · ' + $('trk-cost').textContent + ' this session';   // append cost to the (warn-aware) context tooltip — cost lives here now
   const at = t.agentTok || 0;                                    // subagent/swarm tokens (the main meter misses these)
   $('trk-tokens').textContent = fmtK((t.sessTok || 0) + at);
   $('trk-tokens').title = at ? (fmtK(t.sessTok || 0) + ' main + ' + fmtK(at) + ' agents') : '';
@@ -276,7 +277,7 @@ let mediaRecorder = null, chunks = [], recording = false, micStream = null, disc
 function talkUI(on) {
   $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on);
   // Top-bar Voice In box — always visible (even with the drawer closed) so you can see you're talking.
-  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'Recording' : 'Record'; }
+  const vi = $('voice-in'); if (vi) { vi.classList.toggle('live', on); const s = $('vin-stat'); if (s) s.textContent = on ? 'Listening' : 'Talk'; }
 }
 
 async function startRecording() {
@@ -580,11 +581,14 @@ const send = (cmd) => {
 // holds focus in the terminal (keeps the click-twice focus-war fix above).
 const cmdscroll = $('cmdscroll'), cmdwrap = cmdscroll.parentElement;
 let cdrag = null;
-function cmdEdges() {                                          // fade the side(s) that have more off-screen
+function cmdEdges() {                                          // fade + arrow the side(s) that have more off-screen
   const max = cmdscroll.scrollWidth - cmdscroll.clientWidth;
   cmdwrap.classList.toggle('more-l', cmdscroll.scrollLeft > 2);
   cmdwrap.classList.toggle('more-r', cmdscroll.scrollLeft < max - 2);
 }
+{ const cl = $('cmd-left'), cr = $('cmd-right');             // arrow buttons (the existing scroll listener below keeps arrows/fades synced)
+  if (cl) cl.addEventListener('click', () => cmdscroll.scrollBy({ left: -cmdscroll.clientWidth * 0.8, behavior: 'smooth' }));
+  if (cr) cr.addEventListener('click', () => cmdscroll.scrollBy({ left: cmdscroll.clientWidth * 0.8, behavior: 'smooth' })); }
 cmdscroll.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   e.preventDefault();
@@ -712,13 +716,19 @@ function renderAgents() {
   const liveWf = ((at && at.workflows) || []).filter((w) => w.running > 0);   // ONLY swarms with a genuinely-live agent
   const taskAgents = at ? Array.from(at.agents.values()).reverse() : [];      // hook-fed Task subagents (newest first)
   const nowSec = Date.now() / 1000;
-  // Rebuild the DOM only when membership/status actually changes — NOT on every 1s tick. The old code did
-  // el.innerHTML='' every poll, which restarted the CSS entry animations = the "flashing". When unchanged,
-  // just advance the elapsed timers in place.
-  const sig = JSON.stringify([
-    liveWf.map((w) => [w.wf, w.running, w.done, w.agents.filter((a) => a.status === 'running').map((a) => a.id)]),
-    taskAgents.map((a) => a.desc + a.status),
-  ]);
+  // Unify BOTH kinds (workflow-swarm agents + hook-fed Task subagents) into one list and group by STATUS —
+  // Running then Done — so the pane reads like "your agents, at a glance" instead of mixing per-swarm sections.
+  const all = [];
+  liveWf.forEach((wf) => (wf.agents || []).forEach((a) => all.push(a)));
+  taskAgents.forEach((a) => all.push(a));
+  const running = all.filter((a) => a.status === 'running');
+  const doneAll = all.filter((a) => a.status !== 'running');
+  const endSec = (a) => a.last || (a.startedAt ? (a.startedAt + (a.durationMs || 0)) / 1000 : (a.start || 0));
+  doneAll.sort((x, y) => endSec(y) - endSec(x));                              // most-recently-finished first across BOTH sources, so the cap drops the oldest
+  const done = doneAll.slice(0, 20);                                          // cap the recent-history list
+  // Rebuild the DOM only when membership/status actually changes — NOT on every 1s tick (avoids re-flashing the
+  // CSS entry animations). When unchanged, just advance the running timers in place.
+  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '')), done.map((a) => (a.desc || a.label || '') + a.status), doneAll.length]);
   if (sig === _agentsSig) {
     el.querySelectorAll('.agent-meta[data-start]').forEach((m) => {
       m.textContent = (m.dataset.pre || '') + 'running · ' + fmtDur(nowSec - parseFloat(m.dataset.start));
@@ -726,23 +736,21 @@ function renderAgents() {
     return;
   }
   _agentsSig = sig;
-  if (!liveWf.length && !taskAgents.length) {
+  if (!all.length) {
     el.innerHTML = '<div class="agents-empty"><span class="agents-empty-ico">' + SWARM_SVG + '</span>'
       + 'No agents running.<br>When Claude spawns subagents or a workflow swarm, they appear here.</div>';
     return;
   }
   el.innerHTML = '';
-  // Running swarm agents — a clean flat list (Claude-Code style), no progress-bar/sweep chrome.
-  liveWf.forEach((wf) => {
+  if (running.length) {
+    const hd = document.createElement('div'); hd.className = 'agents-section'; hd.textContent = 'Running · ' + running.length; el.appendChild(hd);
+    running.forEach((a) => el.appendChild(agentRow(a, nowSec)));
+  }
+  if (done.length) {
     const hd = document.createElement('div'); hd.className = 'agents-section';
-    hd.textContent = 'Agent swarm · ' + wf.running + ' running' + (wf.done ? ' · ' + wf.done + ' done' : '');
+    hd.textContent = 'Done · ' + doneAll.length + (doneAll.length > done.length ? ' (showing ' + done.length + ')' : '');
     el.appendChild(hd);
-    wf.agents.filter((a) => a.status === 'running').forEach((a) => el.appendChild(agentRow(a, nowSec)));
-  });
-  // Task subagents (hook-fed) — running + a short recently-done history.
-  if (taskAgents.length) {
-    if (liveWf.length) { const hd = document.createElement('div'); hd.className = 'agents-section'; hd.textContent = 'Task subagents'; el.appendChild(hd); }
-    taskAgents.forEach((a) => el.appendChild(agentRow(a, nowSec)));
+    done.forEach((a) => el.appendChild(agentRow(a, nowSec)));
   }
 }
 function setAgentsView(on) {
@@ -856,8 +864,15 @@ function webShareUI(on) {
   shareBtn.classList.toggle('live', on);
   setActive('lbl-share', on);
   setDot('d-share', on ? 'ok' : '');
+  const sr = $('share-reset'); if (sr) sr.style.display = on ? '' : 'none';   // "reset access" only while web-sharing
   if (!on) { shareLink.style.display = 'none'; shareLink.value = ''; }
 }
+// "Reset access": disconnect every current guest + revoke the old link (server regenerateLink), then surface the fresh one.
+{ const sr = $('share-reset'); if (sr) sr.addEventListener('click', async () => {
+    let r = null; try { r = await claudible.shareNewLink(); } catch {}
+    if (r && r.ok) { if (r.url) { shareLink.value = r.url; shareLink.style.display = ''; } toast('Access reset — guests disconnected, old link revoked'); }
+    else { toast('Could not reset access' + (r && r.error ? ': ' + r.error : '')); }
+  }); }
 // The collaboration chat/voice column appears when you're web-sharing OR a viewer/peer has actually joined — so
 // an idle synced session stays clean, but the panel is there the moment someone's watching.
 function refreshChatPanel() {
@@ -1706,6 +1721,7 @@ function repaintLiveTracker(rec) {
     bar.classList.remove('warn', 'crit'); bar.title = 'host context window used';
   }
   $('trk-cost').textContent = rec.liveCost != null ? rec.liveCost : '$0.00'; $('trk-cost').title = 'host session cost';
+  if (bar) bar.title = bar.title + ' · ' + $('trk-cost').textContent + ' host session cost';
   $('trk-tokens').textContent = rec.liveTokens != null ? rec.liveTokens : '0'; $('trk-tokens').title = 'host session tokens';
 }
 // Open (or focus) a peer's live session as a native tab in THIS window.
