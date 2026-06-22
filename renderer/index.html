@@ -382,7 +382,8 @@
     .vin.live .vstat{color:#fff}
     /* Voice Out — red stop, always-speak toggle (voice is picked in Settings; defaults to Bella) */
     /* dual button: ▶ Speak when idle (reads Claude's latest reply), ■ Stop while speaking */
-    .vout .vstop{width:auto;min-width:0;display:flex;align-items:center;justify-content:center;gap:3px;height:21px;padding:0 7px;
+    .vout{padding-right:6px}   /* tuck the megaphone toward the right edge — less dead space after it */
+    .vout .vstop{width:auto;display:flex;align-items:center;justify-content:center;gap:3px;height:21px;padding:0 7px;
       border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;color:var(--ink-faint);
       font-size:10px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;box-shadow:none;transition:all .16s}   /* match TALK: caps, 10px, .14em; min-width:0 keeps it tight */
     .vout .vstop:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
