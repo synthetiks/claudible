@@ -33,3 +33,30 @@ share/voice stack still behave. 10/10 here = green-light to start Part A/B/C aga
 #5 (an agent shows up) exercise spawnClaude + the runtime pollers + runScript(workflows.sh) — the
 three highest-traffic seam paths. If those three are green the cutover is almost certainly faithful;
 run the full 10 before flipping any default.
+
+---
+
+## Native backends — opt-in smoke tests (Part A/B/C, 🟡 until these pass)
+
+The default on Windows is still the proven WSL backend. The native backends are **registered but opt-in**
+so they can be smoke-tested without risk. Run the 10-point list above under each, plus the watch-items.
+
+### Windows-native (`runners/win.js`, Part A) — `CLAUDIBLE_RUNNER=win`
+**Needs:** native Claude Code on PATH (`where claude`), Windows Node 22.12+ on PATH, Git for Windows
+(`bash.exe` — already an install prereq). **No WSL.** Launch with the env var set, e.g. in PowerShell:
+`$env:CLAUDIBLE_RUNNER='win'; npm start` (from the install folder). `Remove-Item Env:\CLAUDIBLE_RUNNER` to revert.
+- **#1 Terminal** — does **claude.exe** spawn in the embedded terminal (ConPTY)? Watch for a `.cmd`-shim
+  vs native-exe resolution issue (we spawn via `cmd /c claude …`).
+- **#4 Telemetry** — does the meter tick? This proves Claude invokes the **Node hooks via the Windows
+  `node.exe`** (NOT electron.exe) with the per-tab path baked as argv. If the meter is dead, check
+  `%USERPROFILE%\.claudible\session\.claude\settings.json` — the command should be `"<…\node.exe>" "…statusline.js" "…status.json"`.
+- **#5 Agents / #6 Workspaces / diff / skills** — these run the 16 `wsl/*.sh` via **git-bash**. If they're
+  empty but the terminal works, git-bash/`cygpath` resolution is the suspect (`CLAUDIBLE_GIT_BASH` overrides the path).
+- **Open verification:** that Claude's Windows cwd→`projects/<dir>` encoding matches `claudeProjectsDir`
+  (resume targeting). If resume always starts fresh, that's the encoding (SEAMS §8).
+
+### Linux-native (`runners/posix.js`, Part B) — auto-selected when Electron runs on Linux
+`runScript` is already proven live (test/posix-runner.test.js). The remaining gate is running Claudible's
+**Electron on a Linux desktop** + a **linux node-pty build** (1.1.0 ships no linux prebuild — `npm rebuild
+node-pty` or a prebuilt). Then run the 10-point list. macOS is the same backend + the Homebrew/`lsof`
+build branches (Part C).
