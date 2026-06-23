@@ -4,9 +4,12 @@
 //   • spawnClaude: a pure-Node session bootstrap (compute the session dir, write settings.json + stage
 //     the shared Node hooks, pick the resume target) then node-pty spawns claude.exe with WINDOWS-path
 //     args. This avoids handing MSYS paths to claude.exe. The bootstrap is pure + unit-tested (below).
-//   • runScript: the 16 wsl/*.sh run UNCHANGED via git-bash (`bash.exe -lc`). Git for Windows is already
-//     an install prerequisite and ships bash + coreutils + sed, so the whole fleet is reused with zero
-//     rewrite. App-dir is translated to MSYS form via `cygpath` (the git-bash analogue of wslpath).
+//   • runScript: the 16 wsl/*.sh run via git-bash (`bash.exe -lc`). Git for Windows is already an install
+//     prerequisite (ships bash + coreutils + sed). Two ENV bridges (no script rewrite): CLAUDIBLE_PROJ (so
+//     they read claude.exe's Windows-encoded projects store, not the MSYS-encoded phantom) + MSYS_NO_PATHCONV.
+//     ⚠ 8 of the 16 scripts ALSO shell out to python3 for JSON, and Git-for-Windows ships NO python3 — so the
+//     Windows-native installer (A5) MUST put Python on PATH, else those 8 degrade to empty (session list /
+//     transcript / skills / plugins / agent-tokens / workflows / diff / sync-titles). App-dir -> MSYS via cygpath.
 //
 // STATUS: 🟡 the pure bootstrap (sessionDir/claudeProjectsDir/pickResumeTarget/claudeArgv/settingsJson)
 // is verified by test/win-runner.test.js on Linux. The live glue (ConPTY claude.exe spawn, git-bash
@@ -185,7 +188,15 @@ function runScript(name, argStr = '', opts = {}) {
     const bash = gitBash(); const appdir = appDirGuest();
     if (!bash || !appdir) return resolve({ err: new Error('git-bash unavailable (Windows runScript)'), stdout: '' });
     const cmd = shared.scriptCmd(appdir, name, argStr, opts);
-    const o = { encoding: 'utf8' };
+    // Two env bridges for git-bash (no script rewrite, WSL/Posix unaffected since they don't set these):
+    //  CLAUDIBLE_PROJ — the scripts otherwise encode the MSYS-form SDIR (/c/..) into the projects-dir key,
+    //   which MISMATCHES the Windows form claude.exe used; pass the Windows-form key so they read the real store.
+    //  MSYS_NO_PATHCONV — stop git-bash rewriting a leading-slash arg (e.g. `gh api '/user/repos?...'`).
+    const env = Object.assign({}, process.env, {
+      MSYS_NO_PATHCONV: '1',
+      CLAUDIBLE_PROJ: String(sessionDir(opts.ws, HOME())).replace(/[^A-Za-z0-9]/g, '-'),
+    });
+    const o = { encoding: 'utf8', env };
     if (opts.timeout !== undefined) o.timeout = opts.timeout;
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
     try { cp.execFile(bash, ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' })); }

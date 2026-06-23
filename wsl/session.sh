@@ -118,7 +118,7 @@ cd "$SDIR" || { echo "[claudible] FATAL: could not enter the session dir ($SDIR)
 # here to continue and exit with "No conversation found to continue". Deriving the exact dir from $SDIR
 # keeps the check de-hardcoded. The char class must match Claude's encoder exactly: it maps EVERY
 # non-alphanumeric char (incl. '_', spaces, etc. — not just '/' and '.') to a single '-'.
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 # SECURITY: Claudible runs Claude with --dangerously-skip-permissions for frictionless local use. But a
 # transcript synced from a collaborator is UNTRUSTED input — resuming it with approvals disabled would let
 # its contents drive tool execution (RCE) with full $HOME access. So a foreign session resumes in NORMAL

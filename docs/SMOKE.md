@@ -52,8 +52,16 @@ so they can be smoke-tested without risk. Run the 10-point list above under each
   `%USERPROFILE%\.claudible\session\.claude\settings.json` — the command should be `"<…\node.exe>" "…statusline.js" "…status.json"`.
 - **#5 Agents / #6 Workspaces / diff / skills** — these run the 16 `wsl/*.sh` via **git-bash**. If they're
   empty but the terminal works, git-bash/`cygpath` resolution is the suspect (`CLAUDIBLE_GIT_BASH` overrides the path).
-- **Open verification:** that Claude's Windows cwd→`projects/<dir>` encoding matches `claudeProjectsDir`
-  (resume targeting). If resume always starts fresh, that's the encoding (SEAMS §8).
+- **Prereq (from the win.js review):** **Python on PATH** — 8 of the `wsl/*.sh` use `python3` for JSON and
+  Git-for-Windows lacks it; without Python the session list / transcript / skills / plugins / agent-tokens /
+  workflows / diff all degrade to empty (the terminal + telemetry still work).
+- **Verify the projects-dir encoding** (else resume starts fresh + the script fleet reads a phantom dir):
+  launch claude in a known session dir, let it write a transcript, then `dir %USERPROFILE%\.claude\projects`
+  and confirm the dir name equals `runners/win._internals.claudeProjectsDir(sdir, %USERPROFILE%)`. **Watch
+  the drive-letter case** (`C--…` vs `c--…`) — if claude.exe lowercases it, normalize the same way in win.js.
+- **Verify the hook command actually runs:** trigger a Stop → a JSON line must land in
+  `runtime\tabs\<tab>\hooks.ndjson` and `status.json` must update. If nothing lands, cmd.exe may be stripping
+  the leading double-quote — drop the quotes around bare `node` in `settingsJson`.
 
 ### Linux-native (`runners/posix.js`, Part B) — auto-selected when Electron runs on Linux
 `runScript` is already proven live (test/posix-runner.test.js). The remaining gate is running Claudible's

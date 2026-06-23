@@ -19,7 +19,7 @@ else
   SDIR="$HOME/.claudible/session"
 fi
 [ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 mkdir -p "$PROJ" 2>/dev/null
 kept="$PROJ/.claudible-kept"
 grep -qxF -- "$id" "$kept" 2>/dev/null || printf '%s\n' "$id" >> "$kept"

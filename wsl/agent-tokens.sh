@@ -15,7 +15,7 @@ else SDIR="$HOME/.claudible/session"; fi
 
 SID="${1:-}"
 case "$SID" in '' | *[!A-Za-z0-9-]*) printf '0'; exit 0 ;; esac
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 SA="$PROJ/$SID/subagents"
 [ -d "$SA" ] || { printf '0'; exit 0; }
 

@@ -20,7 +20,7 @@ else
   SDIR="$HOME/.claudible/session"
 fi
 [ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 src="$PROJ/$id.jsonl"
 [ -f "$src" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
 trash="$HOME/.claudible/trash"

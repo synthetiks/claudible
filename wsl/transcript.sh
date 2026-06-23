@@ -19,7 +19,7 @@ else
 fi
 [ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"
 # Same encoding Claude uses: every non-alphanumeric char in the cwd path → '-'.
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 f="$PROJ/$id.jsonl"
 [ -f "$f" ] || { printf '[]'; exit 0; }
 

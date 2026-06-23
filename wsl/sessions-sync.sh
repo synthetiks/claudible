@@ -37,7 +37,7 @@ SDIR="$HOME/.claudible/repos/$WS_SLUG"               # the code working tree (th
 
 # Same encoder Claude uses (must match session.sh exactly): EVERY non-alphanumeric char in the absolute
 # cwd path -> a single '-'. This is recomputed locally on each machine, so the per-machine dir is correct.
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 
 # Trust boundary: a session is TRUSTED (may run under --dangerously-skip-permissions) ONLY if it was
 # created locally by Claude here. The moment ANY content is copied in from the shared branch, the id is

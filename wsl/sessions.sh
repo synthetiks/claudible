@@ -17,7 +17,7 @@ else
 fi
 [ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
 # Same encoding Claude uses: every non-alphanumeric char in the cwd path → '-'.
-PROJ="$HOME/.claude/projects/$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')"
+PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 # Sessions-sync worktree (repo workspaces only): lets us flag sessions a collaborator deleted on GitHub.
 WT=""
 [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ] && WT="$HOME/.claudible/sessions-sync/$WS_SLUG"

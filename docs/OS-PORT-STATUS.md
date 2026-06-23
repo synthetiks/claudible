@@ -41,6 +41,17 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
   prereq) + `cygpath` app-dir 🟡. Registered as `CLAUDIBLE_RUNNER=win` (opt-in; auto stays on wsl).
 - A3 voice — `whisper-server.exe` + Kokoro uvicorn on Windows (A0-proven approach) — installer-side, ⬜
 - A5 installer (`install.ps1 -Native`) ⬜  ·  A6 e2e + flip — gated on a Windows smoke test ⬜
+- **win.js adversarial review done (3-angle).** Outcomes:
+  - ✅ FIXED: the projects-dir encoding mismatch (git-bash MSYS `-c-…` vs claude.exe `C--…`) — env-bridge
+    `CLAUDIBLE_PROJ` set by win.js runScript + `${CLAUDIBLE_PROJ:-<sed fallback>}` in the 8 scripts
+    (backward-compatible — WSL/Posix byte-identical when unset; override verified live).
+  - ✅ FIXED: `MSYS_NO_PATHCONV=1` in runScript env (leading-slash `gh api` mangling).
+  - ✅ FIXED earlier: `process.execPath`/electron.exe-as-node → `whichNode()`.
+  - ⚠ GATE (blocker 2): **8 of the 16 scripts shell out to `python3`**, which Git-for-Windows lacks — the
+    A5 installer MUST put Python on PATH (or those 8 degrade to empty). Documented in win.js header; not a
+    terminal/telemetry blocker.
+  - 🔬 SMOKE-only (unverifiable from Linux): claudeProjectsDir drive-letter CASE (`C--` vs `c--`); whether
+    cmd.exe runs the leading-double-quote hook command. Both in docs/SMOKE.md.
 
 ## Cross-cutting ⬜
 - electron-builder packaging per OS · CI matrix · the "millions" packaged-installer bar
