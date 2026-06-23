@@ -73,13 +73,10 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),
   onShareGuests: (cb) => ipcRenderer.on('share:guests', (_e, n) => cb(n)),
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
-  onShareClaimed: (cb) => ipcRenderer.on('share:claimed', () => cb()),
   onShareApproval: (cb) => ipcRenderer.on('share:approval', (_e, info) => cb(info)),
   onShareApprovalCancel: (cb) => ipcRenderer.on('share:approval-cancel', (_e, id) => cb(id)),
-  // voice room (WebRTC signaling bridged through main; audio is peer-to-peer)
+  // voice room — audio frames are relayed through the share server (server-relayed PCM, not peer-to-peer)
   voiceJoin: (join) => ipcRenderer.send('share:voice', { join }),
-  rtcSend: (to, kind, data) => ipcRenderer.send('share:rtc-send', { to, kind, data }),
-  onShareRtc: (cb) => ipcRenderer.on('share:rtc', (_e, p) => cb(p)),
   onVoiceMembers: (cb) => ipcRenderer.on('share:voice-members', (_e, m) => cb(m)),
   voiceAudio: (b64, sr) => ipcRenderer.send('share:audio-send', { data: b64, sr }),   // cockpit mic frame (+ rate) → guests
   onShareAudio: (cb) => ipcRenderer.on('share:audio', (_e, p) => cb(p)),           // guest voice frame → cockpit

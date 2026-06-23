@@ -70,13 +70,10 @@ const share = createShareServer({
       });
   },
   // Voice room (WebRTC) — the server is signaling-only; audio is peer-to-peer. Bridge the host cockpit's
-  // signaling (over IPC) to/from guests (over the share WS): a guest's signal addressed to 'host' arrives
-  // here, and the host's outgoing signals + voice membership go back to the cockpit renderer.
-  onRtc: (payload) => { try { win && win.webContents.send('share:rtc', payload); } catch {} },
+  // voice membership + audio frames go back to the cockpit renderer (over IPC).
   onVoiceMembers: (members) => { try { win && win.webContents.send('share:voice-members', members); } catch {} },
   onAudio: (frame) => { try { win && win.webContents.send('share:audio', frame); } catch {} },   // a guest's voice frame → cockpit
 });
-ipcMain.on('share:rtc-send', (e, { to, kind, data } = {}) => { try { share.rtcFromHost(to, kind, data); } catch {} });
 ipcMain.on('share:voice', (e, { join } = {}) => { try { share.hostVoiceSet(!!join); } catch {} });
 ipcMain.on('share:audio-send', (e, p) => { try { share.audioFromHost(p && p.data, p && p.sr); } catch {} });   // cockpit's voice frame → guests
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
