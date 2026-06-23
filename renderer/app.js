@@ -1830,7 +1830,18 @@ function repaintLiveTracker(rec) {
 function openLiveTab(peer) {
  try {
   if (!peer) return;
-  for (const r of tabs.values()) { if (r.kind === 'live' && r.peer && r.peer.session === peer.session) { setActiveTab(r.tabId); return; } }   // already joined → just focus it
+  for (const r of tabs.values()) {
+    if (r.kind === 'live' && r.peer && r.peer.session === peer.session) {
+      setActiveTab(r.tabId);
+      if (r.liveState === 'offline' || r.liveState === 'denied') {   // the mirror had dropped → RE-ARM it (refresh the handle + reconnect) instead of focusing a dead tab
+        r.peer = peer; setLiveState(r, 'connecting'); refreshSessions();
+        claudible.liveConnect(r.tabId, peer, collabName())
+          .then((res) => { if (!res || !res.ok) { setLiveState(r, 'offline'); toast('Could not rejoin: ' + humanError(res && res.error)); } })
+          .catch((err) => { console.error('[live] reconnect rejected:', err); setLiveState(r, 'offline'); });
+      }
+      return;   // already joined → focus it (and reconnect above if it had gone offline/denied)
+    }
+  }
   if (tabs.size >= MAX_TABS) { toast('Tab limit reached (' + MAX_TABS + ')'); return; }
   const id = newTabId();
   const who = peer.name || peer.login || 'collaborator';

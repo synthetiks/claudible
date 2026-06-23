@@ -21,7 +21,7 @@ fi
 
 # 1. Prereqs — auto-install whatever's missing (one-time). apt needs sudo; uv has its own installer.
 APT_MISSING=""
-for c in git cmake make ffmpeg python3; do command -v "$c" >/dev/null 2>&1 || APT_MISSING="$APT_MISSING $c"; done
+for c in git cmake make g++ ffmpeg python3 espeak-ng curl; do command -v "$c" >/dev/null 2>&1 || APT_MISSING="$APT_MISSING $c"; done   # probe the FULL install set (g++/curl/espeak-ng too) so a box missing only those still triggers the install
 if [ -n "$APT_MISSING" ]; then
   if command -v apt-get >/dev/null 2>&1; then
     say "Installing WSL build prerequisites ($APT_MISSING ) — you may be asked for your WSL sudo password…"
