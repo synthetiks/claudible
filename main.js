@@ -8,10 +8,10 @@
 const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const cp = require('child_process');
 const { createShareServer } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
+const runner = require('./runners/runner').select();
 
 let win;
 // Multi-tab: each Claudible tab is its own live session/pty. `ptys` maps a renderer-issued tabId to a
@@ -53,8 +53,7 @@ const share = createShareServer({
   onBrowseSessions: (wsId, reply) => {
     const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
     if (!ws || !APPDIR_WSL) return reply({ type: 'ws-sessions', wsId, list: [] });
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/sessions.sh'`],
-      { encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    runner.runScript('sessions.sh', '', { ws, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
         let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
         reply({ type: 'ws-sessions', wsId, label: ws.label, list: Array.isArray(list) ? list : [] });
       });
@@ -63,8 +62,7 @@ const share = createShareServer({
     const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');   // strict id (also the bash-interp invariant)
     if (!ws || !sid || !APPDIR_WSL) return reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: [] });
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/transcript.sh' '${sid}'`],
-      { encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+    runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
         let msgs = []; try { msgs = JSON.parse(String(stdout).trim() || '[]'); } catch {}
         reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
       });
@@ -78,7 +76,7 @@ ipcMain.on('share:voice', (e, { join } = {}) => { try { share.hostVoiceSet(!!joi
 ipcMain.on('share:audio-send', (e, p) => { try { share.audioFromHost(p && p.data, p && p.sr); } catch {} });   // cockpit's voice frame → guests
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
-const RT = path.join(__dirname, 'runtime');   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)
+const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)
 // Durable settings (Claudible username + every renderer pref). Lives in gitignored runtime/ so it survives
 // restarts, force-kills (written synchronously) and `git reset --hard`, and never leaks into the public repo.
 // The sandboxed preload can't use fs, so MAIN owns the file; these handlers are registered at top level here
@@ -89,37 +87,14 @@ ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
 ipcMain.on('settings:set', (e, obj) => { try { fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2)
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
-let APPDIR_WSL = null;
-// NB: pass forward slashes — single backslashes get stripped crossing the Windows->WSL arg boundary, so
-// a raw `C:\Users\...` reaches wslpath as `C:Users...`. wslpath accepts forward slashes natively.
-try { APPDIR_WSL = cp.execFileSync('wsl.exe', ['wslpath', '-u', __dirname.replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); }
-catch (e) { console.error('[claudible] wslpath failed:', e.message); }
+const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
 // session.sh receives the app dir as $1 so it writes runtime/ to the SAME Windows folder this process reads.
 // A session choice ('new' | a <session-id> | '') is passed via CLAUDIBLE_SESSION on the command line
 // (env vars don't cross the Windows→WSL boundary without WSLENV, so we inline it). The id is sanitised
 // to [A-Za-z0-9-] so it can't break out of the quoted command.
 // Inline the active workspace as env (kind + strict-allowlisted slug) so the wsl scripts run in THAT
 // workspace's own cwd. slug is re-sanitised here too (defense in depth) since it's interpolated into bash.
-function wsEnv(ws) {
-  const kind = ws && ['local', 'repo', 'legacy'].includes(ws.kind) ? ws.kind : 'legacy';
-  const slug = String((ws && ws.slug) || '').replace(/[^A-Za-z0-9-]/g, '');
-  let s = `CLAUDIBLE_WS_KIND='${kind}'` + (slug ? ` CLAUDIBLE_WS_SLUG='${slug}'` : '');
-  const p = ws && ws.path;   // custom save-location (absolute WSL path); single-quote-free for safe inlining
-  if (p && typeof p === 'string' && !p.includes("'")) s += ` CLAUDIBLE_WS_DIR='${p}'`;
-  return s;
-}
 function tabRuntimeId(tabId) { return String(tabId || '').replace(/[^A-Za-z0-9-]/g, '') || 'default'; }
-function buildBoot(session, ws, tabId) {
-  if (!APPDIR_WSL) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
-  const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
-  const tab = tabRuntimeId(tabId);                                                       // per-tab runtime path key (matches session.sh)
-  // 'ultracode' isn't a CLI --effort value; it launches at xhigh and we inject `/effort ultracode` once the
-  // session settles (see spawnPty) to add the orchestration mode. Everything else maps 1:1.
-  const effLevel = registry.effort === 'ultracode' ? 'xhigh' : registry.effort;
-  const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(effLevel) ? ` CLAUDIBLE_EFFORT='${effLevel}'` : '';
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + ' ' + wsEnv(ws) + ' ';
-  return `${prefix}bash '${APPDIR_WSL}/wsl/session.sh' '${APPDIR_WSL}'`;
-}
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
 // Sweep orphaned diff-action temp files from a previous run (a crash/kill between write and unlink) — M1.
 try { for (const f of fs.readdirSync(RT)) if (/^diffaction-.*\.tmp$/.test(f)) { try { fs.unlinkSync(path.join(RT, f)); } catch {} } } catch {}
@@ -145,20 +120,7 @@ let activeWorkspace = registry.workspaces.find((w) => w.id === registry.activeId
 // Bring up the local voice services (Whisper/Kokoro) on launch. services.sh is idempotent (it checks
 // the ports first), so this is safe whether the user runs `npm start` directly or via the .ps1 launcher
 // (which also calls it). Async execFile so the ~5s port-wait never blocks window creation.
-function startVoiceServices() {
-  if (!APPDIR_WSL) return;
-  try {
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/services.sh'`],
-      (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh:', err.message, stderr || ''); });
-  } catch (e) { console.error('[claudible] failed to start voice services:', e.message); }
-}
-
-let nodePty = null, ptyErr = null;
-for (const mod of ['node-pty', 'node-pty-prebuilt-multiarch']) {
-  try { nodePty = require(mod); ptyErr = null; console.log('[claudible] pty loaded via', mod); break; }
-  catch (e) { console.error(`[claudible] require('${mod}') failed:`, e.message); ptyErr = `${mod}: ${e.message}`; }
-}
-if (!nodePty) console.error('[claudible] no pty backend available');
+function startVoiceServices() { runner.startVoiceServices(); }
 
 function createWindow() {
   win = new BrowserWindow({
@@ -228,20 +190,18 @@ function armUltracode(tabId, proc) {
 function winSend(channel, payload) { try { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); } catch {} }
 function spawnPty(tabId, cols, rows, ws, session) {
   if (!tabId) return;
-  if (ptys.has(tabId) || !nodePty) {
-    if (!nodePty) winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${ptyErr})\r\n` });
+  const pty = runner.ptyInfo();
+  if (ptys.has(tabId) || !pty.mod) {
+    if (!pty.mod) winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${pty.err})\r\n` });
     return;
   }
   ws = ws || activeWorkspace;
   try {
-    const proc = nodePty.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, tabId)], {
-      name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
-      // ConPTY (default on Win11) — preserves full ANSI incl. the dim attribute (winpty strips it).
-      // Its console-list agent crash ("AttachConsole failed") is neutralized by the guard patch in
-      // node_modules/node-pty/lib/conpty_console_list_agent.js + the uncaughtException net below.
-    });
+    const runtimeId = tabRuntimeId(tabId);
+    const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, runtimeId });
+    if (!proc) { winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${pty.err})\r\n` }); return; }
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
-      runtimeId: tabRuntimeId(tabId), busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
+      runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
     if (registry.effort === 'ultracode') armUltracode(tabId, proc);   // switch the new session into ultracode mode once it settles
     if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
@@ -484,8 +444,7 @@ ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, 
 const liveWindows = new Set();
 function runPresence(args, cb) {
   if (!APPDIR_WSL) return cb && cb(null);
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/sessions-sync.sh' ${args}`],
-    { encoding: 'utf8', timeout: 45000 }, (err, stdout) => {
+  runner.runScript('sessions-sync.sh', `${args}`, { ws: activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
@@ -559,8 +518,7 @@ ipcMain.handle('live:join', (e, payload) => {
 function listSessions() {
   return new Promise((resolve) => {
     if (!APPDIR_WSL) return resolve([]);
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/sessions.sh'`],
-      { maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+    runner.runScript('sessions.sh', '', { ws: activeWorkspace, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] sessions.sh:', err.message); return resolve([]); }
         try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
       });
@@ -575,15 +533,12 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
   const scope = (arg && arg.scope) || 'local';                              // 'local' (trash here) | 'everywhere' (also off GitHub)
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  const env = wsEnv(activeWorkspace);
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${env} bash '${APPDIR_WSL}/wsl/delete-session.sh' '${sid}'`],
-    { encoding: 'utf8' }, (err, stdout) => {
+  runner.runScript('delete-session.sh', `'${sid}'`, { ws: activeWorkspace }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let local = {}; try { local = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
       // also tombstone it on the shared sessions branch so a sync can never bring it back (for anyone)
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${env} bash '${APPDIR_WSL}/wsl/sessions-sync.sh' delete '${sid}'`],
-        { encoding: 'utf8', timeout: 45000 }, (err2, out2) => {
+      runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws: activeWorkspace, timeout: 45000 }).then(({ err: err2, stdout: out2 }) => {
           if (err2) { console.error('[claudible] delete-session everywhere:', err2.message); return resolve({ ok: false, error: 'sync-exec', localDone: true }); }
           let r = {}; try { r = JSON.parse((out2 || '').trim() || '{}'); } catch {}
           resolve(r.ok ? { ok: true, everywhere: true } : { ok: false, error: (r.error || 'sync failed'), localDone: true });
@@ -596,8 +551,7 @@ ipcMain.handle('session:keep', (e, arg) => new Promise((resolve) => {
   const id = (typeof arg === 'string') ? arg : (arg && arg.id);
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/session-keep.sh' '${sid}'`],
-    { encoding: 'utf8' }, (err, stdout) => {
+  runner.runScript('session-keep.sh', `'${sid}'`, { ws: activeWorkspace }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session-keep:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       resolve(r.ok ? r : { ok: false, error: (r.error || 'keep failed') });
@@ -632,8 +586,7 @@ function runSync(ws, op, opts) {
     const o = ['init', 'pull', 'push', 'sync', 'status'].includes(op) ? op : 'status';
     if (!APPDIR_WSL || !ws || ws.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
     const live = (opts && opts.live && /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(opts.live)) ? `CLAUDIBLE_LIVE_SESSION='${opts.live}' ` : '';
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${live}${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/sessions-sync.sh' '${o}'`],
-      { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    runner.runScript('sessions-sync.sh', `'${o}'`, { ws, extraEnv: live, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'exec' }); }
         try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false, error: 'parse' }); }
       });
@@ -705,8 +658,7 @@ function ensureClone(ws) {
     if (!slug || !owner) return resolve({ ok: false, error: 'bad workspace' });
     const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? ws.path : '';   // the invitee's chosen clone dir (else the script's default)
     const dirArg = wsp ? ` '${wsp}'` : '';
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/clone-workspace.sh' '${owner}' '${slug}'${dirArg}`],
-      { encoding: 'utf8', timeout: 300000 }, (err, stdout) => {
+    runner.runScript('clone-workspace.sh', `'${owner}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
         if (err) return resolve({ ok: false, error: 'clone exec' });
         let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
         if (r.ok) { if (wsp && r.path) ws.path = r.path; delete ws.needsClone; saveRegistry(); }
@@ -721,8 +673,7 @@ function ensureClone(ws) {
 function discoverWorkspaces() {
   return new Promise((resolve) => {
     if (!APPDIR_WSL) return resolve({ ok: false, added: [] });
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/sessions-discover.sh'`],
-      { encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+    runner.runScript('sessions-discover.sh', '', { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] discover:', err.message); return resolve({ ok: false, added: [] }); }
         let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
         const added = [];
@@ -811,7 +762,7 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
     let res; try { res = await dialog.showOpenDialog(win, { title: 'Choose where to save this shared workspace', properties: ['openDirectory', 'createDirectory'] }); } catch { res = { canceled: true }; }
     if (res.canceled || !res.filePaths || !res.filePaths.length) return { ok: false, error: 'cancelled' };
     let wslp = '';
-    try { wslp = cp.execFileSync('wsl.exe', ['wslpath', '-u', res.filePaths[0].replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); } catch {}
+    wslp = runner.toGuestPath(res.filePaths[0]);
     if (!wslp || /['"]/.test(wslp)) return { ok: false, error: 'could not use that folder' };
     ws.path = `${wslp.replace(/\/+$/, '')}/${slug}`;                 // clone into <chosen>/<slug> (mirrors create-workspace's <parent>/<slug>)
     saveRegistry();
@@ -830,8 +781,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
   const exec = (pdirWsl) => {
     const arg3 = pdirWsl ? ` '${pdirWsl}'` : '';                       // optional custom parent dir (local only)
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/create-workspace.sh' '${kind}' '${slug}'${arg3}`],
-      { encoding: 'utf8', timeout: kind === 'repo' ? 300000 : 30000 }, (err, stdout) => {   // repo = network-bound (clone+push)
+    runner.runScript('create-workspace.sh', `'${kind}' '${slug}'${arg3}`, { timeout: kind === 'repo' ? 300000 : 30000 }).then(({ err, stdout }) => {   // repo = network-bound (clone+push)
         if (err) { console.error('[claudible] create-workspace:', err.message); return resolve({ ok: false, error: 'creation timed out or failed' }); }
         let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
         // Register + switch to a workspace, then resolve. fresh=true for a brand-new one (start a fresh
@@ -858,7 +808,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
       .then((res) => {
         if (res.canceled || !res.filePaths || !res.filePaths.length) return resolve({ ok: false, error: 'cancelled' });
         let wslp = '';
-        try { wslp = cp.execFileSync('wsl.exe', ['wslpath', '-u', res.filePaths[0].replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); } catch {}
+        wslp = runner.toGuestPath(res.filePaths[0]);
         if (!wslp || wslp.includes("'")) return resolve({ ok: false, error: 'could not use that folder' });
         exec(wslp);
       }).catch(() => resolve({ ok: false, error: 'folder pick failed' }));
@@ -899,8 +849,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const finish = () => resolve({ ok: true, activeId: registry.activeId });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (APPDIR_WSL && slug && (ws.kind === 'local' || ws.kind === 'repo')) {
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/delete-workspace.sh' '${ws.kind}' '${slug}'`],
-      { encoding: 'utf8', timeout: 20000 }, finish);
+    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(() => finish());
   } else finish();
 }));
 // Reorder the workspace chips (drag). Accepts the new id order; any ids not listed keep their place at the end.
@@ -929,8 +878,7 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');          // honor the bash-interpolation invariant (re-sanitise)
   if (!slug) return resolve({ ok: false, error: 'bad workspace' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/repo-invite.sh' '${slug}' '${login}'`],
-    { encoding: 'utf8', timeout: 60000 }, (err, stdout) => {
+  runner.runScript('repo-invite.sh', `'${slug}' '${login}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
@@ -939,8 +887,7 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
 // ---- skills + plugins (manage Claude Code extensions from the cockpit) ----
 ipcMain.handle('skills:list', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve([]);
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/skills.sh' list`],
-    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+  runner.runScript('skills.sh', `list`, { ws: activeWorkspace, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] skills:list', err.message); return resolve([]); }
       try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
     });
@@ -950,24 +897,21 @@ ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
   const state = ['on', 'off', 'name-only', 'user-invocable-only'].includes(payload && payload.state) ? payload.state : '';
   if (!name || !state) return resolve({ ok: false, error: 'bad args' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/skills.sh' set '${name}' '${state}'`],
-    { encoding: 'utf8' }, (err, stdout) => {
+  runner.runScript('skills.sh', `set '${name}' '${state}'`, { ws: activeWorkspace }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] skills:set', err.message); return resolve({ ok: false, error: 'failed' }); }
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
     });
 }));
 ipcMain.handle('plugins:list', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve([]);
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' list`],
-    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 12000 }, (err, stdout) => {
+  runner.runScript('plugins.sh', `list`, { maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] plugins:list', err.message); return resolve([]); }
       try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
     });
 }));
 ipcMain.handle('plugins:available', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve([]);
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' available`],
-    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
+  runner.runScript('plugins.sh', `available`, { maxBuffer: 16 * 1024 * 1024, timeout: 15000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] plugins:available', err.message); return resolve([]); }
       try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
     });
@@ -977,8 +921,7 @@ ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
   const act = (payload && payload.enable) ? 'enable' : 'disable';
   if (!key) return resolve({ ok: false, error: 'bad key' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${APPDIR_WSL}/wsl/plugins.sh' toggle '${key}' '${act}'`],
-    { encoding: 'utf8', timeout: 60000 }, (err, stdout) => {
+  runner.runScript('plugins.sh', `toggle '${key}' '${act}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] plugins:toggle', err.message); return resolve({ ok: false, error: 'failed' }); }
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
     });
@@ -1022,8 +965,7 @@ function pollAgentTokens() {
     for (const [tabId, rec] of ptys) {
       const sid = String(rec.sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
       if (!sid) continue;
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(rec.ws)} bash '${APPDIR_WSL}/wsl/agent-tokens.sh' '${sid}'`],
-        { encoding: 'utf8', timeout: 10000 }, (err, stdout) => {
+      runner.runScript('agent-tokens.sh', `'${sid}'`, { ws: rec.ws, timeout: 10000 }).then(({ err, stdout }) => {
           if (err) return;
           const n = parseInt(String(stdout).trim(), 10);
           if (!Number.isFinite(n)) return;
@@ -1073,8 +1015,7 @@ function runWorkflows(ws, sid) {
   return new Promise((resolve) => {
     const s = String(sid || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!APPDIR_WSL || !s) return resolve([]);
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/workflows.sh' '${s}'`],
-      { encoding: 'utf8', timeout: 12000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+    runner.runScript('workflows.sh', `'${s}'`, { ws, timeout: 12000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) return resolve([]);
         try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
       });
@@ -1120,7 +1061,7 @@ ipcMain.handle('tts', async (e, text, voice) => {
     return { audio: await r.arrayBuffer() };
   } catch (err) { return { error: String(err) }; }
 });
-ipcMain.handle('endpoints', () => ({ whisper: WHISPER, kokoro: KOKORO, pty: !!nodePty, ptyErr }));
+ipcMain.handle('endpoints', () => ({ whisper: WHISPER, kokoro: KOKORO, pty: !!runner.ptyInfo().mod, ptyErr: runner.ptyInfo().err }));
 
 // clipboard for the right-click menu (works regardless of renderer clipboard permissions)
 ipcMain.handle('clip:write', (e, text) => { try { clipboard.writeText(String(text ?? '')); } catch {} });
@@ -1148,8 +1089,7 @@ ipcMain.handle('session:export', async (e, sessionId) => {
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!sid || !APPDIR_WSL) return { error: 'no session' };
     const messages = await new Promise((resolve) => {
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(ws)} bash '${APPDIR_WSL}/wsl/transcript.sh' '${sid}'`],
-        { encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+      runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
           let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
           resolve(Array.isArray(m) ? m : []);
         });
@@ -1170,8 +1110,7 @@ ipcMain.handle('session:export', async (e, sessionId) => {
 // ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
 ipcMain.handle('diff:list', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });
-  cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/diff.sh'`],
-    { encoding: 'utf8', timeout: 30000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
+  runner.runScript('diff.sh', '', { ws: activeWorkspace, timeout: 30000, maxBuffer: 32 * 1024 * 1024 }).then(({ err, stdout }) => {
       let r = { ok: false, repo: false, files: [], untracked: [] };
       try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       resolve(r);
@@ -1187,8 +1126,7 @@ function diffAction(mode, payload) {
       const name = `diffaction-${process.pid}-${++diffActionSeq}.tmp`;   // unique per action → concurrent revert/discard never read each other's payload (M1)
       const tmp = path.join(RT, name);
       fs.writeFileSync(tmp, payload, 'utf8');
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `${wsEnv(activeWorkspace)} bash '${APPDIR_WSL}/wsl/diff-apply.sh' ${mode} '${APPDIR_WSL}/runtime/${name}'`],
-        { encoding: 'utf8', timeout: 20000 }, (err, stdout) => {
+      runner.runScript('diff-apply.sh', `${mode} '${APPDIR_WSL}/runtime/${name}'`, { ws: activeWorkspace, timeout: 20000 }).then(({ err, stdout }) => {
           try { fs.unlinkSync(tmp); } catch {}   // clean up the temp patch file
           let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
           resolve(r);

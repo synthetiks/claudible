@@ -111,9 +111,14 @@ function runScript(name, argStr = '', opts = {}) {
     const appdir = appDirGuest();
     if (!appdir) return resolve({ err: new Error('WSL unavailable (wslpath)'), stdout: '' });
     const cmd = _scriptCmd(appdir, name, argStr, opts);
+    // Only set timeout/maxBuffer when the caller actually provided them. Passing `undefined` OVERWRITES
+    // execFile's defaults (notably maxBuffer 1 MB -> unlimited), so a missing key must stay missing to
+    // preserve the exact behavior of the inline sites that omitted these options.
+    const o = { encoding: 'utf8' };
+    if (opts.timeout !== undefined) o.timeout = opts.timeout;
+    if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
     try {
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', cmd],
-        { encoding: 'utf8', timeout: opts.timeout, maxBuffer: opts.maxBuffer },
+      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', cmd], o,
         (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
     } catch (e) { resolve({ err: e, stdout: '' }); }
   });
