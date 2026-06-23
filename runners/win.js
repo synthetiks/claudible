@@ -117,7 +117,9 @@ function installHooks(sdir, tabRuntimeId) {
   try { fs.writeFileSync(hooksPath, ''); fs.writeFileSync(statusPath, '{}'); } catch {}   // fresh per launch
   fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js'));
   fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js'));
-  const nodeBin = process.execPath;   // the Electron/Node exe — always present, absolute
+  // MUST be a real node.exe, NOT process.execPath (= electron.exe under Electron, which won't run a .js
+  // without ELECTRON_RUN_AS_NODE). Claudible's installer guarantees Windows Node 22.12+ on PATH.
+  const nodeBin = whichNode();
   fs.writeFileSync(path.win32.join(cdir, 'settings.json'),
     JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath), null, 2));
   return { cdir, statusPath, hooksPath };
@@ -140,6 +142,12 @@ function ptyInfo() {
 function whichClaude() {
   if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;
   try { return cp.execFileSync('where', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim() || 'claude'; } catch { return 'claude'; }
+}
+// A real Windows node.exe for the hook commands (NEVER process.execPath = electron.exe).
+function whichNode() {
+  if (process.env.CLAUDIBLE_NODE) return process.env.CLAUDIBLE_NODE;
+  try { const w = cp.execFileSync('where', ['node'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim(); if (w) return w; } catch {}
+  return 'node';   // installer guarantees Windows Node on PATH; bare 'node' resolves in claude's hook shell
 }
 
 // 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns

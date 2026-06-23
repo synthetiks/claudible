@@ -30,8 +30,17 @@ if [ -n "$APT_MISSING" ]; then
       echo "  sudo apt install -y git cmake build-essential ffmpeg python3 espeak-ng curl"
       exit 1
     fi
+  elif command -v brew >/dev/null 2>&1; then
+    # macOS: Homebrew for the build libs; Xcode Command Line Tools provide git/make/clang(g++)/curl/python3.
+    command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 || { say "Install Xcode Command Line Tools first:  xcode-select --install  — then re-run \`npm run setup\`."; exit 1; }
+    say "Installing build prerequisites via Homebrew ($APT_MISSING )…"
+    if ! brew install cmake ffmpeg espeak-ng; then
+      say "Couldn't auto-install via Homebrew. Run, then re-run \`npm run setup\`:"
+      echo "  brew install cmake ffmpeg espeak-ng"
+      exit 1
+    fi
   else
-    say "Missing:$APT_MISSING — and this isn't a Debian/apt distro. Install them with your package manager, then re-run \`npm run setup\`."
+    say "Missing:$APT_MISSING — and this isn't an apt or Homebrew system. Install them with your package manager, then re-run \`npm run setup\`."
     exit 1
   fi
 fi

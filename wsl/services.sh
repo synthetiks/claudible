@@ -6,8 +6,13 @@
 # are local and unauthenticated, so don't run mirrored networking on an untrusted network.
 set -u
 LOG="$HOME/.claudible/logs"; mkdir -p "$LOG"
-listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
-command -v ss >/dev/null 2>&1 || echo "[claudible] note: 'ss' not found — can't detect already-running voice services; may try to (re)start them."
+# Cross-platform port-listen check: ss (Linux/WSL) -> lsof (macOS) -> netstat (fallback).
+listening() {
+  if command -v ss >/dev/null 2>&1; then ss -tln 2>/dev/null | grep -q ":$1 ";
+  elif command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1;
+  else netstat -an 2>/dev/null | grep -qE "[:.]$1 .*LISTEN"; fi
+}
+{ command -v ss >/dev/null 2>&1 || command -v lsof >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1; } || echo "[claudible] note: no ss/lsof/netstat — can't detect already-running voice services; may try to (re)start them."
 
 # Ports are overridable; if you change them, also point the app's CLAUDIBLE_KOKORO / CLAUDIBLE_WHISPER
 # URLs at the new ports (see README → Configuration) so the client and server agree.
@@ -37,7 +42,7 @@ if ! listening "$KOKORO_PORT"; then
     echo "[claudible] kokoro NOT started: 'uv' is missing from PATH — run: npm run setup (it installs uv)."
   elif [ -d "$VOICE/kokoro" ]; then
     ESPEAK_ENV=""
-    for p in /usr/lib/x86_64-linux-gnu/espeak-ng-data /usr/share/espeak-ng-data; do
+    for p in /usr/lib/x86_64-linux-gnu/espeak-ng-data /usr/share/espeak-ng-data /opt/homebrew/share/espeak-ng-data /usr/local/share/espeak-ng-data; do
       [ -d "$p" ] && { ESPEAK_ENV="ESPEAK_DATA_PATH=$p"; break; }
     done
     ( cd "$VOICE/kokoro" && \
