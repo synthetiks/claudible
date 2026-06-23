@@ -44,7 +44,7 @@ eq('boot strips leading-dash id',
   `CLAUDIBLE_SESSION='evil' CLAUDIBLE_TAB='main' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
 eq('boot appdir null -> echo fallback',
   _bootStr(null, '', legacy, 'main', ''),
-  `echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8`);
+  `echo "[claudible] could not resolve the app path — is the environment set up?"; sleep 8`);
 
 // ---- runScript / _scriptCmd : every call-site shape (main.js line cited) ----
 // sessions.sh — ws, no args  (main.js:562)

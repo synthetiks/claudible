@@ -29,19 +29,21 @@
 // built and proven, every path resolves to the WSL backend, so today's behavior is unchanged.
 
 const wsl = require('./wsl');
+const posix = require('./posix');
 
-const REGISTRY = { wsl };   // win / posix register here as Parts A / B-C land.
+const REGISTRY = { wsl, posix };   // win registers here as Part A lands.
 
 function select() {
   const forced = String(process.env.CLAUDIBLE_RUNNER || '').trim().toLowerCase();
   if (forced && REGISTRY[forced]) return REGISTRY[forced];
   if (forced) {
-    // e.g. CLAUDIBLE_RUNNER=win before win.js exists — fail SOFT to the known-good backend, loudly.
-    console.error(`[claudible] CLAUDIBLE_RUNNER='${forced}' is not built yet — falling back to 'wsl'.`);
-    return wsl;
+    // e.g. CLAUDIBLE_RUNNER=win before win.js exists — fail SOFT to the platform default, loudly.
+    console.error(`[claudible] CLAUDIBLE_RUNNER='${forced}' is not built yet — using the platform default.`);
   }
-  // Auto-detect. Today only the WSL backend exists; Part A/B/C insert native detection ahead of this.
-  return wsl;
+  // Auto-detect by host platform. Windows keeps the proven WSL backend as default (until win.js is
+  // smoke-tested and flipped); native Linux/macOS use the Posix backend (the WSL backend minus wsl.exe).
+  if (process.platform === 'win32') return wsl;
+  return posix;
 }
 
-module.exports = { select, REGISTRY, wsl };
+module.exports = { select, REGISTRY, wsl, posix };

@@ -10,6 +10,7 @@
 
 const path = require('path');
 const cp = require('child_process');
+const shared = require('./_shared');   // OS-agnostic command construction (wsEnv/bootStr/scriptCmd), shared with posix.js
 
 // App root = parent of this runners/ dir (main.js lives at the root; its __dirname == APP_ROOT).
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -42,30 +43,10 @@ function toHostPath(guestPath) {
 function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 
 // --- Claude Code session bootstrap (was main.js:103-122) -----------------------------------------
-// wsEnv: the env prefix the wsl scripts read to run in the active workspace's cwd. slug re-sanitized
-// (defense in depth) since it's interpolated into bash; custom path must be single-quote-free.
-function wsEnv(ws) {
-  const kind = ws && ['local', 'repo', 'legacy'].includes(ws.kind) ? ws.kind : 'legacy';
-  const slug = String((ws && ws.slug) || '').replace(/[^A-Za-z0-9-]/g, '');
-  let s = `CLAUDIBLE_WS_KIND='${kind}'` + (slug ? ` CLAUDIBLE_WS_SLUG='${slug}'` : '');
-  const p = ws && ws.path;   // custom save-location (absolute WSL path); single-quote-free for safe inlining
-  if (p && typeof p === 'string' && !p.includes("'")) s += ` CLAUDIBLE_WS_DIR='${p}'`;
-  return s;
-}
-// buildBoot: the `bash -lc` boot string for the Claude TUI. `effort` and `runtimeId` are passed in
-// (decoupled from main's registry/tabRuntimeId) so this module owns no app state. 'ultracode' isn't a
-// CLI value — it launches at xhigh and main.js injects `/effort ultracode` once the session settles.
-// _bootStr is the PURE construction (appdir injected) so the parity test can verify it without wsl.exe.
-function _bootStr(appdir, session, ws, runtimeId, effort) {
-  if (!appdir) return 'echo "[claudible] could not resolve the app path via wslpath — is WSL installed?"; sleep 8';
-  const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
-  const tab = String(runtimeId || 'default');
-  const effLevel = effort === 'ultracode' ? 'xhigh' : effort;
-  const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(effLevel) ? ` CLAUDIBLE_EFFORT='${effLevel}'` : '';
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + ' ' + wsEnv(ws) + ' ';
-  return `${prefix}bash '${appdir}/wsl/session.sh' '${appdir}'`;
-}
-function buildBoot(session, ws, runtimeId, effort) { return _bootStr(appDirGuest(), session, ws, runtimeId, effort); }
+// Command construction (wsEnv + the boot string) is OS-agnostic and lives in _shared.js (also used by
+// posix.js); this backend only adds the wsl.exe wrapper + wslpath app-dir. buildBoot injects the
+// resolved guest app-dir into the shared pure builder.
+function buildBoot(session, ws, runtimeId, effort) { return shared.bootStr(appDirGuest(), session, ws, runtimeId, effort); }
 
 // --- node-pty backend (was main.js:156-161) ------------------------------------------------------
 let _pty = undefined;
@@ -95,22 +76,14 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId } = {})
 }
 
 // --- the universal script runner (was the 23 `cp.execFile('wsl.exe', …)` sites; SEAMS §7) --------
-// Runs wsl/<name> with an optional wsEnv(ws) prefix and an optional extraEnv prefix. `argStr` is the
-// VERBATIM tail each call site already used (e.g. "'<sid>'", "set '<n>' '<s>'", "presence-list"),
-// so command text is unchanged from the inline versions. Resolves {err, stdout}; callers parse JSON.
-// _scriptCmd is the PURE command construction (appdir injected) — the parity test asserts it matches
-// each main.js inline site exactly. env keeps its own trailing space (e.g. the live-session prefix).
-function _scriptCmd(appdir, name, argStr = '', opts = {}) {
-  const env = opts.extraEnv ? String(opts.extraEnv) : '';
-  const wsp = opts.ws ? wsEnv(opts.ws) + ' ' : '';
-  const tail = String(argStr || '').trim();
-  return `${env}${wsp}bash '${appdir}/wsl/${name}'${tail ? ' ' + tail : ''}`;
-}
+// Runs wsl/<name> with an optional wsEnv(ws) + extraEnv prefix. `argStr` is the VERBATIM tail each call
+// site used, so command text is unchanged. The command string itself is built by the shared, OS-agnostic
+// scriptCmd; this backend only adds the wsl.exe wrapper. Resolves {err, stdout}; callers parse JSON.
 function runScript(name, argStr = '', opts = {}) {
   return new Promise((resolve) => {
     const appdir = appDirGuest();
     if (!appdir) return resolve({ err: new Error('WSL unavailable (wslpath)'), stdout: '' });
-    const cmd = _scriptCmd(appdir, name, argStr, opts);
+    const cmd = shared.scriptCmd(appdir, name, argStr, opts);
     // Only set timeout/maxBuffer when the caller actually provided them. Passing `undefined` OVERWRITES
     // execFile's defaults (notably maxBuffer 1 MB -> unlimited), so a missing key must stay missing to
     // preserve the exact behavior of the inline sites that omitted these options.
@@ -163,5 +136,5 @@ module.exports = {
   startVoiceServices, voiceHealth,
   installHooks, setup,
   // exposed for the parity test only (not used by main.js):
-  _internals: { wsEnv, buildBoot, _bootStr, _scriptCmd, APP_ROOT },
+  _internals: { wsEnv: shared.wsEnv, buildBoot, _bootStr: shared.bootStr, _scriptCmd: shared.scriptCmd, APP_ROOT },
 };
