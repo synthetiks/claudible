@@ -698,12 +698,23 @@ function onAgentDone(t, o) {
   const a = o.tool_use_id && t.agents.get(o.tool_use_id); if (!a) return;
   a.status = 'done';
   a.durationMs = (o.duration_ms != null) ? o.duration_ms : (Date.now() - a.startedAt);
-  try { a.ok = !/"is_error"\s*:\s*true|"error"\s*:/i.test(JSON.stringify(o.tool_response || '').slice(0, 500)); } catch { a.ok = true; }
-  try {   // capture the subagent's final result — Agent/Task hooks have no live tool feed, but PostToolUse carries the result, which makes the row expandable
-    const tr = o.tool_response;
-    let res = (typeof tr === 'string') ? tr
-      : Array.isArray(tr) ? tr.map((x) => (x && x.text) || '').join(' ')
-      : (tr && typeof tr === 'object') ? (tr.text || (Array.isArray(tr.content) ? tr.content.map((x) => (x && x.text) || '').join(' ') : tr.content) || '') : '';
+  const tr = o.tool_response;
+  try { a.ok = !/"is_error"\s*:\s*true|"error"\s*:/i.test(JSON.stringify(tr || '').slice(0, 500)); } catch { a.ok = true; }
+  // The Agent/Task PostToolUse payload is RICH — tokens, tool stats, duration, result — so a subagent row becomes a
+  // full cockpit card straight from the hook (no transcript needed).
+  if (tr && typeof tr === 'object' && !Array.isArray(tr)) {
+    if (tr.status === 'error' || tr.status === 'failed') a.ok = false;
+    if (typeof tr.totalDurationMs === 'number') a.durationMs = tr.totalDurationMs;
+    if (typeof tr.totalTokens === 'number') a.tokens = tr.totalTokens;
+    if (typeof tr.totalToolUseCount === 'number') a.toolCount = tr.totalToolUseCount;
+    const ts = tr.toolStats || {};
+    const NAMES = { readCount: 'Read', searchCount: 'Search', bashCount: 'Bash', editFileCount: 'Edit', otherToolCount: 'Other' };
+    a.tools = Object.keys(NAMES).filter((k) => (ts[k] || 0) > 0).map((k) => ({ name: NAMES[k], target: '×' + ts[k] }));
+    if ((ts.linesAdded || 0) + (ts.linesRemoved || 0) > 0) a.tools.push({ name: 'diff', target: '+' + (ts.linesAdded || 0) + ' −' + (ts.linesRemoved || 0) });
+  }
+  try {   // final result text (content blocks → text, or a plain string)
+    const c = (tr && typeof tr === 'object' && 'content' in tr) ? tr.content : tr;
+    const res = (typeof c === 'string') ? c : Array.isArray(c) ? c.map((x) => (x && x.text) || '').join(' ') : '';
     a.result = String(res || '').replace(/\s+/g, ' ').trim().slice(0, 280);
   } catch {}
   if (t.tabId === activeTabId) renderAgents();
