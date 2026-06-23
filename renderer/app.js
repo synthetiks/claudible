@@ -728,47 +728,68 @@ function fmtDur(sec) {
 }
 const SWARM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="16" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M12 7.2v3.2M10.3 12.1 6.7 14.3M13.7 12.1l3.6 2.2"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>';
 const expandedAgents = new Set();   // agent ids the user has drilled into — re-applied across rebuilds so live updates don't collapse them
-// One row, shared by Task subagents (desc/type/startedAt/durationMs/ok) and workflow agents — the latter carry a
-// rich payload (tools feed / tokens / result) so their rows are expandable into a live activity cockpit.
+// Categorize a tool name → a color-coded badge class (forward-compatible: unknown tools fall to 'misc' + their name).
+function toolCat(name) {
+  const n = String(name || '');
+  if (/^Bash/i.test(n)) return 'sh';
+  if (/^(Read|Glob|Ls|NotebookRead)/i.test(n)) return 'read';
+  if (/^(Grep|Search|Find)/i.test(n)) return 'find';
+  if (/(Edit|Write|diff)/i.test(n)) return 'edit';
+  if (/^(Web|Fetch)/i.test(n)) return 'web';
+  if (/^(Task|Agent)/i.test(n)) return 'agent';
+  return 'misc';
+}
+function typeHue(type) {   // the agent-type → left-rail hue (gives the swarm visual identity)
+  const t = String(type || '').toLowerCase();
+  if (t.includes('explore')) return '#5fb487';
+  if (t.includes('plan')) return '#e0a93b';
+  if (t.includes('review')) return '#cf625a';
+  if (t.includes('code')) return '#b48ce0';
+  if (t.includes('research') || t.includes('general')) return '#6aa6e0';
+  return '#8493a6';
+}
+function toolBadge(t) { const b = document.createElement('span'); b.className = 'tb tb-' + toolCat(t.name); b.textContent = t.name; if (t.target) b.title = t.name + ' ' + t.target; return b; }
+// One card per agent — Task subagents (simple) + workflow/Agent-tool agents (rich: chips, a tool-glyph strip, and an
+// expandable detail with the task, full tool feed, and result).
 function agentRow(a, nowSec) {
   const running = a.status === 'running';
   const tools = Array.isArray(a.tools) ? a.tools : [];
-  const rich = tools.length > 0 || !!(a.result && a.result.length) || (a.tokens || 0) > 0;   // workflow agents; Task subagents stay simple
+  const rich = tools.length > 0 || !!(a.result && a.result.length) || (a.tokens || 0) > 0;
   const row = document.createElement('div');
   row.className = 'agent-row ' + (running ? 'running' : (a.ok === false ? 'err' : 'done')) + (rich ? ' rich' : '') + (expandedAgents.has(a.id) ? ' expanded' : '');
+  if (a.type) row.style.setProperty('--rail', typeHue(a.type));
   const head = document.createElement('div'); head.className = 'agent-head';
   const dot = document.createElement('span'); dot.className = 'agent-dot'; head.appendChild(dot);
   const c = document.createElement('div'); c.className = 'agent-body';
   const label = a.desc || a.label || 'agent';
   const name = document.createElement('div'); name.className = 'agent-name'; name.textContent = label; name.title = label; c.appendChild(name);
-  const meta = document.createElement('div'); meta.className = 'agent-meta';
-  const pre = a.type ? a.type + ' · ' : '';
+  // stat chips — the numbers that matter, at a glance
+  const chips = document.createElement('div'); chips.className = 'agent-chips';
+  const chip = (cls, txt, ds) => { const e = document.createElement('span'); e.className = 'chip ' + cls; e.textContent = txt; if (ds != null) e.dataset.start = ds; chips.appendChild(e); };
+  if (a.type) chip('chip-type', a.type);
   const startSec = a.start || (a.startedAt ? a.startedAt / 1000 : null);
-  let dur = '';
-  if (running) dur = startSec ? fmtDur(nowSec - startSec) : '';
-  else dur = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : '');
-  const tok = (a.tokens || 0) > 0 ? ' · ' + fmtK(a.tokens) + ' tok' : '';
-  meta.textContent = pre + (running ? 'running' : (a.ok === false ? 'error' : 'done')) + (dur ? ' · ' + dur : '') + tok;
-  if (running && startSec) { meta.dataset.start = startSec; meta.dataset.pre = pre; meta.dataset.tok = tok; }   // in-place timer/token ticks
-  c.appendChild(meta);
-  if (tools.length) {   // a "current action" line: the latest tool the agent ran
-    const lt = tools[tools.length - 1];
-    const act = document.createElement('div'); act.className = 'agent-action';
-    act.textContent = (running ? '▸ ' : '✓ ') + lt.name + (lt.target ? ' ' + lt.target : '') + (tools.length > 1 ? '   ' + tools.length + ' tools' : '');
-    c.appendChild(act);
+  if (running) chip('chip-dur', startSec ? fmtDur(nowSec - startSec) : '0s', startSec || '');
+  else { const d = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : ''); if (d) chip('chip-dur', d); }
+  if ((a.tokens || 0) > 0) chip('chip-tok', fmtK(a.tokens) + ' tok');
+  const tc = a.toolCount || tools.length; if (tc > 0) chip('chip-tools', tc + (tc === 1 ? ' tool' : ' tools'));
+  if (a.ok === false) chip('chip-err', 'failed');
+  c.appendChild(chips);
+  if (tools.length) {   // tool-glyph activity strip (the recent tools, colored by kind)
+    const strip = document.createElement('div'); strip.className = 'agent-strip';
+    tools.slice(-8).forEach((t) => strip.appendChild(toolBadge(t)));
+    c.appendChild(strip);
   }
   head.appendChild(c);
   if (rich) { const chev = document.createElement('span'); chev.className = 'agent-chev'; chev.textContent = '⌄'; head.appendChild(chev); }
   row.appendChild(head);
-  if (rich) {   // expandable detail: the agent's task, its live tool-call feed, and its final result
+  if (rich) {   // expandable detail: task · full tool feed · result
     const det = document.createElement('div'); det.className = 'agent-detail';
     const taskText = (a.prompt && a.prompt.trim()) || (label !== 'agent' ? label : '');
     if (taskText) { const task = document.createElement('div'); task.className = 'agent-task'; task.textContent = taskText; det.appendChild(task); }
     if (tools.length) {
       const feed = document.createElement('div'); feed.className = 'agent-feed';
       tools.forEach((t) => { const r = document.createElement('div'); r.className = 'agent-tool';
-        const b = document.createElement('b'); b.textContent = t.name; const s = document.createElement('span'); s.textContent = t.target || '';
-        r.appendChild(b); r.appendChild(s); feed.appendChild(r); });
+        r.appendChild(toolBadge(t)); const s = document.createElement('span'); s.className = 'agent-tt'; s.textContent = t.target || ''; r.appendChild(s); feed.appendChild(r); });
       det.appendChild(feed);
     }
     if (!running && a.result) { const res = document.createElement('div'); res.className = 'agent-result'; res.textContent = a.result; det.appendChild(res); }
@@ -804,9 +825,7 @@ function renderAgents() {
   // not just on membership changes. Expanded rows survive it (expandedAgents set); entry animation removed so no flash.
   const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '') + (a.toolCount || 0) + (a.tokens || 0)), done.map((a) => (a.desc || a.label || '') + a.status + (a.toolCount || 0)), doneAll.length]);
   if (sig === _agentsSig) {
-    el.querySelectorAll('.agent-meta[data-start]').forEach((m) => {
-      m.textContent = (m.dataset.pre || '') + 'running · ' + fmtDur(nowSec - parseFloat(m.dataset.start)) + (m.dataset.tok || '');
-    });
+    el.querySelectorAll('.chip-dur[data-start]').forEach((m) => { m.textContent = fmtDur(nowSec - parseFloat(m.dataset.start)); });   // tick the running timers in place
     return;
   }
   _agentsSig = sig;
@@ -816,6 +835,16 @@ function renderAgents() {
     return;
   }
   el.innerHTML = '';
+  // swarm summary — reads the group as ONE unit: count · running/done · total tokens, with a progress bar
+  const totalTok = all.reduce((s, a) => s + (a.tokens || 0), 0);
+  const sum = document.createElement('div'); sum.className = 'agents-summary';
+  sum.innerHTML = '<span class="sum-ico">' + SWARM_SVG + '</span>';
+  const sm = document.createElement('div'); sm.className = 'sum-meta';
+  const stT = document.createElement('div'); stT.className = 'sum-title'; stT.textContent = all.length + (all.length === 1 ? ' agent' : ' agents');
+  const stS = document.createElement('div'); stS.className = 'sum-stats'; stS.textContent = running.length + ' running · ' + doneAll.length + ' done' + (totalTok > 0 ? ' · ' + fmtK(totalTok) + ' tok' : '');
+  sm.appendChild(stT); sm.appendChild(stS); sum.appendChild(sm);
+  const sb = document.createElement('div'); sb.className = 'sum-bar'; const sf = document.createElement('div'); sf.className = 'sum-fill'; sf.style.width = (all.length ? Math.round((doneAll.length / all.length) * 100) : 0) + '%'; sb.appendChild(sf); sum.appendChild(sb);
+  el.appendChild(sum);
   if (running.length) {
     const hd = document.createElement('div'); hd.className = 'agents-section'; hd.textContent = 'Running · ' + running.length; el.appendChild(hd);
     running.forEach((a) => el.appendChild(agentRow(a, nowSec)));

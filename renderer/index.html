@@ -108,14 +108,17 @@
     #agents-pane{position:absolute;inset:0;z-index:16;display:none;flex-direction:column;overflow:auto;
       background:#0c0e12;border:1px solid var(--hairline);border-radius:11px;padding:46px 14px 14px}
     #agents-pane.show{display:flex}
+    .agents-list{max-width:680px;margin:0 auto;width:100%}   /* a centered column, not edge-to-edge — the 'too wide' fix */
     .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
     .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.6;max-width:300px}
     .agents-empty-ico{display:block;width:36px;height:36px;margin:0 auto 13px;opacity:.5}
     .agents-empty-ico svg{width:36px;height:36px}
     .agents-section{font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-faint);margin:6px 0 8px;padding-left:2px}
     /* agent row — Task subagents (simple) + swarm agents (rich: expandable into a live activity cockpit) */
-    .agent-row{border:1px solid var(--hairline);border-radius:9px;overflow:hidden;margin-bottom:7px;
+    .agent-row{position:relative;border:1px solid var(--hairline);border-left:3px solid var(--rail, var(--hairline));border-radius:9px;overflow:hidden;margin-bottom:7px;
       background:linear-gradient(180deg,#131519,#0e1013);transition:border-color .14s,box-shadow .14s}
+    .agent-row.running::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;pointer-events:none;opacity:.75;
+      background:linear-gradient(90deg,transparent,var(--amber),transparent);background-size:200% 100%;animation:agentsweep 2s linear infinite}
     .agent-row.rich .agent-head{cursor:pointer}
     .agent-row.rich:hover{border-color:rgba(255,255,255,.15)}
     .agent-row.expanded{border-color:rgba(255,255,255,.18);box-shadow:inset 0 1px 0 var(--sheen),0 10px 28px -20px #000}
@@ -127,11 +130,24 @@
     .agent-row.err .agent-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
     .agent-body{flex:1;min-width:0}
     .agent-name{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .agent-meta{margin-top:3px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
-    .agent-row.running .agent-meta{color:var(--amber)}
-    /* live "current action" line — the latest tool the agent ran */
-    .agent-action{margin-top:4px;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .agent-row.running .agent-action{color:#6aa6e0}
+    /* stat chips — the numbers that matter, at a glance */
+    .agent-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+    .chip{font-size:9px;letter-spacing:.03em;text-transform:uppercase;padding:2px 6px;border-radius:5px;background:#1a1d23;color:var(--ink-dim);white-space:nowrap}
+    .chip-type{color:var(--ink);background:color-mix(in srgb, var(--rail, #8493a6) 16%, #15181d);border:1px solid color-mix(in srgb, var(--rail, #8493a6) 38%, transparent)}
+    .chip-tok{color:#6aa6e0}
+    .chip-err{color:#fff;background:rgba(229,86,75,.7)}
+    .agent-row.running .chip-dur{color:var(--amber)}
+    /* tool-glyph activity strip — recent tools, colored by kind; the latest pulses while running */
+    .agent-strip{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+    .tb{font-size:8.5px;font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;padding:2px 6px;border-radius:4px;background:#181b20;color:var(--ink-dim);white-space:nowrap}
+    .tb-sh{color:#e0a93b;background:rgba(224,169,59,.13)}
+    .tb-read{color:#6aa6e0;background:rgba(106,166,224,.13)}
+    .tb-find{color:#7fb0e6;background:rgba(106,166,224,.10)}
+    .tb-edit{color:#5fb487;background:rgba(95,180,135,.13)}
+    .tb-web{color:#b48ce0;background:rgba(180,140,224,.13)}
+    .tb-agent{color:#e08cc0;background:rgba(224,140,192,.13)}
+    .tb-misc{color:var(--ink-faint);background:#181b20}
+    .agent-row.running .agent-strip .tb:last-child{animation:micpulse 1.1s ease-in-out infinite}
     .agent-chev{flex:none;align-self:center;color:var(--ink-faint);font-size:13px;line-height:1;transition:transform .18s,color .14s}
     .agent-row.rich .agent-head:hover .agent-chev{color:var(--ink)}
     .agent-row.expanded .agent-chev{transform:rotate(180deg)}
@@ -139,12 +155,22 @@
     .agent-detail{display:none;padding:0 11px 11px 30px;border-top:1px solid var(--hairline-soft)}
     .agent-row.expanded .agent-detail{display:block}
     .agent-task{margin:9px 0;font-size:11px;line-height:1.45;color:var(--ink-dim)}
-    .agent-feed{display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
-    .agent-tool{display:flex;gap:7px;font-size:10.5px;font-family:ui-monospace,Consolas,monospace;line-height:1.4}
-    .agent-tool b{flex:none;color:#6aa6e0;font-weight:600}
-    .agent-tool span{min-width:0;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .agent-feed{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+    .agent-tool{display:flex;gap:7px;align-items:center;line-height:1.4}
+    .agent-tool .agent-tt{min-width:0;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .agent-result{font-size:11px;line-height:1.5;color:var(--ink);background:#0b0d10;border:1px solid var(--hairline-soft);border-radius:7px;padding:8px 10px;max-height:120px;overflow:auto}
     @keyframes agentRing{0%{transform:scale(.7);opacity:.6}100%{transform:scale(1.3);opacity:0}}
+    @keyframes agentsweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
+    /* swarm summary header — reads the whole group as one unit (count · running/done · tokens) with a progress bar */
+    .agents-summary{display:flex;align-items:center;gap:11px;padding:10px 13px;margin-bottom:12px;border:1px solid var(--hairline);border-radius:11px;
+      background:linear-gradient(180deg,#15181d,#0e1013);box-shadow:inset 0 1px 0 var(--sheen)}
+    .sum-ico{flex:none;width:26px;height:26px;color:var(--ink-dim);display:flex;align-items:center;justify-content:center}
+    .sum-ico svg{width:22px;height:22px}
+    .sum-meta{flex:1;min-width:0}
+    .sum-title{font-size:13px;color:var(--ink);font-weight:600;letter-spacing:.01em}
+    .sum-stats{margin-top:2px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint)}
+    .sum-bar{flex:none;width:110px;height:5px;border-radius:3px;background:#1a1d23;overflow:hidden}
+    .sum-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#5fb487,#6aa6e0);transition:width .4s cubic-bezier(.4,0,.2,1)}
     #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
       flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
