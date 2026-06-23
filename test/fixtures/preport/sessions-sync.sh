@@ -360,7 +360,24 @@ case "$op" in
     case "$tb64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
     pull_branch || fail "pull failed"
     mkdir -p "$WT/meta" 2>/dev/null
-    CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" node "$(dirname "$0")/sessions-sync-tool.js" title-write || fail "title write failed"
+    CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" python3 - <<'PY' || fail "title write failed"
+import json, os, time, base64
+f = os.environ['CL_FILE']; i = os.environ['CL_ID']
+try:
+    n = base64.b64decode(os.environ.get('CL_B64', '')).decode('utf-8', 'replace')
+except Exception:
+    n = ''
+n = ''.join(c for c in n if ord(c) >= 32)[:200].strip()   # strip control chars/newlines, cap length
+try:
+    d = json.load(open(f))
+    if not isinstance(d, dict): d = {}
+except Exception:
+    d = {}
+d[i] = {"title": n, "ts": int(time.time())}
+tmp = f + '.tmp'
+json.dump(d, open(tmp, 'w'), ensure_ascii=False)
+os.replace(tmp, f)
+PY
     gitwt add -- "meta/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: title $author" >/dev/null 2>&1
     pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
@@ -371,7 +388,31 @@ case "$op" in
     # via fetch + show — NO worktree merge — like presence-list, so this poll never fights the background sync.
     ensure_worktree || fail "could not set up the sessions branch"
     git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
-    CL_WT="$WT" CL_BR="$BR" node "$(dirname "$0")/sessions-sync-tool.js" title-read || fail "title read failed"
+    CL_WT="$WT" CL_BR="$BR" python3 - <<'PY' || fail "title read failed"
+import json, os, subprocess
+wt = os.environ['CL_WT']; br = os.environ['CL_BR']
+def git(*a):
+    return subprocess.run(['git', '-C', wt, *a], capture_output=True, text=True).stdout
+paths = [p for p in git('ls-tree', '-r', '--name-only', 'origin/' + br, '--', 'meta/').split('\n')
+         if p.endswith('.json')]
+best = {}   # id -> (ts, title)
+for p in paths:
+    try:
+        d = json.loads(git('show', 'origin/%s:%s' % (br, p)) or '{}')
+    except Exception:
+        continue
+    if not isinstance(d, dict):
+        continue
+    for i, v in d.items():
+        if not isinstance(v, dict):
+            continue
+        ts = v.get('ts', 0); t = v.get('title', '')
+        if not isinstance(ts, (int, float)) or not isinstance(t, str):
+            continue
+        if i not in best or ts > best[i][0]:
+            best[i] = (ts, t)
+print(json.dumps({"ok": True, "op": "title-list", "titles": {i: t for i, (ts, t) in best.items()}}))
+PY
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

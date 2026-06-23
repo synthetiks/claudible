@@ -19,4 +19,17 @@ PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^
 SA="$PROJ/$SID/subagents"
 [ -d "$SA" ] || { printf '0'; exit 0; }
 
-node "$(dirname "$0")/agent-tokens-tool.js" "$SA" 2>/dev/null || printf '0'
+python3 - "$SA" <<'PY' 2>/dev/null || printf '0'
+import sys, os, glob, json
+d = sys.argv[1]; tot = 0
+for f in glob.glob(os.path.join(d, '**', '*.jsonl'), recursive=True):
+    try:
+        for line in open(f, encoding='utf-8', errors='ignore'):
+            try: o = json.loads(line)
+            except Exception: continue
+            u = (o.get('message') or {}).get('usage') or {}
+            tot += (u.get('output_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
+    except Exception:
+        pass
+print(tot)
+PY

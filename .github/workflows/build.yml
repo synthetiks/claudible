@@ -1,0 +1,72 @@
+name: Build installers
+
+# Manual + tag-triggered. Produces the per-OS installers that make Claudible a
+# one-click install (no git clone / npm / build toolchain for end users).
+# The repo is PRIVATE — this never publishes a release; it only uploads artifacts.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # node-pty 1.1.0 ships prebuilds for win32 + darwin but NOT linux.
+      # node-pty-prebuilt-multiarch carries the linux prebuilds; ptyInfo() falls
+      # back to it at runtime. Add it only on the Linux runner (keeps win/mac lean).
+      - name: Linux node-pty fallback
+        if: matrix.os == 'ubuntu-latest'
+        run: npm install --no-save node-pty-prebuilt-multiarch@^0.10.1-pre.5
+
+      # AppImage needs FUSE; the deb target needs no extra system deps.
+      - name: Linux packaging prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 || true
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run dist:win
+
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run dist:linux
+
+      - name: Build (macOS, unsigned)
+        if: matrix.os == 'macos-latest'
+        # No code-signing identity in CI yet — produces an unsigned .dmg.
+        # Signing/notarization (C4) is wired separately once an Apple cert is in secrets.
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:mac
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudible-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+          if-no-files-found: warn
+          retention-days: 14

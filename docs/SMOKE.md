@@ -52,9 +52,10 @@ so they can be smoke-tested without risk. Run the 10-point list above under each
   `%USERPROFILE%\.claudible\session\.claude\settings.json` — the command should be `"<…\node.exe>" "…statusline.js" "…status.json"`.
 - **#5 Agents / #6 Workspaces / diff / skills** — these run the 16 `wsl/*.sh` via **git-bash**. If they're
   empty but the terminal works, git-bash/`cygpath` resolution is the suspect (`CLAUDIBLE_GIT_BASH` overrides the path).
-- **Prereq (from the win.js review):** **Python on PATH** — 8 of the `wsl/*.sh` use `python3` for JSON and
-  Git-for-Windows lacks it; without Python the session list / transcript / skills / plugins / agent-tokens /
-  workflows / diff all degrade to empty (the terminal + telemetry still work).
+- **No Python needed (resolved):** the script JSON transforms were ported off `python3` to Node
+  (`wsl/*-tool.js`, byte-parity proven by `test/port-parity.sh`). Git-for-Windows needs no `python3`; Node is
+  already present (it runs the app + hooks). The session list / transcript / skills / plugins / agent-tokens /
+  workflows / diff / sync-titles no longer depend on Python on any OS.
 - **Verify the projects-dir encoding** (else resume starts fresh + the script fleet reads a phantom dir):
   launch claude in a known session dir, let it write a transcript, then `dir %USERPROFILE%\.claude\projects`
   and confirm the dir name equals `runners/win._internals.claudeProjectsDir(sdir, %USERPROFILE%)`. **Watch

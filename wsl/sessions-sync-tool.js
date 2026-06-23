@@ -1,0 +1,416 @@
+'use strict';
+// Node port of the two python3 JSON transforms in sessions-sync.sh, so the script no longer
+// depends on python3. Behavior is byte-identical to the original python.
+//
+//   subcommand "title-write": env CL_ID, CL_B64, CL_FILE  (was the title-set python block)
+//       Decodes a base64 display name, sanitizes it, and merges {id:{title,ts}} into CL_FILE.
+//   subcommand "title-read":  env CL_WT, CL_BR            (was the title-list python block)
+//       Reads every meta/<author>.json straight off origin/<br> and prints the newest title per id.
+//
+// CommonJS on purpose (the repo's package.json has no "type":"module").
+
+const fs = require('fs');
+const { spawnSync } = require('child_process');
+
+// --- base64: faithful port of CPython binascii.a2b_base64 (strict_mode=False) -------------------
+// Python's base64.b64decode discards non-alphabet chars and enforces padding/quantum rules, raising
+// on bad padding (which the caller turns into the empty-string fallback). Node's Buffer.from(...,
+// 'base64') is lenient and would diverge, so we reimplement the python decoder exactly.
+const B64TAB = (() => {
+  const t = new Int8Array(256).fill(-1);
+  const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  for (let i = 0; i < a.length; i++) t[a.charCodeAt(i)] = i;
+  return t;
+})();
+
+function pyB64Decode(str) {
+  const out = [];
+  let quadPos = 0;
+  let leftchar = 0;
+  let pads = 0;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    if (ch === 0x3d /* '=' */) {
+      if (quadPos >= 2 && quadPos + (++pads) >= 4) {
+        // a valid base64 quantum closed by padding -> done; trailing junk discarded (non-strict)
+        return Buffer.from(out);
+      }
+      continue;
+    }
+    const d = ch < 256 ? B64TAB[ch] : -1;
+    if (d === -1) continue; // skip non-alphabet chars (non-strict mode)
+    pads = 0;
+    switch (quadPos) {
+      case 0:
+        quadPos = 1;
+        leftchar = d;
+        break;
+      case 1:
+        quadPos = 2;
+        out.push(((leftchar << 2) | (d >> 4)) & 0xff);
+        leftchar = d & 0x0f;
+        break;
+      case 2:
+        quadPos = 3;
+        out.push(((leftchar << 4) | (d >> 2)) & 0xff);
+        leftchar = d & 0x03;
+        break;
+      default: // case 3
+        quadPos = 0;
+        out.push(((leftchar << 6) | d) & 0xff);
+        leftchar = 0;
+        break;
+    }
+  }
+  if (quadPos !== 0) {
+    // matches python: quadPos===1 vs incorrect-padding; either way the caller falls back to ''
+    throw new Error('Incorrect padding');
+  }
+  return Buffer.from(out);
+}
+
+// --- JSON serialization matching python's json.dump / json.dumps -------------------------------
+// Python uses separators (', ', ': '); JS JSON.stringify uses no spaces, escapes differently, and
+// reorders integer-like object keys. We therefore serialize ourselves, preserving key order via the
+// pairs array and matching python's escaping for both ensure_ascii modes.
+
+// codepoints with a short JSON escape in python
+const SHORT_ESC = {
+  0x22: '\\"',
+  0x5c: '\\\\',
+  0x08: '\\b',
+  0x0c: '\\f',
+  0x0a: '\\n',
+  0x0d: '\\r',
+  0x09: '\\t',
+};
+
+function hex4(n) {
+  return '\\u' + n.toString(16).padStart(4, '0');
+}
+
+// Serialize a JS string the way python's json encoder does.
+//   ensureAscii=true  -> every char >= 0x7f becomes \uXXXX (astral -> surrogate pair)
+//   ensureAscii=false -> chars >= 0x20 emitted raw, only control chars < 0x20 escaped
+function encStr(s, ensureAscii) {
+  let r = '"';
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i); // UTF-16 unit; matches python's \uXXXX surrogate output in ascii mode
+    if (Object.prototype.hasOwnProperty.call(SHORT_ESC, code)) {
+      r += SHORT_ESC[code];
+    } else if (code < 0x20) {
+      r += hex4(code);
+    } else if (code < 0x7f) {
+      r += s[i];
+    } else {
+      // code >= 0x7f
+      if (ensureAscii) {
+        r += hex4(code);
+      } else {
+        r += s[i];
+      }
+    }
+  }
+  return r + '"';
+}
+
+// Serialize a value. Objects are passed as arrays of [key, value] pairs to preserve insertion order
+// exactly (python dicts never reorder integer-like keys, JS objects do).
+function encVal(v, ensureAscii) {
+  if (v === null) return 'null';
+  if (v === true) return 'true';
+  if (v === false) return 'false';
+  if (typeof v === 'number') return encNum(v);
+  if (typeof v === 'string') return encStr(v, ensureAscii);
+  if (Array.isArray(v)) {
+    return '[' + v.map((x) => encVal(x, ensureAscii)).join(', ') + ']';
+  }
+  if (v && typeof v === 'object') {
+    const entries = v.__pairs ? v.__pairs : Object.entries(v);
+    let parts = [];
+    for (const [k, val] of entries) {
+      parts.push(encStr(k, ensureAscii) + ': ' + encVal(val, ensureAscii));
+    }
+    return '{' + parts.join(', ') + '}';
+  }
+  throw new Error('unsupported value');
+}
+
+function encNum(n) {
+  // The only number the tool ever writes is an integer ts (int(time.time())), and String() of an
+  // integer matches python's int repr exactly. Infinity/-Infinity/NaN also match python's json output
+  // (Infinity / -Infinity / NaN) via String(). The lone gap is re-emitting a *foreign* non-integer ts
+  // (e.g. 1e3): python would print "1000.0", String(1000) prints "1000". This cannot occur in
+  // tool-authored data and is never emitted to stdout (title-read prints only the title string), so it
+  // has no observable effect — see the parity notes.
+  if (n === Infinity) return 'Infinity';
+  if (n === -Infinity) return '-Infinity';
+  if (Number.isNaN(n)) return 'NaN';
+  return String(n);
+}
+
+function obj(pairs) {
+  return { __pairs: pairs };
+}
+
+// --- order-preserving JSON parse, matching python's json.loads -------------------------------
+// JS JSON.parse + Object.entries reorders integer-like keys (e.g. "123" jumps ahead of "abc"),
+// which would break byte-identical key ordering when we re-emit the file. We parse into ordered
+// {__pairs:[...]} objects. We also accept NaN/Infinity/-Infinity literals (python's json.loads does)
+// so a peer-authored entry round-trips identically; on any parse error the caller falls back to {}.
+function parseJsonOrdered(text) {
+  let pos = 0;
+  const n = text.length;
+  const WS = new Set([0x20, 0x09, 0x0a, 0x0d]); // python json whitespace
+  function err() { throw new Error('json parse error'); }
+  function skipWs() { while (pos < n && WS.has(text.charCodeAt(pos))) pos++; }
+  function parseValue() {
+    skipWs();
+    if (pos >= n) err();
+    const c = text[pos];
+    if (c === '{') return parseObject();
+    if (c === '[') return parseArray();
+    if (c === '"') return parseString();
+    // -Infinity must be checked before the number branch (the leading '-' would otherwise be eaten
+    // by parseNumber). python's json.loads accepts NaN / Infinity / -Infinity.
+    if (text.startsWith('-Infinity', pos)) { pos += 9; return -Infinity; }
+    if (c === '-' || (c >= '0' && c <= '9')) return parseNumber();
+    if (text.startsWith('true', pos)) { pos += 4; return true; }
+    if (text.startsWith('false', pos)) { pos += 5; return false; }
+    if (text.startsWith('null', pos)) { pos += 4; return null; }
+    if (text.startsWith('NaN', pos)) { pos += 3; return NaN; }
+    if (text.startsWith('Infinity', pos)) { pos += 8; return Infinity; }
+    return err();
+  }
+  function parseObject() {
+    pos++; // {
+    const pairs = [];
+    skipWs();
+    if (text[pos] === '}') { pos++; return obj(pairs); }
+    for (;;) {
+      skipWs();
+      if (text[pos] !== '"') err();
+      const k = parseString();
+      skipWs();
+      if (text[pos] !== ':') err();
+      pos++;
+      const v = parseValue();
+      pairs.push([k, v]);
+      skipWs();
+      const ch = text[pos];
+      if (ch === ',') { pos++; continue; }
+      if (ch === '}') { pos++; break; }
+      err();
+    }
+    return obj(dedupeFirstPosLastVal(pairs));
+  }
+  function parseArray() {
+    pos++; // [
+    const arr = [];
+    skipWs();
+    if (text[pos] === ']') { pos++; return arr; }
+    for (;;) {
+      arr.push(parseValue());
+      skipWs();
+      const ch = text[pos];
+      if (ch === ',') { pos++; continue; }
+      if (ch === ']') { pos++; break; }
+      err();
+    }
+    return arr;
+  }
+  function parseString() {
+    pos++; // opening quote
+    let s = '';
+    for (;;) {
+      if (pos >= n) err();
+      const c = text[pos++];
+      if (c === '"') break;
+      if (c === '\\') {
+        const e = text[pos++];
+        if (e === '"') s += '"';
+        else if (e === '\\') s += '\\';
+        else if (e === '/') s += '/';
+        else if (e === 'b') s += '\b';
+        else if (e === 'f') s += '\f';
+        else if (e === 'n') s += '\n';
+        else if (e === 'r') s += '\r';
+        else if (e === 't') s += '\t';
+        else if (e === 'u') {
+          const hex = text.substr(pos, 4);
+          if (!/^[0-9a-fA-F]{4}$/.test(hex)) err();
+          pos += 4;
+          s += String.fromCharCode(parseInt(hex, 16));
+        } else err();
+      } else {
+        // python's json (strict=True, the default) rejects raw control chars inside a string
+        if (c.charCodeAt(0) < 0x20) err();
+        s += c;
+      }
+    }
+    return s;
+  }
+  function parseNumber() {
+    const start = pos;
+    if (text[pos] === '-') pos++;
+    while (pos < n && text[pos] >= '0' && text[pos] <= '9') pos++;
+    if (text[pos] === '.') { pos++; while (pos < n && text[pos] >= '0' && text[pos] <= '9') pos++; }
+    if (text[pos] === 'e' || text[pos] === 'E') {
+      pos++;
+      if (text[pos] === '+' || text[pos] === '-') pos++;
+      while (pos < n && text[pos] >= '0' && text[pos] <= '9') pos++;
+    }
+    const tok = text.slice(start, pos);
+    // enforce python json's number grammar (no leading zeros, '.' must have fraction digits, exponent
+    // must have digits) so we reject exactly what json.loads rejects; otherwise the consumer would keep
+    // a file python would skip.
+    if (!/^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/.test(tok)) err();
+    return Number(tok);
+  }
+  // python dict from json: duplicate keys keep the FIRST position but take the LAST value.
+  function dedupeFirstPosLastVal(pairs) {
+    if (pairs.length < 2) return pairs;
+    const idx = new Map(); // key -> index in out
+    const out = [];
+    for (const [k, v] of pairs) {
+      if (idx.has(k)) out[idx.get(k)][1] = v; // update value, keep position
+      else { idx.set(k, out.length); out.push([k, v]); }
+    }
+    return out;
+  }
+  const v = parseValue();
+  skipWs();
+  if (pos !== n) err();
+  return v;
+}
+
+// --- python str.strip() whitespace set (codepoints) --------------------------------------------
+// JS .trim() differs (it strips U+FEFF but not U+0085, and the reverse), so use python's exact set.
+const PY_STRIP = new Set([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+  0x85, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+]);
+
+function pyStrip(s) {
+  // operate on codepoints
+  const cps = Array.from(s);
+  let start = 0;
+  let end = cps.length;
+  while (start < end && PY_STRIP.has(cps[start].codePointAt(0))) start++;
+  while (end > start && PY_STRIP.has(cps[end - 1].codePointAt(0))) end--;
+  return cps.slice(start, end).join('');
+}
+
+// ===============================================================================================
+
+function titleWrite() {
+  const f = process.env.CL_FILE;
+  const i = process.env.CL_ID;
+  let n;
+  try {
+    const bytes = pyB64Decode(process.env.CL_B64 || '');
+    // ignoreBOM:true is load-bearing: the default TextDecoder strips a leading U+FEFF, but python's
+    // bytes.decode('utf-8','replace') keeps it. fatal:false gives U+FFFD replacement == 'replace'.
+    n = new TextDecoder('utf-8', { ignoreBOM: true, fatal: false }).decode(bytes);
+  } catch (e) {
+    n = '';
+  }
+  // strip control chars/newlines (codepoint < 32), cap length to 200 codepoints, then strip
+  const filtered = Array.from(n).filter((c) => c.codePointAt(0) >= 32);
+  n = pyStrip(filtered.slice(0, 200).join(''));
+
+  // load existing file as ordered pairs; reset to {} if not a JSON object (matches python's
+  // `d = json.load(open(f)); if not isinstance(d, dict): d = {}` with the except -> {} fallback).
+  let pairs = [];
+  try {
+    const raw = fs.readFileSync(f, 'utf8');
+    const parsed = parseJsonOrdered(raw);
+    if (parsed !== null && typeof parsed === 'object' && parsed.__pairs) {
+      pairs = parsed.__pairs;
+    } else {
+      pairs = [];
+    }
+  } catch (e) {
+    pairs = [];
+  }
+
+  // d[i] = {"title": n, "ts": int(time.time())}  — update in place if key exists, else append.
+  const entry = obj([['title', n], ['ts', Math.floor(Date.now() / 1000)]]);
+  let found = false;
+  for (const p of pairs) {
+    if (p[0] === i) {
+      p[1] = entry;
+      found = true;
+      break;
+    }
+  }
+  if (!found) pairs.push([i, entry]);
+
+  const outStr = encVal(obj(pairs), /*ensureAscii=*/ false);
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, outStr); // json.dump writes no trailing newline
+  fs.renameSync(tmp, f); // os.replace == atomic rename
+}
+
+function titleRead() {
+  const wt = process.env.CL_WT;
+  const br = process.env.CL_BR;
+  const git = (...a) => {
+    const r = spawnSync('git', ['-C', wt, ...a], { encoding: 'utf8' });
+    // python subprocess.run captures stdout; on failure it returns '' (no exception); mirror that.
+    return r.stdout || '';
+  };
+  const paths = git('ls-tree', '-r', '--name-only', 'origin/' + br, '--', 'meta/')
+    .split('\n')
+    .filter((p) => p.endsWith('.json'));
+
+  // dict.get(key, default) over our ordered-pairs object
+  const getKey = (o, k, dflt) => {
+    for (const [pk, pv] of o.__pairs) if (pk === k) return pv;
+    return dflt;
+  };
+
+  // best: id -> [ts, title]; iteration order preserved via Map (== file/path order, like python)
+  const best = new Map();
+  for (const p of paths) {
+    let d;
+    try {
+      d = parseJsonOrdered(git('show', 'origin/' + br + ':' + p) || '{}');
+    } catch (e) {
+      continue;
+    }
+    if (d === null || typeof d !== 'object' || !d.__pairs) continue; // not a dict -> skip
+    for (const [i, v] of d.__pairs) {
+      if (v === null || typeof v !== 'object' || !v.__pairs) continue; // not a dict -> skip
+      let ts = getKey(v, 'ts', 0);
+      const t = getKey(v, 'title', '');
+      // python: isinstance(ts,(int,float)) — bool is an int subclass there, so booleans pass too
+      // (True acts as 1, False as 0 in the > comparison). Mirror that exactly.
+      if (typeof ts === 'boolean') ts = ts ? 1 : 0;
+      else if (typeof ts !== 'number') continue;
+      if (typeof t !== 'string') continue;
+      if (!best.has(i) || ts > best.get(i)[0]) best.set(i, [ts, t]);
+    }
+  }
+
+  const titlePairs = [];
+  for (const [i, [, t]] of best) titlePairs.push([i, t]);
+  const result = obj([
+    ['ok', true],
+    ['op', 'title-list'],
+    ['titles', obj(titlePairs)],
+  ]);
+  process.stdout.write(encVal(result, /*ensureAscii=*/ true) + '\n'); // print() adds newline
+}
+
+const sub = process.argv[2];
+if (sub === 'title-write') {
+  titleWrite();
+} else if (sub === 'title-read') {
+  titleRead();
+} else {
+  process.stderr.write('unknown subcommand\n');
+  process.exit(1);
+}

@@ -16,7 +16,10 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
   (proof: `node test/posix-runner.test.js` — LIVE `runScript('sessions.sh')` returns a real array)
 - B2 hooks — reused unchanged (session.sh under bash stages the Node hooks) ✅
 - B3 voice — `services.sh` runs natively (Linux) ✅ logic; ⬜ live (needs the services built on a Linux host)
-- B4 Electron-on-Linux packaging (AppImage/deb) ⬜
+- B4 Electron-on-Linux packaging ✅ **PROVEN locally** — `electron-builder --linux dir` (node 22) built
+  `dist/linux-unpacked` with electron 42: the `claudible` binary, all 18 `wsl/*.sh` + 8 `*-tool.js` + 2 hooks
+  + main.js ON DISK (asar:false working), node-pty bundled, runtime/docs/test excluded. node-pty also
+  COMPILES + SPAWNS a real pty on Linux (verified). AppImage/deb add only FUSE/dpkg packaging on top (CI).
 - B5 Linux installer + node-pty: **fix verified** — `node-pty-prebuilt-multiarch` (0.10.x) ships
   `linux-{x64,arm64,arm,ia32}` + `darwin-{x64,arm64}` prebuilds, and `ptyInfo()` already falls back to it.
   Add as an `optionalDependency` when packaging the Linux/mac Electron build (deferred now — it'd bloat
@@ -25,8 +28,16 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
 ## Part C — macOS native 🟡 (shares PosixRunner; needs the build-tool branches)
 - C1 PosixRunner — reused as-is ✅
 - C2 voice build branches in `setup.sh`/`services.sh` (brew vs apt, `lsof` vs `ss`, espeak path) — IN PROGRESS
-- C3 hooks/tooling — reused ✅
+- C3 hooks/tooling — reused ✅ (port-parity proven on Linux; see the one macOS caveat below)
 - C4 Apple `.dmg` + code-sign/notarize ⬜
+- **KNOWN macOS-only caveat (tracked, fix when C4 ships):** `wsl/diff-tool.js` reads `/proc/self/environ`
+  to reproduce CPython `os.environ`'s surrogateescape decoding of the diff content passed via env. macOS has
+  no `/proc` → it falls back to `process.env`, so a diff containing **invalid-UTF-8 bytes** decodes to U+FFFD
+  vs python's U+DCxx. Valid-UTF-8 content (the overwhelming norm) is byte-identical everywhere; this only bites
+  non-UTF-8 file content shown in a diff, only on macOS. **Fix (do it on a Mac):** pass DIFF/UNTRACKED/CDIFF/CLOG
+  to the helper via stdin or temp files (raw bytes) instead of env — then `fs.readFileSync` gives exact bytes on
+  every platform and the `/proc` special-case is deleted. Not a WSL/Windows/Linux issue. (`sessions-sync` has a
+  similar documented non-issue: a foreign non-integer `ts` re-serializes 1000.0→1000, but ts is never printed.)
 
 ## Part A — Windows native (core built; live glue 🟡, NOT runtime-run from this Linux env)
 - **A0 voice-on-Windows feasibility — ✅ GREEN.** Proven on the real Windows side: the prebuilt
@@ -47,14 +58,28 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
     (backward-compatible — WSL/Posix byte-identical when unset; override verified live).
   - ✅ FIXED: `MSYS_NO_PATHCONV=1` in runScript env (leading-slash `gh api` mangling).
   - ✅ FIXED earlier: `process.execPath`/electron.exe-as-node → `whichNode()`.
-  - ⚠ GATE (blocker 2): **8 of the 16 scripts shell out to `python3`**, which Git-for-Windows lacks — the
-    A5 installer MUST put Python on PATH (or those 8 degrade to empty). Documented in win.js header; not a
-    terminal/telemetry blocker.
+  - ✅ RESOLVED (was blocker 2): the 8 scripts' `python3` JSON transforms were ported to Node
+    (`wsl/*-tool.js`, called via `node "$(dirname "$0")/<x>-tool.js"`). **Byte-parity proven** against the
+    original python3 (3.10.12 oracle) across 14 adversarial fixtures — emoji/astral surrogate escaping, CJK,
+    malformed lines, conditional keys + ordering, binary diffs, multi-commit logs, base64 (BOM+control+emoji),
+    git-fixture title-read, cross-engine cache. `test/port-parity.sh` (in `npm test` + CI; 14/14 under both node
+    18 and the shipping node 22). Git-for-Windows now needs no python3 for the script fleet; the prereq is gone
+    for the runtime path on every OS. Removed 441 lines of inline python. (The optional voice/TTS stack — Kokoro
+    — still uses Python, provisioned by `setup.sh`; separate from the core app.)
   - 🔬 SMOKE-only (unverifiable from Linux): claudeProjectsDir drive-letter CASE (`C--` vs `c--`); whether
     cmd.exe runs the leading-double-quote hook command. Both in docs/SMOKE.md.
 
-## Cross-cutting ⬜
-- electron-builder packaging per OS · CI matrix · the "millions" packaged-installer bar
+## Cross-cutting — packaging ✅ config PROVEN on Linux, win/mac CI-gated
+- **electron-builder** (`package.json#build`, `asar:false` — required so git-bash/node-by-PATH can read the
+  `wsl/*.sh` + `*-tool.js` + hooks on disk). Targets: Windows NSIS (user picks install dir — the friction fix),
+  Linux AppImage+deb, mac dmg. Icons: `.ico` (win) + generated square `assets/icon.png` (mac/linux).
+  **The Linux target is built + layout-verified locally (see B4)** — same config drives win/mac, so those are
+  high-confidence; their artifacts build in CI (can't build a Windows .exe / mac .dmg from Linux).
+- **CI matrix** `.github/workflows/build.yml` (win/linux/mac runners; node 22.12 — note: electron-builder 26
+  needs node ≥22.12's require(esm); linux adds `node-pty-prebuilt-multiarch`; never auto-publishes — repo stays
+  private). `.github/workflows/test.yml` runs the full parity suite on push.
+- still ⬜ (hardware-gated): A5/A3 (Windows installer + voice — the NSIS .exe already delivers the GUI install),
+  C4 (mac sign/notarize), the Windows/mac live smoke runs.
 
 ## Verification reality
 - **Linux/Posix**: fully runtime-testable here (and tested).

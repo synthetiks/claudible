@@ -23,39 +23,4 @@ PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^
 f="$PROJ/$id.jsonl"
 [ -f "$f" ] || { printf '[]'; exit 0; }
 
-python3 - "$f" <<'PY' 2>/dev/null || printf '[]'
-import sys, json
-f = sys.argv[1]
-MAX_MSGS = 500          # keep the most recent N turns
-MAX_LEN  = 6000         # cap each message so one giant turn can't bloat the payload
-def textof(content):
-    if isinstance(content, list):
-        return " ".join(x.get("text", "") for x in content if isinstance(x, dict) and x.get("type") == "text").strip()
-    if isinstance(content, str):
-        return content.strip()
-    return ""
-out = []
-try:
-    with open(f, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try: o = json.loads(line)
-            except Exception: continue
-            typ = o.get("type")
-            if typ not in ("user", "assistant"): continue
-            msg = o.get("message")
-            if not isinstance(msg, dict): continue
-            t = textof(msg.get("content"))
-            if not t: continue
-            # skip tool-result / system-ish user turns and the injected caveat preface
-            if typ == "user" and (t.startswith("<") or t.startswith("Caveat")): continue
-            if len(t) > MAX_LEN: t = t[:MAX_LEN] + "\n…(truncated)"
-            out.append({"role": "you" if typ == "user" else "claude", "text": t})
-except Exception:
-    out = []
-if len(out) > MAX_MSGS:
-    out = out[-MAX_MSGS:]
-print(json.dumps(out))
-PY
+node "$(dirname "$0")/transcript-tool.js" "$f" 2>/dev/null || printf '[]'

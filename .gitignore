@@ -1,6 +1,9 @@
 # dependencies (reinstalled with `npm install`)
 node_modules/
 
+# electron-builder output (installers are built in CI, never committed)
+/dist/
+
 # live session state — ephemeral; may contain personal paths / session names / cost
 /runtime/
 

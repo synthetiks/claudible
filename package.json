@@ -43,7 +43,13 @@
     "start": "electron .",
     "setup": "wsl.exe -e bash setup/setup.sh",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test": "node test/runner-parity.test.js && node test/posix-runner.test.js && node test/win-runner.test.js && bash test/hooks-parity.sh && bash test/port-parity.sh",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac",
+    "pack": "electron-builder --dir"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.10.0",
@@ -54,6 +60,79 @@
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
     "electron": "42.4.0",
+    "electron-builder": "^26.0.12",
     "patch-package": "^8.0.0"
+  },
+  "build": {
+    "appId": "dev.thecrazydev.claudible",
+    "productName": "Claudible",
+    "copyright": "Copyright © 2026 the_crazydev",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "hooks/**/*",
+      "runners/**/*",
+      "wsl/**/*",
+      "share/**/*",
+      "setup/**/*",
+      "launch/**/*",
+      "assets/**/*",
+      "package.json",
+      "!**/*.md",
+      "!docs/**/*",
+      "!test/**/*",
+      "!runtime/**/*",
+      "!**/*.log",
+      "!**/.git*",
+      "!**/.DS_Store",
+      "!**/*.{o,obj,gyp,gypi}",
+      "!**/node_modules/.cache/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/claudible.ico",
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Claudible"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png",
+      "category": "Development",
+      "synopsis": "Desktop cockpit for Claude Code: live telemetry, local push-to-talk voice, live co-work.",
+      "maintainer": "the_crazydev <vibezdotwin@gmail.com>",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "publish": null
   }
 }

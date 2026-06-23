@@ -7,9 +7,11 @@
 //   • runScript: the 16 wsl/*.sh run via git-bash (`bash.exe -lc`). Git for Windows is already an install
 //     prerequisite (ships bash + coreutils + sed). Two ENV bridges (no script rewrite): CLAUDIBLE_PROJ (so
 //     they read claude.exe's Windows-encoded projects store, not the MSYS-encoded phantom) + MSYS_NO_PATHCONV.
-//     ⚠ 8 of the 16 scripts ALSO shell out to python3 for JSON, and Git-for-Windows ships NO python3 — so the
-//     Windows-native installer (A5) MUST put Python on PATH, else those 8 degrade to empty (session list /
-//     transcript / skills / plugins / agent-tokens / workflows / diff / sync-titles). App-dir -> MSYS via cygpath.
+//     NOTE: the scripts' JSON transforms were ported off python3 to Node (wsl/*-tool.js, byte-parity proven
+//     by test/port-parity.sh) — so Git-for-Windows needs no python3 FOR THE SCRIPTS. Node is already present
+//     (it runs the app + the hooks). The old "installer must provide Python for the scripts" gate is RESOLVED.
+//     (The optional voice/TTS stack — Kokoro — is a separate Python use, provisioned only if you want voice.)
+//     App-dir -> MSYS via cygpath.
 //
 // STATUS: 🟡 the pure bootstrap (sessionDir/claudeProjectsDir/pickResumeTarget/claudeArgv/settingsJson)
 // is verified by test/win-runner.test.js on Linux. The live glue (ConPTY claude.exe spawn, git-bash

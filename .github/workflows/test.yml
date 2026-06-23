@@ -1,0 +1,26 @@
+name: Tests
+
+# The runner-seam acceptance gate: parity (command strings byte-identical across
+# backends), the pure win.js core, the live Posix runScript, the Node-hooks parity,
+# and the python3->Node port parity. All pure Node + bash — no Electron, no display.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+      # The suite needs no npm deps (pure Node + bash); python3 is preinstalled on
+      # ubuntu-latest, which the port-parity test uses to diff old-vs-new output.
+      - name: Runner + hooks + port parity suite
+        run: npm test
