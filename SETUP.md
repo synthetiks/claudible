@@ -57,14 +57,14 @@ Windows → **Settings → Privacy & security → Microphone** → allow desktop
      ```powershell
      powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
      ```
-  Rather not touch your antivirus? Skip `install.ps1` and run the **manual steps** instead: install **Node 22.12+** for Windows, then from the folder run `npm install`, `npm run rebuild`, `npm run setup`, `npm start`.
+  Rather not touch your antivirus? Skip `install.ps1` and run the **manual steps** instead: install **Node 22.12+** for Windows, then from the folder run `npm install`, `npm run setup`, `npm start`.
 - **`npm start` fails with `libnspr4.so: cannot open shared object file` (or another `error while loading shared libraries`)** — you're running it **inside WSL**. Claudible's Electron app is the Windows side. Clone onto your Windows drive and run `npm install` / `npm start` from **Windows PowerShell** (you can delete the WSL copy under `~/…`). Only `npm run setup` runs in WSL.
 - **Embedded terminal shows a Claude login / sign-in prompt** — you're not signed in to Claude Code yet. Complete the login right there in the terminal, or (better) run `claude` once in WSL, finish login, then relaunch Claudible.
-- **Embedded terminal shows a `node-pty` / native-module error** — the module needs rebuilding for your Electron version:
+- **Embedded terminal shows a `node-pty` / native-module error** — **rare.** `node-pty` ships an N-API prebuilt that loads under Electron with no compiling, so this only happens on an unusual CPU arch it has no prebuilt for. As a fallback, build it from source:
   ```powershell
   npm run rebuild
   ```
-  This needs **Visual Studio Build Tools** with the *Desktop development with C++* workload.
+  That fallback — and *only* that fallback — needs **Python 3** plus **Visual Studio C++ Build Tools** (the *Desktop development with C++* workload).
 - **No voice in or out** — confirm the services bound. In WSL: `bash wsl/services.sh` should print `whisper up :2022` and `kokoro up :8880`. Logs live in `~/.claudible/logs/`.
 - **"mic blocked"** — see *Enable the microphone* above.
 - **Point at your own STT/TTS** — set `CLAUDIBLE_WHISPER` / `CLAUDIBLE_KOKORO` to any OpenAI-compatible audio endpoint.

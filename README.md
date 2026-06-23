@@ -44,8 +44,7 @@ There's a **human↔human chat** alongside the terminal, a **voice room**, names
 - **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
 - **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first — Claudible embeds your already-authenticated session)
 - **Git for Windows** — to clone the repo. The one-line installer below **auto-installs it via winget** if you don't have it; otherwise grab it from [git-scm.com](https://git-scm.com/download/win).
-- **Node.js 22.12+** on Windows (Electron 42 requires it)
-- **Visual Studio Build Tools** with the **"Desktop development with C++"** workload — the installer rebuilds the native `node-pty` module for Electron, which needs a C++ compiler. Quick install: `winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
+- **Node.js 22.12+** on Windows (Electron 42 requires it) — and that's the *only* Windows-side tooling: **no compiler, no Python, no Visual Studio Build Tools** (the one native module, `node-pty`, ships a ready-to-run N-API prebuilt).
 - Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 - **Optional, for remote co-work:** [`cloudflared`](https://github.com/cloudflare/cloudflared) on Windows (`winget install Cloudflare.cloudflared`, or point `CLAUDIBLE_CLOUDFLARED` at the binary). Without it, **Share** still works but the invite link is **localhost/LAN-only**.
 - **Optional, for private-repo workspaces + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
@@ -66,8 +65,7 @@ It **prompts for an install folder** (press Enter for the default `…\claudible
 ```powershell
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
-npm install        # deps + the small node-pty patch
-npm run rebuild    # rebuild node-pty for Electron's ABI (needs VS Build Tools / Desktop C++)
+npm install        # deps + node-pty's N-API prebuilt + the small JS patch (no compiler needed)
 npm run setup      # builds the WSL voice services (installs their deps; ~480 MB models on first run)
 npm start          # opens the cockpit
 ```

@@ -36,12 +36,20 @@ if (-not (Test-Node)) {
 Step '1/4' 'Installing dependencies (npm install)...'
 npm install
 if ($LASTEXITCODE -ne 0) { Die "npm install failed (see above)." }
-# node-pty is a NATIVE module: npm fetches a prebuilt compiled for system Node's ABI, but the app runs under
-# Electron - they must match or the embedded Claude terminal (the whole product) fails to load. Rebuild it for Electron.
-Write-Host "  Rebuilding node-pty for Electron..." -ForegroundColor Cyan
-npm run rebuild
-if ($LASTEXITCODE -ne 0) {
-  Die "Rebuilding node-pty for Electron failed - this needs the C++ build toolchain. Install it, then re-run this installer:`n  winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"`n(or install 'Visual Studio Build Tools' and tick the 'Desktop development with C++' workload), then: .\install.ps1"
+# node-pty is the one native module, and it ships ABI-stable N-API prebuilts (node-addon-api). N-API binaries
+# load unchanged under Electron - so there's NO recompile, NO Python, NO C++ toolchain. (The embedded Claude
+# terminal you'll run is itself one of these prebuilt ptys.) Just confirm the prebuilt for this CPU arch landed.
+$arch = (& node -e "process.stdout.write(process.arch)")
+$ptyPrebuilt = Join-Path $app "node_modules\node-pty\prebuilds\win32-$arch\pty.node"
+if (Test-Path $ptyPrebuilt) {
+  Write-Host "  node-pty ready (prebuilt N-API binary for win32-$arch - no compiler needed)." -ForegroundColor Green
+} else {
+  # Rare: an unusual Windows arch node-pty ships no prebuilt for. Only here do we fall back to a source build.
+  Write-Host "  No prebuilt node-pty for win32-$arch (unusual) - falling back to a one-time source build..." -ForegroundColor Yellow
+  npm run rebuild
+  if ($LASTEXITCODE -ne 0) {
+    Die "node-pty has no prebuilt for win32-$arch and the source build failed. This rare fallback needs Python 3 and the Visual Studio C++ Build Tools:`n  winget install -e --id Python.Python.3.12`n  winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"`nThen re-run: .\install.ps1"
+  }
 }
 
 # WSL2 must exist - `npm run setup` and the app both shell into it.
