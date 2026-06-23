@@ -17,7 +17,10 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
 - B2 hooks — reused unchanged (session.sh under bash stages the Node hooks) ✅
 - B3 voice — `services.sh` runs natively (Linux) ✅ logic; ⬜ live (needs the services built on a Linux host)
 - B4 Electron-on-Linux packaging (AppImage/deb) ⬜
-- B5 Linux installer + **node-pty linux build/fetch** (node-pty 1.1.0 ships no linux prebuild) ⬜
+- B5 Linux installer + node-pty: **fix verified** — `node-pty-prebuilt-multiarch` (0.10.x) ships
+  `linux-{x64,arm64,arm,ia32}` + `darwin-{x64,arm64}` prebuilds, and `ptyInfo()` already falls back to it.
+  Add as an `optionalDependency` when packaging the Linux/mac Electron build (deferred now — it'd bloat
+  the Windows install for no current benefit). Installer itself ⬜.
 
 ## Part C — macOS native 🟡 (shares PosixRunner; needs the build-tool branches)
 - C1 PosixRunner — reused as-is ✅
