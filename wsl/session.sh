@@ -41,8 +41,37 @@ mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create th
 : > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
 printf '{}' > "$STATUS" # clear stale status so the meter starts blank, not on last session's numbers
 
-# --- statusLine: dump the rich JSON to STATUS, print a compact line for the TUI ---
-cat > "$SDIR/.claude/statusline.sh" <<EOF
+# --- statusLine + hooks ----------------------------------------------------------------------------
+# Prefer the SHARED Node hooks ($APPDIR/hooks/*.js — ONE implementation reused by WSL / Windows-native /
+# Posix, and no python3). Fall back to inline bash hooks if node can't be found: a minimal native-claude
+# install may ship no node on PATH, and WSL always has bash, so telemetry/agents NEVER silently die. The
+# two Node hooks are byte-for-byte equivalent to the bash ones (test/hooks-parity.sh). Per-tab routing
+# rides the inherited CLAUDIBLE_STATUS/HOOKS env in BOTH modes; the staged path stays in $SDIR/.claude
+# (fast local reads, no per-tick /mnt/c hit).
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+# Guard: a Windows node.exe (or any /mnt-mounted node) reached via WSL interop can't write Linux per-tab
+# paths — reject it so we fall back to bash rather than silently no-op telemetry. (command -v node won't
+# normally resolve to node.exe under interop, but this bulletproofs the most-consumed pipeline.)
+case "$NODE_BIN" in *.exe | /mnt/*) NODE_BIN="" ;; esac
+HOOK_MODE="bash"
+if [ -n "$NODE_BIN" ] && [ -f "$APPDIR/hooks/statusline.js" ] && [ -f "$APPDIR/hooks/hook.js" ]; then
+  if cp "$APPDIR/hooks/statusline.js" "$APPDIR/hooks/hook.js" "$SDIR/.claude/" 2>/dev/null; then
+    HOOK_MODE="node"
+  else
+    echo "[claudible] WARN: couldn't stage the node hooks into $SDIR/.claude — using bash hooks." >&2
+  fi
+fi
+
+if [ "$HOOK_MODE" = "node" ]; then
+  # Bake the ABSOLUTE node path (no PATH-resolution doubt in Claude's hook-invocation context) AND the
+  # per-tab status/hooks path as a trailing arg. The .js prefers the inherited CLAUDIBLE_STATUS/HOOKS env
+  # (per-tab routing) and uses this baked arg only as a fallback — mirroring the bash ${CLAUDIBLE_STATUS:-$STATUS}
+  # defense-in-depth, so a dropped env never silently loses telemetry/agents/voice/sync.
+  SL_CMD="'$NODE_BIN' '$SDIR/.claude/statusline.js' '$STATUS'"
+  HK_CMD="'$NODE_BIN' '$SDIR/.claude/hook.js' '$HOOKS'"
+else
+  # bash fallback — generate the original two scripts inline (statusLine via python3; hook = append).
+  cat > "$SDIR/.claude/statusline.sh" <<EOF
 #!/usr/bin/env bash
 in=\$(cat)
 out="\${CLAUDIBLE_STATUS:-$STATUS}"   # per-tab path from the inheriting Claude env; baked path is the fallback
@@ -53,26 +82,27 @@ try:
     print('claudible · %s%% ctx' % c.get('used_percentage','?'))
 except: print('claudible')" 2>/dev/null || printf 'claudible'
 EOF
-chmod +x "$SDIR/.claude/statusline.sh"
-
-# --- hooks: append each payload as one NDJSON line ---
-cat > "$SDIR/.claude/hook.sh" <<EOF
+  chmod +x "$SDIR/.claude/statusline.sh"
+  cat > "$SDIR/.claude/hook.sh" <<EOF
 #!/usr/bin/env bash
 line=\$(cat)
 out="\${CLAUDIBLE_HOOKS:-$HOOKS}"   # per-tab path from the inheriting Claude env; baked path is the fallback
 printf '%s\n' "\$line" >> "\$out"
 exit 0
 EOF
-chmod +x "$SDIR/.claude/hook.sh"
+  chmod +x "$SDIR/.claude/hook.sh"
+  SL_CMD="bash '$SDIR/.claude/statusline.sh'"
+  HK_CMD="bash '$SDIR/.claude/hook.sh'"
+fi
 
 cat > "$SDIR/.claude/settings.json" <<EOF
 {
-  "statusLine": { "type": "command", "command": "bash '$SDIR/.claude/statusline.sh'" },
+  "statusLine": { "type": "command", "command": "$SL_CMD" },
   "hooks": {
-    "Stop":             [{"hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
-    "UserPromptSubmit": [{"hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
-    "PreToolUse":       [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
-    "PostToolUse":      [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}]
+    "Stop":             [{"hooks":[{"type":"command","command":"$HK_CMD"}]}],
+    "UserPromptSubmit": [{"hooks":[{"type":"command","command":"$HK_CMD"}]}],
+    "PreToolUse":       [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"$HK_CMD"}]}],
+    "PostToolUse":      [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"$HK_CMD"}]}]
   }
 }
 EOF
