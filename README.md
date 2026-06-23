@@ -43,6 +43,7 @@ There's a **human↔human chat** alongside the terminal, a **voice room**, names
 ## Prerequisites
 - **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
 - **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first — Claudible embeds your already-authenticated session)
+- **Git for Windows** — to clone the repo. The one-line installer below **auto-installs it via winget** if you don't have it; otherwise grab it from [git-scm.com](https://git-scm.com/download/win).
 - **Node.js 22.12+** on Windows (Electron 42 requires it)
 - **Visual Studio Build Tools** with the **"Desktop development with C++"** workload — the installer rebuilds the native `node-pty` module for Electron, which needs a C++ compiler. Quick install: `winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
 - Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
@@ -52,11 +53,13 @@ There's a **human↔human chat** alongside the terminal, a **voice room**, names
 ## Install & run
 **Run in Windows PowerShell, not inside WSL.** (Claudible's app is a *Windows* Electron app that embeds Claude Code running in WSL; running it from inside WSL installs the Linux Electron and dies on `libnspr4.so`.) During beta the repo is **private — you must be added as a collaborator first**, and you need **WSL2** + a **signed-in Claude Code** inside it (see [Prerequisites](#prerequisites)).
 
-**One line** — clones, installs everything, and launches:
+**One line** — installs git if you don't have it, clones, installs everything, and launches:
 ```powershell
-git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
+if (!(Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); if (Test-Path "$env:ProgramFiles\Git\cmd\git.exe") { $env:Path = "$env:ProgramFiles\Git\cmd;$env:Path" } }; git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
 ```
-`install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL — installing their Linux deps for you (it may ask for your WSL sudo password) — then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again — it resumes.
+It **auto-installs Git for Windows** (via winget) if it's missing, clones, then `install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL — installing their Linux deps for you (it may ask for your WSL sudo password) — then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again — it resumes.
+
+> **No `winget`?** (older Windows) Install Git from **[git-scm.com/download/win](https://git-scm.com/download/win)** with the defaults, **reopen PowerShell**, then run the line above.
 
 <details><summary>Prefer to run the steps by hand?</summary>
 

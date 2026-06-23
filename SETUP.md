@@ -6,6 +6,7 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
 - **WSL2 + Ubuntu** — `wsl --install` (in an admin PowerShell), then reboot.
 - **Claude Code CLI inside WSL** — `claude` must be on your WSL PATH **and signed in**. Run `claude` once in WSL and complete login *before* launching Claudible (it embeds your existing session and doesn't handle first-time login specially). See the Claude Code docs.
 - **Node.js 22.12+ on Windows.** (Electron 42 and its build tooling require it; older Node prints `EBADENGINE` warnings on install.)
+- **Git for Windows** — to clone the repo. The one-liner in step 2 **auto-installs it via winget** if missing; otherwise get it from [git-scm.com/download/win](https://git-scm.com/download/win).
 - Inside WSL: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
   ```bash
   sudo apt update && sudo apt install -y git cmake build-essential ffmpeg python3 espeak-ng
@@ -16,9 +17,9 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
 > **Run in Windows PowerShell, not inside WSL** (the Electron app is the Windows side; it reaches into WSL itself — running it inside WSL fails with `libnspr4.so`). The repo is **private during beta, so you must be added as a collaborator first**; your first clone will prompt you to sign in to GitHub.
 
 ```powershell
-git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
+if (!(Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); if (Test-Path "$env:ProgramFiles\Git\cmd\git.exe") { $env:Path = "$env:ProgramFiles\Git\cmd;$env:Path" } }; git clone https://github.com/thecrazydev1/claudible "$HOME\claudible"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\claudible\install.ps1"
 ```
-`install.ps1` checks/installs Windows **Node 22.12+**, runs `npm install`, builds the voice services in WSL (installing their deps — may ask for your WSL sudo password), makes a Desktop shortcut, and launches. First run downloads ~480 MB of models (10–20 min); re-run the line if interrupted.
+It auto-installs **Git for Windows** (via winget) if missing, clones, then `install.ps1` checks/installs Windows **Node 22.12+**, runs `npm install`, builds the voice services in WSL (installing their deps — may ask for your WSL sudo password), makes a Desktop shortcut, and launches. First run downloads ~480 MB of models (10–20 min); re-run the line if interrupted. **No winget?** (older Windows) Install Git from [git-scm.com/download/win](https://git-scm.com/download/win), reopen PowerShell, then run the line.
 
 <details><summary>Or do it by hand (steps 2–4 below).</summary>
 

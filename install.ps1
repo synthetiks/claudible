@@ -1,8 +1,9 @@
 # Claudible - one-shot installer. Run in Windows PowerShell from the cloned repo root:
 #   .\install.ps1
 # It handles everything from here: Windows Node, dependencies, the WSL voice build (installing the
-# Linux deps for you), a Desktop shortcut, and launch. The only things it can't conjure are git, WSL2
-# itself, and a signed-in Claude Code in WSL (see README "Prerequisites").
+# Linux deps for you), a Desktop shortcut, and launch. The only things it can't conjure are git (the
+# one-line bootstrap in the README installs that before the clone — by the time this script runs, the
+# clone already succeeded), WSL2 itself, and a signed-in Claude Code in WSL (see README "Prerequisites").
 $ErrorActionPreference = 'Stop'
 $app = $PSScriptRoot
 Set-Location $app
