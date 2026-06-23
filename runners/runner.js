@@ -1,0 +1,47 @@
+// runners/runner.js — the OS-backend seam (Part 0 of docs/OS-CONVERSION-PLAN.md).
+//
+// main.js talks ONLY to a Runner; it never touches wsl.exe / wslpath / bash / a Windows path
+// directly. Every OS-coupled call site in docs/SEAMS.md (74 of them) moves behind one of the
+// methods below. Adding an OS = adding a runner module that implements this contract; nothing
+// in main.js / the renderer changes.
+//
+// THE CONTRACT (every backend — wsl.js, and later win.js / posix.js — implements these):
+//
+//   id                                    'wsl' | 'win' | 'posix'
+//   detect()                  -> bool     is this runner usable on this machine?
+//   appDirGuest()             -> string|null   the app root as the execution space sees it
+//                                              (WSL: /mnt/c/…  · native: the app root itself)
+//   toGuestPath(hostPath)     -> string   host path -> execution-space path (identity on native)
+//   toHostPath(guestPath)     -> string   execution-space path -> host path (identity on native)
+//   runtimeDir()              -> string   host-FS runtime root; pollers read tabs/<id>/status.json
+//                                         + hooks.ndjson here (SEAMS §2)
+//   ptyInfo()                 -> {mod, err}    the loaded node-pty backend (or the load error)
+//   spawnClaude(tabId, opts)  -> ptyProcess    launch the Claude TUI in a PTY (SEAMS §1)
+//                                              opts: { cols, rows, session, ws, effort, runtimeId }
+//   runScript(name,argStr,o)  -> Promise<{err, stdout}>   run wsl/<name> with wsEnv + args (SEAMS §7)
+//                                              o: { ws, extraEnv, timeout, maxBuffer }
+//   startVoiceServices()      -> void     bring up whisper(:2022) + kokoro(:8880) (SEAMS §5)
+//   voiceHealth()             -> Promise<{whisper, kokoro}>
+//   installHooks(sessionDir)  -> void|Promise   write CC settings + hooks (SEAMS §4; Node-ported in 0.5)
+//   setup(opts)               -> Promise   per-OS install/build (SEAMS §6; driven by the installer)
+//
+// SELECTION (plan 0.4): honor CLAUDIBLE_RUNNER for testing; else auto-detect. Until win/posix are
+// built and proven, every path resolves to the WSL backend, so today's behavior is unchanged.
+
+const wsl = require('./wsl');
+
+const REGISTRY = { wsl };   // win / posix register here as Parts A / B-C land.
+
+function select() {
+  const forced = String(process.env.CLAUDIBLE_RUNNER || '').trim().toLowerCase();
+  if (forced && REGISTRY[forced]) return REGISTRY[forced];
+  if (forced) {
+    // e.g. CLAUDIBLE_RUNNER=win before win.js exists — fail SOFT to the known-good backend, loudly.
+    console.error(`[claudible] CLAUDIBLE_RUNNER='${forced}' is not built yet — falling back to 'wsl'.`);
+    return wsl;
+  }
+  // Auto-detect. Today only the WSL backend exists; Part A/B/C insert native detection ahead of this.
+  return wsl;
+}
+
+module.exports = { select, REGISTRY, wsl };
