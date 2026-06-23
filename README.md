@@ -10,7 +10,7 @@
 <p align="center">
   <img alt="multiplayer co-work" src="https://img.shields.io/badge/multiplayer-co--work-e08cc0">
   <img alt="voice 100%25 local" src="https://img.shields.io/badge/voice-100%25%20local-5fb487">
-  <img alt="platform Windows 11 + WSL2" src="https://img.shields.io/badge/platform-Windows%2011%20%2B%20WSL2-7c5cff">
+  <img alt="platform Windows, Linux, macOS" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20Linux%20%C2%B7%20macOS-7c5cff">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-6aa9ff">
   <img alt="status private beta" src="https://img.shields.io/badge/status-private%20beta-e0a93b">
 </p>
@@ -23,7 +23,7 @@ Claude Code is brilliant, but it's **one person, one terminal, one agent.** Clau
 
 And around that, Claudible is a **Swiss-army knife for Claude Code** — everything you wish the terminal had, in one place: fully-local **two-way voice** (talk to it, hear it back), **live context/cost/token telemetry** with a `/compact` guardrail, a **live agents cockpit** (watch your subagents and workflow swarms work — tools, tokens, results), and **one-click** slash-commands. All wrapping the *real* Claude Code TUI, untouched (xterm.js, full scrollback).
 
-> **Windows 11 + WSL2** · voice is fully local · MIT
+> **Windows · Linux · macOS** · voice is fully local · MIT
 
 ## 🤝 Multiplayer — your session, shared
 Click **Share** and Claudible hands you a private invite link to your *live* session. It's **reusable and approval-gated** — up to 8 people can open it, each waiting in a lobby until you approve them by name. Pick the mode per share:
@@ -41,6 +41,8 @@ There's a **human↔human chat** alongside the terminal, a **voice room**, names
 - 🗂️ **Workspaces + session sync** — organize sessions per repo, and (with `gh`) keep shared sessions in sync with collaborators.
 
 ## Prerequisites
+*(These cover the **Windows + WSL2** path — the recommended default. The native Windows, Linux, and macOS
+sections under [Install & run](#install--run) list their own, lighter requirements.)*
 - **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
 - **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first — Claudible embeds your already-authenticated session)
 - **Git for Windows** — to clone the repo. The one-line installer below **auto-installs it via winget** if you don't have it; otherwise grab it from [git-scm.com](https://git-scm.com/download/win).
@@ -50,13 +52,21 @@ There's a **human↔human chat** alongside the terminal, a **voice room**, names
 - **Optional, for private-repo workspaces + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
 
 ## Install & run
-**Run in Windows PowerShell, not inside WSL.** (Claudible's app is a *Windows* Electron app that embeds Claude Code running in WSL; running it from inside WSL installs the Linux Electron and dies on `libnspr4.so`.) During beta the repo is **private — you must be added as a collaborator first**, and you need **WSL2** + a **signed-in Claude Code** inside it (see [Prerequisites](#prerequisites)).
+
+Claudible runs on **Windows (WSL2 *or* native), Linux, and macOS** — one `Runner` seam picks the backend per OS.
+Maturity, honestly: the **Windows + WSL2** path is the battle-tested one; **Linux** is verified (the native backend is
+live-tested and a packaged AppImage builds); **native Windows** and **macOS** are code-complete and statically verified,
+with their runtime smoke tests in progress. During beta the repo is **private — you must be a collaborator first.**
+
+<details open><summary><h3>🪟 Windows 11 + WSL2 — recommended</h3></summary>
+
+**Run in Windows PowerShell, not inside WSL.** (Claudible is a *Windows* Electron app that embeds Claude Code running in WSL; running it from inside WSL installs the Linux Electron and dies on `libnspr4.so`.) You need **WSL2** + a **signed-in Claude Code** inside it (see [Prerequisites](#prerequisites)).
 
 **One line** — asks where to install (Enter for the default), installs git if you don't have it, clones, installs everything, and launches:
 ```powershell
 $dir = (Read-Host "Install folder for Claudible (Enter for default) [$HOME\claudible]").Trim().Trim('"'); if (-not $dir) { $dir = "$HOME\claudible" }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); if (Test-Path "$env:ProgramFiles\Git\cmd\git.exe") { $env:Path = "$env:ProgramFiles\Git\cmd;$env:Path" } }; git clone https://github.com/thecrazydev1/claudible "$dir"; if (Test-Path "$dir\install.ps1") { powershell -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" } else { Write-Host "`n[!] install.ps1 is missing after clone -- your antivirus most likely quarantined it (a false positive). To fix: allow/exclude the folder `"$dir`" in your antivirus, then run these two lines:`n    git -C `"$dir`" restore install.ps1`n    powershell -NoProfile -ExecutionPolicy Bypass -File `"$dir\install.ps1`"`nPer-antivirus steps are in `"$dir\SETUP.md`" (the Antivirus section)." -ForegroundColor Yellow }
 ```
-It **prompts for an install folder** (press Enter for the default `…\claudible`, or paste any path), **auto-installs Git for Windows** via winget if it's missing, clones, then `install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL — installing their Linux deps for you (it may ask for your WSL sudo password) — then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again — it resumes.
+It **prompts for an install folder** (Enter for the default `…\claudible`, or paste any path), **auto-installs Git for Windows** via winget if it's missing, clones, then `install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL — installing their Linux deps for you (it may ask for your WSL sudo password) — then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again — it resumes.
 
 > **No `winget`?** (older Windows) Install Git from **[git-scm.com/download/win](https://git-scm.com/download/win)** with the defaults, **reopen PowerShell**, then run the line above.
 
@@ -70,6 +80,50 @@ npm run setup      # builds the WSL voice services (installs their deps; ~480 MB
 npm start          # opens the cockpit
 ```
 Optional Desktop shortcut: `powershell -NoProfile -ExecutionPolicy Bypass -File launch\make-shortcut.ps1`
+</details>
+</details>
+
+<details><summary><h3>🪟 Windows — native (no WSL) · new</h3></summary>
+
+A WSL-free path: native Windows Claude Code + **prebuilt** voice services (no compiler), driven by the `win` runner.
+**Needs:** Windows **Node 22.12+** and **Git for Windows** (`bash.exe`). The installer installs Claude Code for Windows if it's missing.
+```powershell
+git clone https://github.com/thecrazydev1/claudible
+cd claudible
+.\install.ps1 -Native
+```
+This: installs Claude Code (`npm i -g @anthropic-ai/claude-code`) if absent → runs `setup\setup-win.ps1`, which downloads the prebuilt `whisper-server.exe` + the speech model and sets up Kokoro (CPU) via [`uv`](https://docs.astral.sh/uv/) — **no Visual Studio / Python / cmake** → pins `CLAUDIBLE_RUNNER=win`. Remove that user env var to fall back to WSL.
+
+> 🧪 **Newer path — runtime smoke test in progress.** Terminal + telemetry are expected solid; the Windows **voice** runtime (Kokoro `:8880`) is the most likely rough edge. If anything snags, the **WSL path above is the proven one**.
+</details>
+
+<details><summary><h3>🐧 Linux · verified backend</h3></summary>
+
+**Needs:** **Node 22.12+**, **Claude Code on your PATH** (`claude`, signed in), and the voice build deps — `npm run setup` installs them via `apt` (`git cmake build-essential ffmpeg espeak-ng python3` + [`uv`](https://docs.astral.sh/uv/)).
+```bash
+git clone https://github.com/thecrazydev1/claudible
+cd claudible
+npm install        # builds node-pty for Linux (toolchain present) or uses a prebuilt
+npm run setup      # whisper.cpp + Kokoro (~480 MB models on first run)
+npm start          # auto-selects the native Linux backend (no WSL involved)
+```
+Packaged installers build with `npm run dist:linux` (AppImage + `.deb`). The native backend (`runScript` + a real node-pty spawn) is live-tested; a 123 MB AppImage builds clean.
+</details>
+
+<details><summary><h3>🍎 macOS · new</h3></summary>
+
+Same backend as Linux, with **Homebrew** for the voice build deps.
+**Needs:** **Node 22.12+**, **Claude Code on your PATH**, **Xcode Command Line Tools** (`xcode-select --install`), and `brew install cmake ffmpeg espeak-ng`.
+```bash
+git clone https://github.com/thecrazydev1/claudible
+cd claudible
+npm install
+npm run setup      # detects Homebrew for the build deps
+npm start
+```
+A signed **`.dmg`** is the planned release artifact (`npm run dist:mac`).
+
+> 🧪 **Newer path — runtime smoke test pending** (needs a Mac to build/sign + verify voice).
 </details>
 
 Full steps + troubleshooting: **[SETUP.md](SETUP.md)**.
@@ -101,7 +155,15 @@ There's a **human↔human chat** alongside the terminal, names for the host and 
 - **Live co-work is off until you click Share, and exposes your session for as long as it's on.** The quick-tunnel URL is public-but-unguessable; anyone with the link reaches the lobby, but **no one sees or touches your terminal until you approve them**, and **interactive** access lets an approved guest type into a Claude Code session that runs with skipped permissions — so only share interactive with people you trust, prefer read-only otherwise, and stop sharing (or rotate the link) when you're done.
 
 ## Platform support
-Windows 11 + WSL2 today — it spawns `wsl.exe` and embeds Claude Code running in Linux. macOS/Linux is a clean future port (spawn `bash -lc` directly, skip `wslpath`); everything else is already cross-platform. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Windows (WSL2 or native), Linux, and macOS.** Every OS-coupled call goes through one `Runner` seam
+(`runners/{wsl,posix,win}.js`), selected by `CLAUDIBLE_RUNNER` or the platform:
+- **Windows + WSL2** — spawns `wsl.exe`, embeds Claude Code in Linux. The most-tested path.
+- **Windows native** — runs Windows `claude.exe` directly (ConPTY) and the `wsl/*.sh` fleet via Git-for-Windows `bash`; no WSL.
+- **Linux** — spawns `bash -lc` directly; native backend live-tested, AppImage builds.
+- **macOS** — shares the Linux backend + Homebrew/`lsof` voice branches; `.dmg` is the planned artifact.
+
+The script fleet is **Python-free** (the JSON transforms were ported to Node, byte-parity proven), so the only
+per-OS runtime is Node + a shell. See [docs/OS-CONVERSION-PLAN.md](docs/OS-CONVERSION-PLAN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 [MIT](LICENSE).
