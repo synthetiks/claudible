@@ -71,8 +71,8 @@ cat > "$SDIR/.claude/settings.json" <<EOF
   "hooks": {
     "Stop":             [{"hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
     "UserPromptSubmit": [{"hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
-    "PreToolUse":       [{"matcher":"Task","hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
-    "PostToolUse":      [{"matcher":"Task","hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}]
+    "PreToolUse":       [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}],
+    "PostToolUse":      [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"bash '$SDIR/.claude/hook.sh'"}]}]
   }
 }
 EOF

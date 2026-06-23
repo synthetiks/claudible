@@ -661,9 +661,9 @@ claudible.onHookLine((tabId, line) => {
         else { setDot('d-tts', 'ok'); if (announceOn && String(o.last_assistant_message).length > 700) speak('The task is complete.'); }   // long-task done cue (raw length — stripForSpeech: full reply, or 1500 when 'Read full replies' is off)
       }
     }
-  } else if (o.hook_event_name === 'PreToolUse' && o.tool_name === 'Task') {
-    onAgentStart(t, o);
-  } else if (o.hook_event_name === 'PostToolUse' && o.tool_name === 'Task') {
+  } else if (o.hook_event_name === 'PreToolUse' && (o.tool_name === 'Task' || o.tool_name === 'Agent')) {
+    onAgentStart(t, o);   // newer Claude Code spawns subagents via the 'Agent' tool, older via 'Task' — accept both
+  } else if (o.hook_event_name === 'PostToolUse' && (o.tool_name === 'Task' || o.tool_name === 'Agent')) {
     onAgentDone(t, o);
   }
 });
@@ -689,7 +689,8 @@ let agentsView = false;
 function onAgentStart(t, o) {
   const id = o.tool_use_id || ('a' + t.agents.size + '-' + Date.now());
   const ti = o.tool_input || {};
-  t.agents.set(id, { desc: String(ti.description || ti.subagent_type || 'subagent'), type: String(ti.subagent_type || ''),
+  t.agents.set(id, { id: id, desc: String(ti.description || ti.subagent_type || 'subagent'), type: String(ti.subagent_type || ''),
+    prompt: String(ti.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 600),   // the agent's task → shown in the expanded card
     status: 'running', startedAt: Date.now(), durationMs: null, ok: true });
   if (t.tabId === activeTabId) { renderAgents(); if (!agentsView) { const s = $('seg-agents'); if (s) s.classList.add('has-badge'); } }   // badge while you're on the terminal
 }
@@ -698,6 +699,13 @@ function onAgentDone(t, o) {
   a.status = 'done';
   a.durationMs = (o.duration_ms != null) ? o.duration_ms : (Date.now() - a.startedAt);
   try { a.ok = !/"is_error"\s*:\s*true|"error"\s*:/i.test(JSON.stringify(o.tool_response || '').slice(0, 500)); } catch { a.ok = true; }
+  try {   // capture the subagent's final result — Agent/Task hooks have no live tool feed, but PostToolUse carries the result, which makes the row expandable
+    const tr = o.tool_response;
+    let res = (typeof tr === 'string') ? tr
+      : Array.isArray(tr) ? tr.map((x) => (x && x.text) || '').join(' ')
+      : (tr && typeof tr === 'object') ? (tr.text || (Array.isArray(tr.content) ? tr.content.map((x) => (x && x.text) || '').join(' ') : tr.content) || '') : '';
+    a.result = String(res || '').replace(/\s+/g, ' ').trim().slice(0, 280);
+  } catch {}
   if (t.tabId === activeTabId) renderAgents();
 }
 function fmtDur(sec) {
@@ -743,7 +751,8 @@ function agentRow(a, nowSec) {
   row.appendChild(head);
   if (rich) {   // expandable detail: the agent's task, its live tool-call feed, and its final result
     const det = document.createElement('div'); det.className = 'agent-detail';
-    if (label && label !== 'agent') { const task = document.createElement('div'); task.className = 'agent-task'; task.textContent = label; det.appendChild(task); }
+    const taskText = (a.prompt && a.prompt.trim()) || (label !== 'agent' ? label : '');
+    if (taskText) { const task = document.createElement('div'); task.className = 'agent-task'; task.textContent = taskText; det.appendChild(task); }
     if (tools.length) {
       const feed = document.createElement('div'); feed.className = 'agent-feed';
       tools.forEach((t) => { const r = document.createElement('div'); r.className = 'agent-tool';
