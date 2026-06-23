@@ -4,38 +4,41 @@
 
 <h1 align="center">Claudible</h1>
 
-<p align="center"><b>The cockpit for Claude Code: an interface you can actually talk to — and invite someone into.</b></p>
-<p align="center"><i>Claude Code with a face, a voice, and a co-worker.</i></p>
+<p align="center"><b>Multiplayer Claude Code — the collaboration cockpit.</b></p>
+<p align="center"><i>Invite anyone into your live Claude Code session to watch, talk, and build together — with fully-local voice, live telemetry, and a real-time agents view baked in.</i></p>
 
 <p align="center">
-  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-6aa9ff">
-  <img alt="platform Windows 11 + WSL2" src="https://img.shields.io/badge/platform-Windows%2011%20%2B%20WSL2-7c5cff">
+  <img alt="multiplayer co-work" src="https://img.shields.io/badge/multiplayer-co--work-e08cc0">
   <img alt="voice 100%25 local" src="https://img.shields.io/badge/voice-100%25%20local-5fb487">
+  <img alt="platform Windows 11 + WSL2" src="https://img.shields.io/badge/platform-Windows%2011%20%2B%20WSL2-7c5cff">
+  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-6aa9ff">
   <img alt="status private beta" src="https://img.shields.io/badge/status-private%20beta-e0a93b">
 </p>
 
 ---
 
-**Claudible is a desktop GUI for Claude Code** — it wraps your real Claude Code session in a sleek interface with live telemetry, fully-local push-to-talk voice (talk to it *and* hear it back), and live session sharing so a teammate can pair with you.
+## Claude Code is single-player. Claudible makes it multiplayer — and wraps it in a cockpit.
 
-Claude Code is brilliant, but it lives in a bare terminal. Claudible gives it three things a terminal can't: a **face**, a **voice**, and a **co-worker**.
+Claude Code is brilliant, but it's **one person, one terminal, one agent.** Claudible turns your *running* session into a **room your team can join:** drop a private, approval-gated link in Slack, a teammate opens it in their browser — laptop or phone — and they're *inside your live session.* They watch, they chat, or they **take the keyboard** and co-drive the same Claude. Pair-program with AI *and* humans, build a repo together, onboard someone by handing them the wheel, debug in real time.
 
-**A face.** An obsidian-dark UI with one-click controls, a live meter for context, cost, and tokens, and a guardrail that turns from amber to red and offers a one-tap `/compact` before you run out of room. The actual Claude Code TUI runs inside untouched (real xterm.js, full scrollback), so you keep everything it does and gain a face and a dashboard.
-
-**A voice — fully local.** Hold a key, speak, and your words drop straight into the live session, with replies read back in a natural voice. Speech-to-text *and* text-to-speech run on your own machine (Whisper + Kokoro): no Claude.ai voice sign-in, no cloud transcription, no telemetry from Claudible. It's two-way — you talk and you *hear back* — not just dictation. (The embedded Claude Code talks to Anthropic exactly as it always does; see [Security & privacy](#security--privacy).)
-
-**A co-worker.** Share your running session over a private invite link and someone joins it live in their browser — on a laptop or a phone. You approve every guest by name, choose **read-only** (they watch and chat) or **interactive** (they type into the same session), and there's a human↔human chat side-channel alongside the terminal. It's a local WebSocket server wrapped in a free Cloudflare quick-tunnel (with [`cloudflared`](https://github.com/cloudflare/cloudflared) installed; otherwise the link stays localhost/LAN) — nothing of yours is hosted by us, the tunnel just connects *out* from your machine.
+And around that, Claudible is a **Swiss-army knife for Claude Code** — everything you wish the terminal had, in one place: fully-local **two-way voice** (talk to it, hear it back), **live context/cost/token telemetry** with a `/compact` guardrail, a **live agents cockpit** (watch your subagents and workflow swarms work — tools, tokens, results), and **one-click** slash-commands. All wrapping the *real* Claude Code TUI, untouched (xterm.js, full scrollback).
 
 > **Windows 11 + WSL2** · voice is fully local · MIT
 
-## Features
-- 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js) with full scrollback, dressed in a sleek obsidian-dark UI. Your session, untouched.
-- 📊 **Live telemetry** — context %, cost, and tokens at a glance, with a **context guardrail** (amber → red) and a one-tap `/compact`.
-- 🎛️ **One-click controls** — clear the input, save the session, and fire `/effort`, `/compact`, `/status` & friends from buttons — no commands to memorize.
-- 🎙️ **Push-to-talk voice in** — hold **Left-Alt** (rebindable) or click **Talk**; your speech is transcribed locally and typed straight into the live session.
-- 🔊 **Spoken replies** — Claude's answers read back in a natural voice (voice picker + "always speak" toggle).
-- 🔒 **Local voice** — Whisper + Kokoro run on your machine; Claudible adds no telemetry, and voice needs no Claude.ai sign-in.
-- 🤝 **Live session sharing / co-work** — *pair-program* by inviting someone into your running session over a private, approval-gated link. The host approves each guest by name, **read-only or interactive**, up to 8 at once, with a human↔human chat side-channel and a mobile-friendly browser viewer. Local server + a free [`cloudflared`](https://github.com/cloudflare/cloudflared) quick-tunnel for cross-network reach (install it for remote; without it the link is localhost/LAN).
+## 🤝 Multiplayer — your session, shared
+Click **Share** and Claudible hands you a private invite link to your *live* session. It's **reusable and approval-gated** — up to 8 people can open it, each waiting in a lobby until you approve them by name. Pick the mode per share:
+- **Read-only** — guests watch the live terminal and chat, but can't type.
+- **Interactive** — guests type into the *same* Claude Code session you're driving.
+
+There's a **human↔human chat** alongside the terminal, a **voice room**, names for everyone, and a **mobile-friendly** browser viewer so someone can follow from a phone. With [`cloudflared`](https://github.com/cloudflare/cloudflared) it's a free `https://…trycloudflare.com` tunnel a colleague on any network can reach (without it, localhost/LAN). Nothing is hosted by us — the tunnel connects *out* from your machine. → [details + security](#live-session-sharing--pair-programming)
+
+## 🧰 The cockpit — a Swiss-army knife for Claude Code
+- 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js, full scrollback) in a sleek obsidian-dark UI. Your session, untouched.
+- 🎙️ **Two-way local voice** — hold a key and talk; hear replies read back. Whisper + Kokoro run **on your machine** — no cloud, no Claude.ai voice sign-in, no telemetry from Claudible. (The embedded Claude Code talks to Anthropic exactly as the normal CLI does.)
+- 📊 **Live telemetry** — context %, cost, and tokens at a glance, with a guardrail (amber → red) and a one-tap `/compact` before you run out of room.
+- 🛰️ **Live agents cockpit** — watch your subagents and workflow swarms work in real time: their task, tool-by-tool activity, token burn, and final results.
+- 🎛️ **One-click controls** — fire `/effort`, `/compact`, `/status` & friends from buttons; no commands to memorize.
+- 🗂️ **Workspaces + session sync** — organize sessions per repo, and (with `gh`) keep shared sessions in sync with collaborators.
 
 ## Prerequisites
 - **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
