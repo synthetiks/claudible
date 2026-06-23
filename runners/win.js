@@ -206,10 +206,20 @@ function runScript(name, argStr = '', opts = {}) {
   });
 }
 
-// 🟡 voice — A0 proved whisper-server.exe runs on Windows; this wires the Windows voice start. Built/
-// installed by the Windows installer (A5): whisper-server.exe (prebuilt) + kokoro via uv. Until that
-// installer lands this is a documented stub; the renderer's :2022/:8880 client is unchanged.
-function startVoiceServices() { /* A3: launch whisper-server.exe + kokoro uvicorn on 127.0.0.1 — see A0 */ }
+// 🟡 voice — A0 proved whisper-server.exe runs on Windows. This runs the SAME services.sh fleet via
+// git-bash (like posix/wsl run it via bash/wsl.exe), which resolves the prebuilt whisper-server.exe +
+// starts kokoro. Provisioned by install.ps1 -Native (A5). Binds 127.0.0.1: unlike WSL (where the app must
+// reach across the WSL netns, forcing 0.0.0.0), native Windows has no boundary, so loopback avoids the
+// Firewall prompt + LAN exposure. CLAUDIBLE_BIND_HOST is honored by services.sh (defaults to 0.0.0.0).
+function startVoiceServices() {
+  const bash = gitBash(); const appdir = appDirGuest();
+  if (!bash || !appdir) { console.error('[claudible] voice not started: git-bash unavailable (Windows)'); return; }
+  const env = Object.assign({}, process.env, { MSYS_NO_PATHCONV: '1', CLAUDIBLE_BIND_HOST: '127.0.0.1' });
+  try {
+    cp.execFile(bash, ['-lc', `bash '${appdir}/wsl/services.sh'`], { encoding: 'utf8', env },
+      (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh (win):', err.message, stderr || ''); });
+  } catch (e) { console.error('[claudible] services.sh (win):', e.message); }
+}
 async function voiceHealth() {
   const probe = async (url) => { try { const r = await fetch(url, { method: 'GET' }); return r.status < 500; } catch { return false; } };
   const [w, k] = await Promise.all([probe(process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022'), probe(process.env.CLAUDIBLE_KOKORO || 'http://localhost:8880')]);

@@ -48,7 +48,7 @@ if ! listening "$KOKORO_PORT"; then
     ( cd "$VOICE/kokoro" && \
       env MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 USE_GPU=false USE_ONNX=false \
         PYTHONPATH="$VOICE/kokoro:$VOICE/kokoro/api" $ESPEAK_ENV \
-        nohup uv run --no-sync uvicorn api.src.main:app --host 0.0.0.0 --port "$KOKORO_PORT" \
+        nohup uv run --no-sync uvicorn api.src.main:app --host "${CLAUDIBLE_BIND_HOST:-0.0.0.0}" --port "$KOKORO_PORT" \
         >"$LOG/kokoro.out" 2>&1 & )
     if wait_listen "$KOKORO_PORT" 90; then echo "[claudible] kokoro up :$KOKORO_PORT"; else echo "[claudible] kokoro not up yet (still loading the model?) — check $LOG/kokoro.out"; fi
   else echo "[claudible] kokoro not installed at $VOICE/kokoro — run: npm run setup"; fi
@@ -56,13 +56,21 @@ else echo "[claudible] kokoro already up :$KOKORO_PORT"; fi
 
 # Whisper STT  (OpenAI route + ffmpeg convert)
 if ! listening "$WHISPER_PORT"; then
-  if [ -d "$VOICE/whisper" ] && [ ! -x "$VOICE/whisper/build/bin/whisper-server" ]; then
-    echo "[claudible] whisper NOT started: build/bin/whisper-server is missing or not built — run: npm run setup."
-  elif [ -d "$VOICE/whisper" ]; then
+  # Resolve the whisper-server binary: the WSL/Linux/macOS cmake build (build/bin/whisper-server) OR the
+  # native-Windows prebuilt (Release/whisper-server.exe, placed by setup/setup-win.ps1). Running an
+  # absolute-path .exe lets Windows load its ggml DLLs from the exe's own dir (Release/), while the model
+  # path stays relative to the cwd ($VOICE/whisper) so `-m models/ggml-base.bin` resolves on both layouts.
+  WHISPER_BIN=""
+  for cand in "$VOICE/whisper/build/bin/whisper-server" "$VOICE/whisper/Release/whisper-server.exe"; do
+    [ -x "$cand" ] && { WHISPER_BIN="$cand"; break; }
+  done
+  if [ -d "$VOICE/whisper" ] && [ -z "$WHISPER_BIN" ]; then
+    echo "[claudible] whisper NOT started: no whisper-server binary (build/bin or Release/) — run setup."
+  elif [ -n "$WHISPER_BIN" ]; then
     ( cd "$VOICE/whisper" && \
-      nohup ./build/bin/whisper-server --host 0.0.0.0 --port "$WHISPER_PORT" -m models/ggml-base.bin \
+      nohup "$WHISPER_BIN" --host "${CLAUDIBLE_BIND_HOST:-0.0.0.0}" --port "$WHISPER_PORT" -m models/ggml-base.bin \
         --inference-path /v1/audio/transcriptions --convert \
         >"$LOG/whisper.out" 2>&1 & )
     if wait_listen "$WHISPER_PORT" 20; then echo "[claudible] whisper up :$WHISPER_PORT"; else echo "[claudible] whisper FAILED to bind — see $LOG/whisper.out"; fi
-  else echo "[claudible] whisper not installed at $VOICE/whisper — run: npm run setup"; fi
+  else echo "[claudible] whisper not installed at $VOICE/whisper — run setup."; fi
 else echo "[claudible] whisper already up :$WHISPER_PORT"; fi

@@ -45,6 +45,17 @@ so they can be smoke-tested without risk. Run the 10-point list above under each
 **Needs:** native Claude Code on PATH (`where claude`), Windows Node 22.12+ on PATH, Git for Windows
 (`bash.exe` — already an install prereq). **No WSL.** Launch with the env var set, e.g. in PowerShell:
 `$env:CLAUDIBLE_RUNNER='win'; npm start` (from the install folder). `Remove-Item Env:\CLAUDIBLE_RUNNER` to revert.
+
+**Native install smoke (A5/A3 — authored, never run on Windows yet):** from the cloned repo,
+`.\install.ps1 -Native` should: install Windows Claude Code if missing, run `setup\setup-win.ps1` (download the
+prebuilt `whisper-server.exe` + ggml-base model; clone Kokoro + `uv sync --extra cpu` + its model), and pin
+`CLAUDIBLE_RUNNER=win`. **Watch for, in order:** (1) `uv` resolves after winget/installer (PATH refresh);
+(2) `whisper-bin-x64.zip` extracts to `…\whisper\Release\whisper-server.exe`; (3) the model lands at
+`…\whisper\models\ggml-base.bin`; (4) `uv sync --extra cpu` finishes (the heavy step); (5) on launch, whisper
+binds **`127.0.0.1:2022`** (loopback — no Windows Firewall prompt; check `%USERPROFILE%\.claudible\logs\whisper.out`)
+and **Kokoro `127.0.0.1:8880`** — Kokoro on Windows is the **most likely failure** (espeak-ng phonemizer data /
+uvicorn); check `kokoro.out`. The win runner starts these by running `wsl/services.sh` through **git-bash** (it
+sets `CLAUDIBLE_BIND_HOST=127.0.0.1`). If only voice fails, terminal+telemetry still work.
 - **#1 Terminal** — does **claude.exe** spawn in the embedded terminal (ConPTY)? Watch for a `.cmd`-shim
   vs native-exe resolution issue (we spawn via `cmd /c claude …`).
 - **#4 Telemetry** — does the meter tick? This proves Claude invokes the **Node hooks via the Windows

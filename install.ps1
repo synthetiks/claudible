@@ -1,9 +1,12 @@
 # Claudible - one-shot installer. Run in Windows PowerShell from the cloned repo root:
-#   .\install.ps1
-# It handles everything from here: Windows Node, dependencies, the WSL voice build (installing the
-# Linux deps for you), a Desktop shortcut, and launch. The only things it can't conjure are git (the
-# one-line bootstrap in the README installs that before the clone — by the time this script runs, the
-# clone already succeeded), WSL2 itself, and a signed-in Claude Code in WSL (see README "Prerequisites").
+#   .\install.ps1            # WSL mode (default): WSL2 + a signed-in Claude Code in WSL + the WSL voice build.
+#   .\install.ps1 -Native    # native Windows (NO WSL): provisions Windows Claude Code + the prebuilt voice
+#                             # services, and pins the `win` runner. STATUS: authored + statically verified;
+#                             # the native runtime path needs a Windows smoke test (docs/SMOKE.md) - the WSL
+#                             # mode remains the proven default.
+# It handles Windows Node, dependencies, the voice build, a Desktop shortcut, and launch. The only things it
+# can't conjure are git (the README one-liner installs that before the clone) and, in WSL mode, WSL2 itself.
+param([switch]$Native)
 $ErrorActionPreference = 'Stop'
 $app = $PSScriptRoot
 Set-Location $app
@@ -52,14 +55,32 @@ if (Test-Path $ptyPrebuilt) {
   }
 }
 
-# WSL2 must exist - `npm run setup` and the app both shell into it.
-if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { Die "WSL2 isn't installed. Run 'wsl --install' in an admin PowerShell, reboot, then re-run this installer." }
-& wsl.exe -e true 2>$null
-if ($LASTEXITCODE -ne 0) { Die "WSL has no working default distro. Install one (e.g. 'wsl --install -d Ubuntu' and finish its first-run setup), then re-run this installer." }
+if ($Native) {
+  # Native Windows path - NO WSL. Ensure native Claude Code, build the prebuilt voice services, pin the win runner.
+  Step '2/4' 'Provisioning native Windows Claude Code + voice (no WSL)...'
+  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Write-Host '  Installing Claude Code for Windows (npm i -g @anthropic-ai/claude-code)...' -ForegroundColor Cyan
+    npm install -g '@anthropic-ai/claude-code'
+    if ($LASTEXITCODE -ne 0) { Die "Couldn't install Claude Code. Install it (https://docs.anthropic.com/en/docs/claude-code) + sign in, then re-run: .\install.ps1 -Native" }
+    $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+  }
+  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Die "Claude Code installed but not visible in this window. Open a NEW PowerShell, run 'claude' once to sign in, then re-run: .\install.ps1 -Native" }
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'setup\setup-win.ps1')
+  if ($LASTEXITCODE -ne 0) { Die "Native voice setup did not finish - see above, then re-run: powershell -ExecutionPolicy Bypass -File setup\setup-win.ps1" }
+  # Pin the native-Windows backend for every launch. Remove this env var to revert to the WSL backend.
+  [Environment]::SetEnvironmentVariable('CLAUDIBLE_RUNNER', 'win', 'User')
+  $env:CLAUDIBLE_RUNNER = 'win'
+  Write-Host '  Pinned CLAUDIBLE_RUNNER=win (native backend). Remove that user env var to revert to WSL.' -ForegroundColor Green
+} else {
+  # WSL2 must exist - `npm run setup` and the app both shell into it.
+  if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { Die "WSL2 isn't installed. Run 'wsl --install' in an admin PowerShell, reboot, then re-run this installer (or use -Native for a WSL-free install)." }
+  & wsl.exe -e true 2>$null
+  if ($LASTEXITCODE -ne 0) { Die "WSL has no working default distro. Install one (e.g. 'wsl --install -d Ubuntu' and finish its first-run setup), then re-run this installer." }
 
-Step '2/4' 'Building the local voice services in WSL (you may be asked for your WSL sudo password)...'
-npm run setup
-if ($LASTEXITCODE -ne 0) { Die "Voice setup did not finish - see the messages above. Fix what it reported, then re-run: npm run setup" }
+  Step '2/4' 'Building the local voice services in WSL (you may be asked for your WSL sudo password)...'
+  npm run setup
+  if ($LASTEXITCODE -ne 0) { Die "Voice setup did not finish - see the messages above. Fix what it reported, then re-run: npm run setup" }
+}
 
 Step '3/4' 'Creating the Desktop shortcut...'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'launch\make-shortcut.ps1')

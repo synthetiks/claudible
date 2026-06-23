@@ -27,7 +27,9 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
 
 ## Part C — macOS native 🟡 (shares PosixRunner; needs the build-tool branches)
 - C1 PosixRunner — reused as-is ✅
-- C2 voice build branches in `setup.sh`/`services.sh` (brew vs apt, `lsof` vs `ss`, espeak path) — IN PROGRESS
+- C2 voice build branches ✅ (logic complete; mac-smoke-gated): `setup.sh` has the Homebrew branch; `services.sh`
+  `listening()` is cross-platform (ss→lsof→netstat — `lsof` is the mac path) + espeak-ng-data resolves the
+  Homebrew/`/usr/local` paths. `bash -n` clean. Needs a Mac to runtime-verify.
 - C3 hooks/tooling — reused ✅ (port-parity proven on Linux; see the one macOS caveat below)
 - C4 Apple `.dmg` + code-sign/notarize ⬜
 - **KNOWN macOS-only caveat (tracked, fix when C4 ships):** `wsl/diff-tool.js` reads `/proc/self/environ`
@@ -50,8 +52,19 @@ session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete,
   spawn + the resume-dir read (gated on a Windows smoke).
 - A4 tooling — `runScript` reuses ALL 16 `wsl/*.sh` UNCHANGED via **git-bash** (`bash.exe -lc`, already a
   prereq) + `cygpath` app-dir 🟡. Registered as `CLAUDIBLE_RUNNER=win` (opt-in; auto stays on wsl).
-- A3 voice — `whisper-server.exe` + Kokoro uvicorn on Windows (A0-proven approach) — installer-side, ⬜
-- A5 installer (`install.ps1 -Native`) ⬜  ·  A6 e2e + flip — gated on a Windows smoke test ⬜
+- A3 voice — 🟡 **authored + statically verified.** `setup/setup-win.ps1` provisions the A0-proven prebuilt
+  `whisper-server.exe` (downloaded from the live whisper.cpp release — URL + `Release/` zip layout verified —
+  no compiler) + the ggml-base model + Kokoro (uv `--extra cpu`). `wsl/services.sh` now resolves the whisper
+  binary as either the cmake build OR `Release/whisper-server.exe` (DLLs load from the exe dir; model path
+  stays cwd-relative). **Wiring fix (caught in review):** `win.js startVoiceServices()` was an empty stub —
+  now it runs `services.sh` via git-bash (like posix/wsl), binding `127.0.0.1` (a `CLAUDIBLE_BIND_HOST` bridge,
+  default 0.0.0.0 for WSL) so native Windows avoids the 0.0.0.0 Firewall prompt + LAN exposure. pwsh-parsed
+  clean + `bash -n` clean + suite green. **Smoke-gated:** whisper bind under git-bash + the Kokoro Windows
+  runtime (uvicorn :8880 + espeak-ng-data) need a real Windows box.
+- A5 installer — 🟡 **authored + statically verified.** `install.ps1 -Native`: skips WSL, installs Windows
+  Claude Code if missing (`npm i -g @anthropic-ai/claude-code` — package + `bin: claude.exe` verified), runs
+  `setup-win.ps1`, pins `CLAUDIBLE_RUNNER=win` (User env). pwsh AST-parsed clean. WSL mode stays the default.
+  **Smoke-gated:** the end-to-end native install + A6 flip need a Windows box.
 - **win.js adversarial review done (3-angle).** Outcomes:
   - ✅ FIXED: the projects-dir encoding mismatch (git-bash MSYS `-c-…` vs claude.exe `C--…`) — env-bridge
     `CLAUDIBLE_PROJ` set by win.js runScript + `${CLAUDIBLE_PROJ:-<sed fallback>}` in the 8 scripts
