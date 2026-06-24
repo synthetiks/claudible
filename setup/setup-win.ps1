@@ -71,11 +71,17 @@ if (-not (Test-Path (Join-Path $kokoro '.git'))) {
   Say 'Installing Kokoro (TTS)...'
   Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue
   git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI $kokoro
+  # $ErrorActionPreference='Stop' does NOT catch a native-exe non-zero exit, so check it explicitly and clean up
+  # the partial clone — else the Test-Path guard above treats a half-clone as "already installed" on the next run.
+  if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue; Warn 'Kokoro clone failed (network?). Re-run setup-win.ps1.'; exit 1 }
 }
 # CPU-only torch (matches setup.sh): the --extra cpu pulls torch+cpu, not the multi-GB CUDA wheel.
 Say 'Installing/refreshing Kokoro CPU dependencies (this is the heavy step)...'
 Push-Location $kokoro
 try { uv sync --extra cpu } finally { Pop-Location }
+# Pop-Location is a cmdlet so it leaves $LASTEXITCODE = uv's exit; a failed sync means broken voice deps — abort
+# loudly instead of letting install.ps1 pin the win runner on a non-functional TTS stack.
+if ($LASTEXITCODE -ne 0) { Warn 'uv sync failed - Kokoro CPU deps not installed. Re-run setup-win.ps1.'; exit 1 }
 
 # model weights (~327 MB) - the repo gitignores *.pth, so a clone has none; download_model.py is idempotent.
 $kModel = Join-Path $kokoro 'api\src\models\v1_0\kokoro-v1_0.pth'
@@ -83,6 +89,7 @@ if (-not (Test-Path $kModel)) {
   Say 'Downloading Kokoro model weights (~327 MB)...'
   Push-Location $kokoro
   try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0 } finally { Pop-Location }
+  if ($LASTEXITCODE -ne 0) { Warn 'Kokoro model download failed. Re-run setup-win.ps1.'; exit 1 }
 } else { Say 'Kokoro model already present.' }
 
 Say 'Done. Native-Windows voice services are provisioned. Start Claudible with the win runner (install.ps1 -Native sets it up).'

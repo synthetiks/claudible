@@ -944,7 +944,7 @@ function pollStatus() {
         const d = JSON.parse(raw); const c = d.context_window || {}; const cost = d.cost || {};
         if (d.session_id) rec.sessionId = d.session_id;   // the live session id — used to locate this tab's workflow/swarm agents
         const cu = c.current_usage || null;   // last turn's usage (input/output here are NEW, non-cache)
-        win.webContents.send('status', {
+        win && win.webContents.send('status', {
           tabId,
           sessionId: d.session_id || null,   // lets the renderer reconcile a freshly-started "new" tab into its saved session row
           ctxPct: c.used_percentage, costUsd: cost.total_cost_usd,
@@ -965,6 +965,10 @@ function pollAgentTokens() {
     for (const [tabId, rec] of ptys) {
       const sid = String(rec.sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
       if (!sid) continue;
+      // The all-time agent total only grows during a turn, so don't spawn the scan for an idle tab. Poll while
+      // busy + exactly ONCE more after it goes idle (agentTokSettled) so the final swarm increment still lands;
+      // a new turn flips busy → settled re-arms below. (On error/non-numeric we leave settled unset → retry.)
+      if (!rec.busy && rec.agentTokSettled) continue;
       runner.runScript('agent-tokens.sh', `'${sid}'`, { ws: rec.ws, timeout: 10000 }).then(({ err, stdout }) => {
           if (err) return;
           const n = parseInt(String(stdout).trim(), 10);
@@ -977,28 +981,36 @@ function pollAgentTokens() {
           if (rec.agentTokSid !== sid) { rec.agentTokSid = sid; rec.agentTokBase = n; }
           const delta = Math.max(0, n - (rec.agentTokBase || 0));
           try { win && win.webContents.send('agent-tokens', { tabId, agentTok: delta }); } catch {}
+          rec.agentTokSettled = !rec.busy;   // once we've polled while idle, skip until the next turn flips busy
         });
     }
   }, 8000));
 }
 // ---- hook events: poll EACH live tab's runtime/tabs/<tab>/hooks.ndjson for appended lines ----
 const hookState = new Map();   // tabId -> { offset, buf } (independent tail cursor per tab)
+let hookTick = 0;
 function pollHooks() {
   appIntervals.push(setInterval(() => {
+    hookTick++;
     for (const [tabId, rec] of ptys) {
-      let s = hookState.get(tabId); if (!s) { s = { offset: 0, buf: '' }; hookState.set(tabId, s); }
+      let s = hookState.get(tabId); if (!s) { s = { offset: 0, buf: '', lastData: 0 }; hookState.set(tabId, s); }
+      // Cadence: a tab mid-turn (rec.busy) or that just emitted hook lines stays on the fast 80ms tick, so a
+      // finished reply still reaches the renderer + TTS with minimal lag (the TTS-critical Stop event always
+      // arrives while busy). A fully-idle tab is only sampled every ~6th tick (~480ms), cutting baseline FS load.
+      const hot = rec.busy || (Date.now() - (s.lastData || 0) < 2500);
+      if (!hot && (hookTick % 6 !== 0)) continue;
       try {
         const p = path.join(RT, 'tabs', rec.runtimeId, 'hooks.ndjson');
         const st = fs.statSync(p);
         if (st.size < s.offset) { s.offset = 0; s.buf = ''; }     // truncated (this tab's pty respawned)
         if (st.size === s.offset) continue;
         const fd = fs.openSync(p, 'r'); const buf = Buffer.alloc(st.size - s.offset);
-        fs.readSync(fd, buf, 0, buf.length, s.offset); fs.closeSync(fd);
-        s.offset = st.size; s.buf += buf.toString('utf8');
-        let i; while ((i = s.buf.indexOf('\n')) >= 0) { const l = s.buf.slice(0, i).trim(); s.buf = s.buf.slice(i + 1); if (l) { handleHook(tabId, l); win.webContents.send('hook:line', { tabId, line: l }); } }
+        try { fs.readSync(fd, buf, 0, buf.length, s.offset); } finally { fs.closeSync(fd); }   // close the FD even if the read throws
+        s.offset = st.size; s.buf += buf.toString('utf8'); s.lastData = Date.now();
+        let i; while ((i = s.buf.indexOf('\n')) >= 0) { const l = s.buf.slice(0, i).trim(); s.buf = s.buf.slice(i + 1); if (l) { handleHook(tabId, l); win && win.webContents.send('hook:line', { tabId, line: l }); } }
       } catch {}
     }
-  }, 80));   // poll often so a finished reply reaches the renderer (and TTS) with minimal lag
+  }, 80));   // base tick; idle tabs are sampled at ~480ms via the hot/cold gate above
 }
 ipcMain.handle('hook:test', async () => {
   const ts = Date.now();

@@ -70,7 +70,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   let paused = false;            // host is in a NON-granted workspace → stream nothing to guests
   let workspaces = [];           // granted workspace library shown to guests: [{id,label,kind,live}]
   const clients = new Set();
-  const resumeTokens = new Set();   // one private reconnect token per approved guest
+  const resumeTokens = new Map();   // private reconnect token per approved guest -> the client IP it was minted for (fail-open replay guard)
   const pending = new Map();
   let pendingSeq = 0;
   // ---- voice room (WebRTC mesh) ----  every participant has a stable id; the host is 'host', guests are 'gN'.
@@ -83,7 +83,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // guest auto-reconnects with their resume token. Keyed by that token — we HOLD the "left" announcement and their
   // voice seat for a grace window, cancelling both if they return in time (so a phone lock isn't a fake departure).
   const pendingDrops = new Map();    // resume token -> { timer, wasVoice, name }
-  const REJOIN_GRACE = Number(process.env.CLAUDIBLE_REJOIN_GRACE_MS) || 45000;
+  const REJOIN_GRACE = Number(process.env.CLAUDIBLE_REJOIN_GRACE_MS) || 15000;   // narrowed from 45s — shorter silent-rejoin window
   function voiceMembers() {
     const m = [];
     if (hostVoice) m.push({ id: 'host', name: hostName });
@@ -117,7 +117,21 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     ring = ring.length ? Buffer.concat([ring, buf]) : Buffer.from(buf);
     if (ring.length > RING_CAP) ring = ring.slice(ring.length - RING_CAP);
   }
-  function hasResume(r) { if (!r) return false; for (const t of resumeTokens) { if (safeEqual(r, t)) return true; } return false; }
+  // Best-effort client IP: behind cloudflared the socket is the tunnel's localhost, so prefer the proxy's
+  // forwarded header; fall back to the raw socket for LAN/localhost. Used ONLY as a fail-open replay guard
+  // (we never reject when an IP is unknown — see onConnection's resume branch), so exactness isn't critical;
+  // only CONSISTENCY between mint and resume matters (same device → same string → matches).
+  function clientIp(req) {
+    try {
+      const h = (req && req.headers) || {};
+      const cf = h['cf-connecting-ip'];
+      if (cf) return String(cf).trim();
+      const xff = h['x-forwarded-for'];
+      if (xff) return String(xff).split(',')[0].trim();
+      return (req && req.socket && req.socket.remoteAddress) || '';
+    } catch { return ''; }
+  }
+  function hasResume(r) { if (!r) return false; for (const t of resumeTokens.keys()) { if (safeEqual(r, t)) return true; } return false; }
 
   function pageAuthorized(url) {
     const t = paramFromUrl(url, 't'), r = paramFromUrl(url, 'r');
@@ -143,7 +157,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   function admit(ws, mode, name, resumeTok) {
     if (ws.readyState !== ws.OPEN) return;
     ws._name = name;
-    if (mode === 'link') { const tok = newToken(); resumeTokens.add(tok); ws._resume = tok; }
+    if (mode === 'link') { const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok; }
     else { ws._resume = resumeTok; }
     ws.binaryType = 'nodebuffer';
     clients.add(ws);
@@ -244,7 +258,19 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
 
   function onConnection(ws, mode, req) {
     const name = cleanName(paramFromUrl(req.url, 'n'), 'Guest');
-    if (mode === 'resume') return admit(ws, 'resume', name, paramFromUrl(req.url, 'r'));
+    ws._ip = clientIp(req);   // bound to the resume token at mint; checked (fail-open) on a resume reconnect
+    if (mode === 'resume') {
+      const r = paramFromUrl(req.url, 'r');
+      const boundIp = resumeTokens.get(r);   // wsAuth already matched r to a token, so this is its bound IP
+      // FAIL-OPEN: only reject when BOTH the bound and current IPs are known AND differ (a token replayed from a
+      // different network). When either is unknown (no proxy header / pure localhost), behave exactly as before.
+      if (boundIp && ws._ip && boundIp !== ws._ip) {
+        try { ws.send(JSON.stringify({ type: 'denied', reason: 'revoked' })); } catch {}
+        try { ws.close(); } catch {}
+        return;
+      }
+      return admit(ws, 'resume', name, r);
+    }
     // mode === 'link' (a new viewer joining the invite)
     if (clients.size >= MAX_GUESTS) {
       try { ws.send(JSON.stringify({ type: 'denied', reason: 'full' })); } catch {}
