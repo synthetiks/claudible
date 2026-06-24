@@ -129,14 +129,15 @@ claudible.onPtyData((tabId, d) => {
 // ---------- custom scroll gutter (lives in the UI, never covers terminal text) ----------
 const sc = $('scroll'), thumb = $('scroll-thumb');
 // Claude Code runs full-screen (alternate buffer) → no xterm scrollback for the bar to map, but it enables mouse
-// tracking and scrolls on the wheel, so the bar SENDS it wheel events (SGR mouse) to scroll ITS view.
+// tracking and scrolls on the wheel. So the bar feeds it SGR wheel bytes (PROVEN to drive its scroll), routed
+// through sendInput — the same chokepoint as the keyboard, so it lands on the local pty OR a joined peer alike.
 function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
 function jogScroll(deltaY) {
-  if (!term || !activeTabId) return;
+  if (!term) return;
   const x = Math.max(1, Math.floor((term.cols || 80) / 2)), y = Math.max(1, Math.floor((term.rows || 24) / 2));
   const seq = '\x1b[<' + (deltaY < 0 ? 64 : 65) + ';' + x + ';' + y + 'M';   // SGR wheel: 64=up, 65=down
-  const n = Math.max(1, Math.min(6, Math.round(Math.abs(deltaY) / 40)));
-  for (let i = 0; i < n; i++) { try { claudible.ptyInput(activeTabId, seq); } catch {} }
+  const n = Math.max(1, Math.min(8, Math.round(Math.abs(deltaY) / 30)));
+  for (let i = 0; i < n; i++) sendInput(seq);
 }
 function updateScrollbar() {
   if (!term) return;                                 // no active tab yet (pre-boot)
