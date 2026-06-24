@@ -445,7 +445,7 @@ let announceOn = true, chimeOn = true;               // factory-on: spoken "task
 function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
   const speaking = ttsBusy || !!ttsAudio;
-  b.textContent = speaking ? '◼ Stop' : '▶ Speak';   // short labels so the button stays narrow (uppercased via CSS)
+  const lbl = $('vout-label'); if (lbl) lbl.textContent = speaking ? 'Stop' : 'Speak';   // update only the label span (keep the dot intact)
   b.disabled = !speaking && !lastReply;
   b.title = speaking ? 'Stop speaking' : (lastReply ? "Speak Claude's latest reply" : 'Nothing to speak yet');
 }
@@ -453,7 +453,7 @@ function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
           .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, fullReadout ? Infinity : 1500);
 }
-function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? '■' : '▶'; b.title = on ? 'Stop' : 'Test the selected voice'; b.classList.toggle('live', on); const vo = $('voice-out'); if (vo) vo.classList.toggle('speaking', on); updateVoiceOutBtn(); }
+function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? '■' : '▶'; b.title = on ? 'Stop' : 'Test the selected voice'; b.classList.toggle('live', on); const vo = $('vout-stop'); if (vo) vo.classList.toggle('speaking', on); updateVoiceOutBtn(); }
 function stopSpeech() {
   speakGen++;                                         // invalidate any in-flight speak()
   ttsBusy = false;

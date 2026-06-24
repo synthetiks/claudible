@@ -420,23 +420,19 @@
     .vin.live{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 16px -5px var(--live)}
     .vin.live .vdot{background:var(--live);box-shadow:0 0 9px 0 var(--live);animation:micpulse 1s ease-in-out infinite}
     .vin.live .vstat{color:#fff}
-    /* Voice Out — red stop, always-speak toggle (voice is picked in Settings; defaults to Bella) */
-    /* dual button: ▶ Speak when idle (reads Claude's latest reply), ■ Stop while speaking */
-    .vout{padding-right:6px}   /* tuck the megaphone toward the right edge — less dead space after it */
-    .vout .vstop{width:auto;display:flex;align-items:center;justify-content:center;gap:3px;height:21px;padding:0 7px;
-      border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;color:var(--ink-faint);
-      font-size:10px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;box-shadow:none;transition:all .16s}   /* match TALK: caps, 10px, .14em; min-width:0 keeps it tight */
-    .vout .vstop:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
-    .vout .vstop:disabled{opacity:.4;cursor:default}
-    .vout .vstop:disabled:hover{color:var(--ink-dim);border-color:var(--hairline-soft)}
-    .vout.speaking .vstop{border-color:rgba(229,86,75,.5);background:rgba(229,86,75,.14);color:var(--live-soft)}
-    .vout.speaking .vstop:hover{color:#fff;background:rgba(229,86,75,.3);border-color:var(--live)}
-    .vout .vauto{width:auto;height:21px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline-soft);border-radius:6px;background:#101216;
-      color:var(--ink-faint);cursor:pointer;box-shadow:none;transition:color .15s,background .15s,border-color .15s}
-    .vout .vauto svg{width:14px;height:14px}
-    .vout .vauto:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
-    .vout .vauto.on{color:#5fb487;background:rgba(95,180,135,.12);border-color:rgba(95,180,135,.4)}   /* megaphone lights up green when auto-speak is on */
+    /* Voice Out — SPLIT into two standalone top-bar buttons, each the SAME .vbox size as Talk (Voice In):
+       a Speak button (dot + SPEAK/STOP, mirrors Talk exactly) + an Auto-speak toggle (megaphone icon). */
+    .vout{cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s,color .16s}
+    .vout:hover:not(:disabled){border-color:rgba(255,255,255,.22);color:var(--ink)}
+    .vout:hover:not(:disabled) .vstat{color:var(--ink)}
+    .vout:disabled{opacity:.45;cursor:default}
+    .vout.speaking{border-color:rgba(95,180,135,.5);background:rgba(95,180,135,.14)}   /* green = Claude is speaking; label flips to STOP */
+    .vout.speaking .vstat{color:#5fb487}
     .vout.speaking .vdot{background:#5fb487;box-shadow:0 0 9px 0 #5fb487;animation:micpulse 1s ease-in-out infinite}
+    .vauto{cursor:pointer;color:var(--ink-faint);padding:0 10px;transition:border-color .16s,background .16s,color .16s}
+    .vauto svg{width:15px;height:15px;display:block}
+    .vauto:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    .vauto.on{color:#5fb487;background:rgba(95,180,135,.12);border-color:rgba(95,180,135,.4)}   /* megaphone lights green when auto-speak is on */
     @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.3}}
     /* push-to-talk rebind row (in the Settings drawer) */
     .ptt-key-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;
@@ -807,11 +803,10 @@
       <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
         <span class="vdot"></span><span class="vstat" id="vin-stat">Talk</span>
       </button>
-      <div class="vbox vout" id="voice-out" title="Claude's voice output">
-        <span class="vdot" id="vout-dot"></span>
-        <button class="vstop" id="vout-stop" type="button" title="Speak Claude's latest reply" disabled>▶ Speak</button>
-        <button class="vauto on" id="vout-auto" aria-pressed="true" title="Auto-speak Claude's replies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
-      </div>
+      <button class="vbox vout" id="vout-stop" type="button" title="Speak Claude's latest reply" disabled>
+        <span class="vdot" id="vout-dot"></span><span class="vstat" id="vout-label">Speak</span>
+      </button>
+      <button class="vbox vauto on" id="vout-auto" type="button" aria-pressed="true" title="Auto-speak Claude's replies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
     </div>
     <span class="trk" title="session usage">
       <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">CONTEXT —</span></span>
