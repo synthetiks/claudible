@@ -50,11 +50,11 @@ let activeTabId = null;
 // matching TERMINAL palettes. applyTheme also updates TERM_OPTS so newly-spawned tabs adopt the chosen palette.
 const TERM_THEMES = {
   dark:      { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8', selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
-  graphite:  { background: '#0b0c0e', foreground: '#dfe4ea', cursor: '#c8d0da', selectionBackground: '#262b33', black: '#08090b', brightBlack: '#5a616b' },
-  starlight: { background: '#121419', foreground: '#eef2f7', cursor: '#d6dde6', selectionBackground: '#2a303a', black: '#0f1115', brightBlack: '#69717d' },
-  midnight:  { background: '#080b12', foreground: '#dbe2ec', cursor: '#bfcadb', selectionBackground: '#1f2838', black: '#06080d', brightBlack: '#566275' },
-  aurora:    { background: '#0a0a11', foreground: '#e0dded', cursor: '#c9c2dc', selectionBackground: '#252136', black: '#08070c', brightBlack: '#5f5872' },
-  evergreen: { background: '#080b09', foreground: '#dde7e0', cursor: '#bfd2c6', selectionBackground: '#1c2a22', black: '#060907', brightBlack: '#566b60' },
+  graphite:  { background: '#101319', foreground: '#e6eaf1', cursor: '#cdd6e2', selectionBackground: '#2b3340', black: '#0c0e12', brightBlack: '#646e7e' },
+  starlight: { background: '#171b22', foreground: '#f2f5fa', cursor: '#dbe2ec', selectionBackground: '#303744', black: '#13161c', brightBlack: '#78818f' },
+  midnight:  { background: '#091020', foreground: '#d6e1f2', cursor: '#aec3e4', selectionBackground: '#1d2e48', black: '#060a14', brightBlack: '#566584' },
+  aurora:    { background: '#0d0a1a', foreground: '#e3def0', cursor: '#c3b6e0', selectionBackground: '#251d44', black: '#0a0712', brightBlack: '#65597f' },
+  evergreen: { background: '#08120c', foreground: '#d8ecdf', cursor: '#aed8bd', selectionBackground: '#163322', black: '#060b08', brightBlack: '#52735f' },
 };
 function applyTheme(name) {
   const t = TERM_THEMES[name] ? name : 'dark';

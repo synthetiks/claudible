@@ -35,30 +35,30 @@
        Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
        shades intentionally remain (these are gentle tints, not a full repaint). Names are placeholders — tune the
        exact shades by eye. The matching terminal palettes live in app.js TERM_THEMES. ── */
-    html[data-theme="graphite"]{
-      --bg:#08090b;--terminal-bg:#0b0c0e;--panel:#0f1013;--raised:#181a1f;--raised-hi:#21242b;
-      --hairline:#343a44;--hairline-soft:#21252b;--ink:#e9edf2;--ink-dim:#9aa3ae;--ink-faint:#5c636d;
-      --silver:#d6dde6;--steel:#94a2b4;--live:#d96a5e;--live-soft:#c9756c;--ok:#7fb6a0;--accent:#9fb3c6;--warn:#d6ad6a;
+    html[data-theme="graphite"]{   /* cool platinum-steel — clearly lifted, neutral */
+      --bg:#0c0e12;--terminal-bg:#101319;--panel:#141821;--raised:#1f242e;--raised-hi:#28303c;
+      --hairline:#3c4658;--hairline-soft:#262d39;--ink:#eef1f6;--ink-dim:#a3adbd;--ink-faint:#646e7e;
+      --silver:#dde4ee;--steel:#9aa8be;--live:#e06a64;--live-soft:#cc7771;--ok:#8cc2ac;--accent:#aebdd2;--warn:#dab874;
     }
-    html[data-theme="starlight"]{
-      --bg:#0f1115;--terminal-bg:#121419;--panel:#16181e;--raised:#1f232b;--raised-hi:#282d36;
-      --hairline:#3b414b;--hairline-soft:#272c33;--ink:#f3f6fa;--ink-dim:#aeb6c1;--ink-faint:#707884;
-      --silver:#e6ebf1;--steel:#aab6c4;--live:#df6358;--live-soft:#cf7068;--ok:#7ec1a6;--accent:#a3c4de;--warn:#ddbb7d;
+    html[data-theme="starlight"]{   /* bright silver — the lightest theme */
+      --bg:#13161c;--terminal-bg:#171b22;--panel:#1b1f28;--raised:#262c37;--raised-hi:#303744;
+      --hairline:#454e5e;--hairline-soft:#2c3340;--ink:#f6f8fc;--ink-dim:#b4bcca;--ink-faint:#78818f;
+      --silver:#eaeff6;--steel:#aebbcc;--live:#e26b62;--live-soft:#d0786f;--ok:#83c5a8;--accent:#a8cae6;--warn:#e0c084;
     }
-    html[data-theme="midnight"]{
-      --bg:#06080d;--terminal-bg:#080b12;--panel:#0b0f17;--raised:#141a24;--raised-hi:#1b2230;
-      --hairline:#293446;--hairline-soft:#1a2230;--ink:#e4e9f1;--ink-dim:#8d97a8;--ink-faint:#566275;
-      --silver:#c4d0e2;--steel:#7d92b0;--live:#e5564b;--live-soft:#cf625a;--ok:#5fb487;--accent:#5b9fe0;--warn:#e0a93b;
+    html[data-theme="midnight"]{   /* deep ocean blue — clearly blue-tinted + blue accent */
+      --bg:#060a14;--terminal-bg:#091020;--panel:#0b1322;--raised:#152234;--raised-hi:#1d2e48;
+      --hairline:#2c3f5c;--hairline-soft:#1a2740;--ink:#dfe8f5;--ink-dim:#8a98b4;--ink-faint:#566584;
+      --silver:#bcd0ee;--steel:#6f8cba;--live:#ef5b6e;--live-soft:#d86472;--ok:#52b0e0;--accent:#4f9bf0;--warn:#e8b24a;
     }
-    html[data-theme="aurora"]{
-      --bg:#08070c;--terminal-bg:#0a0a11;--panel:#0e0d16;--raised:#171522;--raised-hi:#1f1d2d;
-      --hairline:#312d44;--hairline-soft:#1f1d2c;--ink:#e9e7f2;--ink-dim:#9a94ae;--ink-faint:#5f5872;
-      --silver:#d4cfe2;--steel:#9488b4;--live:#e0566f;--live-soft:#cf6275;--ok:#5fb499;--accent:#a98ce0;--warn:#e0a93b;
+    html[data-theme="aurora"]{   /* violet / iridescent — purple accent */
+      --bg:#0a0712;--terminal-bg:#0d0a1a;--panel:#100c20;--raised:#1c1633;--raised-hi:#251d44;
+      --hairline:#3a2f5e;--hairline-soft:#241d3c;--ink:#ece7f7;--ink-dim:#a094bc;--ink-faint:#65597f;
+      --silver:#d6cbf0;--steel:#9580c4;--live:#e85b86;--live-soft:#d56a8f;--ok:#5cc0a8;--accent:#b07ee8;--warn:#e0a93b;
     }
-    html[data-theme="evergreen"]{
-      --bg:#060907;--terminal-bg:#080b09;--panel:#0a0f0c;--raised:#121a15;--raised-hi:#19241c;
-      --hairline:#27392e;--hairline-soft:#1a2620;--ink:#e6efe9;--ink-dim:#8fa399;--ink-faint:#566b60;
-      --silver:#c8e0d2;--steel:#7fa08c;--live:#e5564b;--live-soft:#cf625a;--ok:#5fb487;--accent:#5fb487;--warn:#cfa65f;
+    html[data-theme="evergreen"]{   /* forest green — green-tinted + green accent */
+      --bg:#060b08;--terminal-bg:#08120c;--panel:#0a1610;--raised:#10271a;--raised-hi:#163322;
+      --hairline:#244e34;--hairline-soft:#163024;--ink:#dff0e6;--ink-dim:#88a896;--ink-faint:#52735f;
+      --silver:#bce6cd;--steel:#6fa886;--live:#ef5b50;--live-soft:#d8665c;--ok:#43c07e;--accent:#43c07e;--warn:#cfa84e;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -520,7 +520,7 @@
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:none;display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto;
-      padding:0 14px 13px;border-bottom:1px solid var(--hairline)}   /* the divider between workspaces and sessions */
+      padding:9px 14px 13px;border-bottom:1px solid var(--hairline)}   /* top pad so the first workspace chip's hover/active glow isn't cramped against the corner */
     /* SESSIONS section header — just the label + "+ New"; the active workspace is already shown above */
     .sess-section-head{padding:12px 14px 9px}
     .newsess-mini{width:auto;padding:2px 10px 3px;font-size:11px;letter-spacing:.02em;text-transform:none;color:var(--ink-dim);
