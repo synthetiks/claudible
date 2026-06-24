@@ -35,30 +35,30 @@
        Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
        shades intentionally remain (these are gentle tints, not a full repaint). Names are placeholders — tune the
        exact shades by eye. The matching terminal palettes live in app.js TERM_THEMES. ── */
-    html[data-theme="graphite"]{   /* cool platinum-steel — clearly lifted, neutral */
-      --bg:#0c0e12;--terminal-bg:#101319;--panel:#141821;--raised:#1f242e;--raised-hi:#28303c;
-      --hairline:#3c4658;--hairline-soft:#262d39;--ink:#eef1f6;--ink-dim:#a3adbd;--ink-faint:#646e7e;
-      --silver:#dde4ee;--steel:#9aa8be;--live:#e06a64;--live-soft:#cc7771;--ok:#8cc2ac;--accent:#aebdd2;--warn:#dab874;
+    html[data-theme="graphite"]{   /* cool platinum-steel */
+      --bg:#0d1015;--terminal-bg:#11141b;--panel:#161a23;--raised:#212733;--raised-hi:#2b3340;
+      --hairline:#414c60;--hairline-soft:#28303d;--ink:#eff2f8;--ink-dim:#a7b1c1;--ink-faint:#687283;
+      --silver:#e1e8f1;--steel:#a0aec5;--live:#e36a63;--live-soft:#cf7770;--ok:#8ec5ae;--accent:#b6c6dc;--warn:#dcb96f;
     }
-    html[data-theme="starlight"]{   /* bright silver — the lightest theme */
-      --bg:#13161c;--terminal-bg:#171b22;--panel:#1b1f28;--raised:#262c37;--raised-hi:#303744;
-      --hairline:#454e5e;--hairline-soft:#2c3340;--ink:#f6f8fc;--ink-dim:#b4bcca;--ink-faint:#78818f;
-      --silver:#eaeff6;--steel:#aebbcc;--live:#e26b62;--live-soft:#d0786f;--ok:#83c5a8;--accent:#a8cae6;--warn:#e0c084;
+    html[data-theme="starlight"]{   /* bright silver — the lightest */
+      --bg:#161a21;--terminal-bg:#1a1f27;--panel:#1f242e;--raised:#2a313d;--raised-hi:#343c4a;
+      --hairline:#4b5466;--hairline-soft:#303744;--ink:#f8fafd;--ink-dim:#b8c1cf;--ink-faint:#7c8693;
+      --silver:#edf1f7;--steel:#b3c0d0;--live:#e56d63;--live-soft:#d37a70;--ok:#88cbad;--accent:#aecfea;--warn:#e5c688;
     }
-    html[data-theme="midnight"]{   /* deep ocean blue — clearly blue-tinted + blue accent */
-      --bg:#060a14;--terminal-bg:#091020;--panel:#0b1322;--raised:#152234;--raised-hi:#1d2e48;
-      --hairline:#2c3f5c;--hairline-soft:#1a2740;--ink:#dfe8f5;--ink-dim:#8a98b4;--ink-faint:#566584;
-      --silver:#bcd0ee;--steel:#6f8cba;--live:#ef5b6e;--live-soft:#d86472;--ok:#52b0e0;--accent:#4f9bf0;--warn:#e8b24a;
+    html[data-theme="midnight"]{   /* deep ocean blue */
+      --bg:#050b18;--terminal-bg:#081227;--panel:#0a1628;--raised:#13273e;--raised-hi:#1b3354;
+      --hairline:#2f456a;--hairline-soft:#1a2c48;--ink:#dce8f7;--ink-dim:#8698b6;--ink-faint:#54668a;
+      --silver:#b6cef2;--steel:#6a8cc2;--live:#ef5b6e;--live-soft:#d86472;--ok:#4ab2e6;--accent:#3d93f5;--warn:#ecb44a;
     }
-    html[data-theme="aurora"]{   /* violet / iridescent — purple accent */
-      --bg:#0a0712;--terminal-bg:#0d0a1a;--panel:#100c20;--raised:#1c1633;--raised-hi:#251d44;
-      --hairline:#3a2f5e;--hairline-soft:#241d3c;--ink:#ece7f7;--ink-dim:#a094bc;--ink-faint:#65597f;
-      --silver:#d6cbf0;--steel:#9580c4;--live:#e85b86;--live-soft:#d56a8f;--ok:#5cc0a8;--accent:#b07ee8;--warn:#e0a93b;
+    html[data-theme="aurora"]{   /* violet / iridescent */
+      --bg:#0b0717;--terminal-bg:#0e0a20;--panel:#120d26;--raised:#1f173b;--raised-hi:#29204f;
+      --hairline:#40316a;--hairline-soft:#271e42;--ink:#ece6f9;--ink-dim:#a392c2;--ink-faint:#675b86;
+      --silver:#d8cbf5;--steel:#9a82cc;--live:#ea5a89;--live-soft:#d76992;--ok:#52c2ac;--accent:#b574f0;--warn:#e0a93b;
     }
-    html[data-theme="evergreen"]{   /* forest green — green-tinted + green accent */
-      --bg:#060b08;--terminal-bg:#08120c;--panel:#0a1610;--raised:#10271a;--raised-hi:#163322;
-      --hairline:#244e34;--hairline-soft:#163024;--ink:#dff0e6;--ink-dim:#88a896;--ink-faint:#52735f;
-      --silver:#bce6cd;--steel:#6fa886;--live:#ef5b50;--live-soft:#d8665c;--ok:#43c07e;--accent:#43c07e;--warn:#cfa84e;
+    html[data-theme="evergreen"]{   /* forest green */
+      --bg:#050c08;--terminal-bg:#07140d;--panel:#091810;--raised:#0e2c1c;--raised-hi:#143826;
+      --hairline:#205a38;--hairline-soft:#143521;--ink:#ddf2e6;--ink-dim:#85ac96;--ink-faint:#4e7860;
+      --silver:#b6ecca;--steel:#69b089;--live:#ef5b50;--live-soft:#d8665c;--ok:#34c47b;--accent:#34c47b;--warn:#cfa84e;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -87,7 +87,7 @@
       border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,#0d0f13,#090a0c)}
     .logo{height:32px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
-    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:var(--silver)}
+    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:#f6f8fc}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
     .topbtns{display:flex;align-items:center;gap:6px}     /* icon buttons grouped tight, right of the title */
     .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
     /* session tracker */
