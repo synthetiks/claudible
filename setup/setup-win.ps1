@@ -83,13 +83,39 @@ try { uv sync --extra cpu } finally { Pop-Location }
 # loudly instead of letting install.ps1 pin the win runner on a non-functional TTS stack.
 if ($LASTEXITCODE -ne 0) { Warn 'uv sync failed - Kokoro CPU deps not installed. Re-run setup-win.ps1.'; exit 1 }
 
-# model weights (~327 MB) - the repo gitignores *.pth, so a clone has none; download_model.py is idempotent.
-$kModel = Join-Path $kokoro 'api\src\models\v1_0\kokoro-v1_0.pth'
-if (-not (Test-Path $kModel)) {
+# model weights (~327 MB) - the repo gitignores *.pth, so a clone has none. download_model.py pulls them from the
+# Kokoro-FastAPI v0.1.4 GitHub release and only checks existence + that config.json is JSON; an interrupted run, or
+# a proxy/antivirus that rewrites GitHub-release responses, can leave a partial/!json file. So: treat a too-small
+# .pth as missing, WIPE partials before each attempt (else they fool the next run's guard), and fall back to a
+# direct download of the same release assets when the Python downloader can't produce a valid model.
+$kRel   = 'https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4'
+$kDir   = Join-Path $kokoro 'api\src\models\v1_0'
+$kModel = Join-Path $kDir 'kokoro-v1_0.pth'
+$kConf  = Join-Path $kDir 'config.json'
+function Test-Kokoro { (Test-Path $kModel) -and ((Get-Item $kModel -EA SilentlyContinue).Length -gt 100MB) -and (Test-Path $kConf) }
+if (-not (Test-Kokoro)) {
   Say 'Downloading Kokoro model weights (~327 MB)...'
+  Remove-Item -Recurse -Force $kDir -ErrorAction SilentlyContinue          # clear any partial from a prior failed run
   Push-Location $kokoro
-  try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0 } finally { Pop-Location }
-  if ($LASTEXITCODE -ne 0) { Warn 'Kokoro model download failed. Re-run setup-win.ps1.'; exit 1 }
+  try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0 } catch {} finally { Pop-Location }
+  if (-not (Test-Kokoro)) {
+    Warn 'Python downloader did not produce a valid model - falling back to a direct download of the release assets...'
+    New-Item -ItemType Directory -Force -Path $kDir | Out-Null
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri "$kRel/kokoro-v1_0.pth" -OutFile $kModel
+      Invoke-WebRequest -UseBasicParsing -Uri "$kRel/config.json"     -OutFile $kConf
+    } catch { Warn "  direct download failed: $($_.Exception.Message)" }
+  }
+  if (-not (Test-Kokoro)) {
+    Remove-Item -Recurse -Force $kDir -ErrorAction SilentlyContinue        # don't leave a partial that fools the next run
+    Warn 'Kokoro model could not be downloaded. The usual cause is a network/corporate proxy/antivirus blocking GitHub'
+    Warn 'release assets. Try another network, or download these two files in a browser and drop them in the folder below:'
+    Warn "    $kRel/kokoro-v1_0.pth"
+    Warn "    $kRel/config.json"
+    Warn "  -> $kDir"
+    exit 1
+  }
+  Say 'Kokoro model ready.'
 } else { Say 'Kokoro model already present.' }
 
 Say 'Done. Native-Windows voice services are provisioned. Start Claudible with the win runner (install.ps1 -Native sets it up).'
