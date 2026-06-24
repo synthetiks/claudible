@@ -1163,6 +1163,28 @@ ipcMain.handle('claude:version', () => {
   });
 });
 
+// The active session's LATEST assistant reply, so the manual Speak button can re-read it even after a relaunch
+// (when the in-memory lastReply is empty) or for a session opened from history. Reads the transcript and returns
+// the last 'claude' message's text, or '' if there's genuinely nothing to read.
+ipcMain.handle('session:latest-reply', async (e, sessionId) => {
+  try {
+    const ws = activeWorkspace;
+    const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!sid || !APPDIR_WSL) return { text: '' };
+    const messages = await new Promise((resolve) => {
+      runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ stdout }) => {
+          let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+          resolve(Array.isArray(m) ? m : []);
+        });
+    });
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m && m.role === 'claude' && m.text && String(m.text).trim()) return { text: String(m.text) };
+    }
+    return { text: '' };
+  } catch (err) { return { text: '', error: String(err) }; }
+});
+
 // ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
 ipcMain.handle('diff:list', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });

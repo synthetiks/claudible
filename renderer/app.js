@@ -446,8 +446,8 @@ function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
   const speaking = ttsBusy || !!ttsAudio;
   const lbl = $('vout-label'); if (lbl) lbl.textContent = speaking ? 'Stop' : 'Speak';   // update only the label span (keep the dot intact)
-  b.disabled = !speaking && !lastReply;
-  b.title = speaking ? 'Stop speaking' : (lastReply ? "Speak Claude's latest reply" : 'Nothing to speak yet');
+  b.disabled = false;   // ALWAYS clickable — on click it reads lastReply, else fetches the open session's latest reply, else toasts "no text detected to read"
+  b.title = speaking ? 'Stop speaking' : 'Read the latest reply aloud';
 }
 function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
@@ -533,7 +533,23 @@ function setAlways(on) { alwaysSpeak = !!on; savePrefs({ alwaysSpeak: alwaysSpea
 document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown', (e) => { e.preventDefault(); setVoice(p.dataset.voice); }));
 // top-bar Voice Out: voice name cycles voices, ■ stops Claude speaking, auto = always-speak toggle
 if ($('vout-name')) $('vout-name').addEventListener('click', () => { const i = VOICE_ORDER.indexOf(selectedVoice); setVoice(VOICE_ORDER[(i + 1) % VOICE_ORDER.length]); });
-if ($('vout-stop')) { $('vout-stop').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else if (lastReply) speak(lastReply); }); updateVoiceOutBtn(); }
+if ($('vout-stop')) {
+  $('vout-stop').addEventListener('click', async () => {
+    if (ttsBusy || ttsAudio) { stopSpeech(); return; }
+    if (lastReply) { speak(lastReply); return; }
+    // Nothing captured this app-session — fetch the OPEN session's latest reply from its transcript so you can
+    // re-listen (after a relaunch, or for a session opened from history). Empty → tell the user there's nothing.
+    const sid = activeSession;
+    if (sid) {
+      try {
+        const r = await claudible.latestReply(sid);
+        if (r && r.text && r.text.trim()) { lastReply = stripForSpeech(r.text); if ($('tts-in')) $('tts-in').value = lastReply; speak(lastReply); return; }
+      } catch {}
+    }
+    toast('No text detected to read');
+  });
+  updateVoiceOutBtn();
+}
 if ($('vout-auto')) $('vout-auto').addEventListener('click', () => setAlways(!alwaysSpeak));
 
 // ---- Voice-out speed slider (0–25% over baseline) ----

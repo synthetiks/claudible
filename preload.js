@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('claudible', {
   exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
   exportSessionText: (id) => ipcRenderer.invoke('session:export-text', id),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: () => ipcRenderer.invoke('claude:version'),   // the embedded Claude Code CLI version (for the status bar)
+  latestReply: (id) => ipcRenderer.invoke('session:latest-reply', id),   // a session's last assistant reply (for manual Speak / re-listen)
   // diff review (what Claude changed in the workspace's git repo)
   diffList: () => ipcRenderer.invoke('diff:list'),
   diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),
