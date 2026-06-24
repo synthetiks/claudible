@@ -90,8 +90,10 @@ A WSL-free path: native Windows Claude Code + **prebuilt** voice services (no co
 ```powershell
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
-.\install.ps1 -Native
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Native
 ```
+> Run it through `powershell -ExecutionPolicy Bypass -File …` as shown — Windows blocks `.\install.ps1` directly under its default `Restricted` policy ("running scripts is disabled on this system"). The `Bypass` applies to this one launch only and changes nothing on the machine. Also: clone into your **home/projects folder, not `C:\WINDOWS\system32`** (and use a normal, non-Admin PowerShell).
+
 This: installs Claude Code (`npm i -g @anthropic-ai/claude-code`) if absent → runs `setup\setup-win.ps1`, which downloads the prebuilt `whisper-server.exe` + the speech model and sets up Kokoro (CPU) via [`uv`](https://docs.astral.sh/uv/) — **no Visual Studio / Python / cmake** → pins `CLAUDIBLE_RUNNER=win`. Remove that user env var to fall back to WSL.
 
 > 🧪 **Newer path — runtime smoke test in progress.** Terminal + telemetry are expected solid; the Windows **voice** runtime (Kokoro `:8880`) is the most likely rough edge. If anything snags, the **WSL path above is the proven one**.

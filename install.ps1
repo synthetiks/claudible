@@ -1,4 +1,6 @@
-# Claudible - one-shot installer. Run in Windows PowerShell from the cloned repo root:
+# Claudible - one-shot installer. Run in Windows PowerShell from the cloned repo root. If Windows blocks it
+# ("running scripts is disabled on this system"), launch via ExecutionPolicy Bypass - a one-shot that changes
+# nothing on the machine:  powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 [-Native]
 #   .\install.ps1            # WSL mode (default): WSL2 + a signed-in Claude Code in WSL + the WSL voice build.
 #   .\install.ps1 -Native    # native Windows (NO WSL): provisions Windows Claude Code + the prebuilt voice
 #                             # services, and pins the `win` runner. STATUS: authored + statically verified;
