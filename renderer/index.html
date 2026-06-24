@@ -228,13 +228,13 @@
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
     /* custom scroll gutter: lives in the UI, outside the terminal, never covers text */
-    .scroll{position:relative;width:7px;align-self:stretch;border-radius:7px;
-      background:linear-gradient(180deg,#101216,#0b0d10);box-shadow:inset 0 0 0 1px var(--hairline-soft)}
-    .scroll .thumb{position:absolute;left:0;right:0;top:0;min-height:26px;border-radius:7px;
-      background:linear-gradient(180deg,#3a414c,#262b32);box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
-      cursor:grab;opacity:0;transition:background .15s,opacity .2s;will-change:transform,height}
-    .scroll:hover .thumb{background:linear-gradient(180deg,#49515d,#30353d)}
-    .scroll .thumb.drag{cursor:grabbing;background:linear-gradient(180deg,var(--silver),#8a929b)}
+    .scroll{position:relative;width:14px;align-self:stretch;border-radius:9px;flex:none;
+      background:linear-gradient(180deg,#171a20,#0e1116);box-shadow:inset 0 0 0 1px var(--hairline)}
+    .scroll .thumb{position:absolute;left:2px;right:2px;top:0;min-height:36px;border-radius:8px;
+      background:linear-gradient(180deg,var(--steel),var(--ink-faint));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 4px -1px #000;
+      cursor:grab;opacity:.6;transition:background .15s,opacity .2s;will-change:transform,height}
+    .scroll:hover .thumb{opacity:.92;background:linear-gradient(180deg,var(--silver),var(--steel))}
+    .scroll .thumb.drag{cursor:grabbing;opacity:1;background:linear-gradient(180deg,var(--silver),#9aa3ae)}
     /* command bar — 5 commands visible; scroll or drag horizontally for the rest */
     /* frameless command row — no box/corners (nothing for hovered pills to clash with); the reclaimed
        border + padding height goes to the terminal above. Pills keep their own glow-hover. */
