@@ -128,25 +128,31 @@ claudible.onPtyData((tabId, d) => {
 
 // ---------- custom scroll gutter (lives in the UI, never covers terminal text) ----------
 const sc = $('scroll'), thumb = $('scroll-thumb');
-// Claude Code runs full-screen (alternate buffer) → no xterm scrollback for the bar to map, but it enables mouse
-// tracking and scrolls on the wheel. So the bar feeds it SGR wheel bytes (PROVEN to drive its scroll), routed
-// through sendInput — the same chokepoint as the keyboard, so it lands on the local pty OR a joined peer alike.
+// Claude Code runs full-screen (alt buffer) → no xterm scrollback for the bar to map. But it scrolls its OWN view
+// on PageUp/PageDown (proven), and unlike mouse sequences those keystrokes always survive the ConPTY/wsl bridge
+// that carries Claude's input — which is why a mouse-based jog could silently do nothing here. So for a full-screen
+// app the bar drives Claude with Page keys (through sendInput, the keyboard's own channel) and keeps a position
+// ESTIMATE (altFrac) so the thumb moves as you scroll and rests at the bottom, where Claude shows the newest
+// output. A normal-buffer shell still gets real xterm scrollback below.
 function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
-function jogScroll(deltaY) {
-  if (!term) return;
-  const x = Math.max(1, Math.floor((term.cols || 80) / 2)), y = Math.max(1, Math.floor((term.rows || 24) / 2));
-  const seq = '\x1b[<' + (deltaY < 0 ? 64 : 65) + ';' + x + ';' + y + 'M';   // SGR wheel: 64=up, 65=down
-  const n = Math.max(1, Math.min(8, Math.round(Math.abs(deltaY) / 30)));
-  for (let i = 0; i < n; i++) sendInput(seq);
+let altFrac = 0;                       // 0 = bottom (newest) … 1 = scrolled fully up (an estimate; Claude never reports it)
+const ALT_PAGE = 0.14;                 // estimate nudge per PageUp/PageDown
+function sendPage(dir) { sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~'); }   // PageUp (older) / PageDown (newer)
+function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
+  if (!term || !dir) return;
+  const n = Math.min(6, Math.abs(dir));
+  for (let i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
+  altFrac = Math.max(0, Math.min(1, altFrac + (dir < 0 ? 1 : -1) * ALT_PAGE * n));
+  updateScrollbar();
 }
 function updateScrollbar() {
   if (!term) return;                                 // no active tab yet (pre-boot)
   const trackH = sc.clientHeight;
   if (trackH <= 0) { thumb.style.opacity = '0'; return; }
-  if (isAlt()) {                                      // full-screen app → a draggable "jog" thumb that scrolls IT
-    const thumbH = Math.max(46, trackH * 0.22);
+  if (isAlt()) {                                      // full-screen app → a draggable thumb that pages Claude's view
+    const thumbH = Math.max(40, trackH * 0.20);
     thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
-    if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) / 2) + 'px)';   // rests centered
+    if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (1 - altFrac)) + 'px)';   // 0=bottom
     return;
   }
   const b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
@@ -171,21 +177,22 @@ window.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   const trackH = sc.clientHeight, thumbH = thumb.offsetHeight;
   const top = Math.max(0, Math.min(trackH - thumbH, e.clientY - sc.getBoundingClientRect().top - grabDY));
-  if (isAlt()) {                                      // jog: drag → wheel-scroll the app; thumb follows the cursor
-    const dy = e.clientY - jogLastY;
-    if (Math.abs(dy) >= 6) { jogScroll(dy); jogLastY = e.clientY; }
+  if (isAlt()) {                                      // full-screen: thumb follows the cursor; fire a Page key per ~24px
     thumb.style.transform = 'translateY(' + top + 'px)';
+    altFrac = (trackH - thumbH) > 0 ? 1 - (top / (trackH - thumbH)) : 0;   // estimate = where the thumb now sits
+    const dy = e.clientY - jogLastY;
+    if (Math.abs(dy) >= 24) { sendPage(dy < 0 ? -1 : 1); jogLastY = e.clientY; }
     return;
   }
   scrollToFrac((trackH - thumbH) > 0 ? top / (trackH - thumbH) : 0);
 });
 window.addEventListener('pointerup', () => { if (dragging) { dragging = false; thumb.classList.remove('drag'); } });
-sc.addEventListener('pointerdown', (e) => {           // click the gutter: jump (scrollback) / page-scroll (full-screen app)
+sc.addEventListener('pointerdown', (e) => {           // click the gutter: page (full-screen) / jump (scrollback)
   if (e.target === thumb) return;
-  if (isAlt()) { const mid = sc.getBoundingClientRect().top + sc.clientHeight / 2; jogScroll(e.clientY < mid ? -120 : 120); return; }
+  if (isAlt()) { const mid = sc.getBoundingClientRect().top + sc.clientHeight / 2; jogPages(e.clientY < mid ? -2 : 2); return; }
   scrollToFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
 });
-sc.addEventListener('wheel', (e) => { if (isAlt()) { jogScroll(e.deltaY); e.preventDefault(); } }, { passive: false });
+sc.addEventListener('wheel', (e) => { if (isAlt()) { jogPages(e.deltaY < 0 ? -1 : 1); e.preventDefault(); } }, { passive: false });
 // ---------- concurrent sessions ----------
 // Each tab is still one live session/pty running in the background; the active tab is the visible terminal.
 // There is NO top tab strip anymore — every live session is shown as a row in the LEFT SIDEBAR instead
