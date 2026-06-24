@@ -27,6 +27,38 @@
       --steel:#8493a6;
       --live:#e5564b;              /* active-speaker red */
       --live-soft:#cf625a;
+      --ok:#5fb487;                /* success / green accent (also the var(--ok,…) fallback used today) */
+      --accent:#6aa6e0;            /* primary blue accent */
+      --warn:#e0a93b;              /* amber / warning accent */
+    }
+    /* ── Themes: subtle, low-key dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
+       Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
+       shades intentionally remain (these are gentle tints, not a full repaint). Names are placeholders — tune the
+       exact shades by eye. The matching terminal palettes live in app.js TERM_THEMES. ── */
+    html[data-theme="graphite"]{
+      --bg:#08090b;--terminal-bg:#0b0c0e;--panel:#0f1013;--raised:#181a1f;--raised-hi:#21242b;
+      --hairline:#343a44;--hairline-soft:#21252b;--ink:#e9edf2;--ink-dim:#9aa3ae;--ink-faint:#5c636d;
+      --silver:#d6dde6;--steel:#94a2b4;--live:#d96a5e;--live-soft:#c9756c;--ok:#7fb6a0;--accent:#9fb3c6;--warn:#d6ad6a;
+    }
+    html[data-theme="starlight"]{
+      --bg:#0f1115;--terminal-bg:#121419;--panel:#16181e;--raised:#1f232b;--raised-hi:#282d36;
+      --hairline:#3b414b;--hairline-soft:#272c33;--ink:#f3f6fa;--ink-dim:#aeb6c1;--ink-faint:#707884;
+      --silver:#e6ebf1;--steel:#aab6c4;--live:#df6358;--live-soft:#cf7068;--ok:#7ec1a6;--accent:#a3c4de;--warn:#ddbb7d;
+    }
+    html[data-theme="midnight"]{
+      --bg:#06080d;--terminal-bg:#080b12;--panel:#0b0f17;--raised:#141a24;--raised-hi:#1b2230;
+      --hairline:#293446;--hairline-soft:#1a2230;--ink:#e4e9f1;--ink-dim:#8d97a8;--ink-faint:#566275;
+      --silver:#c4d0e2;--steel:#7d92b0;--live:#e5564b;--live-soft:#cf625a;--ok:#5fb487;--accent:#5b9fe0;--warn:#e0a93b;
+    }
+    html[data-theme="aurora"]{
+      --bg:#08070c;--terminal-bg:#0a0a11;--panel:#0e0d16;--raised:#171522;--raised-hi:#1f1d2d;
+      --hairline:#312d44;--hairline-soft:#1f1d2c;--ink:#e9e7f2;--ink-dim:#9a94ae;--ink-faint:#5f5872;
+      --silver:#d4cfe2;--steel:#9488b4;--live:#e0566f;--live-soft:#cf6275;--ok:#5fb499;--accent:#a98ce0;--warn:#e0a93b;
+    }
+    html[data-theme="evergreen"]{
+      --bg:#060907;--terminal-bg:#080b09;--panel:#0a0f0c;--raised:#121a15;--raised-hi:#19241c;
+      --hairline:#27392e;--hairline-soft:#1a2620;--ink:#e6efe9;--ink-dim:#8fa399;--ink-faint:#566b60;
+      --silver:#c8e0d2;--steel:#7fa08c;--live:#e5564b;--live-soft:#cf625a;--ok:#5fb487;--accent:#5fb487;--warn:#cfa65f;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -426,7 +458,7 @@
       border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
     .body.with-sessions .sidebar{display:flex}
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
-    .sess-list{flex:1;overflow:auto;padding:0 12px 14px;display:flex;flex-direction:column;gap:7px}
+    .sess-list{flex:1;overflow:auto;padding:7px 12px 14px;display:flex;flex-direction:column;gap:7px}
     .sess{position:relative;width:auto;text-align:left;padding:10px 11px;border:1px solid var(--hairline);border-radius:9px;
       background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;transition:border-color .16s,box-shadow .16s,opacity .16s}
     .sess:hover{border-color:rgba(255,255,255,.2)}
@@ -989,11 +1021,25 @@
         <div class="ext-list" id="plugins-list"><div class="ext-empty">loading…</div></div>
       </div>
 
+      <div class="sec" id="sec-theme">
+        <div class="label">theme</div>
+        <div class="effort-row" id="theme-row">
+          <button class="eff-pill" data-theme="dark">Dark</button>
+          <button class="eff-pill" data-theme="graphite">Graphite</button>
+          <button class="eff-pill" data-theme="starlight">Starlight</button>
+          <button class="eff-pill" data-theme="midnight">Midnight</button>
+          <button class="eff-pill" data-theme="aurora">Aurora</button>
+          <button class="eff-pill" data-theme="evergreen">Evergreen</button>
+        </div>
+        <div style="font-size:10px;color:var(--ink-faint);margin-top:4px">re-tints the interface and the terminal · applied instantly</div>
+      </div>
+
     </div>
   </div>
 
   <div class="status">
     <span class="s"><span class="dot" id="d-pty"></span> <span id="pty-note">terminal</span></span>
+    <span class="s" id="sb-claude" style="display:none">claude code</span>
     <span class="s" id="sb-whisper">whisper</span>
     <span class="s" id="sb-kokoro">kokoro</span>
     <span class="end" id="meta">connecting…</span>

@@ -44,6 +44,25 @@ const TERM_OPTS = {
 };
 const tabs = new Map();           // tabId -> per-tab record (own xterm/fit/container + tracker/agents/sessionLog)
 let activeTabId = null;
+
+// ---------- themes: re-tint the UI (CSS :root vars via html[data-theme]) + the xterm terminal palette ----------
+// Dark = default (no data-theme attr). The UI palettes live in index.html (html[data-theme="…"]); these are the
+// matching TERMINAL palettes. applyTheme also updates TERM_OPTS so newly-spawned tabs adopt the chosen palette.
+const TERM_THEMES = {
+  dark:      { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8', selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
+  graphite:  { background: '#0b0c0e', foreground: '#dfe4ea', cursor: '#c8d0da', selectionBackground: '#262b33', black: '#08090b', brightBlack: '#5a616b' },
+  starlight: { background: '#121419', foreground: '#eef2f7', cursor: '#d6dde6', selectionBackground: '#2a303a', black: '#0f1115', brightBlack: '#69717d' },
+  midnight:  { background: '#080b12', foreground: '#dbe2ec', cursor: '#bfcadb', selectionBackground: '#1f2838', black: '#06080d', brightBlack: '#566275' },
+  aurora:    { background: '#0a0a11', foreground: '#e0dded', cursor: '#c9c2dc', selectionBackground: '#252136', black: '#08070c', brightBlack: '#5f5872' },
+  evergreen: { background: '#080b09', foreground: '#dde7e0', cursor: '#bfd2c6', selectionBackground: '#1c2a22', black: '#060907', brightBlack: '#566b60' },
+};
+function applyTheme(name) {
+  const t = TERM_THEMES[name] ? name : 'dark';
+  if (t === 'dark') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  try { TERM_OPTS.theme = TERM_THEMES[t]; } catch {}                              // new tabs spawn with this palette
+  for (const r of tabs.values()) { try { r.term.options.theme = TERM_THEMES[t]; } catch {} }   // retint live terminals
+}
 let term, fit;                    // ALWAYS point at the ACTIVE tab, so the 40+ foreground term.* sites need no change
 let tabSeq = 0;
 const newTabId = () => 'tab-' + (++tabSeq);
@@ -224,13 +243,15 @@ document.querySelectorAll('.panel button').forEach((b) =>
   setDot('d-pty', ep.pty ? 'ok' : 'bad');
   $('sb-whisper').textContent = 'whisper ' + ep.whisper.split(':').pop();
   $('sb-kokoro').textContent = 'kokoro ' + ep.kokoro.split(':').pop();
+  // the embedded Claude Code CLI version, left of whisper/kokoro — hidden gracefully if it can't be resolved
+  try { const cv = await claudible.claudeVersion(); const el = $('sb-claude'); if (el) { if (cv) { el.textContent = 'claude code ' + cv; el.style.display = ''; } else { el.style.display = 'none'; } } } catch {}
 })();
 
 // ---------- session tracker ----------
 // Claude Code's statusLine reports CUMULATIVE cost/tokens for the (persisted, --continue'd)
 // conversation. We want THIS session's usage, so we subtract a baseline captured at launch and
 // re-baseline on /clear or any upstream reset. Baseline resets every app launch (fresh process).
-const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n);
+const fmtK = (n) => n >= 1e6 ? ((+(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)) + 'M') : (n >= 1000 ? ((+(n / 1000).toFixed(n >= 100000 ? 0 : 1)) + 'k') : String(n));
 // Tracker accumulators are PER TAB (on each tab's record): the #trk-* DOM always projects the ACTIVE tab,
 // and only the active tab's tracker is mirrored to guests — so two concurrent sessions never cross-count.
 // Mirror the active tab's tracker (and which session is live) to any shared guests. Guests render verbatim.
@@ -1376,6 +1397,18 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
     toast(set ? ('Default effort: ' + set + ' — applies to new sessions') : 'Default effort cleared');
   }));
 })();
+// theme selector — load the saved theme, highlight it, persist + apply (UI + terminal) instantly on click
+(function () {
+  const row = $('theme-row'); if (!row) return;
+  const saved = loadPrefs().theme; const cur = TERM_THEMES[saved] ? saved : 'dark';
+  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.theme || 'dark') === v));
+  paint(cur);
+  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', () => {
+    const v = b.dataset.theme || 'dark';
+    savePrefs({ theme: v }); applyTheme(v); paint(v);
+    toast('Theme · ' + b.textContent);
+  }));
+})();
 // collab display name — what teammates see when you're in a synced session. Persist on edit, update your own
 // roster/bar instantly, and (debounced) re-publish the live presence so the "Join live" badge shows the new name.
 (function () {
@@ -1610,6 +1643,7 @@ function savePrefs(patch) {
 }
 (function applyPrefs() {
   const p = loadPrefs();
+  applyTheme(p.theme);   // re-tint the UI + terminal to the saved theme (Dark when unset)
   if (p.voice && document.querySelector('.vpill[data-voice="' + p.voice + '"]')) {
     selectedVoice = p.voice;
     document.querySelectorAll('.vpill').forEach((x) => x.classList.toggle('on', x.dataset.voice === p.voice));
@@ -1988,12 +2022,20 @@ function doExportSession(s) {
     else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
   }).catch(() => toast('Export failed'));
 }
+function doExportSessionText(s) {
+  claudible.exportSessionText(s.id).then((r) => {
+    if (r && r.saved) toast('Saved · ' + r.saved.replace(/^.*[\\/]/, ''));
+    else if (r && r.canceled) { /* user dismissed the save dialog */ }
+    else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
+  }).catch(() => toast('Export failed'));
+}
 function savedSessMenuItems(row, p, s) {
   const aw = workspaces.find((w) => w.id === activeWsId);
   const synced = !!(aw && aw.kind === 'repo');                       // a shared/repo session may also live on GitHub
   const items = [
     { icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this session (local label only).', act: () => startSessEdit(row, p, s) },
     { icon: SHARE_SVG, label: 'Export replay…', hint: 'Save this session as a shareable HTML replay.', act: () => doExportSession(s) },
+    { icon: SHARE_SVG, label: 'Save as text…', hint: 'Save this session transcript as Markdown (.md/.txt).', act: () => doExportSessionText(s) },
     { sep: true },
   ];
   if (synced) {                                                      // a synced session can be removed locally or for everyone

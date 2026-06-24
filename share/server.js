@@ -63,6 +63,7 @@ function cleanName(n, fallback) {
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
 function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onVoiceMembers, onAudio } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
+  let heartbeatTimer = null;   // ~30s WS ping/pong — catches SILENT disconnects (a network drop with no clean 'close')
   let linkToken = null, hostName = 'Host';
   let cols = 120, rows = 32;
   let ring = Buffer.alloc(0);
@@ -84,6 +85,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // voice seat for a grace window, cancelling both if they return in time (so a phone lock isn't a fake departure).
   const pendingDrops = new Map();    // resume token -> { timer, wasVoice, name }
   const REJOIN_GRACE = Number(process.env.CLAUDIBLE_REJOIN_GRACE_MS) || 15000;   // narrowed from 45s — shorter silent-rejoin window
+  const HEARTBEAT_MS = Number(process.env.CLAUDIBLE_HEARTBEAT_MS) || 30000;      // ping each guest this often; no pong by the next tick → terminate
   function voiceMembers() {
     const m = [];
     if (hostVoice) m.push({ id: 'host', name: hostName });
@@ -160,6 +162,8 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (mode === 'link') { const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok; }
     else { ws._resume = resumeTok; }
     ws.binaryType = 'nodebuffer';
+    ws._alive = true;
+    ws.on('pong', () => { ws._alive = true; });   // heartbeat: the client answered our ping → still connected
     clients.add(ws);
     ws._pid = 'g' + (++pidSeq); byPid.set(ws._pid, ws);   // stable peer-id for voice signaling
     // Returning from a transient drop within the grace window → cancel the pending "left" and restore voice.
@@ -241,14 +245,14 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
           pendingDrops.delete(tok);
           resumeTokens.delete(tok);                       // truly left → kill the silent-reconnect token (no indefinite, approval-free rejoin)
           roster.set(who, 'gone'); notifyRoster();
-          systemChat(who + ' left');
+          systemChat(who + ' disconnected');
           if (wasVoice) broadcastVoice();
         }, REJOIN_GRACE);
         if (timer && timer.unref) timer.unref();
         pendingDrops.set(tok, { timer, wasVoice, name: who });
       } else {
         roster.set(who, 'gone'); notifyRoster();
-        systemChat(who + ' left');
+        systemChat(who + ' disconnected');
         if (wasVoice) broadcastVoice();
       }
     };
@@ -262,14 +266,17 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (mode === 'resume') {
       const r = paramFromUrl(req.url, 'r');
       const boundIp = resumeTokens.get(r);   // wsAuth already matched r to a token, so this is its bound IP
-      // FAIL-OPEN: only reject when BOTH the bound and current IPs are known AND differ (a token replayed from a
-      // different network). When either is unknown (no proxy header / pure localhost), behave exactly as before.
+      // FAIL-OPEN: only act when BOTH the bound and current IPs are known AND differ (a resume from a different
+      // network — could be a replay, or simply a guest roaming cell↔wifi). When either is unknown, resume silently.
       if (boundIp && ws._ip && boundIp !== ws._ip) {
-        try { ws.send(JSON.stringify({ type: 'denied', reason: 'revoked' })); } catch {}
-        try { ws.close(); } catch {}
-        return;
+        // Don't SILENTLY rejoin from a new IP — but don't lock a roaming guest out either. Retire the stale token
+        // and fall through to a normal join so the host just re-approves them (and they get a fresh IP-bound
+        // token). Graceful degrade, not a dead-end — a replay attacker faces the same approval gate.
+        resumeTokens.delete(r);
+        mode = 'link';
+      } else {
+        return admit(ws, 'resume', name, r);
       }
-      return admit(ws, 'resume', name, r);
     }
     // mode === 'link' (a new viewer joining the invite)
     if (clients.size >= MAX_GUESTS) {
@@ -317,6 +324,18 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       if (!mode) { socket.destroy(); return; }
       wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, mode, req));
     });
+    // Heartbeat: ping every client ~30s; one that didn't answer the previous ping (silent network drop, no clean
+    // 'close') is terminated → that fires drop() → the grace-window "disconnected" announce. Without this, a dead
+    // socket lingers until the OS/TCP eventually times it out, so chat would never show the disconnect.
+    heartbeatTimer = setInterval(() => {
+      for (const ws of clients) {
+        if (ws.readyState !== ws.OPEN) continue;
+        if (ws._alive === false) { try { ws.terminate(); } catch {} continue; }
+        ws._alive = false;
+        try { ws.ping(); } catch {}
+      }
+    }, HEARTBEAT_MS);
+    if (heartbeatTimer.unref) heartbeatTimer.unref();
     return new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => { port = server.address().port; resolve(status()); });
@@ -382,6 +401,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   function resetStatus() { lastStatus = null; }
 
   function stop() {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
     for (const [, p] of pending) { try { p.ws.close(); } catch {} }
     pending.clear();
     for (const ws of clients) { try { ws.close(); } catch {} }

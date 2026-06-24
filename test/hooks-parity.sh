@@ -47,10 +47,11 @@ st_case "no ctx_window"  '{"foo":1}'
 st_case "invalid json"   'not json at all'
 st_case "trailing nl"    '{"context_window":{"used_percentage":42}}
 '
-# the REAL captured payload from the running session, if present
+# the REAL captured payload from a running session, if present — point CLAUDIBLE_HOOKTEST_STATUS at a real
+# status.json to also assert parity on live data (optional; skipped when unset, so CI/others just don't run it).
 REAL="$TMP/real-status.json"
-SRC="/tmp/claude-1000/-mnt-c-Users-daisy-Claudible-Release/a56cc2b2-599f-410c-a075-69acb845a95c/scratchpad/hooktest/real-status.json"
-[ -f "$SRC" ] && st_case "REAL session" "$(cat "$SRC")"
+SRC="${CLAUDIBLE_HOOKTEST_STATUS:-}"
+[ -n "$SRC" ] && [ -f "$SRC" ] && st_case "REAL session" "$(cat "$SRC")"
 
 echo "== documented: whole-number float renders cleaner (status.json still byte-identical) =="
 printf '%s' '{"context_window":{"used_percentage":66.0}}' | CLAUDIBLE_STATUS="$TMP/fb_s" bash    "$TMP/statusline.sh"     > "$TMP/fb_o" 2>/dev/null

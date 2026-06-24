@@ -148,6 +148,25 @@ Click **Share** to live-share your *running* Claude Code session: Claudible spin
 
 There's a **human↔human chat** alongside the terminal, names for the host and each guest, and a **mobile-friendly** browser viewer (the cockpit's custom scroll gutter included) so someone can follow along from a phone. Rotate the invite anytime without dropping current guests. Nothing is hosted by us — the tunnel connects *out* from your machine; see [Security & privacy](#security--privacy) for what that exposes.
 
+### How joining works — and why it's safe
+When you click **Share**, Claudible starts a tiny web server **on your own machine** (loopback). If
+[`cloudflared`](https://github.com/cloudflare/cloudflared) is installed, it wraps that in a free Cloudflare
+**quick-tunnel** and gives you a `https://<random>.trycloudflare.com` link; without it, the link is
+`localhost`/LAN-only. A guest opens the link in any browser (laptop or phone), enters a name, and **waits in a
+lobby** until you approve them — they see nothing until you do. Read-only guests can only watch + chat;
+interactive guests share your keyboard, so only grant that to people you trust.
+
+**We don't host anything.** There's no Claudible server in the middle: the page, the live terminal, and the chat
+are all served **by your machine**. The Cloudflare tunnel is just a temporary last-mile pipe (like a disposable
+port-forward) that connects *out* from your computer — so the link is **ephemeral**: it exists only while you're
+sharing and dies the instant you stop or go offline. Click **New link** to invalidate the old one and lock out
+anyone who held it.
+
+> **A guest can't reach the link?** The address is a `*.trycloudflare.com` tunnel, so a guest's
+> network/ISP/VPN — or Cloudflare's own edge — can occasionally block or rate-limit it. That's a *network* issue,
+> not your session or their identity. Fix: have them try a **different network** (a phone hotspot is the quickest
+> test) or send a **fresh link**. Only people you explicitly approve ever get in, so opening it up that way is safe.
+
 ## Security & privacy
 - **The embedded Claude runs with `--dangerously-skip-permissions` and `--add-dir $HOME`.** This is deliberate — Claudible is a personal, local cockpit and that keeps the voice/one-click flow frictionless — but it means the embedded Claude Code can read and act across your home directory without per-action prompts. Run it on a machine you trust, the same way you'd run `claude` yourself with permissions skipped. To change it, edit the `exec claude …` lines in `wsl/session.sh`.
 - **Voice is local; Claude Code is not.** Speech-to-text (Whisper) and text-to-speech (Kokoro) run entirely on your machine, and Claudible sends no telemetry. The embedded **Claude Code** sends your prompts and code to Anthropic exactly as the normal CLI does — Claudible doesn't change that.

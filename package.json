@@ -117,7 +117,7 @@
       "icon": "assets/icon.png",
       "category": "Development",
       "synopsis": "Desktop cockpit for Claude Code: live telemetry, local push-to-talk voice, live co-work.",
-      "maintainer": "the_crazydev <vibezdotwin@gmail.com>",
+      "maintainer": "the_crazydev <noreply@users.noreply.github.com>",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "mac": {

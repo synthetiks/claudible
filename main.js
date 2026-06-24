@@ -1119,6 +1119,50 @@ ipcMain.handle('session:export', async (e, sessionId) => {
   } catch (err) { return { error: String(err) }; }
 });
 
+// Save a session's transcript as a plain Markdown (.md/.txt) document — same transcript source as the HTML
+// replay (transcript.sh), rendered as readable markdown. No server, no HTML; just the conversation.
+ipcMain.handle('session:export-text', async (e, sessionId) => {
+  try {
+    const ws = activeWorkspace;
+    const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!sid || !APPDIR_WSL) return { error: 'no session' };
+    const messages = await new Promise((resolve) => {
+      runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
+          let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+          resolve(Array.isArray(m) ? m : []);
+        });
+    });
+    if (!messages.length) return { error: 'empty' };
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const first = (messages.find((m) => m.role === 'you') || messages[0] || {}).text || 'Claude session';
+    const title = String(first).replace(/\s+/g, ' ').slice(0, 80);
+    const body = messages.map((m) => {
+      const who = m.role === 'you' ? 'You' : (m.role === 'claude' || m.role === 'assistant') ? 'Claude' : (m.role || 'note');
+      return `\n## ${who}\n\n${String(m.text == null ? '' : m.text)}\n`;
+    }).join('');
+    const text = `# ${title}\n\n_${(ws && ws.label) || 'session'} · ${d.toLocaleString()}_\n${body}`;
+    const defaultPath = path.join(app.getPath('desktop'), `claudible-session-${stamp}.md`);
+    const { canceled, filePath } = await dialog.showSaveDialog(win, { defaultPath, filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }] });
+    if (canceled || !filePath) return { canceled: true };
+    fs.writeFileSync(filePath, text, 'utf8');
+    return { saved: filePath, count: messages.length };
+  } catch (err) { return { error: String(err) }; }
+});
+
+// The embedded Claude Code CLI version, for the status bar. Resolved once via a tiny cross-backend script and
+// cached (it's stable for the app's lifetime); returns '' if claude isn't resolvable so the bar just hides it.
+let _claudeVer;   // undefined = not fetched yet
+ipcMain.handle('claude:version', () => {
+  if (_claudeVer !== undefined) return _claudeVer;
+  return new Promise((resolve) => {
+    runner.runScript('claude-version.sh', '', { timeout: 8000 }).then(({ stdout }) => {
+      _claudeVer = (String(stdout || '').match(/\d+\.\d+(?:\.\d+)?/) || [''])[0];   // pull the semver out of any format
+      resolve(_claudeVer);
+    }).catch(() => { _claudeVer = ''; resolve(''); });
+  });
+});
+
 // ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
 ipcMain.handle('diff:list', () => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });
