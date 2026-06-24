@@ -128,40 +128,63 @@ claudible.onPtyData((tabId, d) => {
 
 // ---------- custom scroll gutter (lives in the UI, never covers terminal text) ----------
 const sc = $('scroll'), thumb = $('scroll-thumb');
+// Claude Code runs full-screen (alternate buffer) → no xterm scrollback for the bar to map, but it enables mouse
+// tracking and scrolls on the wheel, so the bar SENDS it wheel events (SGR mouse) to scroll ITS view.
+function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
+function jogScroll(deltaY) {
+  if (!term || !activeTabId) return;
+  const x = Math.max(1, Math.floor((term.cols || 80) / 2)), y = Math.max(1, Math.floor((term.rows || 24) / 2));
+  const seq = '\x1b[<' + (deltaY < 0 ? 64 : 65) + ';' + x + ';' + y + 'M';   // SGR wheel: 64=up, 65=down
+  const n = Math.max(1, Math.min(6, Math.round(Math.abs(deltaY) / 40)));
+  for (let i = 0; i < n; i++) { try { claudible.ptyInput(activeTabId, seq); } catch {} }
+}
 function updateScrollbar() {
   if (!term) return;                                 // no active tab yet (pre-boot)
-  const b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
   const trackH = sc.clientHeight;
-  if (baseY <= 0 || total <= rows || trackH <= 0) { thumb.style.opacity = '0'; return; }
+  if (trackH <= 0) { thumb.style.opacity = '0'; return; }
+  if (isAlt()) {                                      // full-screen app → a draggable "jog" thumb that scrolls IT
+    const thumbH = Math.max(46, trackH * 0.22);
+    thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
+    if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) / 2) + 'px)';   // rests centered
+    return;
+  }
+  const b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
+  if (baseY <= 0 || total <= rows) { thumb.style.opacity = '0'; return; }
   const thumbH = Math.max(26, trackH * (rows / total));
   const top = (trackH - thumbH) * (b.viewportY / baseY);
-  thumb.style.opacity = '1';
-  thumb.style.height = thumbH + 'px';
-  thumb.style.transform = 'translateY(' + top + 'px)';
+  thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px'; thumb.style.transform = 'translateY(' + top + 'px)';
 }
-setInterval(updateScrollbar, 120);   // poll so the thumb tracks the live scroll position even when onScroll is sparse (per-tab onScroll wired in makeTab)
+setInterval(updateScrollbar, 120);   // poll so the thumb tracks the live scroll position even when onScroll is sparse
 
-let dragging = false, grabDY = 0;
+let dragging = false, grabDY = 0, jogLastY = 0;
 function thumbTop() { return thumb.getBoundingClientRect().top - sc.getBoundingClientRect().top; }
 function scrollToFrac(frac) {
   const baseY = term.buffer.active.baseY;
   term.scrollToLine(Math.round(Math.max(0, Math.min(1, frac)) * baseY));
 }
 thumb.addEventListener('pointerdown', (e) => {
-  dragging = true; grabDY = e.clientY - thumbTop(); thumb.classList.add('drag');
+  dragging = true; grabDY = e.clientY - thumbTop(); jogLastY = e.clientY; thumb.classList.add('drag');
   thumb.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
 });
 window.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   const trackH = sc.clientHeight, thumbH = thumb.offsetHeight;
   const top = Math.max(0, Math.min(trackH - thumbH, e.clientY - sc.getBoundingClientRect().top - grabDY));
+  if (isAlt()) {                                      // jog: drag → wheel-scroll the app; thumb follows the cursor
+    const dy = e.clientY - jogLastY;
+    if (Math.abs(dy) >= 6) { jogScroll(dy); jogLastY = e.clientY; }
+    thumb.style.transform = 'translateY(' + top + 'px)';
+    return;
+  }
   scrollToFrac((trackH - thumbH) > 0 ? top / (trackH - thumbH) : 0);
 });
 window.addEventListener('pointerup', () => { if (dragging) { dragging = false; thumb.classList.remove('drag'); } });
-sc.addEventListener('pointerdown', (e) => {           // click the gutter to jump
+sc.addEventListener('pointerdown', (e) => {           // click the gutter: jump (scrollback) / page-scroll (full-screen app)
   if (e.target === thumb) return;
+  if (isAlt()) { const mid = sc.getBoundingClientRect().top + sc.clientHeight / 2; jogScroll(e.clientY < mid ? -120 : 120); return; }
   scrollToFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
 });
+sc.addEventListener('wheel', (e) => { if (isAlt()) { jogScroll(e.deltaY); e.preventDefault(); } }, { passive: false });
 // ---------- concurrent sessions ----------
 // Each tab is still one live session/pty running in the background; the active tab is the visible terminal.
 // There is NO top tab strip anymore — every live session is shown as a row in the LEFT SIDEBAR instead
