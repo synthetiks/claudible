@@ -316,6 +316,9 @@ function resetStats(t) {
   t.baseCost = null; t.sessTok = 0; t.agentTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.sessionLog.length = 0; t.curCtxPct = null;
   if (t.tabId === activeTabId) { repaintTracker(t); pushTracker(); }
 }
+// First-run voice setup progress (packaged native Windows only) → surface as a toast so the long model
+// download doesn't look like a hang. Guarded: a no-op everywhere the bridge/messages never fire.
+if (claudible.onProvision) claudible.onProvision((m) => { try { if (m && m.msg) toast(m.msg); } catch {} });
 claudible.onStatus((s) => {
   const t = tabs.get(s.tabId); if (!t) return;   // route the status to the tab it belongs to
   // Reconcile a freshly-started tab with the real session id Claude assigned it, so its synthetic "live"

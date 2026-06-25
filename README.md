@@ -53,10 +53,39 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 
 ## Install & run
 
-Claudible runs on **Windows (WSL2 *or* native), Linux, and macOS** — one `Runner` seam picks the backend per OS.
-Maturity, honestly: the **Windows + WSL2** path is the battle-tested one; **Linux** is verified (the native backend is
-live-tested and a packaged AppImage builds); **native Windows** and **macOS** are code-complete and statically verified,
-with their runtime smoke tests in progress. During beta the repo is **private — you must be a collaborator first.**
+**Two ways in — pick by who you are:**
+
+| | ⬇️ **Download the app** | 🛠️ **Build from source** |
+|---|---|---|
+| **For** | Most people — just want to run it | Developers · Linux · terminal users |
+| **Windows** | Double-click `Claudible-Setup.exe` | `install.ps1` (clone + build) |
+| **Linux / macOS** | *(installers coming)* | `install.sh` / `npm run setup` |
+| **Comes from** | [**Releases**](https://github.com/thecrazydev1/claudible/releases) | `git clone` |
+
+During beta the repo is **private**, so either path needs a GitHub account that's a **collaborator** on it (to download a release asset *or* to clone).
+
+---
+
+### ⬇️ Download — Windows installer (no terminal, no clone)
+
+The simplest path. **No git, no `npm`, no PowerShell scripts, no `system32` snags** — the app is prebuilt.
+
+1. Open **[Releases](https://github.com/thecrazydev1/claudible/releases)** and download the latest **`Claudible-Setup-<version>-x64.exe`**.
+2. Double-click it. It's **unsigned** during beta, so Windows SmartScreen shows *“Windows protected your PC”* → click **More info → Run anyway** (one time).
+3. Launch Claudible from the Start menu / Desktop shortcut. **On first run it sets up local voice automatically** — the Whisper + Kokoro models are a few-hundred-MB download, so you'll see a *“Setting up voice…”* note while it works in the background (it's resumable; reopen if interrupted).
+
+**Already needs to be on the PC** (the same native-Windows prerequisites — the installer just skips the clone/build):
+- **Claude Code for Windows**, signed in — run `claude` once in any terminal and log in. *(This is what Claudible embeds; it can't run without it.)*
+- **Node.js 22.12+** for Windows ([nodejs.org](https://nodejs.org)) — Claude Code's hooks need a real `node`.
+- **Git for Windows** ([git-scm.com](https://git-scm.com/download/win)) — provides the `bash.exe` the voice services run through.
+
+> 🔒 While the repo is private, downloading a release asset requires being **signed in to GitHub** with access. <br> 🧪 The native-Windows runtime (esp. voice) is the newest path — if voice doesn't come up, the WSL build below is the proven one, and the log is at `%USERPROFILE%\.claudible\logs\`.
+
+---
+
+### 🛠️ Build from source
+
+For developers, Linux, and terminal users who'd rather `git clone` and run a script (no installer). One `Runner` seam picks the backend per OS. Maturity, honestly: **Windows + WSL2** is the battle-tested path; **Linux** is verified (native backend live-tested, AppImage builds); **native Windows** and **macOS** are code-complete with runtime smoke tests in progress.
 
 <details open><summary><h3>🪟 Windows 11 + WSL2 — recommended</h3></summary>
 

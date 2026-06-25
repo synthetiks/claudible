@@ -20,7 +20,7 @@ const APP_ROOT = path.resolve(__dirname, '..');
 function appDirGuest() { return APP_ROOT; }
 function toGuestPath(p) { return String(p == null ? '' : p); }
 function toHostPath(p) { return String(p == null ? '' : p); }
-function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
+function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
 
 // buildBoot via the shared pure builder (appdir = the native app root).
 function buildBoot(session, ws, runtimeId, effort) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort); }

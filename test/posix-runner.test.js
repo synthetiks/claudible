@@ -10,12 +10,18 @@ const APP = path.resolve(__dirname, '..');
 let pass = 0, fail = 0;
 const ok = (label, cond) => cond ? (pass++, console.log('  ok   ' + label)) : (fail++, console.error('  FAIL ' + label));
 
+delete process.env.CLAUDIBLE_RUNTIME;   // pin the default-case assertions regardless of the caller's shell
+
 // identity translation (the whole point of Posix vs WSL)
 ok('id = posix', posix.id === 'posix');
 ok('appDirGuest = APP_ROOT (no wslpath)', posix.appDirGuest() === APP);
 ok('toGuestPath identity (spaces preserved)', posix.toGuestPath('/x/y z') === '/x/y z');
 ok('toHostPath identity', posix.toHostPath('/a/b') === '/a/b');
-ok('runtimeDir = APP_ROOT/runtime', posix.runtimeDir() === path.join(APP, 'runtime'));
+ok('runtimeDir = APP_ROOT/runtime (default, env unset)', posix.runtimeDir() === path.join(APP, 'runtime'));
+// CLAUDIBLE_RUNTIME relocates runtime/ off the read-only app dir when packaged — both readers + writers honor it.
+process.env.CLAUDIBLE_RUNTIME = '/tmp/cl-rt-test';
+ok('runtimeDir = CLAUDIBLE_RUNTIME when set (packaged relocation)', posix.runtimeDir() === '/tmp/cl-rt-test');
+delete process.env.CLAUDIBLE_RUNTIME;
 ok('detect matches platform', posix.detect() === (process.platform === 'linux' || process.platform === 'darwin'));
 
 // buildBoot: bash session.sh directly with the native app dir (shared builder, no wsl.exe)

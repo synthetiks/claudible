@@ -11,6 +11,20 @@ const fs = require('fs');
 const { createShareServer } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
+// A packaged (installed) build runs from a READ-ONLY app dir, so writable runtime state can't live there. On
+// packaged WINDOWS we set two env signals BEFORE the runner is selected/queried below:
+//  • CLAUDIBLE_RUNTIME — relocate runtime/ (settings.json, workspaces.json, per-tab status/hooks) under the user's
+//    ~/.claudible so it survives reinstall/upgrade and never EPERMs. Every runner's runtimeDir() reads this.
+//  • CLAUDIBLE_RUNNER=win — use the native runner (no WSL); it bakes hook paths from runtimeDir() and never shells
+//    bash session.sh, so writers (hooks) and readers (pollers) resolve to the SAME relocated dir — fully coherent.
+// Scoped to win32 ON PURPOSE: a packaged Linux/macOS build uses the Posix runner whose bash session.sh still
+// derives runtime/ from $APPDIR, so relocating only the JS side would desync it. Thread the runtime root into
+// session.sh BEFORE shipping those installers; until then the Posix packaged path is left exactly as-is.
+// Dev (electron .) and the git-clone/script install leave both env vars unset → WSL/Posix runner + ./runtime.
+if (app.isPackaged && process.platform === 'win32') {
+  if (!process.env.CLAUDIBLE_RUNTIME) process.env.CLAUDIBLE_RUNTIME = path.join(app.getPath('home'), '.claudible', 'runtime');
+  if (!process.env.CLAUDIBLE_RUNNER) process.env.CLAUDIBLE_RUNNER = 'win';
+}
 const runner = require('./runners/runner').select();
 
 let win;
@@ -88,6 +102,11 @@ ipcMain.on('settings:set', (e, obj) => { try { fs.mkdirSync(RT, { recursive: tru
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
+// Guest-side runtime root (host RT translated for the execution space: wslpath on WSL, cygpath on win, identity on
+// Posix). diff-apply hands bash a temp path UNDER runtime/, so it must track RT wherever RT now lives (not assume
+// it sits beside the app dir). Empty if translation is unavailable — diff then fails safe via diffAction's guard
+// (and diff-apply.sh's own [ -f "$tmp" ] check), rather than pointing at a stale/wrong path.
+const RT_GUEST = runner.toGuestPath(RT) || '';
 // session.sh receives the app dir as $1 so it writes runtime/ to the SAME Windows folder this process reads.
 // A session choice ('new' | a <session-id> | '') is passed via CLAUDIBLE_SESSION on the command line
 // (env vars don't cross the Windows→WSL boundary without WSLENV, so we inline it). The id is sanitised
@@ -122,6 +141,55 @@ let activeWorkspace = registry.workspaces.find((w) => w.id === registry.activeId
 // (which also calls it). Async execFile so the ~5s port-wait never blocks window creation.
 function startVoiceServices() { runner.startVoiceServices(); }
 
+// First-run voice provisioning — packaged native Windows only. The installer ships the app, NOT the multi-GB
+// Kokoro/torch + Whisper model stack (it can't be bundled). So on first launch, if the voice assets aren't here
+// yet, run the PROVEN setup-win.ps1 (the same script install.ps1 -Native uses) to fetch/build them, then start
+// the services. Reuses the script wholesale (no duplicated logic), is idempotent (re-runs safely if interrupted),
+// and NEVER blocks the terminal — a failure just leaves voice unavailable with retry-on-reopen.
+function voiceProvisioned() {
+  const v = process.env.CLAUDIBLE_VOICE || path.join(app.getPath('home'), '.claudible', 'voice');   // same root setup-win.ps1 writes to (else re-provisions forever)
+  try {
+    return fs.existsSync(path.join(v, 'whisper', 'Release', 'whisper-server.exe'))
+        && fs.existsSync(path.join(v, 'whisper', 'models', 'ggml-base.bin'))
+        && fs.existsSync(path.join(v, 'kokoro', 'api', 'src', 'models', 'v1_0', 'kokoro-v1_0.pth'));
+  } catch { return false; }
+}
+let provisioning = false;
+function ensureVoiceProvisioned() {
+  // Only the packaged native-Windows path self-provisions; dev / WSL / the script install already set voice up.
+  if (provisioning || !app.isPackaged || process.platform !== 'win32' || process.env.CLAUDIBLE_RUNNER !== 'win') return false;
+  if (voiceProvisioned()) return false;
+  provisioning = true;
+  const home = app.getPath('home');
+  const send = (phase, msg) => { try { win && win.webContents.send('provision', { phase, msg }); } catch {} };
+  let out = 'ignore'; try { fs.mkdirSync(path.join(home, '.claudible', 'logs'), { recursive: true }); out = fs.openSync(path.join(home, '.claudible', 'logs', 'provision.out'), 'a'); } catch {}
+  const closeOut = () => { try { if (typeof out === 'number') fs.closeSync(out); } catch {} };   // release the log fd when the child ends
+  const script = path.join(__dirname, 'setup', 'setup-win.ps1');   // shipped in the bundle (asar:false, setup/** included)
+  send('start', 'Setting up voice for the first time — downloading models (a few hundred MB, can take several minutes)…');
+  let child;
+  try {
+    child = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true, stdio: ['ignore', out, out] });
+  } catch (e) { provisioning = false; closeOut(); send('error', 'Voice setup could not start: ' + e.message); startVoiceServices(); return true; }
+  child.on('error', (e) => { provisioning = false; closeOut(); send('error', 'Voice setup could not start: ' + e.message); startVoiceServices(); });
+  child.on('exit', (code) => {
+    provisioning = false; closeOut();
+    if (code === 0) {
+      // setup-win.ps1 just installed uv — to %USERPROFILE%\.local\bin (astral script) OR winget's Links dir. This
+      // process's PATH is stale, so surface both before starting the services that shell out to uv; if neither
+      // resolves (rare), the 'done' note tells the user to reopen (a fresh process inherits the registry PATH).
+      const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+      for (const bin of [path.join(home, '.local', 'bin'), path.join(local, 'Microsoft', 'WinGet', 'Links')]) {
+        if (!String(process.env.PATH || '').split(path.delimiter).includes(bin)) process.env.PATH = bin + path.delimiter + (process.env.PATH || '');
+      }
+      send('done', 'Voice ready. (If you don’t hear replies, reopen Claudible.)');
+      startVoiceServices();
+    } else {
+      send('error', 'Voice setup didn’t finish (code ' + code + '). See %USERPROFILE%\\.claudible\\logs\\provision.out; reopen Claudible to retry.');
+    }
+  });
+  return true;
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1320, height: 860, backgroundColor: '#070809',
@@ -139,7 +207,7 @@ function createWindow() {
   // to .claudible-debug.log and auto-open DevTools. OFF by default, so nothing pops up in normal use.
   const DEBUG = !!process.env.CLAUDIBLE_DEBUG;
   if (DEBUG) {
-    const dbgLog = path.join(__dirname, '.claudible-debug.log');
+    const dbgLog = app.isPackaged ? path.join(RT, 'debug.log') : path.join(__dirname, '.claudible-debug.log');   // writable root when installed; dev path unchanged
     const dbg = (s) => { try { fs.appendFileSync(dbgLog, new Date().toISOString() + ' ' + s + '\n'); } catch {} };
     try { fs.writeFileSync(dbgLog, new Date().toISOString() + ' [start] Claudible launched\n'); } catch {}
     win.webContents.on('console-message', (...a) => {
@@ -156,7 +224,7 @@ function createWindow() {
   win.loadFile('renderer/index.html');
   win.webContents.once('did-finish-load', () => {   // one-shot, scoped to this contents: a reload won't stack a 2nd set of pollers/timers
     if (DEBUG) { try { win.webContents.openDevTools({ mode: 'detach' }); } catch {} }   // only with CLAUDIBLE_DEBUG=1
-    startVoiceServices();   // idempotent; ensures STT/TTS are up even when launched via `npm start`
+    if (!ensureVoiceProvisioned()) startVoiceServices();   // packaged win: provision voice on first run, else just start (idempotent)
     pollStatus(); pollHooks(); pollAgentTokens();
     // spawn-on-size fallback: if the renderer never reports a size, seed the first tab ('main') at a default
     setTimeout(() => { if (ptys.size === 0) spawnPty('main', 120, 32, activeWorkspace, ''); }, 1800);
@@ -1204,7 +1272,7 @@ function diffAction(mode, payload) {
       const name = `diffaction-${process.pid}-${++diffActionSeq}.tmp`;   // unique per action → concurrent revert/discard never read each other's payload (M1)
       const tmp = path.join(RT, name);
       fs.writeFileSync(tmp, payload, 'utf8');
-      runner.runScript('diff-apply.sh', `${mode} '${APPDIR_WSL}/runtime/${name}'`, { ws: activeWorkspace, timeout: 20000 }).then(({ err, stdout }) => {
+      runner.runScript('diff-apply.sh', `${mode} '${RT_GUEST}/${name}'`, { ws: activeWorkspace, timeout: 20000 }).then(({ err, stdout }) => {
           try { fs.unlinkSync(tmp); } catch {}   // clean up the temp patch file
           let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
           resolve(r);

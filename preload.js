@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onAgentTokens: (cb) => ipcRenderer.on('agent-tokens', (_e, { tabId, agentTok }) => cb(tabId, agentTok)),
   hookTest: () => ipcRenderer.invoke('hook:test'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),   // s carries s.tabId
+  onProvision: (cb) => ipcRenderer.on('provision', (_e, m) => cb(m)),   // first-run voice setup progress {phase,msg}
   // live terminal sharing
   shareStart: (opts) => ipcRenderer.invoke('share:start', opts || {}),
   shareStop: () => ipcRenderer.invoke('share:stop'),

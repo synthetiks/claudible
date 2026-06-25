@@ -40,7 +40,7 @@ function toHostPath(guestPath) {
 
 // Host-FS runtime root the pollers read (was main.js:81). On WSL the scripts write here via the
 // /mnt/c guest path passed as $APPDIR; on native it's just a local dir. Same value either way here.
-function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
+function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
 
 // --- Claude Code session bootstrap (was main.js:103-122) -----------------------------------------
 // Command construction (wsEnv + the boot string) is OS-agnostic and lives in _shared.js (also used by

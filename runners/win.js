@@ -57,7 +57,7 @@ function toHostPath(p) {
   const bash = gitBash(); if (!bash) return '';
   try { return cp.execFileSync(bash, ['-lc', `cygpath -w '${String(p).replace(/'/g, "'\\''")}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
-function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
+function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
 
 // ---- PURE session-bootstrap core (unit-tested in test/win-runner.test.js) ------------------------
 // Mirror of wsl/session.sh's SDIR logic (lines 12-22), but in Windows paths.
@@ -115,7 +115,7 @@ function settingsJson(claudeDir, nodeBin, statusPath, hooksPath) {
 // Stage the shared Node hooks + write settings.json into <sdir>\.claude. Returns the runtime paths.
 function installHooks(sdir, tabRuntimeId) {
   const cdir = path.win32.join(sdir, '.claude');
-  const rt = path.join(APP_ROOT, 'runtime', 'tabs', String(tabRuntimeId || 'default'));
+  const rt = path.join(runtimeDir(), 'tabs', String(tabRuntimeId || 'default'));   // writable runtime root (CLAUDIBLE_RUNTIME when packaged), matches what main.js's pollers read
   const statusPath = path.join(rt, 'status.json');
   const hooksPath = path.join(rt, 'hooks.ndjson');
   fs.mkdirSync(cdir, { recursive: true }); fs.mkdirSync(rt, { recursive: true });

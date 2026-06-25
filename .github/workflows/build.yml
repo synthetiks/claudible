@@ -1,8 +1,10 @@
 name: Build installers
 
-# Manual + tag-triggered. Produces the per-OS installers that make Claudible a
-# one-click install (no git clone / npm / build toolchain for end users).
-# The repo is PRIVATE — this never publishes a release; it only uploads artifacts.
+# Manual + tag-triggered. Produces the per-OS installers that make Claudible a one-click install (no git
+# clone / npm / build toolchain for end users). A manual (workflow_dispatch) run uploads CI artifacts only.
+# A v* TAG additionally PUBLISHES the Windows installer to a GitHub Release. The repo is PRIVATE, so release
+# assets are download-gated to collaborators — the default GITHUB_TOKEN with contents:write can create the
+# release in our own repo (no PAT). Linux/macOS stay artifact-only until their installers are validated.
 on:
   workflow_dispatch:
   push:
@@ -10,7 +12,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write   # create the GitHub Release + upload the installer asset (publish step below)
 
 jobs:
   build:
@@ -27,6 +29,18 @@ jobs:
         with:
           node-version: "22.12.0"
           cache: npm
+
+      # Guard: a v* tag MUST match package.json version, so the published asset (named from package.json's
+      # version via artifactName) can never diverge from the Release (named from the tag). Fails fast, before
+      # the expensive build. Windows leg only — it's the one that publishes.
+      - name: Check tag matches package.json version
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag · package.json=$pkg"
+          [ "$tag" = "$pkg" ] || { echo "::error::release tag v$tag does not match package.json $pkg — bump package.json to match the tag"; exit 1; }
 
       - name: Install dependencies
         run: npm ci
@@ -70,3 +84,19 @@ jobs:
             dist/*.dmg
           if-no-files-found: warn
           retention-days: 14
+
+      # On a v* tag, publish the Windows installer to a GitHub Release so users download one .exe (no clone,
+      # no npm, no PowerShell). Only the Windows leg publishes for now; Linux/macOS remain artifact-only until
+      # validated. softprops/action-gh-release upserts the release for the pushed tag; the default GITHUB_TOKEN
+      # with contents:write is sufficient on our own (private) repo — no PAT needed. Unsigned: SmartScreen will
+      # warn on first run ("More info → Run anyway") — expected until a code-signing cert exists.
+      - name: Publish Windows installer to GitHub Release
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
