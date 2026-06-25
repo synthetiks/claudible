@@ -16,6 +16,13 @@ function Step($n, $m) { Write-Host "`n[$n] $m" -ForegroundColor Cyan }
 function Die($m) { Write-Host "`n$m" -ForegroundColor Yellow; exit 1 }
 Write-Host "=== Claudible installer ===" -ForegroundColor Cyan
 
+# Refuse to run from a protected Windows system folder (almost always because the installer was launched from an
+# ADMIN PowerShell, which opens in C:\WINDOWS\system32). npm can't create node_modules there -> EPERM. The fix is
+# location, not elevation: install into the user's own folder.
+if ($app -like "$env:windir\*") {
+  Die "Claudible is in a protected Windows system folder:`n  $app`nWindows blocks writes there, so 'npm install' fails with EPERM creating node_modules. Don't 'Run as Administrator' - open a NORMAL PowerShell (it opens in your user folder) and install there instead:`n`n  cd `$env:USERPROFILE`n  git clone https://github.com/thecrazydev1/claudible`n  cd `$env:USERPROFILE\claudible`n  powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1$(if ($Native) {' -Native'})`n`nThen remove this stray copy:`n  $app"
+}
+
 # Node 22.12+ on Windows - required to run the Electron app.
 function Test-Node {
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $false }
