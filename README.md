@@ -130,13 +130,13 @@ This: installs Claude Code (`npm i -g @anthropic-ai/claude-code`) if absent → 
 
 <details><summary><h3>🐧 Linux · verified backend</h3></summary>
 
-**Needs:** **Node 22.12+**, **Claude Code on your PATH** (`claude`, signed in), and the voice build deps — `npm run setup` installs them via `apt` (`git cmake build-essential ffmpeg espeak-ng python3` + [`uv`](https://docs.astral.sh/uv/)).
+**Needs:** **Node 22.12+**, a **C toolchain** (`build-essential` + `python3` — `node-pty` compiles on install), **Claude Code on your PATH** (`claude`, signed in), and the voice build deps — `bash setup/setup.sh` installs them via `apt` (`git cmake build-essential ffmpeg espeak-ng python3` + [`uv`](https://docs.astral.sh/uv/)).
 ```bash
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
-npm install        # builds node-pty for Linux (toolchain present) or uses a prebuilt
-npm run setup      # whisper.cpp + Kokoro (~480 MB models on first run)
-npm start          # auto-selects the native Linux backend (no WSL involved)
+npm install            # builds node-pty for Linux (needs build-essential + python3)
+bash setup/setup.sh    # whisper.cpp + Kokoro (~480 MB models on first run)  ·  NOT `npm run setup` (that's the Windows→WSL wrapper)
+npm start              # auto-selects the native Linux backend (no WSL involved)
 ```
 Packaged installers build with `npm run dist:linux` (AppImage + `.deb`). The native backend (`runScript` + a real node-pty spawn) is live-tested; a 123 MB AppImage builds clean.
 </details>
@@ -149,7 +149,7 @@ Same backend as Linux, with **Homebrew** for the voice build deps.
 git clone https://github.com/thecrazydev1/claudible
 cd claudible
 npm install
-npm run setup      # detects Homebrew for the build deps
+bash setup/setup.sh    # detects Homebrew for the build deps  ·  NOT `npm run setup` (Windows→WSL only)
 npm start
 ```
 A signed **`.dmg`** is the planned release artifact (`npm run dist:mac`).
