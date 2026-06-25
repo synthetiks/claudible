@@ -144,9 +144,17 @@ function ptyInfo() {
   }
   return _pty;
 }
+// Choose a Windows-RUNNABLE claude among `where claude` hits (pure → unit-tested). npm installs BOTH an
+// extensionless shell shim ('…\claude') and a Windows shim ('…\claude.cmd'/'.exe'); spawning the bare script
+// fails with CreateProcess 193 ("not a valid Win32 application"), so prefer a .cmd/.exe/.bat form. The .cmd
+// path is routed through cmd.exe by spawnClaude; a real .exe is spawned directly.
+function pickClaudeBin(hits) {
+  const list = (hits || []).map((s) => String(s).trim()).filter(Boolean);
+  return list.find((h) => /\.(cmd|exe|bat)$/i.test(h)) || list[0] || 'claude';
+}
 function whichClaude() {
   if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;
-  try { return cp.execFileSync('where', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim() || 'claude'; } catch { return 'claude'; }
+  try { return pickClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)); } catch { return 'claude'; }
 }
 // A real Windows node.exe for the hook commands (NEVER process.execPath = electron.exe).
 function whichNode() {
@@ -236,5 +244,5 @@ module.exports = {
   startVoiceServices, voiceHealth,
   installHooks, setup,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, gitBash, whichClaude, APP_ROOT },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, gitBash, whichClaude, pickClaudeBin, APP_ROOT },
 };

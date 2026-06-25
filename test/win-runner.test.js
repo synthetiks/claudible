@@ -6,12 +6,19 @@
 const assert = require('assert');
 const path = require('path');
 const win = require('../runners/win.js');
-const { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson } = win._internals;
+const { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, pickClaudeBin } = win._internals;
 
 const HOME = 'C:\\Users\\X';
 let pass = 0, fail = 0;
 function eq(label, a, b) { try { assert.deepStrictEqual(a, b); pass++; } catch { fail++; console.error(`  FAIL ${label}\n    got: ${JSON.stringify(a)}\n    exp: ${JSON.stringify(b)}`); } }
 function ok(label, c) { c ? pass++ : (fail++, console.error('  FAIL ' + label)); }
+
+// ---- pickClaudeBin (must avoid CreateProcess 193: prefer a runnable .cmd/.exe over npm's extensionless shim) ----
+eq('pickClaudeBin prefers .cmd over the bare shim', pickClaudeBin(['C:\\Users\\X\\AppData\\Roaming\\npm\\claude', 'C:\\Users\\X\\AppData\\Roaming\\npm\\claude.cmd']), 'C:\\Users\\X\\AppData\\Roaming\\npm\\claude.cmd');
+eq('pickClaudeBin prefers .exe (native install)', pickClaudeBin(['C:\\x\\claude', 'C:\\x\\claude.exe']), 'C:\\x\\claude.exe');
+eq('pickClaudeBin keeps .cmd regardless of order', pickClaudeBin(['C:\\a\\claude.cmd', 'C:\\a\\claude']), 'C:\\a\\claude.cmd');
+eq('pickClaudeBin falls back to first when no runnable form', pickClaudeBin(['C:\\only\\claude']), 'C:\\only\\claude');
+eq('pickClaudeBin empty -> bare claude', pickClaudeBin([]), 'claude');
 
 // ---- sessionDir (mirror session.sh SDIR) ----
 eq('sessionDir legacy', sessionDir({ kind: 'legacy' }, HOME), 'C:\\Users\\X\\.claudible\\session');

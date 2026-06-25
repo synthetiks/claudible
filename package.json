@@ -1,6 +1,6 @@
 {
   "name": "claudible",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A cockpit for Claude Code: a sleek desktop interface with live telemetry, fully-local push-to-talk voice (talk and hear replies), and live co-work — invite someone into your running session by link. Windows + WSL2.",
   "license": "MIT",
   "author": "the_crazydev",
@@ -98,7 +98,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/claudible.ico",
@@ -113,7 +115,10 @@
       "shortcutName": "Claudible"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon.png",
       "category": "Development",
       "synopsis": "Desktop cockpit for Claude Code: live telemetry, local push-to-talk voice, live co-work.",
@@ -124,7 +129,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "assets/icon.png",
