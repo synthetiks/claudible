@@ -766,6 +766,19 @@
       background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px}
     .approve input:focus{outline:none;border-color:rgba(255,255,255,.24)}
     .approve .ghost{background:none;border-color:var(--hairline-soft);color:var(--ink-dim)}
+    /* first-run onboarding wizard — reuses the .approve scrim/card; left-aligned, wider, stepped */
+    .wiz-box{width:430px;text-align:left}
+    .wiz-box h3,.wiz-box p{text-align:left}
+    .wiz-steps{display:flex;gap:6px;justify-content:center;margin:-4px 0 15px}
+    .wiz-dot{width:7px;height:7px;border-radius:50%;background:var(--hairline);transition:background .2s}
+    .wiz-dot.on{background:var(--accent)}
+    .wiz-opt{font-size:9px;letter-spacing:.05em;color:var(--ink-faint);border:1px solid var(--hairline-soft);border-radius:6px;padding:1px 6px;margin-left:7px;vertical-align:middle;text-transform:uppercase}
+    .wiz-dim{color:var(--ink-faint)}
+    .wiz-box input{margin-top:6px}
+    .wiz-box .row{justify-content:flex-end;margin-top:6px}
+    .wiz-skip-row{margin-top:15px;text-align:center}
+    .wiz-skiplink{background:none;border:none;color:var(--ink-faint);font-size:10.5px;cursor:pointer;padding:4px;width:auto;letter-spacing:.02em}
+    .wiz-skiplink:hover{color:var(--ink-dim)}
     /* system chat lines ("X joined" / "X left") */
     .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
     /* ============================================================
@@ -1037,6 +1050,7 @@
     <span class="s" id="sb-claude" style="display:none">claude code</span>
     <span class="s" id="sb-whisper">whisper</span>
     <span class="s" id="sb-kokoro">kokoro</span>
+    <span class="s" id="sb-voice" style="display:none"><span class="dot" id="d-voice"></span> <span id="voice-note">voice</span></span>
     <span class="end" id="meta">connecting…</span>
     <span class="ver" id="app-ver">claudible v0.2</span>
   </div>
@@ -1132,6 +1146,46 @@
       <input type="text" id="mkt-search" maxlength="60" placeholder="search plugins &amp; skills…" />
       <div class="mkt-list" id="mkt-list"><div class="ext-empty">loading…</div></div>
       <div class="row"><button id="mkt-close" class="ghost">Close</button></div>
+    </div>
+  </div>
+
+  <!-- first-run onboarding wizard: connect Claude → create workspace → link GitHub (optional) -->
+  <div class="approve" id="wizard">
+    <div class="box wiz-box">
+      <div class="wiz-steps"><span class="wiz-dot on"></span><span class="wiz-dot"></span><span class="wiz-dot"></span></div>
+
+      <div class="wiz-step" data-step="1">
+        <h3>Connect Claude Code</h3>
+        <p id="wiz-claude-msg">Checking for Claude Code…</p>
+        <div class="ws-busy" id="wiz-claude-busy"></div>
+        <div class="row">
+          <button id="wiz-claude-action" class="ghost" style="display:none"></button>
+          <button id="wiz-claude-next" class="primary" disabled>Next</button>
+        </div>
+      </div>
+
+      <div class="wiz-step" data-step="2" style="display:none">
+        <h3>Create your workspace</h3>
+        <p>A workspace is where this project's sessions live. We'll create a local one — name it, or keep the default.</p>
+        <input type="text" id="wiz-ws-name" maxlength="60" placeholder="My Project" value="My Project" />
+        <div class="ws-busy" id="wiz-ws-busy"></div>
+        <div class="row">
+          <button id="wiz-ws-back" class="ghost">Back</button>
+          <button id="wiz-ws-create" class="primary">Create &amp; continue</button>
+        </div>
+      </div>
+
+      <div class="wiz-step" data-step="3" style="display:none">
+        <h3>Link GitHub <span class="wiz-opt">optional</span></h3>
+        <p id="wiz-gh-msg">Checking GitHub…</p>
+        <div class="ws-busy" id="wiz-gh-busy"></div>
+        <div class="row">
+          <button id="wiz-gh-recheck" class="ghost" style="display:none">Re-check</button>
+          <button id="wiz-finish" class="primary">Finish</button>
+        </div>
+      </div>
+
+      <div class="wiz-skip-row"><button id="wiz-skip" class="wiz-skiplink" type="button">Skip setup for now</button></div>
     </div>
   </div>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>

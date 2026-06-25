@@ -316,9 +316,17 @@ function resetStats(t) {
   t.baseCost = null; t.sessTok = 0; t.agentTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.sessionLog.length = 0; t.curCtxPct = null;
   if (t.tabId === activeTabId) { repaintTracker(t); pushTracker(); }
 }
-// First-run voice setup progress (packaged native Windows only) → surface as a toast so the long model
-// download doesn't look like a hang. Guarded: a no-op everywhere the bridge/messages never fire.
-if (claudible.onProvision) claudible.onProvision((m) => { try { if (m && m.msg) toast(m.msg); } catch {} });
+// First-run voice setup (packaged native Windows only) → a quiet, persistent status-bar CHIP (#sb-voice), not a
+// toast: a multi-minute model download must not auto-vanish or read as a freeze. Phases: start/done/error.
+if (claudible.onProvision) claudible.onProvision((m) => {
+  try {
+    const sp = $('sb-voice'), note = $('voice-note'); if (!sp || !note) return;
+    sp.style.display = ''; sp.title = (m && m.msg) || '';
+    if (!m || m.phase === 'start') { setDot('d-voice', 'work'); note.textContent = 'voice · setting up…'; }
+    else if (m.phase === 'done') { setDot('d-voice', 'ok'); note.textContent = 'voice ready'; setTimeout(() => { const s = $('sb-voice'); if (s) s.style.display = 'none'; }, 8000); }
+    else if (m.phase === 'error') { setDot('d-voice', 'bad'); note.textContent = 'voice setup failed'; }
+  } catch {}
+});
 claudible.onStatus((s) => {
   const t = tabs.get(s.tabId); if (!t) return;   // route the status to the tab it belongs to
   // Reconcile a freshly-started tab with the real session id Claude assigned it, so its synthetic "live"
@@ -2485,7 +2493,7 @@ function openUnameInfo() {
 }
 (function () { const b = $('username-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openUnameInfo(); }); })();
 // First launch: pop the explainer once so new users learn the concept; afterwards it lives behind the ⓘ.
-{ const _wp = loadPrefs(); if (!_wp.wsHintSeen) { savePrefs({ wsHintSeen: true }); setTimeout(() => { try { openWsInfo(); } catch (e) {} }, 1000); } }
+{ const _wp = loadPrefs(); if (!_wp.wsHintSeen && _wp.onboardingDone) { savePrefs({ wsHintSeen: true }); setTimeout(() => { try { openWsInfo(); } catch (e) {} }, 1000); } }   // only post-onboarding; the first-run wizard owns workspace education (and sets wsHintSeen on finish/skip)
 // the bottom-left "share live" ⓘ — same click-popover as the workspace one, but anchored ABOVE the icon (the
 // share dock sits at the screen bottom). Explains what the web link is vs. just joining in Claudible.
 let shareInfoPop = null;
@@ -2906,3 +2914,109 @@ window.addEventListener('keydown', (e) => {
     }
   }
 }, true);
+
+// ---------- first-run onboarding wizard: connect Claude → create workspace → link GitHub (optional) ----------
+// Shown once (gated on prefs.onboardingDone). Reuses the .approve modal shell. Detection is live via
+// claudible.onboardStatus() (one bash probe). Sign-in is browser-OAuth, so Step 1 detects → guides → polls.
+// SAFETY (invariant): the wizard is ALWAYS dismissable — a persistent Skip button + Escape route through
+// dismiss(), which persists onboardingDone so it can never re-trap. It must never lock a user behind the
+// full-screen scrim when a step can't complete (failed install, no runner, offline). Existing users (who
+// already have a real workspace) skip the create step so it's never a forced workspace mutation.
+(function () {
+  const wiz = $('wizard'); if (!wiz || !claudible.onboardStatus) return;
+  let step = 1, poll = null, pollSince = 0, signingIn = false, hasWs = false, done = false, ticking = false;
+  const status = async () => { try { return await claudible.onboardStatus(); } catch { return null; } };
+  function show(n) {
+    step = n;
+    for (const el of document.querySelectorAll('#wizard .wiz-step')) el.style.display = (+el.dataset.step === n) ? '' : 'none';
+    document.querySelectorAll('.wiz-steps .wiz-dot').forEach((d, i) => d.classList.toggle('on', i < n));
+  }
+  function pollStart() { if (poll || done) return; pollSince = Date.now(); poll = setInterval(tick, 3000); }   // never re-arm after a Skip (done)
+  function pollStop() { if (poll) { clearInterval(poll); poll = null; } }
+  async function tick() {
+    if (done || step !== 1 || ticking) return;   // ticking: never overlap probes (each spawns bash/node/network)
+    // 6-min cap ONLY for the genuine orphan case: sign-in clicked → wizard HIDDEN to reveal the terminal → user
+    // abandons the browser flow. While the wizard is visible there's no orphan risk (Skip/Escape always dismiss),
+    // so the cap must not fire during a slow install and stomp its message or kill the poll mid-flow.
+    if (signingIn && Date.now() - pollSince > 360000) {
+      pollStop(); signingIn = false; if (!wiz.classList.contains('show')) { wiz.classList.add('show'); show(1); }
+      const b = $('wiz-claude-busy'); if (b) { b.classList.add('err'); b.textContent = 'Didn’t detect sign-in — try again, or Skip for now.'; } return;
+    }
+    ticking = true;
+    try { const s = await status(); if (s) applyClaude(s); } finally { ticking = false; }
+  }
+  async function open() {
+    try { const wl = await claudible.workspaceList(); hasWs = !!(wl && (wl.workspaces || []).some((w) => w && w.kind && w.kind !== 'legacy')); } catch {}
+    wiz.classList.add('show'); show(1); refreshClaude();
+  }
+  function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} } }
+  function finish() { dismiss(); setTimeout(() => { try { if (term) term.focus(); } catch {} }, 150); }
+  function afterClaude() { if (hasWs) goGh(); else show(2); }   // existing users skip the create step — never a forced workspace mutation
+
+  async function refreshClaude() { const s = await status(); if (s) applyClaude(s); }
+  function applyClaude(s) {
+    const msg = $('wiz-claude-msg'), act = $('wiz-claude-action'), next = $('wiz-claude-next');
+    if (s.claudeSignedIn) {
+      msg.textContent = '✓ Claude Code connected' + (s.claudeVersion ? ' (' + s.claudeVersion + ')' : '');
+      act.style.display = 'none'; next.disabled = false; pollStop();
+      if (signingIn) { signingIn = false; if (!wiz.classList.contains('show')) wiz.classList.add('show'); afterClaude(); }   // returned from sign-in → advance
+    } else if (!s.claudeInstalled) {
+      msg.textContent = 'Claude Code isn’t installed yet.';
+      act.style.display = ''; act.textContent = 'Install Claude Code'; act.onclick = installClaude; next.disabled = true; pollStart();
+    } else {
+      msg.textContent = 'Claude Code is installed but not signed in — sign in (it opens your browser) to continue.';
+      act.style.display = ''; act.textContent = 'Sign in to Claude'; act.onclick = signIn; next.disabled = true; pollStart();
+    }
+  }
+  async function installClaude() {
+    const b = $('wiz-claude-busy'), a = $('wiz-claude-action');
+    a.disabled = true; b.classList.remove('err'); b.textContent = 'Installing Claude Code… (this can take a few minutes)';
+    let r; try { r = await claudible.onboardInstallClaude(); } catch (e) { r = { ok: false, error: e && e.message }; }
+    a.disabled = false;
+    if (r && r.ok) { b.textContent = ''; refreshClaude(); }
+    else { b.classList.add('err'); b.textContent = 'Install failed: ' + ((r && r.error) || 'unknown') + ' — retry, or Skip for now.'; }
+  }
+  async function signIn() {
+    const b = $('wiz-claude-busy'); b.classList.remove('err'); b.textContent = 'Opening Claude — complete sign-in in the terminal/browser…';
+    signingIn = true; pollStart(); pollSince = Date.now();   // anchor the 6-min abandon budget at THIS OAuth hand-off, not at first detection (slow installs mustn't burn it)
+    try { await claudible.onboardClaudeLogin(); } catch {}
+    wiz.classList.remove('show');   // reveal the terminal; the poll re-shows the wizard once signed in (or after the 6-min cap)
+  }
+
+  async function createWs() {
+    if ($('wiz-ws-create').disabled) return;                  // in-flight guard (Enter can bypass the disabled button)
+    const b = $('wiz-ws-busy'), btn = $('wiz-ws-create');
+    const name = ($('wiz-ws-name').value || '').trim() || 'My Project';
+    btn.disabled = true; b.classList.remove('err'); b.textContent = 'Creating workspace…';
+    let r; try { r = await claudible.workspaceCreate('local', name, false); } catch (e) { r = { ok: false, error: e && e.message }; }
+    btn.disabled = false;
+    if (r && !r.ok && /already exists/i.test(r.error || '')) { b.textContent = ''; goGh(); return; }   // a prior run made it → just continue (no dead-end)
+    if (!r || !r.ok) { b.classList.add('err'); b.textContent = (r && r.error) || 'Could not create the workspace.'; return; }
+    b.textContent = '';
+    // mirror createWorkspace()'s post-create reconcile so the foreground tab points at the NEW ws (else its
+    // session list / live tracking key off the old ws — a sidebar desync immediately after onboarding).
+    { const t = AT(); if (t) { t.wsId = (r.workspace && r.workspace.id) || activeWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; try { t.term.reset(); } catch {} resetStats(t); } }
+    activeSession = null;
+    try { await refreshWorkspaces(); } catch {}
+    try { refreshSessions(); renderTabStrip(); } catch {}
+    goGh();
+  }
+
+  async function goGh() { show(3); const s = await status(); if (s) applyGh(s); }
+  function applyGh(s) {
+    const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck');
+    if (s.ghSignedIn) { msg.textContent = '✓ GitHub linked' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
+    else { msg.textContent = 'GitHub isn’t linked. Optional — needed only for private-repo workspaces & session sync; creating a repo workspace will prompt you to sign in.'; rc.style.display = ''; }
+  }
+
+  $('wiz-claude-next').addEventListener('click', afterClaude);
+  $('wiz-ws-back').addEventListener('click', () => show(1));
+  $('wiz-ws-create').addEventListener('click', createWs);
+  $('wiz-ws-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') createWs(); });
+  $('wiz-gh-recheck').addEventListener('click', goGh);
+  $('wiz-finish').addEventListener('click', finish);
+  $('wiz-skip').addEventListener('click', dismiss);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && wiz.classList.contains('show')) { e.preventDefault(); dismiss(); } });
+
+  try { if (!loadPrefs().onboardingDone) setTimeout(open, 700); } catch {}
+})();

@@ -1231,6 +1231,32 @@ ipcMain.handle('claude:version', () => {
   });
 });
 
+// ---- first-run onboarding (the Get-Started wizard) -------------------------------------------------
+// Aggregate status the wizard polls — Claude Code + gh installed/signed-in + voice state. Detected cross-runner
+// via ONE bash probe (check-onboard.sh) so it reads the right home on win-native/WSL/Posix alike.
+ipcMain.handle('onboard:status', async () => {
+  let s = { claudeInstalled: false, claudeSignedIn: false, claudeVersion: '', ghInstalled: false, ghSignedIn: false, ghAccount: '' };
+  try {
+    const { stdout } = await runner.runScript('check-onboard.sh', '', { timeout: 12000 });
+    const o = JSON.parse(String(stdout).trim() || '{}'); if (o && typeof o === 'object') s = Object.assign(s, o);
+  } catch {}
+  return Object.assign(s, { voiceReady: voiceProvisioned(), voiceProvisioning: provisioning });
+});
+// Install Claude Code (npm -g) — called when claudeInstalled is false. Blocks until done (a few min).
+ipcMain.handle('onboard:install-claude', async () => {
+  try { const { stdout } = await runner.runScript('install-claude.sh', '', { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }); return JSON.parse(String(stdout).trim() || '{"ok":false,"error":"no output"}'); }
+  catch (e) { return { ok: false, error: (e && e.message) || 'install failed' }; }
+});
+// Sign-in is browser-OAuth (no headless path): ensure the foreground tab is running Claude so its login surfaces.
+// The renderer hides the wizard to reveal the terminal, then polls onboard:status until signedIn flips true.
+ipcMain.handle('onboard:claude-login', async () => {
+  try {
+    if (fgTabId && ptys.has(fgTabId)) respawnPty(fgTabId, '');     // restart Claude in the live tab → login surfaces
+    else spawnPty('main', 120, 32, activeWorkspace, '');           // no tab yet → spawn one
+    return { ok: true };
+  } catch (e) { return { ok: false, error: (e && e.message) || 'could not start Claude' }; }
+});
+
 // The active session's LATEST assistant reply, so the manual Speak button can re-read it even after a relaunch
 // (when the in-memory lastReply is empty) or for a session opened from history. Reads the transcript and returns
 // the last 'claude' message's text, or '' if there's genuinely nothing to read.
