@@ -2611,6 +2611,13 @@ function wsMenuItems(chip, nm, w) {
         hint: 'Sync this workspace’s sessions over its GitHub repo so teammates can open, resume, AND Join your sessions live — no link needed.',
         act: () => openSyncModal(w) });
     }
+  } else if (w.kind === 'local') {
+    items.push({ icon: CLOUD_SVG, label: 'Sync across my devices…',
+      hint: 'Back this workspace with a private GitHub repo so it + its sessions appear on your other devices (needs GitHub connected).',
+      act: () => upgradeWorkspace(w) });
+    items.push({ icon: PERSON_ADD_SVG, label: 'Invite someone…',
+      hint: 'Share this workspace with a teammate — creates its private GitHub repo first, then adds them.',
+      act: () => inviteToLocal(w) });
   }
   if (w.kind !== 'legacy') {
     items.push({ sep: true });
@@ -2699,6 +2706,25 @@ async function toggleShared(w) {
   const next = !w.shared;
   let r = null; try { r = await claudible.workspaceSetShared(w.id, next); } catch {}
   if (r && r.ok) { w.shared = r.shared; renderWsChips(); }
+}
+// Make a LOCAL workspace synced across devices (and shareable): one click backs it with a private GitHub repo
+// in place — its sessions appear on your other devices via discovery. Needs GitHub connected.
+async function upgradeWorkspace(w) {
+  if (!confirm('Sync "' + w.label + '" across your devices?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected). The workspace + its sessions then appear on your other devices, and you can invite people. Your Claude transcripts stay OUT of the repo.')) return;
+  toast('Setting up sync — creating a private repo…');
+  let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
+  if (r && r.ok) { toast('Synced ✓ — this workspace now appears on your other devices'); try { await refreshWorkspaces(); } catch {} }
+  else { const m = (r && r.error) || 'unknown'; toast('Could not sync: ' + m + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); }
+}
+// Inviting to a local workspace: it must become a synced repo first (collaborators need a GitHub repo), then
+// open the normal invite modal on the now-repo workspace.
+async function inviteToLocal(w) {
+  toast('Preparing to share — creating a private repo…');
+  let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
+  if (!r || !r.ok) { const m = (r && r.error) || 'unknown'; toast('Could not share: ' + m + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); return; }
+  try { await refreshWorkspaces(); } catch {}
+  const up = (workspaces || []).find((x) => x.id === w.id) || w;   // re-fetch the entry (now kind 'repo')
+  openInviteModal(up);
 }
 // repo collaborator invite modal
 let inviteWs = null;

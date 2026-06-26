@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),
+  workspaceUpgrade: (id) => ipcRenderer.invoke('workspace:upgrade', id),   // local → synced (private repo) so it appears on other devices + can be shared
   workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
   workspaceAcceptInvite: (id, useDefault) => ipcRenderer.invoke('workspace:acceptInvite', { id, useDefault: !!useDefault }),   // choose clone dir + clone
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),

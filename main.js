@@ -750,7 +750,7 @@ function discoverWorkspaces() {
           const owner = String(item && item.owner || '').replace(/[^A-Za-z0-9-]/g, '');
           if (!slug || !owner) continue;
           const wid = `repo-${slug}`;
-          if (registry.workspaces.some((w) => w.id === wid)) continue;       // already known locally
+          if (registry.workspaces.some((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner))) continue;   // already known (incl. an upgraded-in-place ws: it's kind 'repo' with owner set, so this catches it without hiding a different owner's same-slug invite)
           const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoUrl: (item && item.repoUrl) || undefined, createdAt: Date.now(), needsClone: true };
           registry.workspaces.push(ws); added.push(ws);
         }
@@ -795,6 +795,35 @@ ipcMain.handle('session:syncNow', async (e, id) => {   // the manual "sync now" 
   return doSync(ws, 'sync', { live });
 });
 ipcMain.handle('workspace:discover', () => discoverWorkspaces());
+
+// Make a LOCAL workspace SYNCED across devices: turn its folder into a private GitHub repo IN PLACE (so its
+// existing sessions stay linked — they're keyed by the unchanged path), then enable session sync. Powers the
+// "sync across my devices" button and auto-upgrade-on-invite. Keeps the registry id/label so the active tab
+// and chips don't jump; discovery dedupes by slug (below) so the upgraded ws is never re-added as a duplicate.
+ipcMain.handle('workspace:upgrade', async (e, id) => {
+  const ws = registry.workspaces.find((w) => w.id === id);
+  if (!ws) return { ok: false, error: 'no such workspace' };
+  if (ws.kind === 'repo') return { ok: true, already: true };
+  if (ws.kind !== 'local') return { ok: false, error: 'only a local workspace can be made synced' };
+  if (!APPDIR_WSL) return { ok: false, error: 'WSL/GitHub backend is not available' };
+  const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (!slug) return { ok: false, error: 'bad workspace' };
+  const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? runner.toGuestPath(ws.path) : '';
+  const dirArg = wsp ? ` '${wsp}'` : '';
+  const { err, stdout } = await runner.runScript('upgrade-workspace.sh', `'${slug}'${dirArg}`, { timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
+  if (err) return { ok: false, error: 'upgrade failed to run' };
+  let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+  if (!r.ok) return { ok: false, error: r.error || 'could not create the repo' };
+  ws.kind = 'repo'; ws.owner = r.owner; ws.repoUrl = r.repoUrl; if (r.path) ws.path = r.path; ws.syncSessions = true; saveRegistry();
+  // set up the sessions-sync branch + first push in the background (don't block the click); failure leaves the
+  // repo created with sync flagged — the next sync/relaunch retries (mirrors syncSetEnabled).
+  (async () => {
+    if (syncLock.has(ws.id)) return; syncLock.add(ws.id);
+    let ir; try { ir = await runSync(ws, 'init', {}); } finally { syncLock.delete(ws.id); }   // release BEFORE doSync, else its lock-guard makes the first push a no-op
+    if (ir && ir.ok) doSync(ws, 'sync', {});   // push this workspace's existing sessions now, so they reach your other devices immediately
+  })();
+  return { ok: true, workspace: { id: ws.id, label: ws.label, kind: ws.kind, owner: ws.owner, repoUrl: ws.repoUrl } };
+});
 
 // ---- workspaces (the library a session belongs to: legacy / local folder / private repo) ----
 ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspaces: registry.workspaces }));

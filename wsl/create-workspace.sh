@@ -37,6 +37,9 @@ case "$kind" in
     if ! gh repo create "$owner/$slug" --private --add-readme >/dev/null 2>&1; then
       printf '{"ok":false,"error":"could not create the repo (is the name already taken on GitHub?)"}'; exit 0
     fi
+    # Tag it so the SAME user's other devices (and collaborators) discover it in ONE fast query (topics are
+    # returned inline by /user/repos — no per-repo scan). Best-effort: discovery also still works via the marker.
+    gh repo edit "$owner/$slug" --add-topic claudible-workspace >/dev/null 2>&1 || true
     # Clone via gh so it uses gh's auth (no credential-helper prompt). On failure, roll back so the
     # same name is retryable: drop the half-clone, and best-effort delete the just-created repo
     # (needs the delete_repo scope — ignored if absent, hence the honest fallback message).
