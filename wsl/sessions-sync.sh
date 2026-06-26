@@ -64,6 +64,17 @@ import_file() {   # $1=src  $2=dest  $3=id
 
 WT="$HOME/.claudible/sessions-sync/$WS_SLUG"         # the isolated sessions worktree
 BR="claudible/sessions"                              # the orphan branch sessions ride on
+
+# Windows git-bash: the runner sets MSYS_NO_PATHCONV, so git.exe receives our paths LITERALLY and misreads the
+# MSYS '/c/…' form as 'C:\c\…' — which silently breaks `worktree add`/`-C` (the cause of "could not set up the
+# sessions branch" + missing synced sessions). Normalize the two paths git.exe actually touches — the clone dir
+# (SDIR) and the worktree (WT) — to the mixed 'C:/…' form, a real Windows path that BOTH git and bash accept.
+# No-op on WSL/Posix (cygpath absent). PROJ is left alone: it's only ever read via bash `cp`, and its encoding
+# comes from CLAUDIBLE_PROJ on Windows so it already matches Claude's transcript store.
+if command -v cygpath >/dev/null 2>&1; then
+  SDIR="$(cygpath -m "$SDIR" 2>/dev/null || printf '%s' "$SDIR")"
+  WT="$(cygpath -m "$WT" 2>/dev/null || printf '%s' "$WT")"
+fi
 LIVE="${CLAUDIBLE_LIVE_SESSION:-}"
 case "$LIVE" in *[!A-Za-z0-9-]*) LIVE="" ;; esac     # only a clean id can name the live session
 

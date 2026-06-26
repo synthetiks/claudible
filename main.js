@@ -655,8 +655,9 @@ function runSync(ws, op, opts) {
     if (!APPDIR_WSL || !ws || ws.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
     const live = (opts && opts.live && /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(opts.live)) ? `CLAUDIBLE_LIVE_SESSION='${opts.live}' ` : '';
     runner.runScript('sessions-sync.sh', `'${o}'`, { ws, extraEnv: live, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
-        if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'exec' }); }
-        try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false, error: 'parse' }); }
+        if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'sync could not run: ' + ((err && err.message) || err) }); }
+        const raw = String(stdout).trim();
+        try { resolve(JSON.parse(raw || '{}')); } catch { resolve({ ok: false, error: raw ? 'sync: ' + raw.slice(0, 300) : 'sync returned no output' }); }
       });
   });
 }

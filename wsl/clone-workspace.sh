@@ -13,6 +13,11 @@ case "$slug"  in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"ba
 case "$dir_in" in *\'* | *\"*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac   # shell/JSON injection guard
 
 if [ -n "$dir_in" ]; then dir="$dir_in"; else dir="$HOME/.claudible/repos/$slug"; fi
+# Windows git-bash: the runner sets MSYS_NO_PATHCONV, so gh/git.exe read our path literally and turn the MSYS
+# '/c/…' form into 'C:\c\…' — the clone lands in the wrong place and the recorded path never matches Claude's
+# transcript store (missing sessions). Normalize to the mixed 'C:/…' form that git AND bash both accept, and
+# RETURN that form so ws.path stays consistent everywhere. No-op on WSL/Posix (cygpath absent) or a C:/ dir.
+if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
 if [ -d "$dir/.git" ]; then printf '{"ok":true,"already":true,"slug":"%s","path":"%s"}' "$slug" "$dir"; exit 0; fi   # already cloned
 command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed in WSL"}'; exit 0; }
 mkdir -p "$(dirname "$dir")" 2>/dev/null
