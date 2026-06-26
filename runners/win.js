@@ -49,9 +49,14 @@ function appDirGuest() {
   catch (e) { console.error('[claudible] cygpath failed:', e.message); _appdirMsys = null; }
   return _appdirMsys;
 }
+// MIXED form (C:/Users/…) — NOT the unix form (/c/Users/…). A chosen folder becomes a workspace path that is
+// (a) handed to git.exe/gh.exe by clone/upgrade and (b) used as the Claude pty's cwd. git.exe + node-pty are
+// WINDOWS programs: under MSYS_NO_PATHCONV they read `/c/Games/X` LITERALLY as C:\c\Games\X (a stray top-level
+// `c` folder — the reported bug). The mixed `C:/Games/X` is a real Windows path that ALSO works inside git-bash
+// (forward slashes), so it's correct in every consumer. (toHostPath stays -w for the few Windows-native call sites.)
 function toGuestPath(p) {
   const bash = gitBash(); if (!bash) return '';
-  try { return cp.execFileSync(bash, ['-lc', `cygpath -u '${String(p).replace(/'/g, "'\\''")}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
+  try { return cp.execFileSync(bash, ['-lc', `cygpath -m '${String(p).replace(/'/g, "'\\''")}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
 function toHostPath(p) {
   const bash = gitBash(); if (!bash) return '';
