@@ -66,5 +66,52 @@ eq('settings PostToolUse matcher', s.hooks.PostToolUse[0].matcher, 'Task|Agent')
 eq('settings PreToolUse matcher', s.hooks.PreToolUse[0].matcher, 'Task|Agent');
 ok('settings is valid JSON', (() => { try { JSON.parse(JSON.stringify(s)); return true; } catch { return false; } })());
 
+// ---- dependency detection (buildDepReport — the self-bootstrap provisioner's pure core) ----
+const { buildDepReport, semverGte, pickRunnable } = win._internals;
+
+ok('semverGte equal', semverGte('22.12.0', '22.12.0'));
+ok('semverGte higher minor', semverGte('22.14.0', '22.12.0'));
+ok('semverGte v-prefixed (node -v form)', semverGte('v22.12.0', '22.12.0'));
+ok('semverGte lower major -> false', !semverGte('20.19.0', '22.12.0'));
+ok('semverGte lower patch -> false', !semverGte('22.11.9', '22.12.0'));
+ok('semverGte garbage -> false', !semverGte('not a version', '22.12.0'));
+
+eq('pickRunnable prefers .exe over bare', pickRunnable(['C:\\a\\node', 'C:\\a\\node.exe']), 'C:\\a\\node.exe');
+eq('pickRunnable falls back to first', pickRunnable(['C:\\only\\thing']), 'C:\\only\\thing');
+eq('pickRunnable empty -> ""', pickRunnable([]), '');
+
+// inject fake IO so the pure report logic runs on Linux (no `where`, no Windows binaries)
+function fakeIO(spec) {
+  return {
+    gitBashPresent: () => !!spec.gitBash,
+    resolveTool: (id) => (spec.present && id in spec.present) ? `C:\\bin\\${id}.exe` : '',
+    toolVersion: (id) => (spec.present && spec.present[id]) || '',
+    claudeSignedIn: () => !!(spec.signedIn && spec.signedIn.claude),
+    ghAuth: () => (spec.signedIn && spec.signedIn.gh) || { signedIn: false, account: '' },
+  };
+}
+
+const full = buildDepReport(fakeIO({ gitBash: true,
+  present: { node: 'v22.14.0', git: 'git version 2.45.0', claude: '1.2.3 (Claude Code)', uv: 'uv 0.5.0', gh: 'gh version 2.40.0', cloudflared: '2024.1.0' },
+  signedIn: { claude: true, gh: { signedIn: true, account: 'mk' } } }));
+ok('full: node installed + ok (>=22.12)', full.node.installed && full.node.ok);
+eq('full: node version captured', full.node.version, 'v22.14.0');
+ok('full: claude installed + signedIn', full.claude.installed && full.claude.signedIn);
+eq('full: gh account', full.gh.account, 'mk');
+ok('full: gitBash true', full.gitBash === true);
+
+const bare = buildDepReport(fakeIO({ gitBash: false, present: {}, signedIn: {} }));
+ok('bare: node missing (no install, not ok)', !bare.node.installed && !bare.node.ok);
+ok('bare: git missing', !bare.git.installed);
+ok('bare: claude missing + not signed', !bare.claude.installed && !bare.claude.signedIn);
+ok('bare: gh missing + not signed + no account', !bare.gh.installed && !bare.gh.signedIn && bare.gh.account === '');
+ok('bare: gitBash false (chicken-and-egg signal)', bare.gitBash === false);
+
+const oldNode = buildDepReport(fakeIO({ gitBash: true, present: { node: 'v20.19.0' }, signedIn: {} }));
+ok('old node: installed but NOT ok (gates on 22.12)', oldNode.node.installed && !oldNode.node.ok);
+
+const noLogin = buildDepReport(fakeIO({ gitBash: true, present: { claude: '1.0.0' }, signedIn: { claude: false } }));
+ok('claude installed but not signed in (soft gate)', noLogin.claude.installed && !noLogin.claude.signedIn);
+
 console.log(`\nwin-runner (pure core): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

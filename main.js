@@ -26,6 +26,7 @@ if (app.isPackaged && process.platform === 'win32') {
   if (!process.env.CLAUDIBLE_RUNNER) process.env.CLAUDIBLE_RUNNER = 'win';
 }
 const runner = require('./runners/runner').select();
+const deps = require('./runners/deps');   // self-bootstrapping dependency provisioner (detect + install + manifest)
 
 let win;
 // Multi-tab: each Claudible tab is its own live session/pty. `ptys` maps a renderer-issued tabId to a
@@ -99,6 +100,22 @@ const SETTINGS_FILE = path.join(RT, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
 ipcMain.on('settings:set', (e, obj) => { try { fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2)
+// Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
+// the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
+// MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
+// finds bash and workspaces/sync/diff come alive. No-op when nothing was persisted; never overrides a live env.
+(function applyPersistedDepEnv() {
+  try {
+    const s = readSettings();
+    const e = s && s.depEnv;
+    if (e && typeof e === 'object') for (const [k, v] of Object.entries(e)) {
+      if (/^CLAUDIBLE_[A-Z_]+$/.test(k) && typeof v === 'string' && v && !process.env[k]) process.env[k] = v;
+    }
+    if (s && typeof s.depPath === 'string' && s.depPath) for (const bin of s.depPath.split(path.delimiter)) {
+      if (bin && !String(process.env.PATH || '').split(path.delimiter).includes(bin)) process.env.PATH = bin + path.delimiter + (process.env.PATH || '');
+    }
+  } catch {}
+})();
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
@@ -146,6 +163,26 @@ function startVoiceServices() { runner.startVoiceServices(); }
 // yet, run the PROVEN setup-win.ps1 (the same script install.ps1 -Native uses) to fetch/build them, then start
 // the services. Reuses the script wholesale (no duplicated logic), is idempotent (re-runs safely if interrupted),
 // and NEVER blocks the terminal — a failure just leaves voice unavailable with retry-on-reopen.
+// winget/npm write the registry PATH, not THIS process's env — so a tool installed at runtime is invisible
+// until refreshed. Reload PATH from the machine+user registry and fold in the dirs winget/npm/uv drop bins
+// into, so a freshly-installed dep resolves WITHOUT a restart (the non-Git provisioner path). Windows-only.
+function refreshWindowsPath() {
+  if (process.platform !== 'win32') return;
+  try {
+    const out = require('child_process').execFileSync('powershell.exe',
+      ['-NoProfile', '-Command', "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"],
+      { encoding: 'utf8', windowsHide: true });
+    const merged = String(out).trim();
+    if (merged) process.env.PATH = merged + path.delimiter + (process.env.PATH || '');
+  } catch {}
+  const home = app.getPath('home');
+  const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  for (const bin of [path.join(roaming, 'npm'), path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(home, '.local', 'bin')]) {
+    if (!String(process.env.PATH || '').split(path.delimiter).includes(bin)) process.env.PATH = bin + path.delimiter + (process.env.PATH || '');
+  }
+}
+
 function voiceProvisioned() {
   const v = process.env.CLAUDIBLE_VOICE || path.join(app.getPath('home'), '.claudible', 'voice');   // same root setup-win.ps1 writes to (else re-provisions forever)
   try {
@@ -158,10 +195,16 @@ let provisioning = false;
 function ensureVoiceProvisioned() {
   // Only the packaged native-Windows path self-provisions; dev / WSL / the script install already set voice up.
   if (provisioning || !app.isPackaged || process.platform !== 'win32' || process.env.CLAUDIBLE_RUNNER !== 'win') return false;
+  // Voice setup (setup-win.ps1) git-clones Kokoro + runs through git-bash, so it REQUIRES Git. On a freshly-set-up
+  // machine Git isn't here yet — the System-check step installs it (then restarts). Until git-bash resolves
+  // (APPDIR_WSL non-null), skip: otherwise the Kokoro clone fails on first launch and shows a spurious
+  // "voice setup didn't finish" chip that has nothing to do with the dependency provisioner. Voice provisions
+  // cleanly on the next launch, once Git is present. No behavior change on an already-set-up machine.
+  if (!APPDIR_WSL) return false;
   if (voiceProvisioned()) return false;
   provisioning = true;
   const home = app.getPath('home');
-  const send = (phase, msg) => { try { win && win.webContents.send('provision', { phase, msg }); } catch {} };
+  const send = (phase, msg) => { try { win && win.webContents.send('provision', { dep: 'voice', phase, msg }); } catch {} };   // dep tag: the renderer routes voice events to the chip, per-dep events to the System-check rows
   let out = 'ignore'; try { fs.mkdirSync(path.join(home, '.claudible', 'logs'), { recursive: true }); out = fs.openSync(path.join(home, '.claudible', 'logs', 'provision.out'), 'a'); } catch {}
   const closeOut = () => { try { if (typeof out === 'number') fs.closeSync(out); } catch {} };   // release the log fd when the child ends
   const script = path.join(__dirname, 'setup', 'setup-win.ps1');   // shipped in the bundle (asar:false, setup/** included)
@@ -1263,15 +1306,15 @@ ipcMain.handle('claude:version', () => {
 });
 
 // ---- first-run onboarding (the Get-Started wizard) -------------------------------------------------
-// Aggregate status the wizard polls — Claude Code + gh installed/signed-in + voice state. Detected cross-runner
-// via ONE bash probe (check-onboard.sh) so it reads the right home on win-native/WSL/Posix alike.
+// Aggregate status the wizard polls — Claude Code + gh installed/signed-in + voice state. Derived from the
+// SAME dependency probe the System-check step uses (deps.detect → runner.detectDeps), so there's one source
+// of truth and one probe. On win-native that probe is pure-Node (no git-bash), which also fixes the old
+// false-negative where check-onboard.sh silently reported everything-not-installed when Git was missing.
+function voiceState() { return { voiceReady: voiceProvisioned(), voiceProvisioning: provisioning }; }
 ipcMain.handle('onboard:status', async () => {
   let s = { claudeInstalled: false, claudeSignedIn: false, claudeVersion: '', ghInstalled: false, ghSignedIn: false, ghAccount: '' };
-  try {
-    const { stdout } = await runner.runScript('check-onboard.sh', '', { timeout: 12000 });
-    const o = JSON.parse(String(stdout).trim() || '{}'); if (o && typeof o === 'object') s = Object.assign(s, o);
-  } catch {}
-  return Object.assign(s, { voiceReady: voiceProvisioned(), voiceProvisioning: provisioning });
+  try { s = Object.assign(s, deps.toOnboardStatus(await deps.detect(runner, voiceState()))); } catch {}
+  return Object.assign(s, voiceState());
 });
 // Install Claude Code (npm -g) — called when claudeInstalled is false. Blocks until done (a few min).
 ipcMain.handle('onboard:install-claude', async () => {
@@ -1287,6 +1330,40 @@ ipcMain.handle('onboard:claude-login', async () => {
     return { ok: true };
   } catch (e) { return { ok: false, error: (e && e.message) || 'could not start Claude' }; }
 });
+
+// ---- self-bootstrapping dependency provisioner (the System-check wizard step) ----------------------
+// Detect every dependency Claudible needs and install the missing ones. The renderer renders deps.detect's
+// rows, fires preflight:install per missing dep (progress streams over the shared 'provision' channel,
+// tagged with {dep}), and offers a restart when a Git install needs one.
+ipcMain.handle('preflight:status', async () => {
+  try { return await deps.detect(runner, voiceState()); }
+  catch (e) { return { runner: runner.id, gitBash: true, deps: [], error: (e && e.message) || 'detect failed' }; }
+});
+// Install one dependency. Voice keeps its proven path (ensureVoiceProvisioned); everything else goes through
+// deps.install. On success we persist any portable-fallback env, apply it + refresh PATH live, and report
+// whether a restart is needed (Git on win, whose app-dir resolves at require-time).
+ipcMain.handle('preflight:install', async (_e, depId) => {
+  const id = String(depId || '').replace(/[^a-z]/g, '');
+  if (id === 'voice') { const started = ensureVoiceProvisioned(); return { ok: started || voiceProvisioned(), restartRequired: false }; }
+  const send = (m) => { try { win && win.webContents.send('provision', m); } catch {} };
+  let res;
+  try { res = await deps.install(runner, id, send); } catch (e) { return { ok: false, error: (e && e.message) || 'install failed', restartRequired: false }; }
+  if (res.ok) {
+    if (res.env && Object.keys(res.env).length) {
+      try {
+        const s = readSettings();
+        s.depEnv = Object.assign({}, s.depEnv, res.env);   // survive a relaunch (re-applied at boot, before APPDIR_WSL)
+        fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2));
+      } catch {}
+      for (const [k, v] of Object.entries(res.env)) if (typeof v === 'string' && v) process.env[k] = v;
+    }
+    refreshWindowsPath();
+    if (runner.id === 'win' && typeof runner.resetCaches === 'function') runner.resetCaches();   // re-resolve git-bash/app-dir next call
+  }
+  return { ok: res.ok, error: res.error || '', restartRequired: !!res.restartRequired };
+});
+// Relaunch — the cleanest way to pick up a freshly-installed Git (main.js resolves the app-dir at require-time).
+ipcMain.handle('preflight:restart', () => { try { app.relaunch(); app.exit(0); } catch {} return { ok: true }; });
 
 // The active session's LATEST assistant reply, so the manual Speak button can re-read it even after a relaunch
 // (when the in-memory lastReply is empty) or for a session opened from history. Reads the transcript and returns

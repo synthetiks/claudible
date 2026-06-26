@@ -24,6 +24,10 @@
 //   voiceHealth()             -> Promise<{whisper, kokoro}>
 //   installHooks(sessionDir)  -> void|Promise   write CC settings + hooks (SEAMS §4; Node-ported in 0.5)
 //   setup(opts)               -> Promise   per-OS install/build (SEAMS §6; driven by the installer)
+//   detectDeps()              -> map|Promise<map>   raw dependency status for the self-bootstrap provisioner
+//                                              (runners/deps.js merges it with the install manifest). win:
+//                                              pure-Node `where`/version/cred read (NO git-bash — Git itself
+//                                              may be missing); wsl/posix: delegate to bash wsl/preflight.sh.
 //
 // SELECTION (plan 0.4): honor CLAUDIBLE_RUNNER for testing; else auto-detect. Until win/posix are
 // built and proven, every path resolves to the WSL backend, so today's behavior is unchanged.

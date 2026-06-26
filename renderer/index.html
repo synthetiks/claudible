@@ -779,6 +779,22 @@
     .wiz-skip-row{margin-top:15px;text-align:center}
     .wiz-skiplink{background:none;border:none;color:var(--ink-faint);font-size:10.5px;cursor:pointer;padding:4px;width:auto;letter-spacing:.02em}
     .wiz-skiplink:hover{color:var(--ink-dim)}
+    /* System-check step: one row per dependency (status pill + per-row action) */
+    .dep-list{margin:4px 0 2px;display:flex;flex-direction:column;gap:1px;max-height:46vh;overflow:auto}
+    .dep-row{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--hairline-soft)}
+    .dep-row:last-child{border-bottom:none}
+    .dep-main{flex:1;min-width:0}
+    .dep-name{font-size:12px;color:var(--ink);letter-spacing:.01em}
+    .dep-name .wiz-opt{margin-left:6px}
+    .dep-hint{font-size:10px;color:var(--ink-faint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .dep-pill{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;border-radius:6px;padding:2px 7px;border:1px solid var(--hairline-soft);color:var(--ink-dim);white-space:nowrap}
+    .dep-pill.ready{color:#7ee0a8;border-color:rgba(126,224,168,.4)}
+    .dep-pill.missing,.dep-pill.outdated,.dep-pill.error{color:#e6b86a;border-color:rgba(230,184,106,.4)}
+    .dep-pill.signin,.dep-pill.unconfirmed{color:#9bb4ff;border-color:rgba(155,180,255,.4)}
+    .dep-pill.installing{color:var(--accent);border-color:rgba(255,255,255,.18)}
+    .dep-act{width:auto;margin:0;padding:0 10px;height:26px;font-size:11px;background:none;border:1px solid var(--hairline-soft);color:var(--ink-dim);border-radius:7px;cursor:pointer;white-space:nowrap}
+    .dep-act:hover:not(:disabled){color:var(--ink);border-color:rgba(255,255,255,.24)}
+    .dep-act:disabled{opacity:.5;cursor:default}
     /* system chat lines ("X joined" / "X left") */
     .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
     /* ============================================================
@@ -1152,9 +1168,20 @@
   <!-- first-run onboarding wizard: connect Claude → create workspace → link GitHub (optional) -->
   <div class="approve" id="wizard">
     <div class="box wiz-box">
-      <div class="wiz-steps"><span class="wiz-dot on"></span><span class="wiz-dot"></span><span class="wiz-dot"></span></div>
+      <div class="wiz-steps"><span class="wiz-dot on"></span><span class="wiz-dot"></span><span class="wiz-dot"></span><span class="wiz-dot"></span></div>
 
       <div class="wiz-step" data-step="1">
+        <h3>System check</h3>
+        <p>Claudible runs on a few tools. We'll check for them and install whatever's missing — you only sign in to the ones that truly need it.</p>
+        <div class="dep-list" id="wiz-dep-list"><div class="wiz-dim">Checking your system…</div></div>
+        <div class="ws-busy" id="wiz-sys-busy"></div>
+        <div class="row">
+          <button id="wiz-sys-install" class="ghost" style="display:none">Install all missing</button>
+          <button id="wiz-sys-next" class="primary" disabled>Next</button>
+        </div>
+      </div>
+
+      <div class="wiz-step" data-step="2" style="display:none">
         <h3>Connect Claude Code</h3>
         <p id="wiz-claude-msg">Checking for Claude Code…</p>
         <div class="ws-busy" id="wiz-claude-busy"></div>
@@ -1164,7 +1191,7 @@
         </div>
       </div>
 
-      <div class="wiz-step" data-step="2" style="display:none">
+      <div class="wiz-step" data-step="3" style="display:none">
         <h3>Create your workspace</h3>
         <p>A workspace is where this project's sessions live. We'll create a local one — name it, or keep the default.</p>
         <input type="text" id="wiz-ws-name" maxlength="60" placeholder="My Project" value="My Project" />
@@ -1175,7 +1202,7 @@
         </div>
       </div>
 
-      <div class="wiz-step" data-step="3" style="display:none">
+      <div class="wiz-step" data-step="4" style="display:none">
         <h3>Link GitHub <span class="wiz-opt">optional</span></h3>
         <p id="wiz-gh-msg">Checking GitHub…</p>
         <div class="ws-busy" id="wiz-gh-busy"></div>

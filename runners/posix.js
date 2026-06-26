@@ -88,9 +88,18 @@ function installHooks(_sessionDir) { /* handled by session.sh under bash */ }
 // setup: the Linux/macOS voice build is `bash setup/setup.sh` run natively; driven by the platform installer.
 function setup(_opts) { return Promise.resolve({ ok: true, note: 'Posix setup is bash setup/setup.sh (native)' }); }
 
+// detectDeps: the provisioner's dependency probe. Same cross-runner preflight.sh, run natively under bash.
+async function detectDeps() {
+  try {
+    const { stdout } = await runScript('preflight.sh', '', { timeout: 12000 });
+    const o = JSON.parse(String(stdout).trim() || '{}');
+    return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
+  } catch { return { gitBash: true }; }
+}
+
 module.exports = {
   id: 'posix',
-  detect,
+  detect, detectDeps,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices, voiceHealth,

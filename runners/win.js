@@ -168,6 +168,111 @@ function whichNode() {
   return 'node';   // installer guarantees Windows Node on PATH; bare 'node' resolves in claude's hook shell
 }
 
+// Drop the memoized git-bash / app-dir resolutions so a later runtime Git install can be picked up without a
+// process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
+function resetCaches() { _bash = undefined; _appdirMsys = undefined; }
+
+// ---- dependency detection (pure-Node; NO git-bash) ----------------------------------------------
+// The self-bootstrapping provisioner needs to know, on a possibly-bare Windows box, which deps are present.
+// Detection MUST NOT route through runScript/git-bash (that very dependency — Git — may be missing; the
+// chicken-and-egg). node/git/claude/uv/gh/cloudflared are all Windows-PATH executables resolvable with
+// `where`; Claude/gh sign-in are an fs read + a `gh auth status` exit code. The pure report builder
+// (buildDepReport) takes injected IO so test/win-runner.test.js can exercise it on Linux with fakes.
+const SEMVER_RE = /(\d+)\.(\d+)\.(\d+)/;
+function parseSemver(s) { const m = SEMVER_RE.exec(String(s || '')); return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null; }
+function semverGte(have, min) {
+  const a = parseSemver(have), b = parseSemver(min); if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; }
+  return true;
+}
+// Choose a runnable hit from `where <cmd>` output (prefer .exe/.cmd/.bat over an extensionless shim — same
+// CreateProcess-193 reasoning as pickClaudeBin), '' when none. Used by resolveTool for detection only.
+function pickRunnable(hits) {
+  const list = (hits || []).map((s) => String(s).trim()).filter(Boolean);
+  return list.find((h) => /\.(exe|cmd|bat)$/i.test(h)) || list[0] || '';
+}
+function which(cmd) {
+  try { return pickRunnable(cp.execFileSync('where', [cmd], { encoding: 'utf8' }).split(/\r?\n/)); } catch { return ''; }
+}
+// Detection-grade resolver: returns the binary path or '' (DISTINCT from whichNode/whichClaude, which fall
+// back to a bare name so a spawn can still try). Honors the same env overrides the portable fallback writes.
+function resolveTool(id) {
+  if (id === 'node' && process.env.CLAUDIBLE_NODE) return process.env.CLAUDIBLE_NODE;
+  if (id === 'claude' && process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;
+  if (id === 'git') {
+    const w = which('git'); if (w) return w;
+    const b = gitBash();                         // portable git-bash (CLAUDIBLE_GIT_BASH) implies Git is present
+    if (b) {
+      const root = path.win32.dirname(path.win32.dirname(b));   // …\bin\bash.exe → install root
+      for (const g of [path.win32.join(root, 'cmd', 'git.exe'), path.win32.join(root, 'bin', 'git.exe')]) {
+        try { if (fs.existsSync(g)) return g; } catch {}
+      }
+      return b;                                  // installed=true even if we can't pinpoint git.exe (version may read empty)
+    }
+    return '';
+  }
+  return which(id);
+}
+// Run `<bin> --version`, first line. A .cmd/.bat shim (npm/winget) throws CreateProcess 193 under execFile,
+// so route those through cmd /c (mirrors spawnClaude's isCmd handling); a real .exe runs directly.
+function toolVersion(bin) {
+  if (!bin) return '';
+  try {
+    const out = /\.(cmd|bat)$/i.test(bin)
+      ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, '--version'], { encoding: 'utf8' })
+      : cp.execFileSync(bin, ['--version'], { encoding: 'utf8' });
+    return String(out).trim().split(/\r?\n/)[0] || '';
+  } catch { return ''; }
+}
+// claude signed-in: ~/.claude/.credentials.json has a non-empty claudeAiOauth.accessToken (the canonical OAuth
+// token — same precise check as wsl/check-onboard.sh:19, ported to Node). Absent → false here; main.js/deps.js
+// treat "installed but not signed-in" as a SOFT gate (the Windows token can also live in Credential Manager).
+function claudeSignedIn() {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.win32.join(HOME(), '.claude', '.credentials.json'), 'utf8'));
+    return !!(c && c.claudeAiOauth && c.claudeAiOauth.accessToken);
+  } catch { return false; }
+}
+// gh sign-in + account: `gh auth status` exit 0 = signed in; `gh api user --jq .login` = handle.
+function ghAuth(bin) {
+  if (!bin) return { signedIn: false, account: '' };
+  const isCmd = /\.(cmd|bat)$/i.test(bin);
+  const run = (args) => isCmd
+    ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    : cp.execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    run(['auth', 'status']);                     // throws (non-zero) when not signed in
+    let account = '';
+    try { account = String(run(['api', 'user', '--jq', '.login'])).trim().split(/\r?\n/)[0] || ''; } catch {}
+    return { signedIn: true, account };
+  } catch { return { signedIn: false, account: '' }; }
+}
+const DETECT_TOOLS = ['node', 'git', 'claude', 'uv', 'gh', 'cloudflared'];
+// PURE: given injected IO, build the raw per-dep status map. deps.js merges this with the install manifest.
+function buildDepReport(io) {
+  const out = { gitBash: !!io.gitBashPresent() };
+  for (const id of DETECT_TOOLS) {
+    const bin = io.resolveTool(id);
+    const installed = !!bin;
+    const rec = { installed, version: installed ? io.toolVersion(id, bin) : '' };
+    if (id === 'node') rec.ok = installed && semverGte(rec.version, '22.12.0');
+    if (id === 'claude') rec.signedIn = installed ? io.claudeSignedIn() : false;
+    if (id === 'gh') { const a = installed ? io.ghAuth(bin) : { signedIn: false, account: '' }; rec.signedIn = a.signedIn; rec.account = a.account; }
+    out[id] = rec;
+  }
+  return out;
+}
+// The runner-contract method: raw dep status for the deps.js orchestrator. Pure-Node — safe with no git-bash.
+function detectDeps() {
+  return buildDepReport({
+    resolveTool,
+    toolVersion: (_id, bin) => toolVersion(bin),
+    claudeSignedIn,
+    ghAuth,
+    gitBashPresent: () => gitBash() != null,
+  });
+}
+
 // 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
 // the Windows claude with WINDOWS-path args. ConPTY hosts a native console app fine (it hosts cmd/pwsh).
 function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId } = {}) {
@@ -243,11 +348,11 @@ function setup(_opts) { return Promise.resolve({ ok: true, note: 'Windows-native
 
 module.exports = {
   id: 'win',
-  detect,
+  detect, detectDeps, resetCaches,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices, voiceHealth,
   installHooks, setup,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, gitBash, whichClaude, pickClaudeBin, APP_ROOT },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT },
 };

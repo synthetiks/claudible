@@ -128,9 +128,19 @@ function installHooks(_sessionDir) { /* fused into spawnClaude's session.sh toda
 // runtime. Kept for the contract; the WSL backend's setup is the existing installer.
 function setup(_opts) { return Promise.resolve({ ok: true, note: 'WSL setup is driven by install.ps1 / npm run setup' }); }
 
+// detectDeps: the provisioner's dependency probe. Delegates to the cross-runner bash preflight.sh — the WSL
+// guest is where node/git/claude/uv/gh actually live (and bash always exists here, so no chicken-and-egg).
+async function detectDeps() {
+  try {
+    const { stdout } = await runScript('preflight.sh', '', { timeout: 12000 });
+    const o = JSON.parse(String(stdout).trim() || '{}');
+    return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
+  } catch { return { gitBash: true }; }
+}
+
 module.exports = {
   id: 'wsl',
-  detect,
+  detect, detectDeps,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices, voiceHealth,

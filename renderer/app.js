@@ -320,6 +320,7 @@ function resetStats(t) {
 // toast: a multi-minute model download must not auto-vanish or read as a freeze. Phases: start/done/error.
 if (claudible.onProvision) claudible.onProvision((m) => {
   try {
+    if (m && m.dep && m.dep !== 'voice') return;   // per-dep installs (System-check) own their own rows; the chip is voice-only
     const sp = $('sb-voice'), note = $('voice-note'); if (!sp || !note) return;
     sp.style.display = ''; sp.title = (m && m.msg) || '';
     if (!m || m.phase === 'start') { setDot('d-voice', 'work'); note.textContent = 'voice · setting up…'; }
@@ -2964,12 +2965,12 @@ window.addEventListener('keydown', (e) => {
   function pollStart() { if (poll || done) return; pollSince = Date.now(); poll = setInterval(tick, 3000); }   // never re-arm after a Skip (done)
   function pollStop() { if (poll) { clearInterval(poll); poll = null; } }
   async function tick() {
-    if (done || step !== 1 || ticking) return;   // ticking: never overlap probes (each spawns bash/node/network)
+    if (done || step !== 2 || ticking) return;   // ticking: never overlap probes (each spawns bash/node/network) — Claude is step 2 (after System check)
     // 6-min cap ONLY for the genuine orphan case: sign-in clicked → wizard HIDDEN to reveal the terminal → user
     // abandons the browser flow. While the wizard is visible there's no orphan risk (Skip/Escape always dismiss),
     // so the cap must not fire during a slow install and stomp its message or kill the poll mid-flow.
     if (signingIn && Date.now() - pollSince > 360000) {
-      pollStop(); signingIn = false; if (!wiz.classList.contains('show')) { wiz.classList.add('show'); show(1); }
+      pollStop(); signingIn = false; if (!wiz.classList.contains('show')) { wiz.classList.add('show'); show(2); }
       const b = $('wiz-claude-busy'); if (b) { b.classList.add('err'); b.textContent = 'Didn’t detect sign-in — try again, or Skip for now.'; } return;
     }
     ticking = true;
@@ -2977,11 +2978,11 @@ window.addEventListener('keydown', (e) => {
   }
   async function open() {
     try { const wl = await claudible.workspaceList(); hasWs = !!(wl && (wl.workspaces || []).some((w) => w && w.kind && w.kind !== 'legacy')); } catch {}
-    wiz.classList.add('show'); show(1); refreshClaude();
+    wiz.classList.add('show'); show(1); refreshSystem();
   }
   function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} } }
   function finish() { dismiss(); setTimeout(() => { try { if (term) term.focus(); } catch {} }, 150); }
-  function afterClaude() { if (hasWs) goGh(); else show(2); }   // existing users skip the create step — never a forced workspace mutation
+  function afterClaude() { if (hasWs) goGh(); else show(3); }   // existing users skip the create step (now step 3) — never a forced workspace mutation
 
   async function refreshClaude() { const s = await status(); if (s) applyClaude(s); }
   function applyClaude(s) {
@@ -3039,15 +3040,85 @@ window.addEventListener('keydown', (e) => {
     goGh();
   }
 
-  async function goGh() { show(3); const s = await status(); if (s) applyGh(s); }
+  async function goGh() { show(4); const s = await status(); if (s) applyGh(s); }
   function applyGh(s) {
     const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck');
     if (s.ghSignedIn) { msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
     else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your workspaces across devices and invite people. In a terminal run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
   }
 
+  // ---- System check (step 1): detect every dependency, install the missing ones --------------------
+  // Rows come from preflight:status (deps.detect). Required infra (node/git) must be present to advance;
+  // claude need only be INSTALLED here — its sign-in is the dedicated next step. Optional deps never block.
+  // Skip/Escape still dismiss at any time (the wizard invariant), so a failed/unavailable install never traps.
+  let depRows = [], restartNeeded = false;
+  const SYS_PILL = { ready: 'ready', missing: 'missing', outdated: 'update', installing: 'installing…', signin: 'sign in', unconfirmed: 'check', error: 'failed' };
+  const sysInstallable = (d) => d.installable && (d.state === 'missing' || d.state === 'outdated' || d.state === 'error');
+  const sysBlocking = (d) => d.required && !(d.state === 'ready' || (d.id === 'claude' && (d.state === 'unconfirmed' || d.state === 'signin')));
+  function sysBusy(msg, err) { const b = $('wiz-sys-busy'); if (!b) return; b.classList.toggle('err', !!err); b.textContent = msg || ''; }
+  function setSysPill(id, cls, text) { const r = document.querySelector('#wiz-dep-list .dep-row[data-dep="' + id + '"]'); if (!r) return; const p = r.querySelector('.dep-pill'); if (p) { p.className = 'dep-pill ' + cls; p.textContent = text; } }
+  function disableSysActs(on) { document.querySelectorAll('#wiz-dep-list .dep-act').forEach((b) => { b.disabled = on; }); const i = $('wiz-sys-install'); if (i) i.disabled = on; }
+  async function refreshSystem() {
+    const list = $('wiz-dep-list'); if (!list) return;
+    let r; try { r = await claudible.preflightStatus(); } catch { r = null; }
+    if (!r || !Array.isArray(r.deps) || !r.deps.length) {
+      list.innerHTML = ''; const d = document.createElement('div'); d.className = 'wiz-dim';
+      d.textContent = 'Couldn’t run the system check — you can Skip and set things up manually.';
+      list.appendChild(d); const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Next'; $('wiz-sys-install').style.display = 'none'; return;
+    }
+    depRows = r.deps; renderSystem();
+  }
+  function renderSystem() {
+    const list = $('wiz-dep-list'); if (!list) return; list.innerHTML = '';
+    let anyInstallable = false, blocking = 0;
+    for (const d of depRows) {
+      if (sysBlocking(d)) blocking++;
+      const row = document.createElement('div'); row.className = 'dep-row'; row.dataset.dep = d.id;
+      const main = document.createElement('div'); main.className = 'dep-main';
+      const name = document.createElement('div'); name.className = 'dep-name'; name.textContent = d.label;
+      if (!d.required) { const o = document.createElement('span'); o.className = 'wiz-opt'; o.textContent = 'optional'; name.appendChild(document.createTextNode(' ')); name.appendChild(o); }
+      const detail = (d.id === 'gh' && d.state === 'ready' && d.account) ? ('@' + d.account) : d.version;
+      if (detail) { const v = document.createElement('span'); v.className = 'wiz-dim'; v.style.marginLeft = '6px'; v.textContent = detail; name.appendChild(v); }
+      const hint = document.createElement('div'); hint.className = 'dep-hint'; hint.textContent = d.hint || '';
+      main.appendChild(name); main.appendChild(hint);
+      const pill = document.createElement('span'); pill.className = 'dep-pill ' + d.state; pill.textContent = SYS_PILL[d.state] || d.state;
+      row.appendChild(main); row.appendChild(pill);
+      if (sysInstallable(d)) { anyInstallable = true; const b = document.createElement('button'); b.className = 'dep-act'; b.textContent = 'Install'; b.onclick = () => installDep(d.id); row.appendChild(b); }
+      list.appendChild(row);
+    }
+    $('wiz-sys-install').style.display = anyInstallable ? '' : 'none';
+    const next = $('wiz-sys-next');
+    if (restartNeeded) { next.disabled = false; next.textContent = 'Restart now'; }
+    else { next.disabled = blocking > 0; next.textContent = blocking > 0 ? 'Install required to continue' : 'Next'; }
+  }
+  async function installDep(id) {
+    setSysPill(id, 'installing', 'installing…'); disableSysActs(true); sysBusy('');
+    let r; try { r = await claudible.preflightInstall(id); } catch (e) { r = { ok: false, error: e && e.message }; }
+    disableSysActs(false);
+    if (r && r.restartRequired) { restartNeeded = true; setSysPill(id, 'ready', 'installed'); sysBusy('Installed. Claudible needs a quick restart to finish.'); const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Restart now'; return; }
+    if (!r || !r.ok) { setSysPill(id, 'error', 'failed'); sysBusy((r && r.error) || 'Install failed — retry, or Skip for now.', true); return; }
+    await refreshSystem();
+  }
+  async function installAllMissing() {
+    disableSysActs(true);
+    const ids = depRows.filter(sysInstallable).map((d) => d.id);   // manifest order → node before claude, uv before voice
+    for (const id of ids) { await installDep(id); if (restartNeeded) break; }
+    disableSysActs(false);
+  }
+  function sysNext() { if (restartNeeded) { try { claudible.preflightRestart(); } catch {} return; } show(2); refreshClaude(); }
+  // live per-dep install progress (a SECOND onProvision listener; the voice chip's is guarded to dep==='voice')
+  if (claudible.onProvision) claudible.onProvision((m) => {
+    if (!m || !m.dep) return;
+    const cls = m.phase === 'done' ? 'ready' : m.phase === 'error' ? 'error' : 'installing';
+    const txt = m.phase === 'done' ? 'ready' : m.phase === 'error' ? 'failed' : 'installing…';
+    setSysPill(m.dep, cls, txt);
+    if (step === 1 && m.msg) sysBusy(m.msg, m.phase === 'error');
+  });
+
+  $('wiz-sys-next').addEventListener('click', sysNext);
+  $('wiz-sys-install').addEventListener('click', installAllMissing);
   $('wiz-claude-next').addEventListener('click', afterClaude);
-  $('wiz-ws-back').addEventListener('click', () => show(1));
+  $('wiz-ws-back').addEventListener('click', () => show(2));
   $('wiz-ws-create').addEventListener('click', createWs);
   $('wiz-ws-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') createWs(); });
   $('wiz-gh-recheck').addEventListener('click', goGh);
