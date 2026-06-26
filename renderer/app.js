@@ -2555,11 +2555,13 @@ function onWsPointerUp() {
   }
 }
 // Accept an invited GitHub workspace: choose where it clones (default vs a folder you pick), then open it.
+const acceptingWs = new Set();   // workspaces whose clone is in flight → don't re-prompt the folder picker on a re-click
 async function openAcceptInviteModal(w) {
+  if (acceptingWs.has(w.id)) { toast('Still adding “' + (w.label || w.slug) + '” — give it a sec…'); return; }
   const slug = w.slug || w.label || '';
   const choice = await modalChoice({
     title: 'Add shared workspace',
-    body: (w.owner ? w.owner + '/' + slug : slug) + ' — choose where it lives on your machine. This is your local copy of a shared repo; sessions still sync with the team.',
+    body: (w.owner ? w.owner + '/' + slug : slug) + ' — choose where it lives on your machine. This is your local copy of a shared repo; sessions still sync with the team. (Default is recommended.)',
     choices: [
       { key: 'default', label: 'Default location', sub: '~/.claudible/repos/' + slug },
       { key: 'custom', label: 'Choose folder…', sub: 'Pick any folder — it clones into <folder>/' + slug },
@@ -2567,8 +2569,10 @@ async function openAcceptInviteModal(w) {
     ],
   });
   if (choice !== 'default' && choice !== 'custom') return;
+  acceptingWs.add(w.id);
   toast('Adding ' + slug + '…');
-  let r = null; try { r = await claudible.workspaceAcceptInvite(w.id, choice === 'default'); } catch (e) {}
+  let r = null; try { r = await claudible.workspaceAcceptInvite(w.id, choice === 'default'); } catch (e) { r = { ok: false, error: e && e.message }; }
+  acceptingWs.delete(w.id);
   if (r && r.ok) { await refreshWorkspaces(); switchWorkspace(w.id); }
   else if (!r || r.error !== 'cancelled') toast('Could not add: ' + humanError(r && r.error));
 }
@@ -2982,6 +2986,7 @@ window.addEventListener('keydown', (e) => {
   async function refreshClaude() { const s = await status(); if (s) applyClaude(s); }
   function applyClaude(s) {
     const msg = $('wiz-claude-msg'), act = $('wiz-claude-action'), next = $('wiz-claude-next');
+    next.textContent = 'Next';   // default label; the not-signed-in branch flips it to 'Continue' (override)
     if (s.claudeSignedIn) {
       msg.textContent = '✓ Claude Code connected' + (s.claudeVersion ? ' (' + s.claudeVersion + ')' : '');
       act.style.display = 'none'; next.disabled = false; pollStop();
@@ -2990,8 +2995,14 @@ window.addEventListener('keydown', (e) => {
       msg.textContent = 'Claude Code isn’t installed yet.';
       act.style.display = ''; act.textContent = 'Install Claude Code'; act.onclick = installClaude; next.disabled = true; pollStart();
     } else {
-      msg.textContent = 'Claude Code is installed but not signed in — sign in (it opens your browser) to continue.';
-      act.style.display = ''; act.textContent = 'Sign in to Claude'; act.onclick = signIn; next.disabled = true; pollStart();
+      // Installed but we couldn't CONFIRM sign-in. On native Windows the token may live in the Credential
+      // Manager (not ~/.claude/.credentials.json), so this is often a false negative — do NOT trap a user who
+      // is actually signed in. Offer Sign in, but ALSO let them Continue (and keep polling: if they do sign in
+      // in the terminal, it flips to ✓ on its own).
+      msg.textContent = 'Claude Code is installed. If you’re already signed in, just Continue. Not signed in yet? Click “Sign in to Claude”.';
+      act.style.display = ''; act.textContent = 'Sign in to Claude'; act.onclick = signIn;
+      next.disabled = false; next.textContent = 'Continue';   // override — Windows sign-in isn't always detectable
+      pollStart();
     }
   }
   async function installClaude() {
@@ -3031,8 +3042,8 @@ window.addEventListener('keydown', (e) => {
   async function goGh() { show(3); const s = await status(); if (s) applyGh(s); }
   function applyGh(s) {
     const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck');
-    if (s.ghSignedIn) { msg.textContent = '✓ GitHub linked' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
-    else { msg.textContent = 'GitHub isn’t linked. Optional — needed only for private-repo workspaces & session sync; creating a repo workspace will prompt you to sign in.'; rc.style.display = ''; }
+    if (s.ghSignedIn) { msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
+    else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your workspaces across devices and invite people. In a terminal run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
   }
 
   $('wiz-claude-next').addEventListener('click', afterClaude);

@@ -727,8 +727,9 @@ function ensureClone(ws) {
     const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? ws.path : '';   // the invitee's chosen clone dir (else the script's default)
     const dirArg = wsp ? ` '${wsp}'` : '';
     runner.runScript('clone-workspace.sh', `'${owner}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
-        if (err) return resolve({ ok: false, error: 'clone exec' });
-        let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+        // Surface the REAL reason so a Windows-specific failure isn't swallowed as a silent re-prompt.
+        if (err) return resolve({ ok: false, error: 'clone could not run: ' + ((err && err.message) || err) });
+        let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch { return resolve({ ok: false, error: 'clone returned no result' + (String(stdout).trim() ? ' — ' + String(stdout).trim().slice(0, 200) : '') }); }
         if (r.ok) { if (wsp && r.path) ws.path = r.path; delete ws.needsClone; saveRegistry(); }
         resolve(r.ok ? { ok: true } : { ok: false, error: r.error || 'clone failed' });
       });
