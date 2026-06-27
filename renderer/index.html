@@ -507,7 +507,7 @@
     .sess.renaming .sess-chip{display:none}
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
     .sess-meta{display:flex;align-items:center;gap:7px}
-    .sess-meta-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sess-meta-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row") */
     .sess-meta{flex-wrap:wrap;row-gap:4px}   /* multiple tags (time + live + diverged) wrap to a 2nd line instead of overflowing the row */
     .sess-live-ind{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
       text-transform:uppercase;color:var(--ok,#5fb487);background:none;border:none;border-radius:999px;padding:2px 4px;line-height:1}
@@ -527,8 +527,8 @@
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
       font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
-    .ws-section-head{padding:14px 9px 9px}
-    .sh-actions{display:flex;align-items:center;gap:9px}
+    .ws-section-head{padding:14px 9px 9px;justify-content:center;position:relative}   /* center the WORKSPACES wordmark; actions float at the right */
+    .sh-actions{display:flex;align-items:center;gap:9px;position:absolute;right:9px;top:0;bottom:0}
     .panel-close{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
     .panel-close:hover{color:var(--ink)}
     .ws-add{width:auto;display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;
@@ -547,7 +547,10 @@
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
-      padding:8px 5px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
+      padding:8px 5px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */
+    .ws-chips::-webkit-scrollbar{width:6px}                                          /* uber-sleek thin scroll for the workspace tree */
+    .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.09);border:none;border-radius:6px}
+    .ws-chips::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2)}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
     .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 12px;padding-left:8px;border-left:1px solid rgba(217,119,87,.13)}   /* nested-session guide: faint Claude-orange tint on the active branch */
     /* "+ New Session" — inline as the last child inside the open workspace */
