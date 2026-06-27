@@ -136,17 +136,31 @@ try { fs.mkdirSync(RT, { recursive: true }); } catch {}
 try { for (const f of fs.readdirSync(RT)) if (/^diffaction-.*\.tmp$/.test(f)) { try { fs.unlinkSync(path.join(RT, f)); } catch {} } } catch {}
 
 // ---- workspaces registry (each workspace = a directory the sessions live in) ----
-// App-maintained source of truth (we NEVER blanket-scan ~/.claude/projects). A 'legacy' entry points at
-// the original single session dir so existing history keeps showing. Persisted on the Windows FS (native read).
+// App-maintained source of truth (we NEVER blanket-scan ~/.claude/projects). The home library ALWAYS has >=1
+// LOCAL workspace as the guaranteed place to open. We no longer inject the old hardcoded, undeletable 'legacy'
+// "My Sessions" bucket; instead, when no local workspace exists, a REAL default Local workspace is materialized
+// (renameable, relocatable, and deletable once another local exists). Persisted on the Windows FS (native read).
 const WORKSPACES = path.join(RT, 'workspaces.json');
+const DEFAULT_LOCAL = { id: 'local-local', label: 'Local', kind: 'local', slug: 'local', createdAt: 0 };
+// Guarantee a default Local workspace. Synchronous mkdir so startup always has a valid cwd; sets firstRun so the
+// renderer can offer a one-time "name + locate your workspace" setup prompt. Never throws (caller wraps too).
+function ensureDefaultLocal(reg) {
+  if (reg.workspaces.some((w) => w.kind === 'local')) return;
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  try { if (home) fs.mkdirSync(path.join(home, '.claudible', 'workspaces', 'local'), { recursive: true }); } catch {}
+  reg.workspaces.unshift(Object.assign({}, DEFAULT_LOCAL));
+  reg.firstRun = true;
+}
 function loadRegistry() {
-  let reg = { activeId: 'legacy', workspaces: [] };
+  let reg = { activeId: '', workspaces: [] };
   try { const r = JSON.parse(fs.readFileSync(WORKSPACES, 'utf8')); if (r && typeof r === 'object') reg = r; } catch {}
   if (!Array.isArray(reg.workspaces)) reg.workspaces = [];
-  reg.workspaces = reg.workspaces.filter((w) => w && typeof w === 'object' && w.id);   // drop malformed entries (no launch crash)
-  if (!reg.workspaces.some((w) => w && w.id === 'legacy'))
-    reg.workspaces.unshift({ id: 'legacy', label: 'My sessions', kind: 'legacy', slug: '', createdAt: 0 });
-  if (!reg.activeId || !reg.workspaces.some((w) => w.id === reg.activeId)) reg.activeId = 'legacy';
+  // drop malformed entries AND the retired 'legacy' "My Sessions" bucket (replaced by a real default Local workspace)
+  reg.workspaces = reg.workspaces.filter((w) => w && typeof w === 'object' && w.id && w.kind !== 'legacy' && w.id !== 'legacy');
+  try { ensureDefaultLocal(reg); } catch (e) { console.error('[claudible] ensureDefaultLocal:', e && e.message); }
+  if (!reg.workspaces.length) reg.workspaces.push(Object.assign({}, DEFAULT_LOCAL));   // belt-and-suspenders: the library is never empty
+  if (!reg.activeId || !reg.workspaces.some((w) => w.id === reg.activeId))
+    reg.activeId = (reg.workspaces.find((w) => w.kind === 'local') || reg.workspaces[0]).id;
   return reg;
 }
 function saveRegistry() { try { fs.writeFileSync(WORKSPACES, JSON.stringify(registry, null, 2)); } catch (e) { console.error('[claudible] workspaces.json:', e.message); } }
@@ -990,11 +1004,14 @@ ipcMain.handle('workspace:rename', (e, payload) => {
   syncShare();
   return { ok: true, label };
 });
-// Delete a workspace: soft-delete its folder (recoverable) + drop it from the registry. Never 'legacy'.
+// Delete a workspace: soft-delete its folder (recoverable) + drop it from the registry. Invariant: never the
+// last local workspace (the guaranteed home to open) — the renderer also hides delete in that case.
 ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === id);
-  if (!ws || ws.id === 'legacy') return resolve({ ok: false, error: 'cannot delete this workspace' });
-  const fallback = registry.workspaces.find((w) => w.id === 'legacy') || registry.workspaces.find((w) => w.id !== id);
+  if (!ws) return resolve({ ok: false, error: 'unknown workspace' });
+  if (ws.kind === 'local' && registry.workspaces.filter((w) => w.kind === 'local').length <= 1)
+    return resolve({ ok: false, error: 'You need at least one local workspace — create another first.' });
+  const fallback = registry.workspaces.find((w) => w.kind === 'local' && w.id !== id) || registry.workspaces.find((w) => w.id !== id) || registry.workspaces[0];
   openGen++;   // supersede any in-flight workspace:open clone for the workspace being deleted (mirrors create/switch)
   const fgWasHere = !!(fgRec() && fgRec().ws && fgRec().ws.id === id);
   for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id) rec.ws = fallback; }   // repoint any tab inside it
