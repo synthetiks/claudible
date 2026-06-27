@@ -2028,7 +2028,7 @@ function renderSessionRow(s) {
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
   const m = document.createElement('div'); m.className = 'sess-meta';
   const mt = document.createElement('span'); mt.className = 'sess-meta-t';
-  mt.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
+  mt.textContent = relTime(s.mtime);   // last-active time only — msg count dropped to cut clutter
   m.appendChild(mt);
   // live indicator — inline at the right of the meta line (normal flow, so it can never overflow the row)
   if (isSharingSession(s.id)) {

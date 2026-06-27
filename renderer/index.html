@@ -120,12 +120,12 @@
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
-    .body{display:grid;grid-template-columns:1fr;gap:11px;padding:14px 14px 7px;min-height:0}   /* bottom padding halved (14→7) → tighter space under the command bar */
+    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:7px 11px 7px;min-height:0}   /* tight: top −50% (14→7) for a bigger terminal, sides −20% (14→11), column gap −20% (11→9) */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
     .body.with-sessions{grid-template-columns:clamp(244px,16vw,340px) 1fr}                                   /* + docked sessions (left) */
     .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
-    .center{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
+    .center{display:flex;flex-direction:column;gap:9px;min-height:0;min-width:0}   /* gap −20% (11→9): terminal sits a touch closer to the command bar */
     .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0;position:relative}
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
     .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:2px;border-radius:9px;
@@ -247,8 +247,8 @@
     .cmdscroll-wrap::after{right:0;background:linear-gradient(270deg,#0b0d10,transparent)}
     .cmdscroll-wrap.more-l::before{opacity:1}
     .cmdscroll-wrap.more-r::after{opacity:1}
-    /* track: equal columns sized so EXACTLY 6 fit the viewport (5 inner gaps of 8px = 40px) — narrower pills, more shown */
-    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 40px) / 6);gap:8px;
+    /* track: equal columns sized so EXACTLY 8 fit the viewport (7 inner gaps of 6px = 42px) — narrower pills, more shown */
+    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 42px) / 8);gap:6px;
       overflow-x:auto;overflow-y:hidden;cursor:grab;touch-action:pan-x;padding-bottom:4px}   /* subtle gap between pills and the scrollbar */
     .cmdscroll:active{cursor:grabbing}
     /* no per-element scrollbar override → inherits the global sleek webkit scrollbar used everywhere else */
@@ -466,7 +466,7 @@
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background:var(--panel);
       border-right:1px solid var(--hairline);overflow:hidden}   /* a true full-height left sidebar: one divider on the right, no card box */
-    .body.with-sessions .sidebar{display:flex;margin:-14px 0 -7px -14px}   /* pull flush to the left wing — cancels the body's top/left padding; bottom -7px matches the halved body bottom padding so it stays flush to the bottombar; right keeps the 11px gap to the terminal */
+    .body.with-sessions .sidebar{display:flex;margin:-7px 0 -7px -11px}   /* flush to the left wing — margins cancel the body padding (top 7 / left 11 / bottom 7) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;width:auto;text-align:left;padding:7px 10px;border:none;border-left:2px solid transparent;border-radius:6px;
@@ -542,7 +542,7 @@
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow:auto;
       padding:8px 8px 12px}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
-    .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 17px;padding-left:8px;border-left:1px solid rgba(255,255,255,.06)}
+    .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 17px;padding-left:8px;border-left:1px solid rgba(217,119,87,.13)}   /* nested-session guide: faint Claude-orange tint on the active branch */
     /* "+ New Session" — inline as the last child inside the open workspace */
     .newsess-row{display:flex;align-items:center;gap:6px;width:auto;text-align:left;margin:1px 0 0;padding:7px 10px;
       font-size:11.5px;letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
@@ -557,7 +557,7 @@
       border-radius:7px;background:none;cursor:pointer;box-shadow:none;
       transition:background .14s,color .14s}
     .ws-chip:hover{background:rgba(255,255,255,.04)}
-    .ws-chip.active{background:rgba(255,255,255,.055)}    /* expanded/active workspace: subtle fill (the rotated chevron is the main expand cue) */
+    .ws-chip.active{background:rgba(217,119,87,.06)}    /* expanded/active workspace: a whisper of Claude-orange (the rotated chevron is the main expand cue) */
     .ws-chip.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     /* leading disclosure chevron — points right when collapsed, rotates down on the active (expanded) workspace */
     .ws-chip .ws-caret{width:13px;height:13px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);transition:transform .16s,color .16s}
@@ -632,12 +632,12 @@
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:14px 14px 16px;display:flex;flex-direction:column;gap:11px}
-    .sharelbl{display:flex;align-items:center;gap:8px;font-size:10.2px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}   /* "share live" text trimmed so the row fits */
+    .sharelbl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 7px;font-size:10.2px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-dim)}   /* tighter tracking/gaps so the view-only toggle fits one line in the wider sidebar; wraps it to its own line rather than overflowing if tight */
     .sl-text{white-space:nowrap}   /* keep "SHARE LIVE" on one line — never let flex-shrink stack it into SHARE / LIVE */
     .sharelbl .ico{width:15.4px;height:15.4px;color:#5a7468;flex:none;transition:color .2s,filter .2s}   /* ~10% larger; very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
     .sharelbl.active{color:var(--ink)}
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
-    .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em;flex:none;white-space:nowrap}   /* keep "view-only" on one line */
+    .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em;white-space:nowrap}   /* "view-only" stays one unbroken word; wraps whole if the row is tight — never splits or overflows the sidebar */
     .sharelbl .toggle .tlabel{white-space:nowrap}
     #d-share:not(.ok):not(.work):not(.bad){visibility:hidden}   /* the web-share status light: only show it once a link is starting/live/failed */
     .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
@@ -864,7 +864,7 @@
       <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
       <button class="iconbtn" id="diff-btn" title="Review changes — what Claude changed in this repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
-      <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins">⚙</button>
+      <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div class="vgroup">
       <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
