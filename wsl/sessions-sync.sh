@@ -371,7 +371,8 @@ case "$op" in
     case "$tb64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
     pull_branch || fail "pull failed"
     mkdir -p "$WT/meta" 2>/dev/null
-    CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" node "$(dirname "$0")/sessions-sync-tool.js" title-write || fail "title write failed"
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path (the gitwt push below still needs MSYS_NO_PATHCONV for the $BR refspec)
+    (unset MSYS_NO_PATHCONV; CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" node "$(dirname "$0")/sessions-sync-tool.js" title-write) || fail "title write failed"
     gitwt add -- "meta/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: title $author" >/dev/null 2>&1
     pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
@@ -382,7 +383,8 @@ case "$op" in
     # via fetch + show — NO worktree merge — like presence-list, so this poll never fights the background sync.
     ensure_worktree || fail "could not set up the sessions branch"
     git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
-    CL_WT="$WT" CL_BR="$BR" node "$(dirname "$0")/sessions-sync-tool.js" title-read || fail "title read failed"
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+    (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" node "$(dirname "$0")/sessions-sync-tool.js" title-read) || fail "title read failed"
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
