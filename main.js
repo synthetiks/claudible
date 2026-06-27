@@ -306,6 +306,14 @@ function spawnPty(tabId, cols, rows, ws, session) {
     if (!pty.mod) winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${pty.err})\r\n` });
     return;
   }
+  // Claude not installed/on PATH? Spawning it just crashes to "session ended" (cmd: 'claude' is not recognized).
+  // Don't spawn a doomed pty — show a friendly line and pop the Connect Claude flow. (win runner only; wsl/posix
+  // claude lives in the guest and their setups are already provisioned, so claudePresent is undefined there.)
+  if (typeof runner.claudePresent === 'function' && runner.claudePresent() === false) {
+    winSend('pty:data', { tabId, data: '\r\n[claudible] Claude Code isn’t connected yet — click the Claude button (top bar) to install it and sign in.\r\n' });
+    try { win && win.webContents.send('claude:needed'); } catch {}
+    return;
+  }
   ws = ws || activeWorkspace;
   try {
     const runtimeId = tabRuntimeId(tabId);
@@ -333,6 +341,12 @@ function spawnPty(tabId, cols, rows, ws, session) {
       if (r && r.ultraTimer) { try { clearInterval(r.ultraTimer); } catch {} }
       const msg = '\r\n[claudible] session ended\r\n';
       winSend('pty:data', { tabId, data: msg });
+      // If claude vanished (uninstalled, or a first-launch spawn that beat detection), point at the fix instead
+      // of leaving a dead pane. Cheap sync check; win runner only.
+      if (typeof runner.claudePresent === 'function' && runner.claudePresent() === false) {
+        winSend('pty:data', { tabId, data: '[claudible] Claude Code isn’t connected — click the Claude button to set it up.\r\n' });
+        try { win && win.webContents.send('claude:needed'); } catch {}
+      }
       if (tabId === fgTabId) { share.broadcast(msg); share.resetRing(); }
       setGenBusy(tabId, false); ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId);
       schedulePush(rws);                                   // session ended → flush its workspace's transcripts to collaborators
@@ -1364,6 +1378,27 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
 });
 // Relaunch — the cleanest way to pick up a freshly-installed Git (main.js resolves the app-dir at require-time).
 ipcMain.handle('preflight:restart', () => { try { app.relaunch(); app.exit(0); } catch {} return { ok: true }; });
+// After the Connect-Claude flow succeeds: if the spawn-gate suppressed the terminal (or it died on a missing
+// claude), bring it up now that claude resolves. No-op if a foreground pty is already live (don't disturb it).
+ipcMain.handle('claude:connected', () => {
+  try {
+    if (fgTabId && ptys.has(fgTabId)) return { ok: true };   // already running — leave it
+    const id = fgTabId || 'main';
+    spawnPty(id, 120, 32, activeWorkspace, '');
+    if (!fgTabId && ptys.has(id)) fgTabId = id;
+  } catch {}
+  return { ok: true };
+});
+// Focused claude-only status for the Connect-Claude dot + popup. The win runner answers cheaply (no gh network,
+// no 6-tool probe — those must not run on every launch / 3s poll); wsl/posix derive it from the full probe.
+ipcMain.handle('claude:state', async () => {
+  try {
+    if (typeof runner.claudeState === 'function') return runner.claudeState();
+    const d = await deps.detect(runner, voiceState());
+    const c = (d.deps || []).find((x) => x.id === 'claude') || {};
+    return { installed: c.state !== 'missing', signedIn: c.state === 'ready' };
+  } catch { return { installed: false, signedIn: false }; }
+});
 
 // The active session's LATEST assistant reply, so the manual Speak button can re-read it even after a relaunch
 // (when the in-memory lastReply is empty) or for a session opened from history. Reads the transcript and returns

@@ -104,6 +104,7 @@ try {
 
     'claude' {
       Emit 'start' 'Installing the Claude Code CLI…'
+      if ($env:CLAUDIBLE_NODE) { $env:Path = (Split-Path $env:CLAUDIBLE_NODE) + ';' + $env:Path }   # portable Node fallback: make its bundled npm visible
       if (-not (Tool 'npm')) { Refresh-Path }
       if (-not (Tool 'npm')) { Emit 'error' 'npm not found — install Node first.'; exit 1 }
       Emit 'progress' 'npm install -g @anthropic-ai/claude-code …'

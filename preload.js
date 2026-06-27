@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('claudible', {
   preflightStatus: () => ipcRenderer.invoke('preflight:status'),        // { runner, gitBash, deps: [{ id, label, hint, state, version, account, required, auth, authSoft, installable, restartOnInstall, requires }] }
   preflightInstall: (depId) => ipcRenderer.invoke('preflight:install', depId),   // → { ok, error, restartRequired }; progress streams via onProvision({dep,phase,msg})
   preflightRestart: () => ipcRenderer.invoke('preflight:restart'),
+  // Connect-Claude button/popup: main fires 'claude:needed' when a spawn finds no claude; renderer pops the dialog
+  onClaudeNeeded: (cb) => ipcRenderer.on('claude:needed', () => cb()),
+  claudeConnected: () => ipcRenderer.invoke('claude:connected'),   // bring the terminal up after connecting
+  claudeState: () => ipcRenderer.invoke('claude:state'),           // cheap claude-only {installed,signedIn} for the dot/popup
   // diff review (what Claude changed in the workspace's git repo)
   diffList: () => ipcRenderer.invoke('diff:list'),
   diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),

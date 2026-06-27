@@ -3128,3 +3128,73 @@ window.addEventListener('keydown', (e) => {
 
   try { if (!loadPrefs().onboardingDone) setTimeout(open, 700); } catch {}
 })();
+
+// ---------- Connect Claude Code (topbar mascot button + auto-pop when a terminal finds no claude) ----------
+// Detect → install (preflight) → sign in (onboard:claude-login) → bring the terminal up (claude:connected).
+// Status via the FOCUSED claude:state probe (cheap — no gh network / 6-tool scan on every launch or poll tick).
+// The dot mirrors claude's connection; it pulses ONLY when claude is missing — never for "installed but sign-in
+// not confirmable", which on Windows is a known false-negative (the token can live in Credential Manager), so
+// nagging a signed-in user would be wrong. Always available as the standing "(re)connect Claude" escape hatch;
+// the first-run wizard owns first-run claude setup, so auto-pop defers to it and never stacks on it.
+(function () {
+  const pop = $('claude-connect'), btn = $('claude-btn');
+  if (!pop || !btn || !claudible.claudeState) return;
+  const wizEl = $('wizard');
+  const msg = $('cc-msg'), act = $('cc-action'), busy = $('cc-busy'), doneBtn = $('cc-done'), dot = $('claude-dot');
+  let poll = null, pollSince = 0, lastState = '', userDismissed = false;
+  const stop = () => { if (poll) { clearInterval(poll); poll = null; } };
+  async function getState() { try { return await claudible.claudeState(); } catch { return null; } }
+  function toState(s) { if (!s) return ''; if (!s.installed) return 'missing'; return s.signedIn ? 'ready' : 'unconfirmed'; }
+  function setDot(state) {
+    lastState = state || '';
+    if (dot) dot.className = 'claude-dot ' + (state === 'ready' ? 'ok' : state === 'missing' ? 'bad' : (state ? 'warn' : ''));
+    btn.classList.toggle('attn', state === 'missing');   // nudge ONLY when truly absent (not the unconfirmed false-negative)
+  }
+  function fitSoon() { setTimeout(() => { try { window.dispatchEvent(new Event('resize')); } catch {} }, 450); }   // re-fit the revived terminal (it spawns at a default size)
+  function open() { userDismissed = false; pop.classList.add('show'); render(); }
+  function close() { stop(); pop.classList.remove('show'); userDismissed = true; if (lastState === 'ready') { try { claudible.claudeConnected && claudible.claudeConnected(); } catch {} fitSoon(); } }
+  async function render() {
+    const st = toState(await getState());
+    setDot(st); busy.classList.remove('err'); busy.textContent = '';
+    if (st === '') { msg.textContent = 'Couldn’t check Claude Code — try again, or open a terminal manually.'; act.style.display = 'none'; return; }
+    if (st === 'ready') {
+      msg.textContent = '✓ Claude Code connected.'; act.style.display = 'none'; doneBtn.textContent = 'Done'; stop();
+    } else if (st === 'missing') {
+      msg.textContent = 'Claude Code isn’t installed yet. Install it now — takes a minute (Node is already set up).';
+      act.style.display = ''; act.textContent = 'Install Claude Code'; act.disabled = false; act.onclick = install; doneBtn.textContent = 'Close';
+    } else {   // unconfirmed: installed, sign-in not confirmable (Windows often can't see the token) — don't nag
+      msg.textContent = 'Claude Code is installed. If you’re already signed in, you’re all set — just close. If not, sign in below (opens in the terminal).';
+      act.style.display = ''; act.textContent = 'Sign in to Claude'; act.disabled = false; act.onclick = signIn; doneBtn.textContent = 'Close';
+    }
+  }
+  async function install() {
+    act.disabled = true; busy.classList.remove('err'); busy.textContent = 'Installing Claude Code… (a minute or two)';
+    let r; try { r = await claudible.preflightInstall('claude'); } catch (e) { r = { ok: false, error: e && e.message }; }
+    act.disabled = false;
+    if (r && r.ok) { busy.textContent = ''; render(); }
+    else { busy.classList.add('err'); busy.textContent = 'Install failed: ' + ((r && r.error) || 'unknown') + ' — retry, or install it manually.'; }
+  }
+  async function signIn() {
+    busy.classList.remove('err'); busy.textContent = 'Opening Claude — finish sign-in in the terminal/browser…';
+    try { await claudible.onboardClaudeLogin(); } catch {}    // (re)spawns the foreground tab running claude → login surfaces
+    fitSoon();
+    pop.classList.remove('show');                             // reveal the terminal; a BOUNDED poll re-confirms + updates the dot
+    stop(); pollSince = Date.now();
+    poll = setInterval(async () => {
+      if (Date.now() - pollSince > 360000) { stop(); return; }   // abandon cap (mirrors the wizard) — never poll forever
+      const st = toState(await getState()); setDot(st); if (st === 'ready') stop();
+    }, 3000);
+  }
+  btn.addEventListener('click', open);
+  doneBtn.addEventListener('click', close);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pop.classList.contains('show')) { e.preventDefault(); close(); } });
+  // Auto-pop on a missing-claude spawn — but DEFER to the first-run wizard (it owns first-run claude setup),
+  // don't stack on it, don't re-pop while already open, and respect an explicit dismissal for the session.
+  if (claudible.onClaudeNeeded) claudible.onClaudeNeeded(() => {
+    try { if (!loadPrefs().onboardingDone) return; } catch {}
+    if (wizEl && wizEl.classList.contains('show')) return;
+    if (pop.classList.contains('show') || userDismissed) return;
+    open();
+  });
+  getState().then((s) => setDot(toState(s)));   // initialize the dot (cheap, claude-only)
+})();

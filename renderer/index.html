@@ -448,6 +448,20 @@
       cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all .15s}
     .iconbtn svg{width:15.5px;height:15.5px;display:block}
     .iconbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    /* Connect-Claude button: the orange Claude Code mascot, with a small status dot (claude connection) */
+    .claude-btn{position:relative;padding:6px 9px}
+    .claude-mascot{width:18px;height:18px;border-radius:5px;display:block}
+    .claude-dot{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;
+      background:var(--ink-faint);box-shadow:0 0 0 1.5px var(--bg)}
+    .claude-dot.ok{background:#7ee0a8}      /* connected + signed in */
+    .claude-dot.bad{background:#e6b86a}     /* not installed */
+    .claude-dot.warn{background:#9bb4ff}    /* installed, not signed in */
+    .claude-btn.attn{animation:claudePulse 1.4s var(--ease-pop) infinite}
+    @keyframes claudePulse{0%,100%{box-shadow:inset 0 1px 0 var(--sheen),0 0 0 0 rgba(217,119,87,.55)}50%{box-shadow:inset 0 1px 0 var(--sheen),0 0 0 4px rgba(217,119,87,0)}}
+    /* Connect-Claude popup: reuses the .approve scrim/card */
+    .cc-head{display:flex;align-items:center;gap:11px;margin-bottom:4px}
+    .cc-head h3{margin:0}
+    .cc-mascot{width:34px;height:34px;border-radius:8px;display:block;flex:0 0 auto}
     .iconbtn:active{transform:translateY(1px)}
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background:var(--panel);
@@ -826,6 +840,7 @@
     <div class="topbtns">
       <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
       <button class="iconbtn" id="diff-btn" title="Review changes — what Claude changed in this repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
+      <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins">⚙</button>
     </div>
     <div class="vgroup">
@@ -1213,6 +1228,19 @@
       </div>
 
       <div class="wiz-skip-row"><button id="wiz-skip" class="wiz-skiplink" type="button">Skip setup for now</button></div>
+    </div>
+  </div>
+  <!-- Connect Claude Code: detect → install → sign in. Opened by the topbar mascot button, or auto when a
+       terminal spawn finds no claude. Reuses the .approve modal shell + the preflight provisioner IPC. -->
+  <div class="approve" id="claude-connect">
+    <div class="box wiz-box">
+      <div class="cc-head"><img class="cc-mascot" src="../assets/claude-mascot.png" alt="Claude" /><h3>Connect Claude Code</h3></div>
+      <p id="cc-msg">Checking Claude Code…</p>
+      <div class="ws-busy" id="cc-busy"></div>
+      <div class="row">
+        <button id="cc-action" class="primary" style="display:none"></button>
+        <button id="cc-done" class="ghost">Close</button>
+      </div>
     </div>
   </div>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>

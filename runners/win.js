@@ -170,7 +170,7 @@ function whichNode() {
 
 // Drop the memoized git-bash / app-dir resolutions so a later runtime Git install can be picked up without a
 // process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
-function resetCaches() { _bash = undefined; _appdirMsys = undefined; }
+function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; }
 
 // ---- dependency detection (pure-Node; NO git-bash) ----------------------------------------------
 // The self-bootstrapping provisioner needs to know, on a possibly-bare Windows box, which deps are present.
@@ -262,6 +262,29 @@ function buildDepReport(io) {
   }
   return out;
 }
+// Cheap "is claude on PATH?" — lets main.js gate the terminal spawn so a missing claude shows a friendly
+// "connect Claude" prompt instead of crashing to "session ended". Pure-Node, no git-bash. wsl/posix don't
+// expose this (their claude lives in the guest). The POSITIVE result is memoized (claude doesn't vanish
+// mid-session) so the per-spawn/per-exit gate isn't a repeated subprocess; a FALSE re-checks every call (so a
+// freshly-installed claude is picked up) and resetCaches() clears it after an install. A `where` that THROWS a
+// spawn error (vs exit 1 = genuinely not found) is treated as PRESENT, so a transient hiccup never false-nags.
+let _claudePresent;
+function claudePresent() {
+  if (_claudePresent === true) return true;
+  if (process.env.CLAUDIBLE_CLAUDE) return (_claudePresent = true);
+  try {
+    const out = cp.execFileSync('where', ['claude'], { encoding: 'utf8' });
+    return (_claudePresent = pickRunnable(out.split(/\r?\n/)) !== '');
+  } catch (e) {
+    if (e && e.status === 1) return (_claudePresent = false);   // `where` ran, found nothing → genuinely absent
+    return true;                                                 // spawn glitch (not exit 1) → assume present, don't false-nag
+  }
+}
+// Focused, claude-only state for the Connect-Claude dot + popup — avoids detectDeps's full 6-tool + gh-network
+// probe (which must NOT run on every launch / 3s poll tick). installed via claudePresent, signed-in via the
+// credentials read; no `claude --version` subprocess (the dot doesn't need it).
+function claudeState() { const installed = claudePresent(); return { installed, signedIn: installed ? claudeSignedIn() : false }; }
+
 // The runner-contract method: raw dep status for the deps.js orchestrator. Pure-Node — safe with no git-bash.
 function detectDeps() {
   return buildDepReport({
@@ -348,7 +371,7 @@ function setup(_opts) { return Promise.resolve({ ok: true, note: 'Windows-native
 
 module.exports = {
   id: 'win',
-  detect, detectDeps, resetCaches,
+  detect, detectDeps, resetCaches, claudePresent, claudeState,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices, voiceHealth,
