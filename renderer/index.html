@@ -120,7 +120,7 @@
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
-    .body{display:grid;grid-template-columns:1fr;gap:11px;padding:14px;min-height:0}
+    .body{display:grid;grid-template-columns:1fr;gap:11px;padding:14px 14px 7px;min-height:0}   /* bottom padding halved (14→7) → tighter space under the command bar */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
     .body.with-sessions{grid-template-columns:clamp(244px,16vw,340px) 1fr}                                   /* + docked sessions (left) */
     .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
@@ -128,9 +128,9 @@
     .center{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
     .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0;position:relative}
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
-    .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:3px;border-radius:9px;
+    .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:2px;border-radius:9px;
       background:#14171c;border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
-    .termseg button{width:auto;padding:4px 11px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+    .termseg button{width:auto;padding:3px 9px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
       background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all .15s}
     .termseg button:hover{color:var(--ink-dim)}
     .termseg button.on{color:var(--ink);background:linear-gradient(180deg,#22262e,#171a20)}
@@ -260,7 +260,7 @@
     .cmdarrow-r{right:0}
     .cmdscroll-wrap.more-l .cmdarrow-l{opacity:1;pointer-events:auto}
     .cmdscroll-wrap.more-r .cmdarrow-r{opacity:1;pointer-events:auto}
-    .cmdscroll .cmdpill{min-width:0;width:auto;padding:8px 10px;
+    .cmdscroll .cmdpill{min-width:0;width:auto;padding:7px 9px;
       font-size:11.5px;letter-spacing:.02em;color:var(--ink-dim);white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis;text-align:center;
       background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline-soft);
@@ -466,7 +466,7 @@
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background:var(--panel);
       border-right:1px solid var(--hairline);overflow:hidden}   /* a true full-height left sidebar: one divider on the right, no card box */
-    .body.with-sessions .sidebar{display:flex;margin:-14px 0 -14px -14px}   /* pull flush to the left wing — cancels the body's top/left/bottom padding; right keeps the 11px gap to the terminal */
+    .body.with-sessions .sidebar{display:flex;margin:-14px 0 -7px -14px}   /* pull flush to the left wing — cancels the body's top/left padding; bottom -7px matches the halved body bottom padding so it stays flush to the bottombar; right keeps the 11px gap to the terminal */
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;width:auto;text-align:left;padding:7px 10px;border:none;border-left:2px solid transparent;border-radius:6px;
@@ -637,9 +637,11 @@
     .sharelbl .ico{width:15.4px;height:15.4px;color:#5a7468;flex:none;transition:color .2s,filter .2s}   /* ~10% larger; very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
     .sharelbl.active{color:var(--ink)}
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
-    .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em}
+    .sharelbl .toggle{margin-left:auto;font-size:9px;letter-spacing:.07em;flex:none;white-space:nowrap}   /* keep "view-only" on one line */
+    .sharelbl .toggle .tlabel{white-space:nowrap}
     #d-share:not(.ok):not(.work):not(.bad){visibility:hidden}   /* the web-share status light: only show it once a link is starting/live/failed */
     .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
+    .share-dock .out:empty{display:none}   /* no fluff line when there's no live-share status to show (the hint moved to the button's tooltip) */
     /* live collab bar: shows that the session is live + who has joined it */
     .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
     .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#5fb487);box-shadow:0 0 8px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
@@ -904,10 +906,10 @@
           <button class="ws-info" id="share-info" type="button" aria-label="About sharing a live link" title="About sharing a live link">i</button>
           <label class="toggle" id="ro-toggle" title="Guests can watch but cannot type"><input type="checkbox" id="share-ro" /><span class="sw"></span><span class="tlabel">view-only</span></label>
         </div>
-        <button id="share-btn" class="share-btn">Share a live link</button>
+        <button id="share-btn" class="share-btn" title="A web link for people without Claudible">Share a live link</button>
         <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
-        <div class="out share-out" id="share-out">A web link for people without Claudible.</div>
+        <div class="out share-out" id="share-out"></div><!-- empty by default (hint is now the button tooltip); JS fills this only with live-share status -->
       </div>
     </aside>
     <div class="center">
