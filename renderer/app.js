@@ -1862,9 +1862,13 @@ async function pollTitles(force) {
 }
 setInterval(pollTitles, 20000);
 function makeLiveBadge(peer) {
+  const who = peer.name || peer.login || 'host';
   const b = document.createElement('button'); b.className = 'sess-live-ind sess-join';
-  b.innerHTML = '<span class="live-dot"></span>Join';
-  b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — co-drive it right here';
+  const dot = document.createElement('span'); dot.className = 'live-dot';
+  const liw = document.createElement('span'); liw.className = 'liw'; liw.textContent = 'live · ' + who;
+  const jx = document.createElement('span'); jx.className = 'joinx'; jx.textContent = 'Join →';   // revealed on row hover
+  b.appendChild(dot); b.appendChild(liw); b.appendChild(jx);
+  b.title = 'Join ' + who + '’s live session — co-drive it right here';
   b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // native, in this same window
   return b;
 }
@@ -2032,24 +2036,27 @@ function renderSessionRow(s) {
   m.appendChild(mt);
   // live indicator — inline at the right of the meta line (normal flow, so it can never overflow the row)
   if (isSharingSession(s.id)) {
+    row.classList.add('sess-live-row');                              // green left accent bar — you're sharing this live
     const lv = document.createElement('span'); lv.className = 'sess-live-ind';
-    lv.innerHTML = '<span class="live-dot"></span>Live'; lv.title = 'You are sharing this session live';
+    lv.innerHTML = '<span class="live-dot"></span><span class="liw">Live</span>'; lv.title = 'You are sharing this session live';
     m.appendChild(lv);
   } else {
     const _lp = livePeers.find((x) => x.session === s.id);
-    if (_lp) m.appendChild(makeLiveBadge(_lp));   // a collaborator is live in THIS session → clickable "Join"
+    if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp)); }   // a collaborator is live here → green bar + calm dot, "Join" on hover
   }
   row.appendChild(p); row.appendChild(m);
-  if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → red "!" prompt
+  if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip
     const db = document.createElement('button');
-    db.className = 'sess-delbadge'; db.textContent = '!'; db.title = 'Deleted from GitHub by a collaborator';
+    db.className = 'sess-chip removed'; db.title = 'Deleted from GitHub by a collaborator';
+    db.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>removed';
     db.addEventListener('click', (e) => { e.stopPropagation(); openDeletedRemoteModal(s); });
-    row.appendChild(db);
-  } else if (s.diverged) {                                           // same session edited on both machines → amber "!"
+    m.appendChild(db);
+  } else if (s.diverged) {                                           // same session edited on both machines → soft amber "diverged" chip
     const vb = document.createElement('button');
-    vb.className = 'sess-divbadge'; vb.textContent = '!'; vb.title = 'Edited on both machines — your copy and the shared copy differ';
+    vb.className = 'sess-chip diverged'; vb.title = 'Edited on both machines — your copy and the shared copy differ';
+    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>diverged';
     vb.addEventListener('click', (e) => { e.stopPropagation(); openDivergedInfo(s); });
-    row.appendChild(vb);
+    m.appendChild(vb);
   }
   // A single ▾ opens the per-session options menu (Rename / Export / Delete) — mirrors the workspace ▾ menu,
   // so the row stays a clean title with nothing crowding it and no inline confirm strip to overflow.
@@ -2195,7 +2202,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sessMenu
 let sdrag = null;
 function onSessPointerDown(e, row, s) {
   if (e.button !== 0) return;
-  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || e.target.closest('.sess-live-ind') || row.classList.contains('renaming')) return;   // never capture a press on the ▾, rename input, or the Live/Join pill — let those buttons get their own click
+  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || e.target.closest('.sess-live-ind') || e.target.closest('.sess-chip') || row.classList.contains('renaming')) return;   // never capture a press on the ▾, rename input, Live/Join pill, or a conflict chip — let those get their own click
   sdrag = { id: s.id, label: sessTitle(s), row, startY: e.clientY, moved: false, pid: e.pointerId };
   try { row.setPointerCapture(e.pointerId); } catch {}
 }

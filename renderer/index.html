@@ -473,6 +473,7 @@
       background:none;cursor:pointer;transition:background .14s,border-color .14s,opacity .16s}
     .sess:hover{background:rgba(255,255,255,.045)}
     .sess.active{background:rgba(255,255,255,.06);border-left-color:var(--live)}    /* active session: left accent bar + subtle fill (flat surface, no card border) */
+    .sess.sess-live-row,.sess.sess-peer-live{border-left-color:var(--ok,#5fb487)}    /* a session that's live (yours or a peer's) → calm green left accent bar */
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
@@ -494,21 +495,26 @@
     .sess:hover .sess-menu-btn,.sess.menu-open .sess-menu-btn{opacity:1}   /* hover-revealed; stays lit while its menu is open */
     .sess-menu-btn:hover,.sess.menu-open .sess-menu-btn{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .sess.renaming .sess-menu-btn{display:none}   /* nothing floats over the rename input while editing */
-    /* per-row alert badges: red = a collaborator deleted this on GitHub; amber = edited on both machines (diverged) */
-    .sess-delbadge,.sess-divbadge{position:absolute;top:6px;right:34px;width:18px;height:18px;padding:0;
-      display:flex;align-items:center;justify-content:center;border-radius:50%;font:inherit;font-size:11px;
-      font-weight:800;line-height:1;cursor:pointer;border:1px solid;transition:transform .12s}
-    .sess-delbadge{color:#fff;background:var(--live);border-color:var(--live);box-shadow:0 0 8px -2px var(--live)}
-    .sess-divbadge{color:#1a1205;background:#e0a93b;border-color:#e0a93b;box-shadow:0 0 8px -2px #e0a93b}
-    .sess-delbadge:hover,.sess-divbadge:hover{transform:scale(1.12)}
-    .sess.renaming .sess-delbadge,.sess.renaming .sess-divbadge{display:none}
+    /* conflict chips — soft, icon-led, inline in the meta line (replaces the loud "!" alarm circles) */
+    .sess-chip{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
+      text-transform:uppercase;border:none;border-radius:999px;padding:2px 7px 2px 5px;line-height:1;cursor:pointer;font-family:inherit;
+      white-space:nowrap;transition:background .14s}
+    .sess-chip svg{width:11px;height:11px;display:block;flex:none}
+    .sess-chip.diverged{color:#e0a93b;background:rgba(224,169,59,.14)}
+    .sess-chip.diverged:hover{background:rgba(224,169,59,.26)}
+    .sess-chip.removed{color:#e58479;background:rgba(229,86,75,.15)}
+    .sess-chip.removed:hover{background:rgba(229,86,75,.28)}
+    .sess.renaming .sess-chip{display:none}
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
     .sess-meta{display:flex;align-items:center;gap:7px}
     .sess-meta-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .sess-live-ind{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;letter-spacing:.06em;
-      text-transform:uppercase;color:var(--ok,#5fb487);background:rgba(95,180,135,.13);border:1px solid transparent;border-radius:999px;padding:2px 7px;line-height:1}
-    button.sess-live-ind.sess-join{cursor:pointer;font-family:inherit;border-color:rgba(95,180,135,.4)}
-    button.sess-live-ind.sess-join:hover{background:rgba(95,180,135,.24)}
+    .sess-live-ind{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
+      text-transform:uppercase;color:var(--ok,#5fb487);background:none;border:none;border-radius:999px;padding:2px 4px;line-height:1}
+    .sess-live-ind .liw{white-space:nowrap}
+    button.sess-live-ind.sess-join{cursor:pointer;font-family:inherit}
+    .sess-live-ind .joinx{display:none;font-weight:800}                          /* hidden at rest */
+    .sess:hover .sess-live-ind.sess-join{background:rgba(95,180,135,.16)}        /* gentle bg on row hover */
+    .sess:hover .sess-live-ind.sess-join .joinx{display:inline}                  /* reveal "Join →" on row hover */
     .sess-live-ind .live-dot{width:6px;height:6px;border-radius:50%;background:var(--ok,#5fb487);
       box-shadow:0 0 6px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2.6s ease-in-out infinite}
     .sess.renaming .sess-live-ind{display:none}
