@@ -2015,13 +2015,15 @@ function renderSessionRow(s) {
   const m = document.createElement('div'); m.className = 'sess-meta';
   m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
   row.appendChild(p); row.appendChild(m);
-  if (isSharingSession(s.id)) {                                      // I'm hosting THIS session → subtle "live" dot
+  if (isSharingSession(s.id)) {                                      // I'm hosting THIS session → compact "Live" pill (top-right)
+    row.classList.add('has-liveind');
     const sb = document.createElement('span'); sb.className = 'sess-sharing';
-    sb.innerHTML = '<span class="live-dot"></span>live'; sb.title = 'You are sharing this session live';
+    sb.innerHTML = '<span class="live-dot"></span>Live'; sb.title = 'You are sharing this session live';
     row.appendChild(sb);
+  } else {
+    const _lp = livePeers.find((x) => x.session === s.id);
+    if (_lp) { row.classList.add('has-liveind'); row.appendChild(makeLiveBadge(_lp)); }   // a collaborator is live here → compact Join pill
   }
-  const _lp = livePeers.find((x) => x.session === s.id);
-  if (_lp && !isSharingSession(s.id)) row.appendChild(makeLiveBadge(_lp));   // a collaborator is live in THIS session → subtle Join chip
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → red "!" prompt
     const db = document.createElement('button');
     db.className = 'sess-delbadge'; db.textContent = '!'; db.title = 'Deleted from GitHub by a collaborator';

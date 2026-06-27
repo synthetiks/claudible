@@ -502,16 +502,18 @@
     .sess-divbadge{color:#1a1205;background:#e0a93b;border-color:#e0a93b;box-shadow:0 0 8px -2px #e0a93b}
     .sess-delbadge:hover,.sess-divbadge:hover{transform:scale(1.12)}
     .sess.renaming .sess-delbadge,.sess.renaming .sess-divbadge{display:none}
-    /* live collaboration indicators — subtle, bottom-right of the row (replaces the old loud pills + the ⤢ button) */
-    .sess-livebadge,.sess-sharing{position:absolute;right:9px;bottom:7px;display:inline-flex;align-items:center;gap:5px;
-      font-size:10px;font-weight:600;letter-spacing:.02em;line-height:1;padding:3px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
-    .sess-livebadge{color:var(--ok,#5fb487);background:rgba(95,180,135,.12);border-color:rgba(95,180,135,.35);cursor:pointer}
-    .sess-livebadge:hover{background:rgba(95,180,135,.22)}
-    .sess-sharing{color:var(--ok,#5fb487);background:transparent;padding-right:0;cursor:default}
-    .sess-livebadge .live-dot,.sess-sharing .live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok,#5fb487);
-      box-shadow:0 0 7px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
+    /* live collaboration — a compact pill at the row's TOP-RIGHT (left of the ▾), never overlapping the title/meta */
+    .sess-sharing,.sess-livebadge{position:absolute;top:7px;right:32px;display:inline-flex;align-items:center;gap:5px;
+      font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;line-height:1;padding:3px 7px;border-radius:999px;
+      background:rgba(95,180,135,.13);color:var(--ok,#5fb487);border:1px solid transparent;white-space:nowrap}
+    .sess-livebadge{border-color:rgba(95,180,135,.38);cursor:pointer}
+    .sess-livebadge:hover{background:rgba(95,180,135,.24)}
+    .sess-sharing{cursor:default}
+    .sess-sharing .live-dot,.sess-livebadge .live-dot{width:6px;height:6px;border-radius:50%;background:var(--ok,#5fb487);
+      box-shadow:0 0 6px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
+    .sess.has-liveind .sess-prev{padding-right:74px}                 /* keep the title clear of the Live/Join pill */
     .sess.renaming .sess-livebadge,.sess.renaming .sess-sharing{display:none}
-    .sess-peer-live .sess-livebadge{position:static;margin-left:auto}
+    .sess-peer-live .sess-livebadge{position:static;top:auto;right:auto;margin-left:auto}
     /* inline rename input (replaces the title while editing) */
     .sess-rename{width:100%;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:4px 7px;margin-bottom:3px}
