@@ -2266,9 +2266,10 @@ async function deleteSession(id, scope) {
 // Lightweight centered choice modal (self-contained; labels/subs are static strings we control). Resolves the
 // chosen key, or null on Cancel / backdrop / Esc.
 function modalChoice({ title, body, choices }) {
+  if (pttCapturing) stopCapture();                                   // a modal cancels any in-progress PTT rebind — else the capture-phase keydown eats the modal's Escape/keys
   return new Promise((resolve) => {
     const back = document.createElement('div');
-    back.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+    back.style.cssText = 'position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';   /* above toasts (10001) so a toast can't obscure the modal */
     const box = document.createElement('div');
     box.style.cssText = 'min-width:320px;max-width:440px;padding:20px;border:1px solid #2b2f37;border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
     const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px';
@@ -2294,9 +2295,10 @@ function modalChoice({ title, body, choices }) {
 }
 // Single text-input modal (mirrors modalChoice). Resolves the trimmed value (may be ''), or null on Cancel/Esc/backdrop.
 function modalPrompt({ title, body, placeholder, value, ok }) {
+  if (pttCapturing) stopCapture();                                   // a modal cancels any in-progress PTT rebind — else the capture-phase keydown eats the modal's Escape/keys
   return new Promise((resolve) => {
     const back = document.createElement('div');
-    back.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+    back.style.cssText = 'position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';   /* above toasts (10001) so a toast can't obscure the modal */
     const box = document.createElement('div');
     box.style.cssText = 'min-width:330px;max-width:440px;padding:20px;border:1px solid #2b2f37;border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
     const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px'; box.appendChild(h);
@@ -2425,6 +2427,7 @@ function startLiveRename(row, p, rec) {
     if (done) return; done = true;
     if (save) {
       rec.label = inp.value.trim() || '';
+      rec.pendingTitle = rec.label;                                  // keep the to-persist title in sync so a rename BEFORE the session resolves sticks (and isn't clobbered by the creation-time name)
       p.textContent = rec.label || 'New session';
       if (rec.tabId === activeTabId) { rec.curSessionLabel = p.textContent; pushTracker(); }   // mirror to guests
     }
