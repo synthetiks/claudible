@@ -161,7 +161,7 @@ function updateScrollbar() {
   const top = (trackH - thumbH) * (b.viewportY / baseY);
   thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px'; thumb.style.transform = 'translateY(' + top + 'px)';
 }
-setInterval(updateScrollbar, 120);   // poll so the thumb tracks the live scroll position even when onScroll is sparse
+setInterval(updateScrollbar, 80);   // poll so the thumb tracks the live scroll position even when onScroll is sparse (snappier fallback; live scroll is event-driven via onScroll)
 
 let dragging = false, grabDY = 0, jogLastY = 0;
 function thumbTop() { return thumb.getBoundingClientRect().top - sc.getBoundingClientRect().top; }

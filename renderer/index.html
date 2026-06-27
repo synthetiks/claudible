@@ -126,7 +126,7 @@
     .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:9px;min-height:0;min-width:0}   /* gap −20% (11→9): terminal sits a touch closer to the command bar */
-    .termrow{display:flex;gap:11px;flex:1;min-height:0;min-width:0;position:relative}
+    .termrow{display:flex;gap:5px;flex:1;min-height:0;min-width:0;position:relative}   /* gap terminal↔scrollbar −50% (11→5) */
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
     .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:2px;border-radius:9px;
       background:#14171c;border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
@@ -228,9 +228,9 @@
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
     /* custom scroll gutter: lives in the UI, outside the terminal, never covers text */
-    .scroll{position:relative;width:14px;align-self:stretch;border-radius:9px;flex:none;
+    .scroll{position:relative;width:10px;align-self:stretch;border-radius:7px;flex:none;   /* gutter −30% (14→10) — sleeker */
       background:linear-gradient(180deg,#171a20,#0e1116);box-shadow:inset 0 0 0 1px var(--hairline)}
-    .scroll .thumb{position:absolute;left:2px;right:2px;top:0;min-height:36px;border-radius:8px;
+    .scroll .thumb{position:absolute;left:2px;right:2px;top:0;min-height:34px;border-radius:6px;
       background:linear-gradient(180deg,var(--steel),var(--ink-faint));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 4px -1px #000;
       cursor:grab;opacity:.6;transition:background .15s,opacity .2s;will-change:transform,height}
     .scroll:hover .thumb{opacity:.92;background:linear-gradient(180deg,var(--silver),var(--steel))}
