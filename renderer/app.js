@@ -2206,9 +2206,10 @@ function onSessPointerMove(e) {
   let before = null;
   for (let i = 0; i < rows.length; i++) { const r = rows[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { before = rows[i]; break; } }
   if (before) sessListEl.insertBefore(sdrag.row, before); else sessListEl.appendChild(sdrag.row);
-  const lr = sessListEl.getBoundingClientRect();                                    // gentle auto-scroll near the edges
-  if (e.clientY < lr.top + 22) sessListEl.scrollTop -= 10;
-  else if (e.clientY > lr.bottom - 22) sessListEl.scrollTop += 10;
+  const sc = $('ws-chips') || sessListEl;                                           // gentle auto-scroll near the edges — the tree (#ws-chips) is the scroll container now, not sess-list
+  const lr = sc.getBoundingClientRect();
+  if (e.clientY < lr.top + 22) sc.scrollTop -= 10;
+  else if (e.clientY > lr.bottom - 22) sc.scrollTop += 10;
 }
 function onSessPointerUp() {
   if (!sdrag) return;
@@ -2436,13 +2437,23 @@ let wsMenuFor = null;     // id of the workspace whose ▾ options menu is curre
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
   closeWsMenu();                 // a re-render replaces the chips/caret the open menu was anchored to
+  // Preserve the live sessions list + its inline "+ New Session" across the wipe — they get moved INTO the active
+  // workspace node below. .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare
+  // renderWsChips() never drops the sessions. Without this, el.innerHTML='' would destroy the relocated nodes.
+  const newSessEl = $('new-session');
+  if (el.contains(sessListEl)) sessListEl.remove();
+  if (newSessEl && el.contains(newSessEl)) newSessEl.remove();
   el.innerHTML = '';
+  let nested = false;
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
     chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (w.shared ? ' shared' : '');
     chip.title = w.kind === 'legacy' ? 'Default space — quick chats, not tied to a project folder'
       : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — shared GitHub repo; sessions sync with your team')
       : (w.label + ' — a project folder on your machine (private to you)');
+    const cv = document.createElement('span'); cv.className = 'ws-caret';   // leading disclosure chevron — rotates down on the active (expanded) workspace
+    cv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>';
+    chip.appendChild(cv);
     chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
     if (isLastLocal(w)) {                                              // a tiny "default" tag on the sole local workspace (the protected home)
@@ -2488,7 +2499,15 @@ function renderWsChips() {
       if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
     });
     el.appendChild(chip);
+    if (w.id === activeWsId) {                              // the expanded workspace: nest its sessions + "+ New Session" beneath it
+      const kids = document.createElement('div'); kids.className = 'ws-children';
+      kids.appendChild(sessListEl);
+      if (newSessEl) kids.appendChild(newSessEl);
+      el.appendChild(kids);
+      nested = true;
+    }
   });
+  if (!nested) { el.appendChild(sessListEl); if (newSessEl) el.appendChild(newSessEl); }   // no active match → keep the nodes attached (never orphan the sessions)
 }
 // "What's a workspace?" — one click on the ⓘ explains the concept, so the sidebar stays clean (no inline paragraphs).
 let wsInfoPop = null;
@@ -2592,6 +2611,7 @@ function onWsPointerUp() {
     const order = Array.prototype.slice.call($('ws-chips').querySelectorAll('.ws-chip')).map((c) => c.dataset.id);
     workspaces.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));   // keep the local array in sync with the DOM order
     claudible.workspaceReorder(order).catch(() => {});
+    renderWsChips();                                                        // re-nest the active workspace's sessions under its newly-moved chip
   } else {
     const w = workspaces.find((x) => x.id === d.id);
     if (w && w.kind === 'repo' && w.needsClone) openAcceptInviteModal(w);   // invited workspace → choose where to save it, then clone

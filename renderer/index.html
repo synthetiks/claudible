@@ -468,21 +468,21 @@
       border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
     .body.with-sessions .sidebar{display:flex}
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
-    .sess-list{flex:1;overflow:auto;padding:7px 12px 14px;display:flex;flex-direction:column;gap:7px}
-    .sess{position:relative;width:auto;text-align:left;padding:10px 11px;border:1px solid var(--hairline);border-radius:9px;
-      background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;transition:border-color .16s,box-shadow .16s,opacity .16s}
-    .sess:hover{border-color:rgba(255,255,255,.2)}
-    .sess.active{border-color:var(--live);box-shadow:0 0 14px -7px var(--live)}
-    .sess.dragging{opacity:.55;border-color:rgba(255,255,255,.32);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
+    .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
+    .sess{position:relative;width:auto;text-align:left;padding:7px 10px;border:none;border-left:2px solid transparent;border-radius:6px;
+      background:none;cursor:pointer;transition:background .14s,border-color .14s,opacity .16s}
+    .sess:hover{background:rgba(255,255,255,.045)}
+    .sess.active{background:rgba(255,255,255,.06);border-left-color:var(--live)}    /* active session: left accent bar + subtle fill (flat surface, no card border) */
+    .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
     /* live (unsaved) session rows: a blue dotted accent so they read as "running, not yet saved" */
-    .sess.sess-live{border-style:dashed}
+    .sess.sess-live{border-left-color:#6aa6e0}    /* live/unsaved → blue left accent bar (was a dashed card border) */
     .sess.sess-live .sess-meta{color:#6aa6e0}
     .sess-livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#6aa6e0;
       margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px #6aa6e0}
     .sess.busy .sess-livedot{animation:ws-sync-pulse 1s ease-in-out infinite}
-    .sess.busy.open-in-tab,.sess.busy.sess-live{border-color:var(--live)}
+    .sess.busy.open-in-tab,.sess.busy.sess-live{border-left-color:var(--live)}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
@@ -539,19 +539,30 @@
     .ws-info-pop .wt{display:block;font-size:12px;color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
-    .ws-chips{flex:none;display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto;
-      padding:9px 14px 13px;border-bottom:1px solid var(--hairline)}   /* top pad so the first workspace chip's hover/active glow isn't cramped against the corner */
+    .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow:auto;
+      padding:8px 8px 12px}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
+    /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
+    .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 17px;padding-left:8px;border-left:1px solid rgba(255,255,255,.06)}
+    /* "+ New Session" — inline as the last child inside the open workspace */
+    .newsess-row{display:flex;align-items:center;gap:6px;width:auto;text-align:left;margin:1px 0 0;padding:7px 10px;
+      font-size:11.5px;letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
+      border-radius:6px;cursor:pointer;box-shadow:none;transition:background .14s,color .14s}
+    .newsess-row:hover{background:rgba(255,255,255,.045);color:var(--ink-dim)}
     /* SESSIONS section header — just the label + "+ New"; the active workspace is already shown above */
     .sess-section-head{padding:12px 14px 9px}
     .newsess-mini{width:auto;padding:2px 10px 3px;font-size:11px;letter-spacing:.02em;text-transform:none;color:var(--ink-dim);
       background:none;border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
     .newsess-mini:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
-    .ws-chip{display:flex;align-items:center;gap:8px;width:auto;text-align:left;padding:7px 9px;border:1px solid var(--hairline);
-      border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;box-shadow:none;
-      transition:border-color .16s,box-shadow .16s}
-    .ws-chip:hover{border-color:rgba(255,255,255,.2)}
-    .ws-chip.active{border-color:var(--live);box-shadow:0 0 14px -8px var(--live)}
-    .ws-chip.dragging{opacity:.55;border-color:rgba(255,255,255,.32);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
+    .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:7px 8px;border:1px solid transparent;
+      border-radius:7px;background:none;cursor:pointer;box-shadow:none;
+      transition:background .14s,color .14s}
+    .ws-chip:hover{background:rgba(255,255,255,.04)}
+    .ws-chip.active{background:rgba(255,255,255,.055)}    /* expanded/active workspace: subtle fill (the rotated chevron is the main expand cue) */
+    .ws-chip.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
+    /* leading disclosure chevron — points right when collapsed, rotates down on the active (expanded) workspace */
+    .ws-chip .ws-caret{width:13px;height:13px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);transition:transform .16s,color .16s}
+    .ws-chip .ws-caret svg{width:11px;height:11px;display:block}
+    .ws-chip.active .ws-caret{transform:rotate(90deg);color:var(--ink-dim)}
     .ws-chip .ws-ico{width:13px;height:13px;flex:none;color:var(--ink-faint)}
     .ws-chip.active .ws-ico{color:var(--live-soft)}
     .ws-chip .ws-name{flex:1;min-width:0;font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -881,12 +892,11 @@
         </span>
       </div>
       <div class="ws-chips" id="ws-chips"></div>
-      <!-- SESSIONS — the conversations inside the active workspace -->
-      <div class="sess-section-head">
-        <span>sessions</span>
-        <button class="newsess-mini" id="new-session" title="New session in this workspace">+ New</button>
-      </div>
+      <!-- Sessions nest UNDER the active workspace, inside #ws-chips. These two elements live here at load so
+           their JS ref (#sess-list) and click handler (#new-session) resolve; renderWsChips() relocates them
+           into the active workspace's .ws-children on every render. -->
       <div class="sess-list" id="sess-list"></div>
+      <button class="newsess-row" id="new-session" title="New session in this workspace">+ New Session</button>
       <div class="share-dock">
         <div class="sharelbl" id="lbl-share">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
