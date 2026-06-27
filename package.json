@@ -1,6 +1,6 @@
 {
   "name": "claudible",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "A cockpit for Claude Code: a sleek desktop interface with live telemetry, fully-local push-to-talk voice (talk and hear replies), and live co-work — invite someone into your running session by link. Windows + WSL2.",
   "license": "MIT",
   "author": "the_crazydev",
