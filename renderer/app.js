@@ -1861,7 +1861,7 @@ async function pollTitles(force) {
   titlesSig = sig; remoteTitles = m; refreshSessions();
 }
 setInterval(pollTitles, 20000);
-function makeLiveBadge(peer) {
+function makeLiveBadge(peer, localLabel) {
   const who = peer.name || peer.login || 'host';
   const b = document.createElement('button'); b.className = 'sess-live-ind sess-join';
   const dot = document.createElement('span'); dot.className = 'live-dot';
@@ -1869,7 +1869,7 @@ function makeLiveBadge(peer) {
   const jx = document.createElement('span'); jx.className = 'joinx'; jx.textContent = 'Join →';   // revealed on row hover
   b.appendChild(dot); b.appendChild(liw); b.appendChild(jx);
   b.title = 'Join ' + who + '’s live session — co-drive it right here';
-  b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // native, in this same window
+  b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer, localLabel); });   // native, in this same window — carry the clicked row's label
   return b;
 }
 // (removed: the ⤢ "open in a separate window" fallback — joining is always native, in this same window)
@@ -1906,8 +1906,9 @@ function fitLiveTab(rec) {
 function setLiveState(rec, state, detail) {
   if (!rec || rec.kind !== 'live') return;
   rec.liveState = state || '';
+  rec.liveReason = detail || rec.liveReason || '';
   const meta = document.querySelector('[data-livetab="' + rec.tabId + '"] .sess-meta');
-  if (meta) meta.innerHTML = '<span class="sess-livedot"></span>joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live');
+  if (meta) meta.innerHTML = '<span class="sess-livedot"></span>joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + (((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '');
   let ov = rec.container.querySelector('.live-ov');
   if (!(state && state !== 'live')) { if (ov) ov.classList.remove('show'); return; }
   if (!ov) { ov = document.createElement('div'); ov.className = 'live-ov'; rec.container.appendChild(ov); }
@@ -1942,7 +1943,7 @@ function repaintLiveTracker(rec) {
   $('trk-tokens').textContent = rec.liveTokens != null ? rec.liveTokens : '0'; $('trk-tokens').title = 'host session tokens';
 }
 // Open (or focus) a peer's live session as a native tab in THIS window.
-function openLiveTab(peer) {
+function openLiveTab(peer, localLabel) {
  try {
   if (!peer) return;
   for (const r of tabs.values()) {
@@ -1962,12 +1963,13 @@ function openLiveTab(peer) {
   const who = peer.name || peer.login || 'collaborator';
   const rec = makeTab(id, null, '', { kind: 'live', peer });
   rec.label = 'Live · ' + who; rec.curSessionLabel = 'Live · ' + who; rec.hostName = who;
+  rec.joinedAsLabel = localLabel || '';                              // name the joined tab after the row you clicked, until the host broadcasts its own session name
   setActiveTab(id);
   setLiveState(rec, 'connecting');
   refreshSessions();                                                 // surface the joined-tab row immediately
   claudible.liveConnect(id, peer, collabName()).then((r) => {
-    if (!r || !r.ok) { setLiveState(rec, 'offline'); toast('Could not join: ' + humanError(r && r.error)); }
-  }).catch((err) => { console.error('[live] liveConnect rejected:', err); setLiveState(rec, 'offline'); });
+    if (!r || !r.ok) { toast('Could not join ' + who + ': ' + humanError(r && r.error)); closeTab(id); }   // don't leave a dead "ended" tab — close it and tell the user why
+  }).catch((err) => { console.error('[live] liveConnect rejected:', err); toast('Could not join ' + who + ' — connection failed'); closeTab(id); });
  } catch (e) { console.error('[live] openLiveTab THREW:', e && (e.stack || e.message || e)); toast('Join failed: ' + ((e && e.message) || e)); }
 }
 // A joined live session as a sidebar row (pinned at the top): click to switch, ✕ to leave.
@@ -1977,10 +1979,10 @@ function renderJoinedTabRow(rec) {
   row.dataset.livetab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator';
   const sessName = rec.liveSessName || '';                                          // host's real current session name (once reported), else a host-name placeholder
-  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + (sessName || (who + '’s session'));
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + (sessName || rec.joinedAsLabel || (who + '’s session'));
   const m = document.createElement('div'); m.className = 'sess-meta';
   if (rec.sessMismatch) m.innerHTML = '<span class="sess-livedot"></span>⚠ host moved to another session · ' + who;
-  else m.innerHTML = '<span class="sess-livedot"></span>joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live');
+  else m.innerHTML = '<span class="sess-livedot"></span>joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + (((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '');
   row.appendChild(p); row.appendChild(m);
   const xb = document.createElement('button');
   xb.className = 'sess-menu-btn'; xb.title = 'Leave this live session'; xb.setAttribute('aria-label', 'Leave live session');
@@ -2042,7 +2044,7 @@ function renderSessionRow(s) {
     m.appendChild(lv);
   } else {
     const _lp = livePeers.find((x) => x.session === s.id);
-    if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp)); }   // a collaborator is live here → green bar + calm dot, "Join" on hover
+    if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s))); }   // a collaborator is live here → green bar + calm dot, "Join" on hover (carry this row's name onto the joined tab)
   }
   row.appendChild(p); row.appendChild(m);
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip

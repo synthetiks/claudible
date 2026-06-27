@@ -508,6 +508,7 @@
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
     .sess-meta{display:flex;align-items:center;gap:7px}
     .sess-meta-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sess-meta{flex-wrap:wrap;row-gap:4px}   /* multiple tags (time + live + diverged) wrap to a 2nd line instead of overflowing the row */
     .sess-live-ind{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
       text-transform:uppercase;color:var(--ok,#5fb487);background:none;border:none;border-radius:999px;padding:2px 4px;line-height:1}
     .sess-live-ind .liw{white-space:nowrap}
@@ -545,7 +546,7 @@
     .ws-info-pop .wt{display:block;font-size:12px;color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
-    .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow:auto;
+    .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
       padding:8px 5px 12px}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
     .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 12px;padding-left:8px;border-left:1px solid rgba(217,119,87,.13)}   /* nested-session guide: faint Claude-orange tint on the active branch */
