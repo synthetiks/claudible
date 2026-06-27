@@ -421,16 +421,22 @@ $('voice-in').addEventListener('click', () => { recording ? stopRecording() : st
 const PTT_HOLD_MS = 150;
 let pttHeld = false, pttStart = 0, pttCombo = false, pttTimer = null;
 let pttKey = 'AltLeft', pttCapturing = false;   // default push-to-talk key (configurable); Alt frees Ctrl for copy/paste
+// PTT is a HOLD key → it MUST be a modifier (or a safe non-typing key), NEVER a terminal key like Space/Enter/Tab,
+// or the handler below would swallow it from the terminal (a stray rebind to Space literally kills the spacebar).
+// This guards both the saved pref (self-heal on load) and the rebind capture.
+const PTT_SAFE = /^(ControlLeft|ControlRight|AltLeft|AltRight|ShiftLeft|ShiftRight|MetaLeft|MetaRight|CapsLock|F\d{1,2})$/;
+const isSafePttKey = (code) => PTT_SAFE.test(code || '');
 const pttHint = document.querySelector('.ptt-hint');
 function pttCancelTimer() { if (pttTimer) { clearTimeout(pttTimer); pttTimer = null; } }
 window.addEventListener('keydown', (e) => {
   if (pttCapturing) {                      // rebinding: the next key becomes the new push-to-talk key
     e.preventDefault(); e.stopPropagation();
-    if (e.key !== 'Escape') setPttKey(e.code);   // Escape cancels without changing it
-    stopCapture();
+    if (e.key === 'Escape') { stopCapture(); return; }                 // Escape cancels without changing it
+    if (!isSafePttKey(e.code)) { try { toast('Push-to-talk must be a hold key — Ctrl, Alt, Shift or Win'); } catch (_) {} return; }   // reject typing keys (Space/Enter/…) so a rebind can never kill the terminal; keep listening for a valid one
+    setPttKey(e.code); stopCapture();
     return;
   }
-  if (e.code === pttKey) {
+  if (e.code === pttKey && isSafePttKey(pttKey)) {   // defense in depth: even a corrupt pttKey can't swallow a terminal key
     e.preventDefault(); e.stopPropagation();
     if (pttHeld) return;                   // ignore auto-repeat while held
     pttHeld = true; pttCombo = false; pttStart = Date.now();
@@ -1718,7 +1724,7 @@ function savePrefs(patch) {
   chimeOn = p.chime !== false; if ($('chat-chime')) { $('chat-chime').checked = chimeOn; $('chime-toggle').classList.toggle('on', chimeOn); }
   fullReadout = p.fullReadout !== false; if ($('full-readout')) { $('full-readout').checked = fullReadout; $('fullreadout-toggle').classList.toggle('on', fullReadout); }
   applyTtsSpeed(p.ttsSpeed || 0, false);
-  if (p.pttKey) pttKey = p.pttKey;
+  if (p.pttKey) { if (isSafePttKey(p.pttKey)) pttKey = p.pttKey; else savePrefs({ pttKey: 'AltLeft' }); }   // self-heal a bad saved key (e.g. an old rebind to Space) so it can't keep eating the spacebar
   applyPttKey();   // render the current push-to-talk key (default or saved)
   syncVoiceUI();   // reflect saved voice + always-speak in the top-bar Voice Out box
 })();
