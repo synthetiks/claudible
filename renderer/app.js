@@ -1778,7 +1778,14 @@ function updateAdvertise() {
   const want = (tunnelUp && aw && aw.kind === 'repo' && activeSession && activeSession === sharedSessionId) ? activeSession : null;
   if (want === advertisedSession) return;
   advertisedSession = want;
-  try { want ? claudible.liveAdvertise(want, collabName()) : claudible.liveUnadvertise(); } catch (e) {}
+  if (!want) { try { claudible.liveUnadvertise(); } catch (e) {} return; }
+  // advertise + warn the host if the tunnel isn't actually up (so they know WHY a collaborator can't join,
+  // instead of silently publishing an unreachable handle). The main-process heartbeat self-heals once it connects.
+  try {
+    claudible.liveAdvertise(want, collabName())
+      .then((r) => { if (r && r.error === 'tunnel-down') toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.'); })
+      .catch(() => {});
+  } catch (e) {}
 }
 // ---- Collaboration tunnel: keep the single share server matching what's actually wanted — a manual web link
 // (webShare) OR a synced session a peer can join (collabLive). The bottom-left indicator is driven SEPARATELY
@@ -2183,7 +2190,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sessMenu
 let sdrag = null;
 function onSessPointerDown(e, row, s) {
   if (e.button !== 0) return;
-  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || row.classList.contains('renaming')) return;
+  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || e.target.closest('.sess-live-ind') || row.classList.contains('renaming')) return;   // never capture a press on the ▾, rename input, or the Live/Join pill — let those buttons get their own click
   sdrag = { id: s.id, label: sessTitle(s), row, startY: e.clientY, moved: false, pid: e.pointerId };
   try { row.setPointerCapture(e.pointerId); } catch {}
 }

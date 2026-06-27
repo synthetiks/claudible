@@ -505,7 +505,12 @@ function openLiveSocket(tabId) {
 // origin. Only ever connect to / open a cloudflare quick-tunnel host (what startCloudflared produces) or localhost
 // for dev — never an arbitrary HTTPS host. This is the single allowlist used by both liveConnect and live:join.
 function isTunnelUrl(url) {
-  return /^https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com$/i.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url);
+  if (/^https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com$/i.test(url)) return true;
+  // Loopback is valid ONLY for an explicit same-machine dev test. A 127.0.0.1/localhost handle is never reachable
+  // by a REMOTE peer — accepting it in production is exactly what let a tunnel-less host advertise a URL that guests
+  // then dialed against their OWN loopback (connect-to-nothing → "unavailable", no host prompt). Gate it.
+  if (process.env.CLAUDIBLE_DEV_LOCAL && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(url)) return true;
+  return false;
 }
 function liveConnect(tabId, peer, name) {
   const url = String((peer && peer.url) || '');
@@ -600,7 +605,7 @@ function startAdvertiseHeartbeat(sid) {
   if (advertiseTimer) return;
   advertiseTimer = setInterval(() => {
     const st = share.status();
-    if (!advertisedSid || !st.running || !shareBaseUrl || !st.token) return;   // not hosting this beat — unadvertise/stop tear the timer down
+    if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
     runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, () => {});
   }, 120000);
   if (advertiseTimer.unref) advertiseTimer.unref();
@@ -608,11 +613,12 @@ function startAdvertiseHeartbeat(sid) {
 ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   const sid = String((payload && payload.sessionId) || '').replace(/[^A-Za-z0-9-]/g, '');
   const st = share.status();
-  if (!sid || !st.running || !shareBaseUrl || !st.token) return resolve({ ok: false, error: 'not live' });
+  if (!sid || !st.running || !st.token) return resolve({ ok: false, error: 'not live' });
   advertisedNameB64 = Buffer.from(String((payload && payload.name) || '')).toString('base64');   // chosen display name → presence (badge/roster)
-  // Start the re-stamp heartbeat even if THIS push failed: we ARE hosting (guarded above), and the 120s beat
-  // retries the push, so a transient blip at advertise time still self-heals — while presence-set now honestly
-  // reports ok:false for this attempt.
+  // NEVER publish a non-tunnel (loopback/dead) URL to remote peers — they'd dial their own machine. If the tunnel
+  // isn't up yet, arm the heartbeat anyway so presence is pushed the instant a real *.trycloudflare.com URL appears,
+  // and tell the caller so the host can be warned their share isn't remotely reachable.
+  if (!isTunnelUrl(shareBaseUrl)) { startAdvertiseHeartbeat(sid); return resolve({ ok: false, error: 'tunnel-down' }); }
   runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
 }));
 ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
