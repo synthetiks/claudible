@@ -231,10 +231,11 @@ function setActiveTab(tabId) {
   setTimeout(() => { if (term) term.focus(); }, 0);
 }
 // Open a brand-new session in a NEW tab (the current tab keeps running in the background).
-function newBlankTab(wsId, session) {
+function newBlankTab(wsId, session, name) {
   if (tabs.size >= MAX_TABS) { toast('Tab limit reached (' + MAX_TABS + ')'); return; }
   const id = newTabId();
-  makeTab(id, wsId || activeWsId, session || 'new');
+  const rec = makeTab(id, wsId || activeWsId, session || 'new');
+  if (name && rec) { rec.label = name; rec.curSessionLabel = name; rec.pendingTitle = name; }   // named up front → show it now + persist once the session gets its real id (onStatus reconcile)
   setActiveTab(id);                                // activating fits + starts its pty
 }
 function closeTab(tabId) {
@@ -336,6 +337,12 @@ claudible.onStatus((s) => {
   if (s.sessionId && t.session !== s.sessionId && (t.session === 'new' || !t.session)) {
     t.session = s.sessionId;
     if (t.tabId === activeTabId) activeSession = s.sessionId;
+    if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
+      const nm = t.pendingTitle; t.pendingTitle = null;
+      const titles = loadPrefs().sessionTitles || {}; titles[s.sessionId] = nm; savePrefs({ sessionTitles: titles });
+      const _aw = workspaces.find((w) => w.id === activeWsId);
+      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = nm; try { claudible.titleSet(s.sessionId, nm).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo workspace → share the name with collaborators
+    }
     if (sidebarReady && t.wsId === activeWsId) refreshSessions();
   }
   // context % — live current-fill gauge + guardrail (amber ≥70%, red ≥85%; becomes a /compact shortcut)
@@ -2285,6 +2292,35 @@ function modalChoice({ title, body, choices }) {
     document.body.appendChild(back); back.appendChild(box);
   });
 }
+// Single text-input modal (mirrors modalChoice). Resolves the trimmed value (may be ''), or null on Cancel/Esc/backdrop.
+function modalPrompt({ title, body, placeholder, value, ok }) {
+  return new Promise((resolve) => {
+    const back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+    const box = document.createElement('div');
+    box.style.cssText = 'min-width:330px;max-width:440px;padding:20px;border:1px solid #2b2f37;border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
+    const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px'; box.appendChild(h);
+    if (body) { const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:14px'; box.appendChild(bd); }
+    const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 200; inp.placeholder = placeholder || ''; inp.value = value || '';
+    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #2b2f37;border-radius:9px;background:#0a0b0d;color:#e7eaef;font:inherit;font-size:13px;outline:none;margin-bottom:16px';
+    box.appendChild(inp);
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+    cancel.style.cssText = 'font:inherit;font-size:12.5px;padding:8px 14px;border:1px solid #2b2f37;border-radius:9px;cursor:pointer;color:#cfd6df;background:#191c22';
+    const okb = document.createElement('button'); okb.type = 'button'; okb.textContent = ok || 'OK';
+    okb.style.cssText = 'font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #3a6b52;border-radius:9px;cursor:pointer;color:#dff3e8;background:rgba(95,180,135,.18)';
+    row.appendChild(cancel); row.appendChild(okb); box.appendChild(row);
+    const close = (v) => { try { back.remove(); } catch {} document.removeEventListener('keydown', onDocKey, true); resolve(v); try { if (term) term.focus(); } catch {} };
+    const onDocKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); close(inp.value.trim()); } else if (e.key === 'Escape') { e.preventDefault(); close(null); } });
+    okb.addEventListener('click', () => close(inp.value.trim()));
+    cancel.addEventListener('click', () => close(null));
+    back.addEventListener('mousedown', (e) => { if (e.target === back) close(null); });
+    document.addEventListener('keydown', onDocKey, true);
+    document.body.appendChild(back); back.appendChild(box);
+    setTimeout(() => { try { inp.focus(); } catch {} }, 30);
+  });
+}
 // A collaborator deleted this session on GitHub — let the user fully delete their local copy or keep it.
 async function openDeletedRemoteModal(s) {
   const name = sessTitle(s);
@@ -2978,7 +3014,11 @@ claudible.onWorkspaceActiveChanged((id) => {
 
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
-$('new-session').addEventListener('click', () => newBlankTab(activeWsId, 'new'));   // a NEW tab — never clears the current session
+$('new-session').addEventListener('click', async () => {                            // a NEW tab — never clears the current session
+  const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
+  if (name === null) return;                                                         // Cancel / Esc → don't create
+  newBlankTab(activeWsId, 'new', name || '');                                        // empty (just hit Create) → unnamed, like before
+});
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }
