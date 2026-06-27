@@ -464,16 +464,16 @@
     .cc-mascot{width:34px;height:34px;border-radius:8px;display:block;flex:0 0 auto}
     .iconbtn:active{transform:translateY(1px)}
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
-    .sidebar{display:none;flex-direction:column;min-height:0;background:var(--panel);
-      border-right:1px solid var(--hairline);overflow:hidden}   /* a true full-height left sidebar: one divider on the right, no card box */
+    .sidebar{display:none;flex-direction:column;min-height:0;background-color:var(--panel);background-image:linear-gradient(180deg,rgba(255,255,255,.022),transparent 22%);
+      border-right:1px solid var(--hairline);box-shadow:inset -1px 0 0 var(--sheen);overflow:hidden}   /* ④ a real material: top-lit panel + a beveled (light-catching) right divider */
     .body.with-sessions .sidebar{display:flex;margin:-7px 0 -7px -11px}   /* flush to the left wing — margins cancel the body padding (top 7 / left 11 / bottom 7) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;width:auto;text-align:left;padding:7px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
-      background:none;cursor:pointer;transition:background .14s,border-color .14s,opacity .16s}
-    .sess:hover{background:rgba(255,255,255,.045)}
-    .sess.active{background:rgba(255,255,255,.06);border-left-color:var(--live)}    /* active session: left accent bar + subtle fill (flat surface, no card border) */
-    .sess.sess-live-row,.sess.sess-peer-live{border-left-color:var(--ok,#5fb487)}    /* a session that's live (yours or a peer's) → calm green left accent bar */
+      background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
+    .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
+    .sess.active{background-color:rgba(255,255,255,.05);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 11%,transparent),transparent 42%);box-shadow:inset 0 1px 0 var(--sheen),inset 0 0 0 1px rgba(255,255,255,.05);border-left-color:var(--live)}    /* ①+② lit raised surface + directional accent wash */
+    .sess.sess-live-row,.sess.sess-peer-live{background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%);box-shadow:inset 0 1px 0 var(--sheen);border-left-color:var(--ok,#5fb487)}    /* live row: green directional wash + lift */
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
@@ -547,7 +547,7 @@
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
-      padding:8px 5px 12px}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
+      padding:8px 5px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
     .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 12px;padding-left:8px;border-left:1px solid rgba(217,119,87,.13)}   /* nested-session guide: faint Claude-orange tint on the active branch */
     /* "+ New Session" — inline as the last child inside the open workspace */
@@ -562,9 +562,9 @@
     .newsess-mini:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:7px 5px;border:1px solid transparent;
       border-radius:7px;background:none;cursor:pointer;box-shadow:none;
-      transition:background .14s,color .14s}
-    .ws-chip:hover{background:rgba(255,255,255,.04)}
-    .ws-chip.active{background:rgba(217,119,87,.06)}    /* expanded/active workspace: a whisper of Claude-orange (the rotated chevron is the main expand cue) */
+      transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),color .14s}
+    .ws-chip:hover{background-color:rgba(255,255,255,.034);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
+    .ws-chip.active{background-color:rgba(217,119,87,.05);background-image:linear-gradient(90deg,rgba(217,119,87,.11),transparent 46%);box-shadow:inset 0 1px 0 var(--sheen)}    /* ①+② active workspace: Claude-orange wash + lift (chevron is the main expand cue) */
     .ws-chip.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     /* leading disclosure chevron — points right when collapsed, rotates down on the active (expanded) workspace */
     .ws-chip .ws-caret{width:13px;height:13px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);transition:transform .16s,color .16s}
