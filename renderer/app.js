@@ -1855,7 +1855,7 @@ async function pollTitles(force) {
 }
 setInterval(pollTitles, 20000);
 function makeLiveBadge(peer) {
-  const b = document.createElement('button'); b.className = 'sess-livebadge';
+  const b = document.createElement('button'); b.className = 'sess-live-ind sess-join';
   b.innerHTML = '<span class="live-dot"></span>Join';
   b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — co-drive it right here';
   b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // native, in this same window
@@ -1866,8 +1866,10 @@ function makeLiveBadge(peer) {
 function renderLivePeerRow(peer) {
   const row = document.createElement('div'); row.className = 'sess sess-peer-live';
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = 'Live session';
-  const m = document.createElement('div'); m.className = 'sess-meta'; m.textContent = (peer.name || peer.login || 'a collaborator') + ' is live now';
-  row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer));
+  const m = document.createElement('div'); m.className = 'sess-meta';
+  const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = (peer.name || peer.login || 'a collaborator') + ' is live now';
+  m.appendChild(mt); m.appendChild(makeLiveBadge(peer));
+  row.appendChild(p); row.appendChild(m);
   row.style.cursor = 'pointer';
   row.addEventListener('click', () => openLiveTab(peer));
   return row;
@@ -2013,17 +2015,19 @@ function renderSessionRow(s) {
   row.dataset.id = s.id; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
   const m = document.createElement('div'); m.className = 'sess-meta';
-  m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
-  row.appendChild(p); row.appendChild(m);
-  if (isSharingSession(s.id)) {                                      // I'm hosting THIS session → compact "Live" pill (top-right)
-    row.classList.add('has-liveind');
-    const sb = document.createElement('span'); sb.className = 'sess-sharing';
-    sb.innerHTML = '<span class="live-dot"></span>Live'; sb.title = 'You are sharing this session live';
-    row.appendChild(sb);
+  const mt = document.createElement('span'); mt.className = 'sess-meta-t';
+  mt.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
+  m.appendChild(mt);
+  // live indicator — inline at the right of the meta line (normal flow, so it can never overflow the row)
+  if (isSharingSession(s.id)) {
+    const lv = document.createElement('span'); lv.className = 'sess-live-ind';
+    lv.innerHTML = '<span class="live-dot"></span>Live'; lv.title = 'You are sharing this session live';
+    m.appendChild(lv);
   } else {
     const _lp = livePeers.find((x) => x.session === s.id);
-    if (_lp) { row.classList.add('has-liveind'); row.appendChild(makeLiveBadge(_lp)); }   // a collaborator is live here → compact Join pill
+    if (_lp) m.appendChild(makeLiveBadge(_lp));   // a collaborator is live in THIS session → clickable "Join"
   }
+  row.appendChild(p); row.appendChild(m);
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → red "!" prompt
     const db = document.createElement('button');
     db.className = 'sess-delbadge'; db.textContent = '!'; db.title = 'Deleted from GitHub by a collaborator';
