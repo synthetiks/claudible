@@ -240,6 +240,7 @@ function newBlankTab(wsId, session) {
 function closeTab(tabId) {
   const rec = tabs.get(tabId); if (!rec || tabs.size <= 1) return;   // never close the last tab
   if (tabId === liveVoiceTabId) { try { liveVoice.leave(); } catch {} liveVoiceTabId = null; }   // leaving a joined session drops its voice
+  if (rec.kind === 'live') { try { claudible.liveDisconnect(tabId); } catch {} }   // leaving a JOINED peer session: tear down the client WebSocket too (was leaking)
   try { claudible.tabClose(tabId); } catch {}
   try { rec.term.dispose(); } catch {}
   try { rec.container.remove(); } catch {}
@@ -1766,10 +1767,15 @@ function sessTitle(s) {
 }
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
 // ---- Live sessions: advertise the session I'm hosting; discover + join a collaborator's, natively ----
+// Explicit opt-in: I only host (advertise) a session after I pick "Share live" on it — NOT automatically just
+// because sync is on. sharedSessionId is the one session I've chosen to share (null = not sharing). It resets on
+// reload, so a refresh never silently re-hosts (the bug that made two people both host the same session).
+let sharedSessionId = null;
+function isSharingSession(id) { return !!id && sharedSessionId === id; }
 // Advertise only changes when it actually changes (avoids spamming presence pushes).
 function updateAdvertise() {
   const aw = workspaces.find((w) => w.id === activeWsId);
-  const want = (tunnelUp && aw && aw.kind === 'repo' && aw.syncSessions && activeSession) ? activeSession : null;
+  const want = (tunnelUp && aw && aw.kind === 'repo' && activeSession && activeSession === sharedSessionId) ? activeSession : null;
   if (want === advertisedSession) return;
   advertisedSession = want;
   try { want ? claudible.liveAdvertise(want, collabName()) : claudible.liveUnadvertise(); } catch (e) {}
@@ -1802,9 +1808,24 @@ async function ensureTunnel() {
 function updateCollab() {
   if (AT() && AT().kind === 'live') { renderLiveBar(); return; }   // viewing a peer's session — DON'T recompute your own share off the live tab's (null) session, or you'd drop your own tunnel + guests
   const aw = workspaces.find((w) => w.id === activeWsId);
-  collabLive = !!(aw && aw.kind === 'repo' && aw.syncSessions && activeSession);
+  collabLive = !!(aw && aw.kind === 'repo' && activeSession && activeSession === sharedSessionId);   // explicit: tunnel only when I've chosen to Share THIS session
   ensureTunnel();
   renderLiveBar();                                  // show/hide the in-session "● Live · who's here" bar
+}
+// Toggle live-sharing of a session from the ▾ menu. Sharing streams the live pty, so the session must be the
+// active one — switch to it if needed. Stop sharing drops the tunnel (unless a manual web-share is up).
+function toggleShareSession(s) {
+  if (!s || !s.id) return;
+  if (sharedSessionId === s.id) {
+    sharedSessionId = null;
+    updateCollab(); updateAdvertise(); refreshSessions();
+    toast('Stopped sharing this session');
+  } else {
+    sharedSessionId = s.id;
+    if (activeSession !== s.id) openSession(s.id, sessTitle(s));   // must be the running session to stream it live
+    updateCollab(); updateAdvertise(); refreshSessions();
+    toast('Sharing live — collaborators can now Join');
+  }
 }
 // Poll the shared branch for collaborators who are live (only in a repo workspace). Re-render on change.
 async function pollLivePeers() {
@@ -1835,30 +1856,18 @@ async function pollTitles(force) {
 setInterval(pollTitles, 20000);
 function makeLiveBadge(peer) {
   const b = document.createElement('button'); b.className = 'sess-livebadge';
-  b.textContent = '● Join live' + ((peer.name || peer.login) ? ' · ' + (peer.name || peer.login) : '');
-  b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — co-drive it right here in Claudible';
-  b.style.cssText = 'margin-left:6px;flex:none;font:inherit;font-size:10px;font-weight:600;color:#fff;background:rgba(95,180,135,.2);border:1px solid var(--ok,#5fb487);border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap';
-  b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // default: native, in this same window
+  b.innerHTML = '<span class="live-dot"></span>Join';
+  b.title = 'Join ' + (peer.name || peer.login || 'the host') + '’s live session — co-drive it right here';
+  b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer); });   // native, in this same window
   return b;
 }
-// optional fallback: pop the peer's live session into a SEPARATE window (the old behavior)
-function makeWindowBtn(peer) {
-  const b = document.createElement('button');
-  b.textContent = '⤢'; b.title = 'Open ' + (peer.name || peer.login || 'the host') + '’s live session in a separate window';
-  b.style.cssText = 'margin-left:4px;flex:none;font:inherit;font-size:11px;line-height:1;color:var(--ink-faint,#8a92a0);background:transparent;border:1px solid #2b2f37;border-radius:7px;padding:3px 7px;cursor:pointer';
-  b.addEventListener('click', (e) => { e.stopPropagation(); joinLive(peer); });
-  return b;
-}
-async function joinLive(peer) {   // separate-window fallback
-  try { const r = await claudible.liveJoin(peer, collabName()); if (!r || !r.ok) toast('Could not join: ' + humanError(r && r.error)); }
-  catch (e) { console.error('[live] joinLive THREW:', e); toast('Could not join: ' + ((e && e.message) || e)); }
-}
+// (removed: the ⤢ "open in a separate window" fallback — joining is always native, in this same window)
 // a collaborator is live in a session we don't have locally yet → a joinable row of its own
 function renderLivePeerRow(peer) {
   const row = document.createElement('div'); row.className = 'sess sess-peer-live';
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = 'Live session';
   const m = document.createElement('div'); m.className = 'sess-meta'; m.textContent = (peer.name || peer.login || 'a collaborator') + ' is live now';
-  row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer)); row.appendChild(makeWindowBtn(peer));
+  row.appendChild(p); row.appendChild(m); row.appendChild(makeLiveBadge(peer));
   row.style.cursor = 'pointer';
   row.addEventListener('click', () => openLiveTab(peer));
   return row;
@@ -2006,8 +2015,13 @@ function renderSessionRow(s) {
   const m = document.createElement('div'); m.className = 'sess-meta';
   m.textContent = relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : '');
   row.appendChild(p); row.appendChild(m);
+  if (isSharingSession(s.id)) {                                      // I'm hosting THIS session → subtle "live" dot
+    const sb = document.createElement('span'); sb.className = 'sess-sharing';
+    sb.innerHTML = '<span class="live-dot"></span>live'; sb.title = 'You are sharing this session live';
+    row.appendChild(sb);
+  }
   const _lp = livePeers.find((x) => x.session === s.id);
-  if (_lp) { row.appendChild(makeLiveBadge(_lp)); row.appendChild(makeWindowBtn(_lp)); }   // a collaborator is live in THIS session → join natively (or ⤢ in a window)
+  if (_lp && !isSharingSession(s.id)) row.appendChild(makeLiveBadge(_lp));   // a collaborator is live in THIS session → subtle Join chip
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → red "!" prompt
     const db = document.createElement('button');
     db.className = 'sess-delbadge'; db.textContent = '!'; db.title = 'Deleted from GitHub by a collaborator';
@@ -2093,10 +2107,21 @@ function savedSessMenuItems(row, p, s) {
   const synced = !!(aw && aw.kind === 'repo');                       // a shared/repo session may also live on GitHub
   const items = [
     { icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this session (local label only).', act: () => startSessEdit(row, p, s) },
+  ];
+  // Live collaboration (repo workspaces only): explicit Share toggle + Join when a peer is hosting this session.
+  if (aw && aw.kind === 'repo') {
+    items.push({ icon: SHARE_SVG, label: isSharingSession(s.id) ? 'Stop sharing' : 'Share live',
+      hint: isSharingSession(s.id) ? 'Stop sharing this session with collaborators.' : 'Share this session live so a collaborator can Join and co-drive it.',
+      act: () => toggleShareSession(s) });
+    const peer = livePeers.find((x) => x.session === s.id);
+    if (peer && !isSharingSession(s.id)) items.push({ icon: SHARE_SVG, label: 'Join live · ' + (peer.name || peer.login || 'host'),
+      hint: 'Join this collaborator’s live session and co-drive it.', act: () => openLiveTab(peer) });
+  }
+  items.push(
     { icon: SHARE_SVG, label: 'Export replay…', hint: 'Save this session as a shareable HTML replay.', act: () => doExportSession(s) },
     { icon: SHARE_SVG, label: 'Save as text…', hint: 'Save this session transcript as Markdown (.md/.txt).', act: () => doExportSessionText(s) },
-    { sep: true },
-  ];
+    { sep: true }
+  );
   if (synced) {                                                      // a synced session can be removed locally or for everyone
     items.push({ icon: TRASH_SVG, label: 'Delete for me', hint: 'Remove from this machine (may sync back from GitHub).',
       act: () => { if (confirm('Delete “' + sessTitle(s) + '” from this machine?\nIt may sync back if a collaborator still has it. Moves to ~/.claudible/trash (recoverable).')) deleteSession(s.id, 'local'); } });
