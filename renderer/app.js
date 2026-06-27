@@ -2427,7 +2427,7 @@ function renderWsChips() {
       : (w.label + ' — a project folder on your machine (private to you)');
     chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
-    if (w.kind === 'legacy') {                                         // a tiny tag so "My Sessions" reads as the default, not a project
+    if (isLastLocal(w)) {                                              // a tiny "default" tag on the sole local workspace (the protected home)
       const tag = document.createElement('span'); tag.textContent = 'default';
       tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-left:4px';
       chip.appendChild(tag);
@@ -2465,7 +2465,7 @@ function renderWsChips() {
     chip.addEventListener('pointerup', onWsPointerUp);
     chip.addEventListener('pointercancel', onWsPointerUp);
     chip.addEventListener('contextmenu', (e) => {
-      if (w.kind === 'legacy') return;                     // the default workspace isn't deletable
+      if (isLastLocal(w)) { try { toast('You need at least one local workspace'); } catch (e) {} return; }   // never delete the last local (the guaranteed home)
       e.preventDefault(); e.stopPropagation();
       if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
     });
@@ -2649,9 +2649,9 @@ function wsMenuItems(chip, nm, w) {
       hint: 'Share this workspace with a teammate — creates its private GitHub repo first, then adds them.',
       act: () => inviteToLocal(w) });
   }
-  if (w.kind !== 'legacy') {
-    items.push({ sep: true });
-    items.push({ icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this workspace (local label only).', act: () => startWsEdit(chip, nm, w) });
+  items.push({ sep: true });
+  items.push({ icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this workspace (local label only).', act: () => startWsEdit(chip, nm, w) });
+  if (!isLastLocal(w)) {                                  // never offer delete on the LAST local workspace (the guaranteed home)
     items.push({
       icon: TRASH_SVG, label: 'Delete workspace', danger: true,
       hint: 'Move this workspace’s folder to trash (recoverable). A repo keeps its GitHub copy.',
@@ -2807,11 +2807,23 @@ async function confirmSync() {
   if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); updateCollab(); }   // sync on → a peer can now Join live
   else { busy.textContent = (r && r.error) || 'could not turn on sharing'; busy.classList.add('err'); }
 }
+let firstRunHandled = false, firstRunActive = false;
+function isLastLocal(w) { return !!(w && w.kind === 'local' && workspaces.filter((x) => x.kind === 'local').length <= 1); }
+// First launch (no local workspace existed → main materialized a default): once, welcome the user and open the
+// workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.
+function maybeFirstRun(r) {
+  if (firstRunHandled || !r || !r.firstRun) return;
+  firstRunHandled = true; firstRunActive = true;
+  try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch (e) {}
+  try { toast('Welcome — name your workspace and pick where to keep it'); } catch (e) {}
+  setTimeout(() => { try { openWsModal(); } catch (e) {} }, 450);
+}
 async function refreshWorkspaces() {
   let r = null; try { r = await claudible.workspaceList(); } catch {}
   if (r && Array.isArray(r.workspaces)) { workspaces = r.workspaces; if (r.activeId) activeWsId = r.activeId; }
   const at = AT(); if (at && !at.wsId) at.wsId = activeWsId;   // bind the boot tab to the real active workspace
   renderWsChips();
+  maybeFirstRun(r);
 }
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
@@ -2848,7 +2860,7 @@ function openWsModal() {
   $('ws-modal').classList.add('show');
   setTimeout(() => $('ws-name-in').focus(), 60);
 }
-function closeWsModal() { $('ws-modal').classList.remove('show'); }
+function closeWsModal() { $('ws-modal').classList.remove('show'); firstRunActive = false; }
 async function createWorkspace() {
   if ($('ws-create').disabled) return;                      // in-flight guard (the Enter key can bypass the disabled button)
   const name = $('ws-name-in').value.trim();
@@ -2860,11 +2872,17 @@ async function createWorkspace() {
   let r = null; try { r = await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
   $('ws-create').disabled = false;
   if (!r || !r.ok) { busy.textContent = (r && r.error) || 'creation failed'; busy.classList.add('err'); return; }
+  const wasFirstRun = firstRunActive; firstRunActive = false;
   if (r.note) { try { toast(r.note); } catch {} }   // honest partial-success (e.g. repo created but the discovery marker push failed)
   closeWsModal();                                   // main already switched the foreground tab + respawned a fresh conversation
   { const t = AT(); if (t) { t.wsId = (r.workspace && r.workspace.id) || activeWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; t.term.reset(); resetStats(t); } }
   activeSession = null;
   await refreshWorkspaces();
+  // first-run: the workspace they just made replaces the auto-created "Local" placeholder — remove it now that
+  // another local exists (the >=1-local invariant still holds). A repo creation keeps the placeholder (still the only local).
+  if (wasFirstRun && workspaces.some((w) => w.id === 'local-local') && workspaces.filter((w) => w.kind === 'local').length >= 2) {
+    try { await claudible.workspaceDelete('local-local'); await refreshWorkspaces(); } catch (e) {}
+  }
   refreshSessions(); renderTabStrip();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }

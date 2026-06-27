@@ -899,7 +899,9 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
 });
 
 // ---- workspaces (the library a session belongs to: legacy / local folder / private repo) ----
-ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspaces: registry.workspaces }));
+ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspaces: registry.workspaces, firstRun: !!registry.firstRun }));
+// One-time first-run flag (set when the default Local workspace was materialized) → cleared once the renderer has shown its setup prompt.
+ipcMain.handle('workspace:firstRunDone', () => { if (registry.firstRun) { delete registry.firstRun; saveRegistry(); } return { ok: true }; });
 // Switch the active workspace: subsequent session list/open/delete scope to its cwd; resume its latest convo.
 ipcMain.handle('workspace:open', async (e, id) => {
   const ws = registry.workspaces.find((w) => w.id === id);

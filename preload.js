@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('claudible', {
   diffDiscard: (relPath) => ipcRenderer.invoke('diff:discard', relPath),
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  workspaceFirstRunDone: () => ipcRenderer.invoke('workspace:firstRunDone'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),
   workspaceUpgrade: (id) => ipcRenderer.invoke('workspace:upgrade', id),   // local → synced (private repo) so it appears on other devices + can be shared
   workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
