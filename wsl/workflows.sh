@@ -28,4 +28,5 @@ PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^
 WF_ROOT="$PROJ/$SID/subagents/workflows"
 [ -d "$WF_ROOT" ] || { printf '[]'; exit 0; }
 
+unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
 node "$(dirname "$0")/workflows-tool.js" "$WF_ROOT" 2>/dev/null || printf '[]'

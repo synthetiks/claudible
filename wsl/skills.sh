@@ -18,6 +18,7 @@ op="${1:-list}"
 case "$op" in
 
   list)
+    unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
     node "$(dirname "$0")/skills-tool.js" list "$SDIR" 2>/dev/null || printf '[]'
     ;;
 
@@ -25,6 +26,7 @@ case "$op" in
     name="${2:-}"; state="${3:-}"
     case "$name"  in '' | *[!A-Za-z0-9:/_.-]*) printf '{"ok":false,"error":"bad name"}';  exit 0 ;; esac
     case "$state" in on|off|name-only|user-invocable-only) ;; *) printf '{"ok":false,"error":"bad state"}'; exit 0 ;; esac
+    unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
     node "$(dirname "$0")/skills-tool.js" set "$SDIR" "$name" "$state" 2>/dev/null || printf '{"ok":false,"error":"write failed"}'
     ;;
 

@@ -9,6 +9,7 @@ op="${1:-list}"
 case "$op" in
 
   list)
+    unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
     node "$(dirname "$0")/plugins-tool.js" list 2>/dev/null || printf '[]'
     ;;
 
@@ -26,6 +27,7 @@ case "$op" in
 
   available)
     # Browse what's installable from the registered marketplaces (the official one + any others).
+    unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
     node "$(dirname "$0")/plugins-tool.js" available 2>/dev/null || printf '[]'
     ;;
 

@@ -35,4 +35,5 @@ if [ "$N" -gt 0 ]; then
   clog="$(git log --no-color --format='%h%x1f%s%x1f%an%x1f%ad' --date=short "HEAD~$N"..HEAD 2>/dev/null)"
 fi
 
+unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
 DIFF="$diff_text" UNTRACKED="$untracked" CDIFF="$cdiff_text" CLOG="$clog" node "$(dirname "$0")/diff-tool.js" 2>/dev/null || printf '{"ok":true,"repo":true,"files":[],"untracked":[],"committed":[],"commits":[]}'

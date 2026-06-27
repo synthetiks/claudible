@@ -23,4 +23,5 @@ PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^
 f="$PROJ/$id.jsonl"
 [ -f "$f" ] || { printf '[]'; exit 0; }
 
+unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
 node "$(dirname "$0")/transcript-tool.js" "$f" 2>/dev/null || printf '[]'

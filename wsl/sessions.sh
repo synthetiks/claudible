@@ -22,4 +22,5 @@ PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^
 WT=""
 [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ] && WT="$HOME/.claudible/sessions-sync/$WS_SLUG"
 
+unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
 node "$(dirname "$0")/sessions-tool.js" "$PROJ" "$WT" 2>/dev/null || printf '[]'
