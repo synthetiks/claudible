@@ -492,8 +492,13 @@ function openLiveSocket(tabId) {
   });
   sock.on('close', () => {
     r.ws = null; if (r.closed) return;
-    const warm = gotHello || r.resume;                     // we were admitted (resume token proves it) → reconnect indefinitely
-    if (!warm) { r.coldTries = (r.coldTries || 0) + 1; if (r.coldTries > 5) { liveSend(tabId, 'live:state', { state: 'offline' }); return; } }   // cold: host tunnel may just be slow to come up — try a few times, then give up
+    // A close with NO hello this attempt = we were not admitted. If we were presenting a resume token (?r=), it's
+    // probably stale (host restarted / revoked it) — after 2 such failures, DROP it so the next dial uses the link
+    // token (?t=) and re-requests approval, instead of looping forever on a dead resume token.
+    if (!gotHello && r.resume) { r.resumeFails = (r.resumeFails || 0) + 1; if (r.resumeFails >= 2) { r.resume = null; r.resumeFails = 0; } }
+    else if (gotHello) { r.resumeFails = 0; }
+    const warm = gotHello || r.resume;                     // admitted this attempt, or still holding a not-yet-exhausted resume token
+    if (!warm) { r.coldTries = (r.coldTries || 0) + 1; if (r.coldTries > 8) { liveSend(tabId, 'live:state', { state: 'offline' }); return; } }   // cold: host tunnel slow to come up OR we just fell back resume→link — try a few times, then give up
     r.retry = Math.min(r.retry + 1, 6);
     liveSend(tabId, 'live:state', { state: warm ? 'reconnecting' : 'offline' });
     r.retryTimer = setTimeout(() => openLiveSocket(tabId), (warm ? 500 : 3000) * r.retry);

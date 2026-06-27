@@ -18,6 +18,8 @@ case "$kind" in
   local)
     pdir="${3:-}"                                          # optional custom parent dir (absolute WSL path from the app)
     if [ -n "$pdir" ]; then dir="$pdir/$slug"; else dir="$HOME/.claudible/workspaces/$slug"; fi
+    # win-native: normalize to a real Windows path (C:/..) so the stored ws.path drives node-pty/claude.exe + the project-dir key correctly, instead of a /c/.. form read as a stray C:\c\.. (no-op on WSL/Posix). Mirrors clone-workspace.sh.
+    if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
     if [ -e "$dir" ]; then printf '{"ok":false,"error":"a workspace with that name already exists there"}'; exit 0; fi
     if mkdir -p "$dir/.claude"; then
       printf '{"ok":true,"kind":"local","slug":"%s","path":"%s"}' "$slug" "$dir"
@@ -31,6 +33,8 @@ case "$kind" in
     owner="$(gh api user --jq .login 2>/dev/null)"
     if [ -z "$owner" ]; then printf '{"ok":false,"error":"gh is not authenticated — run: gh auth login"}'; exit 0; fi
     dir="$HOME/.claudible/repos/$slug"
+    # win-native: normalize to a Windows path so gh/git.exe clone into the real dir, not a stray C:\c\.. (no-op off Windows).
+    if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
     if [ -e "$dir" ]; then printf '{"ok":false,"error":"a repo workspace with that name already exists locally"}'; exit 0; fi
     mkdir -p "$HOME/.claudible/repos" 2>/dev/null
     # Create the private repo with an initial commit (--add-readme) so the clone has a real default branch.

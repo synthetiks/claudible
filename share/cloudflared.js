@@ -34,7 +34,7 @@ function spawnCandidate(bin, port) {
   return new Promise((resolve) => {
     let proc;
     try {
-      proc = cp.spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://localhost:${port}`], { windowsHide: true });
+      proc = cp.spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`], { windowsHide: true });   // 127.0.0.1 (not localhost) to match the share server's IPv4 bind — avoids localhost→::1 → unreachable origin/502 on dual-stack hosts
     } catch (e) { return resolve({ ok: false, err: e }); }
     let done = false;
     proc.once('spawn', () => { if (!done) { done = true; resolve({ ok: true, proc }); } });

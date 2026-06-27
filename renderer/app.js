@@ -290,7 +290,7 @@ const fmtK = (n) => n >= 1e6 ? ((+(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)) + 'M') : 
 function pushTracker() {
   const t = AT(); if (!t) return;
   if (t.kind === 'live') return;   // viewing a peer's session — never mirror THEIR tracker to YOUR guests
-  try { claudible.shareTracker({ ctxPct: t.curCtxPct, cost: $('trk-cost').textContent, tokens: $('trk-tokens').textContent, session: t.curSessionLabel }); } catch {}
+  try { claudible.shareTracker({ ctxPct: t.curCtxPct, cost: $('trk-cost').textContent, tokens: $('trk-tokens').textContent, session: t.curSessionLabel, sessionId: (t.session && t.session !== 'new') ? t.session : '' }); } catch {}   // sessionId lets a guest detect "host moved to a different session than I joined"
 }
 // Paint the #trk-* gauges from a tab record (called for the active tab on update and on every tab switch).
 function repaintTracker(t) {
@@ -1841,7 +1841,7 @@ async function pollLivePeers() {
   let peers = []; try { peers = await claudible.livePeers(); } catch (e) {}
   const now = Date.now() / 1000;
   peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 300));   // drop stale (>5 min; a live host re-stamps every ~2 min)
-  const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts]).sort());
+  const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session]]).sort());   // include local-presence so the Join badge re-renders the moment the host's session syncs into our list — not only when a peer changes (fixes "Join only shows when I click around")
   if (sig === livePeersSig) return;
   livePeersSig = sig; livePeers = peers; refreshSessions();
 }
@@ -1972,9 +1972,11 @@ function renderJoinedTabRow(rec) {
   row.className = 'sess sess-joined-live' + (rec.tabId === activeTabId ? ' active' : '');
   row.dataset.livetab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator';
-  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + who + '’s session';
+  const sessName = rec.liveSessName || '';                                          // host's real current session name (once reported), else a host-name placeholder
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + (sessName || (who + '’s session'));
   const m = document.createElement('div'); m.className = 'sess-meta';
-  m.innerHTML = '<span class="sess-livedot"></span>joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live');
+  if (rec.sessMismatch) m.innerHTML = '<span class="sess-livedot"></span>⚠ host moved to another session · ' + who;
+  else m.innerHTML = '<span class="sess-livedot"></span>joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live');
   row.appendChild(p); row.appendChild(m);
   const xb = document.createElement('button');
   xb.className = 'sess-menu-btn'; xb.title = 'Leave this live session'; xb.setAttribute('aria-label', 'Leave live session');
@@ -2013,8 +2015,11 @@ claudible.onLiveStatus((p) => {
   if (typeof s.ctxPct === 'number') rec.curCtxPct = s.ctxPct;
   if (s.cost != null) rec.liveCost = String(s.cost).slice(0, 16);          // host-provided (untrusted) — textContent + length-capped
   if (s.tokens != null) rec.liveTokens = String(s.tokens).slice(0, 16);
-  if (s.session != null && s.session) rec.curSessionLabel = 'Live · ' + String(s.session).slice(0, 80);
+  const prevName = rec.liveSessName, prevMismatch = rec.sessMismatch;
+  if (s.session != null && s.session) { rec.liveSessName = String(s.session).slice(0, 80); rec.curSessionLabel = 'Live · ' + rec.liveSessName; }   // the host's ACTUAL current session name → label the joined tab by it, not by the host's name
+  if (s.sessionId) { rec.liveSessId = String(s.sessionId).slice(0, 64); rec.sessMismatch = !!(rec.peer && rec.peer.session && rec.liveSessId !== rec.peer.session); }   // host is streaming a different session than I clicked Join on → flag it instead of silently mirroring the wrong pty
   if (p.tabId === activeTabId) repaintLiveTracker(rec);
+  if (rec.liveSessName !== prevName || rec.sessMismatch !== prevMismatch) refreshSessions();   // reflect the real session name / mismatch on the sidebar row
 });
 function renderSessionRow(s) {
   const row = document.createElement('div');
