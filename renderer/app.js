@@ -1136,9 +1136,14 @@ function activeRosterMembers() {
   }
   return lastRoster;
 }
+// I'm the HOST of a live session (so I may terminate it / kick guests) when I'm NOT viewing someone else's joined
+// tab AND I'm sharing one of my own sessions (or a manual web link). A guest must never see these controls.
+function amHostingLive() { const t = AT(); return !(t && t.kind === 'live') && (!!sharedSessionId || webShare); }
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
+  const hosting = amHostingLive();
+  const term = $('chat-terminate'); if (term) term.style.display = hosting ? '' : 'none';   // host-only "End live"
   const you = document.createElement('span'); you.className = 'rmember you';
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
   you.appendChild(document.createTextNode(youName()));
@@ -1149,8 +1154,27 @@ function renderRoster(roster) {
     m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab'));
     const d = document.createElement('span'); d.className = 'rdot ' + cls;
     m.appendChild(d); m.appendChild(document.createTextNode(g.name));
+    if (hosting && !g.host && g.state !== 'gone') {                  // host can remove a guest who's present
+      const k = document.createElement('button'); k.className = 'rkick'; k.type = 'button';
+      k.title = 'Remove ' + g.name; k.setAttribute('aria-label', 'Remove ' + g.name); k.textContent = '✕';
+      k.addEventListener('click', (e) => { e.stopPropagation(); claudible.shareKick(g.name).then((r) => { if (r && r.ok) toast('Removed ' + g.name); }).catch(() => {}); });
+      m.appendChild(k);
+    }
     el.appendChild(m);
   });
+}
+// End the live session entirely: disconnect everyone + drop the tunnel/advertisement (mirrors "Stop sharing").
+async function terminateLive() {
+  const go = await modalChoice({
+    title: 'End the live session?',
+    body: 'Everyone viewing will be disconnected and the share link stops working. Your session keeps running here.',
+    choices: [{ key: 'end', label: 'End live session', danger: true }, { key: 'cancel', label: 'Cancel' }],
+  });
+  if (go !== 'end') return;
+  if (sharedSessionId) sharedSessionId = null;
+  if (webShare) { webShare = false; webShareUI(false); }
+  updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions();   // updateCollab→ensureTunnel drops the tunnel (closes guests)
+  toast('Live session ended');
 }
 // The cockpit LIVE bar: visible whenever this session is live (synced collab) — shows you + everyone who's joined.
 let lastRoster = [];
@@ -1733,10 +1757,21 @@ function renderChatLog() {
     const d = document.createElement('div'); d.className = 'chat-msg ' + (m.mine ? 'me' : 'them');
     const w = document.createElement('span'); w.className = 'who'; w.textContent = m.who;
     const body = document.createElement('div'); body.textContent = m.text;   // textContent → no HTML injection
-    d.appendChild(w); d.appendChild(body); chatLog.appendChild(d);
+    const cp = document.createElement('button'); cp.className = 'chat-copy'; cp.title = 'Copy message'; cp.setAttribute('aria-label', 'Copy message');
+    cp.dataset.text = m.text;   // copy the raw text → paste straight into Claude
+    cp.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1"/></svg>';
+    d.appendChild(w); d.appendChild(body); d.appendChild(cp); chatLog.appendChild(d);
   });
   chatLog.scrollTop = chatLog.scrollHeight;
 }
+// Hover copy on any chat message → clipboard, so a collaborator's prompt can be pasted straight into Claude.
+if (chatLog) chatLog.addEventListener('click', (e) => {
+  const cp = e.target.closest('.chat-copy'); if (!cp) return;
+  e.stopPropagation();
+  claudible.clipWrite(cp.dataset.text || '');   // main-process clipboard → works regardless of renderer perms (matches the rest of the app)
+  toast('Message copied');
+});
+{ const _term = $('chat-terminate'); if (_term) _term.addEventListener('click', () => terminateLive()); }   // host: "End live" → terminate the session
 // Append to a SPECIFIC buffer; only repaint if that buffer is the one currently on screen.
 function chatAppend(buf, entry, onScreen) { buf.push(entry); if (buf.length > 400) buf.shift(); if (onScreen) renderChatLog(); }
 function sendChat() {
@@ -2223,7 +2258,7 @@ function savedSessMenuItems(row, p, s) {
   // Live collaboration (repo workspaces only): explicit Share toggle + Join when a peer is hosting this session.
   if (aw && aw.kind === 'repo') {
     items.push({ icon: SHARE_SVG, label: isSharingSession(s.id) ? 'Stop sharing' : 'Share live',
-      hint: isSharingSession(s.id) ? 'Stop sharing this session with collaborators.' : 'Share this session live so a collaborator can Join and co-drive it.',
+      hint: isSharingSession(s.id) ? 'End the live session — everyone viewing is disconnected.' : 'Share this session live so a collaborator can Join and co-drive it.',
       act: () => toggleShareSession(s) });
     const peer = livePeers.find((x) => x.session === s.id);
     if (peer && !isSharingSession(s.id)) items.push({ icon: SHARE_SVG, label: 'Join live · ' + (peer.name || peer.login || 'host'),

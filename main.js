@@ -585,6 +585,7 @@ ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time
   const t = share.regenerateLink();
   return { ok: true, url: `${shareBaseUrl}/?t=${t}` };
 });
+ipcMain.handle('share:kick', (e, arg) => { try { return { ok: !!share.kickGuest(arg && arg.name) }; } catch { return { ok: false }; } });   // host removes one guest by name
 ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, !!(arg && arg.ok)));   // host's verdict
 
 // ---- Live sessions: advertise the session I'm hosting (presence on the shared branch) so a collaborator in

@@ -236,9 +236,10 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       const wasVoice = voiceGuests.delete(ws._pid);
       notifyGuests();
       const tok = ws._resume, who = ws._name;
-      if (tok) {
+      if (tok && !ws._kicked) {
         // Don't cry "left" the instant the socket closes — a backgrounded tab / locked phone reconnects with this
         // token. Show them amber ("away") and wait out the grace window; only a real, lasting departure announces.
+        // (A host-KICKED guest skips this entirely — handled in the else: token killed, gone immediately.)
         roster.set(who, 'idle'); notifyRoster();
         const prev = pendingDrops.get(tok); if (prev) clearTimeout(prev.timer);
         const timer = setTimeout(() => {
@@ -251,8 +252,9 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         if (timer && timer.unref) timer.unref();
         pendingDrops.set(tok, { timer, wasVoice, name: who });
       } else {
+        if (ws._kicked && tok) resumeTokens.delete(tok);   // kick → kill the resume token so they can't silently rejoin
         roster.set(who, 'gone'); notifyRoster();
-        systemChat(who + ' disconnected');
+        systemChat(who + (ws._kicked ? ' was removed by the host' : ' disconnected'));
         if (wasVoice) broadcastVoice();
       }
     };
@@ -345,6 +347,28 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // "New link" is a full ACCESS RESET, not a soft rotation: disconnect every current guest, revoke all reconnect
   // tokens + pending drops, then mint a fresh invite — so re-inviting genuinely locks out everyone who held the old
   // link. (Previously it kept old guests' tokens, letting a departed/denied guest silently rejoin via ?r=.)
+  // Host kicks ONE guest by display name: deny + close their socket. drop() then kills their resume token and marks
+  // them 'gone' immediately (no grace), so the kick sticks until they re-join through the link (host can also
+  // regenerateLink to lock everyone out). Returns true if at least one matching connection was closed.
+  function kickGuest(name) {
+    const nm = String(name || '');
+    let hit = false;
+    for (const ws of clients) {
+      if (ws._name === nm) {
+        ws._kicked = true;
+        try { ws.send(JSON.stringify({ type: 'denied', reason: 'removed' })); } catch {}
+        try { ws.close(); } catch {}   // → drop(): token killed, roster 'gone', "removed by host"
+        hit = true;
+      }
+    }
+    // also evict a guest of that name still in the reconnect grace window (disconnected, token alive) so a
+    // backgrounded tab can't silently rejoin past the kick.
+    for (const [tok, p] of Array.from(pendingDrops.entries())) {
+      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} pendingDrops.delete(tok); resumeTokens.delete(tok); roster.set(nm, 'gone'); hit = true; }
+    }
+    if (hit) notifyRoster();
+    return hit;
+  }
   function regenerateLink() {
     if (!server) return null;
     for (const ws of clients) { try { ws.send(JSON.stringify({ type: 'denied', reason: 'revoked' })); } catch {} try { ws.close(); } catch {} }
@@ -419,7 +443,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, decideApproval, status, hostVoiceSet, audioFromHost };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
 module.exports = { createShareServer };

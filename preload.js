@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('claudible', {
   shareStop: () => ipcRenderer.invoke('share:stop'),
   shareStatus: () => ipcRenderer.invoke('share:status'),
   shareNewLink: () => ipcRenderer.invoke('share:newlink'),
+  shareKick: (name) => ipcRenderer.invoke('share:kick', { name }),   // host removes one guest by name
   shareApprove: (id, ok) => ipcRenderer.invoke('share:approve', { id, ok }),
   shareTracker: (s) => ipcRenderer.send('share:tracker', s),
   shareSendChat: (text) => ipcRenderer.send('share:chat-send', text),

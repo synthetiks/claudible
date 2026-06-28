@@ -817,16 +817,27 @@
       font-size:9px;letter-spacing:.04em;color:var(--ink-faint);text-transform:none;max-width:70%}
     .rmember{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
     .rmember.you{color:var(--ink-dim)}
+    /* host live-controls: a small "End live" in the chat head + a per-guest ✕ revealed on hover */
+    .chat-term{flex:none;font:inherit;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:7px;padding:2px 8px;cursor:pointer;transition:background .14s,color .14s}
+    .chat-term:hover{background:rgba(229,86,75,.26);color:#ff9b91}
+    .rkick{flex:none;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin-left:1px;border:none;border-radius:4px;background:none;color:var(--ink-faint);font-size:10px;line-height:1;cursor:pointer;opacity:0;transition:opacity .14s,color .14s}
+    .rmember:hover .rkick{opacity:.75}
+    .rkick:hover{opacity:1;color:var(--live)}
     .rmember.gone{color:var(--ink-faint);opacity:.7}
     .rdot{width:6px;height:6px;border-radius:50%;background:#565c66;flex:none}
     .rdot.ok{background:#5fb487;box-shadow:0 0 6px -1px #5fb487}
     .rdot.idle{background:#e0a93b;box-shadow:0 0 6px -1px #e0a93b}
     .rdot.gone{background:var(--live);opacity:.85}
     .chat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
-    .chat-msg{max-width:88%;padding:7px 10px;border-radius:9px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+    .chat-msg{position:relative;max-width:88%;padding:7px 10px;border-radius:9px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
     .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
     .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6}
     .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink)}
+    /* hover-revealed copy button, bottom-right of the bubble — copy a collaborator's prompt straight to the clipboard */
+    .chat-copy{position:absolute;bottom:3px;right:3px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:6px;background:rgba(0,0,0,.28);color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .14s,color .14s,background .14s}
+    .chat-copy svg{width:12px;height:12px;display:block}
+    .chat-msg:hover .chat-copy{opacity:.85}
+    .chat-copy:hover{opacity:1;color:var(--ink);background:rgba(0,0,0,.42)}
     .chat-empty{margin:auto;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
     .chat-input{display:flex;gap:7px;padding:10px;border-top:1px solid var(--hairline-soft)}
     .chat-input input{margin:0;flex:1}
@@ -1000,7 +1011,7 @@
       </div>
     </div><!-- /center -->
     <div class="chat" id="chat">
-      <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><span class="chat-roster" id="chat-roster"></span></div>
+      <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><button class="chat-term" id="chat-terminate" type="button" title="End the live session for everyone" style="display:none">End live</button><span class="chat-roster" id="chat-roster"></span></div>
       <div class="voicerow" id="voicerow">
         <button id="hv-btn" class="hv-btn" title="Talk with your viewers">🎙 Join voice</button>
         <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
