@@ -364,7 +364,21 @@ claudible.onStatus((s) => {
 });
 
 // ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Left-Ctrl push-to-talk hold) ----------
-let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false;
+let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false, micIdleTimer = null, micPending = null;
+function micLive() { return !!(micStream && micStream.getTracks().some((t) => t.readyState === 'live')); }
+function getMic() {                                          // reuse a WARM mic stream (deduped) so recording starts INSTANTLY — the per-record getUserMedia gap is what swallowed the first/long clip
+  if (micLive()) return Promise.resolve(micStream);
+  if (micPending) return micPending;                        // dedupe a pre-warm + a record racing the same cold grant
+  micPending = navigator.mediaDevices.getUserMedia({ audio: true })
+    .then((s) => { micStream = s; micPending = null; return s; })
+    .catch((e) => { micPending = null; throw e; });
+  return micPending;
+}
+function releaseMicSoon() {                                  // keep the mic warm for quick retries, then release when idle (privacy — the OS mic indicator turns off)
+  if (micIdleTimer) clearTimeout(micIdleTimer);
+  micIdleTimer = setTimeout(() => { try { if (micStream) micStream.getTracks().forEach((t) => t.stop()); } catch {} micStream = null; micIdleTimer = null; }, 45000);
+}
+function warmMic() { getMic().then(() => { if (!recording && !micIdleTimer) releaseMicSoon(); }).catch(() => {}); }   // pre-grab on press; idle out if no recording follows
 function talkUI(on) {
   $('talk').textContent = on ? '■ Stop' : 'Talk'; $('talk').className = on ? 'primary live' : 'primary'; setActive('lbl-in', on);
   // Top-bar Voice In box — always visible (even with the drawer closed) so you can see you're talking.
@@ -375,19 +389,24 @@ async function startRecording() {
   if (recording) return;
   recording = true; discardClip = false;   // claim synchronously — blocks double-trigger re-entry
   stopSpeech();                            // barge-in: stop any TTS the instant the user starts talking
-  talkUI(true); setDot('d-stt', 'work'); $('stt-out').textContent = 'listening…'; $('stt-out').className = 'out';
-  try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  if (micIdleTimer) { clearTimeout(micIdleTimer); micIdleTimer = null; }   // cancel a pending mic release — we're recording again
+  const warm = micLive();                  // warm stream → instant capture; cold → a grant gap during which nothing records
+  talkUI(true); setDot('d-stt', 'work');
+  $('stt-out').textContent = warm ? 'listening…' : 'starting mic…'; $('stt-out').className = 'out';
+  if (!warm) { const s = $('vin-stat'); if (s) s.textContent = 'Starting…'; }   // honest cue: DON'T speak yet — the mic isn't capturing during the cold getUserMedia gap (this is what swallowed the first/long clip)
+  let stream;
+  try { stream = await getMic(); }
   catch (e) {
     recording = false; talkUI(false);
     setDot('d-stt', 'bad'); $('stt-out').textContent = 'mic blocked: ' + e.message + ' — enable Windows mic for desktop apps'; $('stt-out').className = 'out';
     return;
   }
-  if (!recording) { micStream.getTracks().forEach((t) => t.stop()); return; }   // released during the async mic-grant gap
+  if (!recording) { releaseMicSoon(); return; }   // stopped during the grant gap → keep the stream WARM so the retry is instant (was: thrown away → next clip cold again)
   const mt = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-  mediaRecorder = new MediaRecorder(micStream, { mimeType: mt }); chunks = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType: mt }); chunks = [];
   mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   mediaRecorder.onstop = async () => {
-    micStream.getTracks().forEach((t) => t.stop());
+    releaseMicSoon();                      // keep the mic warm for a quick retry; released after idle (privacy) — NOT stopped immediately
     if (discardClip) { setDot('d-stt', 'ok'); $('stt-out').textContent = ''; $('stt-out').className = 'out'; return; }  // false-start: combo key or too short to be speech
     const blob = new Blob(chunks, { type: 'audio/webm' });
     setDot('d-stt', 'work'); $('stt-out').textContent = 'transcribing…'; $('stt-out').className = 'out';
@@ -407,6 +426,8 @@ async function startRecording() {
   };
   mediaRecorder.start(1000);               // 1s timeslice: collect data incrementally so LONG recordings
                                            // capture reliably (concatenated webm chunks decode fine via ffmpeg)
+  $('stt-out').textContent = 'listening…'; $('stt-out').className = 'out';   // NOW actually capturing → the honest cue to speak
+  { const s = $('vin-stat'); if (s && recording) s.textContent = 'Listening'; }
 }
 function stopRecording(opts) {
   if (!recording) return;
@@ -415,6 +436,7 @@ function stopRecording(opts) {
   try { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch {}
 }
 $('talk').addEventListener('click', () => { recording ? stopRecording() : startRecording(); });
+['talk', 'voice-in'].forEach((id) => { const b = $(id); if (b) b.addEventListener('pointerdown', () => { if (!recording) warmMic(); }); });   // pre-warm the mic on press → recording starts instantly, hiding the cold getUserMedia gap
 // Top-bar Voice In box doubles as a Talk button (so you can talk without opening the drawer).
 $('voice-in').addEventListener('click', () => { recording ? stopRecording() : startRecording(); });
 
@@ -446,7 +468,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === pttKey && isSafePttKey(pttKey)) {   // defense in depth: even a corrupt pttKey can't swallow a terminal key
     e.preventDefault(); e.stopPropagation();
     if (pttHeld) return;                   // ignore auto-repeat while held
-    pttHeld = true; pttCombo = false; pttStart = Date.now();
+    pttHeld = true; pttCombo = false; pttStart = Date.now(); warmMic();   // warm the mic the instant you press, so capture is live before the hold-debounce fires startRecording
     pttTimer = setTimeout(() => {          // held long enough alone => it's a deliberate talk, start the mic
       pttTimer = null;
       if (pttHeld && !pttCombo) { if (pttHint) pttHint.classList.add('live'); startRecording(); }
