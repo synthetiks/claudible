@@ -2604,7 +2604,7 @@ function renderWsSessionRow(w, s) {
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s); p.title = p.textContent;
   const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.mtime); m.appendChild(mt);
   row.appendChild(p); row.appendChild(m);
-  const go = () => { switchWorkspace(w.id).then(() => openSession(s.id, sessTitle(s))); };   // switch to that workspace, then open the specific session
+  const go = () => { switchWorkspace(w.id, s.id); };   // switch to that workspace AND open the specific session in one shot (single respawn, no flicker)
   row.addEventListener('click', go);
   row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
   return row;
@@ -2616,7 +2616,7 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
     const nb = document.createElement('button'); nb.className = 'newsess-row'; nb.textContent = '+ New Session';
-    nb.addEventListener('click', (e) => { e.stopPropagation(); switchWorkspace(w.id).then(() => newBlankTab(w.id, 'new')); });
+    nb.addEventListener('click', (e) => { e.stopPropagation(); switchWorkspace(w.id, 'new'); });   // switch to that workspace + start a fresh session, one shot
     kids.appendChild(nb);
   };
   const c = _wsSessCache.get(w.id);
@@ -3069,8 +3069,8 @@ async function refreshWorkspaces() {
 }
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
-async function switchWorkspace(id) {
-  if (id === activeWsId) return;
+async function switchWorkspace(id, targetSession) {
+  if (id === activeWsId) { if (targetSession) openSession(targetSession); return; }   // already here → just open the session (no full switch, no flicker)
   let t = AT();
   if (t && t.kind === 'live') {                     // viewing a peer's session — a workspace switch applies to YOUR own tab, never the live mirror
     const local = [...tabs.values()].find((r) => r.kind !== 'live');
@@ -3078,13 +3078,15 @@ async function switchWorkspace(id) {
     setActiveTab(local.tabId); t = local;
   }
   if (!t) return;
-  activeWsId = id; t.wsId = id; t.session = ''; t.label = '';
+  const sess = targetSession || '';                 // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
+  activeWsId = id; t.wsId = id; t.session = sess; t.label = (sess === 'new') ? 'New session' : '';
   setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)
-  activeSession = null; t.curSessionLabel = '';   // the conversation list is about to change entirely
+  activeSession = (sess && sess !== 'new') ? sess : null; t.curSessionLabel = (sess === 'new') ? 'New session' : '';
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
+  sessListEl.innerHTML = ''; _sessSig = '';        // drop the OLD workspace's session rows immediately so they don't flash under the NEW workspace before refreshSessions lands
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
-  try { const r = await claudible.workspaceOpen(id); if (r && r.ok === false && r.error !== 'superseded') toast('Could not switch workspace' + (r.error ? ': ' + humanError(r.error) : '')); } catch (e) { toast('Could not switch workspace'); }
+  try { const r = await claudible.workspaceOpen(id, sess); if (r && r.ok === false && r.error !== 'superseded') toast('Could not switch workspace' + (r.error ? ': ' + humanError(r.error) : '')); } catch (e) { toast('Could not switch workspace'); }
   refreshSessions();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }

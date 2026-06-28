@@ -925,7 +925,7 @@ ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspace
 // One-time first-run flag (set when the default Local workspace was materialized) → cleared once the renderer has shown its setup prompt.
 ipcMain.handle('workspace:firstRunDone', () => { if (registry.firstRun) { delete registry.firstRun; saveRegistry(); } return { ok: true }; });
 // Switch the active workspace: subsequent session list/open/delete scope to its cwd; resume its latest convo.
-ipcMain.handle('workspace:open', async (e, id) => {
+ipcMain.handle('workspace:open', async (e, id, session) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return { ok: false, error: 'unknown workspace' };
   const myGen = ++openGen;                                         // a later open must win over a slow clone
@@ -936,7 +936,7 @@ ipcMain.handle('workspace:open', async (e, id) => {
   if (myGen !== openGen) return { ok: false, error: 'superseded' };   // a newer open started during our clone → stand down
   activeWorkspace = ws; registry.activeId = id; saveRegistry();
   const fr = fgRec(); if (fr) fr.ws = ws;                          // re-point the foreground tab at the new workspace (other tabs keep running)
-  respawnPty(fgTabId, '');                                         // '' = resume most-recent conversation in that cwd
+  respawnPty(fgTabId, session || '');                             // a session id → open it DIRECTLY (one respawn); '' = resume most-recent in that cwd
   pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
   if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
   return { ok: true };

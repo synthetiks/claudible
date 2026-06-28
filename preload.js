@@ -47,7 +47,7 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceFirstRunDone: () => ipcRenderer.invoke('workspace:firstRunDone'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),
   workspaceUpgrade: (id) => ipcRenderer.invoke('workspace:upgrade', id),   // local → synced (private repo) so it appears on other devices + can be shared
-  workspaceOpen: (id) => ipcRenderer.invoke('workspace:open', id),
+  workspaceOpen: (id, session) => ipcRenderer.invoke('workspace:open', id, session),   // session id → open it directly on switch
   workspaceAcceptInvite: (id, useDefault) => ipcRenderer.invoke('workspace:acceptInvite', { id, useDefault: !!useDefault }),   // choose clone dir + clone
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   workspaceRename: (id, label) => ipcRenderer.invoke('workspace:rename', { id, label }),
