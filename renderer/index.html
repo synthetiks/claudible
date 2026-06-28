@@ -508,10 +508,10 @@
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
     .sess-menu-btn{position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;
-      width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
+      width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
       color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
       transition:opacity .15s,color .15s,border-color .15s,background .15s}
-    .sess-menu-btn svg{width:15px;height:15px;display:block}
+    .sess-menu-btn svg{width:13.5px;height:13.5px;display:block}
     .sess:hover .sess-menu-btn,.sess.menu-open .sess-menu-btn{opacity:1}   /* hover-revealed; stays lit while its menu is open */
     .sess-menu-btn:hover,.sess.menu-open .sess-menu-btn{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .sess.renaming .sess-menu-btn{display:none}   /* nothing floats over the rename input while editing */
