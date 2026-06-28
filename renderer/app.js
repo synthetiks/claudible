@@ -332,9 +332,10 @@ if (claudible.onProvision) claudible.onProvision((m) => {
 });
 claudible.onStatus((s) => {
   const t = tabs.get(s.tabId); if (!t) return;   // route the status to the tab it belongs to
-  // Reconcile a freshly-started tab with the real session id Claude assigned it, so its synthetic "live"
-  // sidebar row collapses into the proper saved session row (and the right row highlights as active).
-  if (s.sessionId && t.session !== s.sessionId && (t.session === 'new' || !t.session)) {
+  // Reconcile the tab's UI session with the REAL session id Claude's pty reports — the pty is the source of truth.
+  // Covers a freshly-started 'new' tab AND the case where an explicitly-opened session was unresumable (e.g. a
+  // collaborator deleted it) and the runner fell back to a different one — without this the highlight sticks wrong.
+  if (s.sessionId && t.session !== s.sessionId) {
     t.session = s.sessionId;
     if (t.tabId === activeTabId) activeSession = s.sessionId;
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
@@ -3086,8 +3087,9 @@ async function switchWorkspace(id, targetSession) {
   sessListEl.innerHTML = ''; _sessSig = '';        // drop the OLD workspace's session rows immediately so they don't flash under the NEW workspace before refreshSessions lands
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
-  try { const r = await claudible.workspaceOpen(id, sess); if (r && r.ok === false && r.error !== 'superseded') toast('Could not switch workspace' + (r.error ? ': ' + humanError(r.error) : '')); } catch (e) { toast('Could not switch workspace'); }
-  refreshSessions();
+  let failed = false;
+  try { const r = await claudible.workspaceOpen(id, sess); if (r && r.ok === false && r.error !== 'superseded') { failed = true; toast('Could not switch workspace' + (r.error ? ': ' + humanError(r.error) : '')); } } catch (e) { failed = true; toast('Could not switch workspace'); }
+  if (!failed) refreshSessions();   // don't paint the new workspace's sessions over a switch that actually failed (frontend/backend mismatch)
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
 // new-workspace chooser modal
