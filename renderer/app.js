@@ -1197,6 +1197,11 @@ function renderLiveBar() {
   });
 }
 claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
+claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped mid-share → reflect it so guests aren't met with a silent refusal
+  tunnelUp = false; lastShareUrl = ''; lastShareRemote = false;
+  toast('Live link dropped — the tunnel went down. Toggle Share Live off then on for a fresh link.');
+  renderLiveBar(); refreshChatPanel();
+});
 
 // floating per-person VOLUME control — right-click a voice member to set how loud YOU hear them (listener-side,
 // 0–200%). Local only; never changes what anyone else hears. Persists across rejoin via the voice room's volume map.

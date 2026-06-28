@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),
   onShareGuests: (cb) => ipcRenderer.on('share:guests', (_e, n) => cb(n)),
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
+  onShareTunnelDown: (cb) => ipcRenderer.on('share:tunnel-down', (_e) => cb()),   // public tunnel dropped while sharing
   onShareApproval: (cb) => ipcRenderer.on('share:approval', (_e, info) => cb(info)),
   onShareApprovalCancel: (cb) => ipcRenderer.on('share:approval-cancel', (_e, id) => cb(id)),
   // voice room — audio frames are relayed through the share server (server-relayed PCM, not peer-to-peer)

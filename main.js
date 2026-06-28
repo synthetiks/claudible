@@ -45,6 +45,23 @@ const { WebSocket: LiveSocket } = require('ws');
 const liveTabs = new Map();    // tabId -> { ws, url, token, name, hostCols, hostRows, pid, readOnly, resume, retry, closed, peer }
 // Live terminal sharing: server runs locally (loopback); cloudflared carries the last hop. See share/.
 let cloudflaredProc = null, shareBaseUrl = null;
+// A hard crash / force-kill orphans cloudflared (a live tunnel with no handle). Record its pid while running and,
+// on the NEXT launch, kill the orphan — but ONLY if that pid is still a cloudflared (guards against a recycled pid).
+const _cfPidFile = () => path.join(RT, 'cloudflared.pid');
+function _writeCfPid(pid) { try { fs.writeFileSync(_cfPidFile(), String(pid || '')); } catch {} }
+function _clearCfPid() { try { fs.unlinkSync(_cfPidFile()); } catch {} }
+function _isCloudflaredPid(pid) {
+  try {
+    if (process.platform === 'linux') return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').includes('cloudflared');
+    if (process.platform === 'win32') return /cloudflared/i.test(require('child_process').execFileSync('tasklist', ['/FI', 'PID eq ' + pid, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true }));
+    return /cloudflared/i.test(require('child_process').execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }));   // mac/other posix
+  } catch { return false; }
+}
+function reapOrphanCloudflared() {
+  let pid = 0; try { pid = parseInt(fs.readFileSync(_cfPidFile(), 'utf8').trim(), 10); } catch { return; }
+  if (Number.isInteger(pid) && pid > 0 && _isCloudflaredPid(pid)) { try { process.kill(pid); } catch {} console.log('[claudible] reaped orphaned cloudflared pid', pid); }
+  _clearCfPid();
+}
 const share = createShareServer({
   onInput: (d) => { const t = ptys.get(fgTabId); try { t && t.proc.write(d); } catch {} },   // a guest typed → into the FOREGROUND pty
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
@@ -565,7 +582,12 @@ ipcMain.handle('share:start', (e, opts) => {
         const { proc, url } = await startCloudflared(port);
         if (!share.status().running) { try { proc.kill(); } catch {} return { ok: false, error: 'stopped during start' }; }   // a share:stop landed while we were spawning → reap the tunnel, don't orphan a live public URL
         cloudflaredProc = proc;
-        cloudflaredProc.on('exit', () => { cloudflaredProc = null; shareBaseUrl = null; });   // tunnel died (self-exit/network) → drop the now-dead public URL so the next start re-establishes a tunnel
+        _writeCfPid(proc.pid);                              // record the tunnel pid so a crash-orphan can be reaped on next launch
+        cloudflaredProc.on('exit', () => {
+          const unexpected = share.status().running;        // still "sharing" at exit ⇒ the tunnel dropped on its own (network/crash), not a clean host-stop
+          cloudflaredProc = null; shareBaseUrl = null; _clearCfPid();
+          if (unexpected) winSend('share:tunnel-down', {}); // tell the host their public link is dead so guests aren't met with a silent refusal
+        });
         base = url; remote = true;                       // public link
       } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN
       shareBaseUrl = base;
@@ -1530,7 +1552,7 @@ ipcMain.handle('diff:discard', (e, relPath) => diffAction('discard', relPath));
 process.on('uncaughtException', (e) => console.error('[claudible] uncaughtException:', e && e.message));
 process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { reapOrphanCloudflared(); createWindow(); });
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
   try { stopAdvertiseHeartbeat(); } catch {}
