@@ -403,8 +403,9 @@ async function startRecording() {
   }
   if (!recording) { releaseMicSoon(); return; }   // stopped during the grant gap → keep the stream WARM so the retry is instant (was: thrown away → next clip cold again)
   const mt = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-  mediaRecorder = new MediaRecorder(stream, { mimeType: mt }); chunks = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType: mt, audioBitsPerSecond: 32000 }); chunks = [];   // 32 kbps → small blobs (whisper is excellent at low bitrate), reliable IPC + upload even for long clips
   mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  mediaRecorder.onerror = (ev) => { try { console.error('[voice] MediaRecorder error', (ev && ev.error) || ev); } catch {} setDot('d-stt', 'bad'); $('stt-out').textContent = 'recording error — try again'; $('stt-out').className = 'out'; recording = false; talkUI(false); };
   mediaRecorder.onstop = async () => {
     releaseMicSoon();                      // keep the mic warm for a quick retry; released after idle (privacy) — NOT stopped immediately
     if (discardClip) { setDot('d-stt', 'ok'); $('stt-out').textContent = ''; $('stt-out').className = 'out'; return; }  // false-start: combo key or too short to be speech
@@ -424,8 +425,11 @@ async function startRecording() {
     sendInput('\x1b[200~' + text + '\x1b[201~');   // paste the transcript into the live TUI
     setTimeout(() => sendInput('\r'), 120);        // …then submit it
   };
-  mediaRecorder.start(1000);               // 1s timeslice: collect data incrementally so LONG recordings
-                                           // capture reliably (concatenated webm chunks decode fine via ffmpeg)
+  mediaRecorder.start();                   // ONE complete, well-formed webm on stop (proper headers + duration).
+                                           // The old 1s-timeslice produced a FRAGMENTED webm (Duration: N/A) that
+                                           // ffmpeg/whisper decoded only a few seconds of for LONG recordings — the
+                                           // real cause of "spoke 5 min, it didn't record". Verified: a proper webm
+                                           // transcribes the full 5 min in ~10s; the fragmented one truncated to <7s.
   $('stt-out').textContent = 'listening…'; $('stt-out').className = 'out';   // NOW actually capturing → the honest cue to speak
   { const s = $('vin-stat'); if (s && recording) s.textContent = 'Listening'; }
 }
