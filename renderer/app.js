@@ -2635,10 +2635,45 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
       .finally(() => { _wsSessFetching.delete(w.id); });
   }
 }
+// Structural signature of the chip ROW themselves (everything that shapes a chip's own DOM) — but NOT which chip is
+// active/expanded (those are reconciled in place). Unchanged sig on a switch/expand → take the fast path below.
+let _wsChipsSig = '';
+function wsChipsSig() {
+  return JSON.stringify(workspaces.map((w) => [w.id, w.label, w.kind, !!w.shared, !!w.syncSessions, !!w.needsClone, isLastLocal(w), (wsSyncState[w.id] || {}).status || '']));
+}
+// In-place update: toggle active/expanded/shared, re-nest the live #sess-list under whoever is active now, and
+// add/remove the non-active children — WITHOUT recreating any chip (so the busy/syncing dot animations don't restart).
+function reconcileWsChips(el) {
+  const newSessEl = $('new-session');
+  if (sessListEl && sessListEl.parentNode) sessListEl.remove();      // detach the live list so we can re-nest it under the new active chip
+  if (newSessEl && newSessEl.parentNode) newSessEl.remove();
+  const chipById = {};
+  el.querySelectorAll('.ws-chip').forEach((c) => { chipById[c.dataset.id] = c; });
+  workspaces.forEach((w) => {
+    const chip = chipById[w.id]; if (!chip) return;
+    const wantExpanded = isWsExpanded(w.id), wantActive = w.id === activeWsId;
+    chip.classList.toggle('active', wantActive);
+    chip.classList.toggle('expanded', wantExpanded);
+    chip.classList.toggle('shared', !!w.shared);
+    const cv = chip.querySelector('.ws-caret'); if (cv) cv.title = wantExpanded ? 'Collapse' : 'Expand';
+    let kids = chip.nextElementSibling;
+    if (kids && !kids.classList.contains('ws-children')) kids = null;
+    if (!wantExpanded) { if (kids) kids.remove(); return; }
+    if (!kids) { kids = document.createElement('div'); kids.className = 'ws-children'; chip.after(kids); }
+    if (wantActive) { kids.innerHTML = ''; kids.appendChild(sessListEl); if (newSessEl) kids.appendChild(newSessEl); }   // active → the live list
+    else if (!kids.childElementCount) { renderWsNonActiveSessions(w, kids); }                                            // newly non-active/expanded → its saved list (warm cache → instant). a stable non-active list is left untouched (no restart)
+  });
+}
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
   const _scroll = el.scrollTop;  // preserve the sidebar scroll position across the rebuild (no jump-to-top flicker)
   closeWsMenu();                 // a re-render replaces the chips/caret the open menu was anchored to
+  // FAST PATH — a workspace switch / expand toggle leaves the workspace set, labels and sync-state unchanged; only
+  // which chip is active/expanded differs. Recreating every chip (innerHTML='') restarts the keyframe animations on
+  // busy/syncing dots (a visible stutter). When the structural signature matches, update chips IN PLACE instead.
+  const sig = wsChipsSig();
+  if (sig === _wsChipsSig && el.querySelector('.ws-chip')) { reconcileWsChips(el); el.scrollTop = _scroll; return; }
+  _wsChipsSig = sig;
   // Preserve the live sessions list + its inline "+ New Session" across the wipe — they get moved INTO the active
   // workspace node below. .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare
   // renderWsChips() never drops the sessions. Without this, el.innerHTML='' would destroy the relocated nodes.
