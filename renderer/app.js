@@ -336,7 +336,9 @@ claudible.onStatus((s) => {
   // Covers a freshly-started 'new' tab AND the case where an explicitly-opened session was unresumable (e.g. a
   // collaborator deleted it) and the runner fell back to a different one — without this the highlight sticks wrong.
   if (s.sessionId && t.session !== s.sessionId) {
+    const wasNew = (t.session === 'new');   // adopting a real id FROM an explicit 'new' = a genuine user-created session (keep its live·unsaved row until it saves). Adopting one from ''/another id = a switch/resume → NOT born-new, so it can never flash a phantom row.
     t.session = s.sessionId;
+    t.bornNew = wasNew;
     if (t.tabId === activeTabId) activeSession = s.sessionId;
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
@@ -2426,12 +2428,12 @@ async function refreshSessions() {
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
   _wsSessCache.set(activeWsId, { list, ts: Date.now() });                           // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash)
   const savedIds = new Set(list.map((s) => s.id));
-  // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row. That covers a brand-
-  // new 'new' tab AND a just-started session whose real id exists but whose transcript file hasn't been
-  // written to disk yet — so the row never vanishes in the gap between "created" and "first saved". The
-  // empty-session boot tab ('') is excluded: it resolves to the most-recent saved row via reconcile, so it
-  // must not flash a phantom "New session" at launch.
-  const liveTabs = Array.from(tabs.values()).filter((r) => r.wsId === activeWsId && r.session !== '' && !savedIds.has(r.session));
+  // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row — but ONLY for a session
+  // the USER explicitly created new: either still pending an id ('new') or born-new and not yet saved (bornNew,
+  // set in the onStatus reconcile when a 'new' tab adopts its real id). A switch/resume that momentarily adopts a
+  // latest-session id NOT yet in savedIds must NOT flash a phantom "New session" row — that's exactly the glitch
+  // where clicking a workspace briefly showed an auto-created session that then vanished. (Boot '' is excluded too.)
+  const liveTabs = Array.from(tabs.values()).filter((r) => r.wsId === activeWsId && r.session !== '' && !savedIds.has(r.session) && (r.session === 'new' || r.bornNew));
   const joinedLive = Array.from(tabs.values()).filter((r) => r.kind === 'live');   // peers' sessions I've joined (cross-workspace) → always reachable
   if (!list.length && !liveTabs.length && !joinedLive.length) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
