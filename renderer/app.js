@@ -2573,10 +2573,9 @@ function renderWsChips() {
     chip.title = w.kind === 'legacy' ? 'Default space — quick chats, not tied to a project folder'
       : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — shared GitHub repo; sessions sync with your team')
       : (w.label + ' — a project folder on your machine (private to you)');
-    const cv = document.createElement('span'); cv.className = 'ws-caret';   // leading disclosure chevron — rotates down on the active (expanded) workspace
+    const cv = document.createElement('span'); cv.className = 'ws-caret';   // expand chevron — now seated on the RIGHT (rotates down when expanded); appended to .ws-right below
     cv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>';
-    chip.appendChild(cv);
-    chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
+    chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);   // workspace logo — now the leftmost element
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
     if (isLastLocal(w)) {                                              // a tiny "default" tag on the sole local workspace (the protected home)
       const tag = document.createElement('span'); tag.textContent = 'default';
@@ -2601,14 +2600,15 @@ function renderWsChips() {
       right.appendChild(dot);
     }
     const mb = document.createElement('button');
-    mb.className = 'ws-menu-btn'; mb.title = 'Workspace options';
-    mb.innerHTML = CARET_SVG;
+    mb.className = 'ws-menu-btn'; mb.title = 'Manage — rename, share, export, delete';
+    mb.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>';   // ⋯ manage — distinct from the expand chevron, never confused
     mb.addEventListener('click', (e) => {
       e.stopPropagation();
       const wasOpen = wsMenuFor === w.id; closeWsMenu();
       if (!wasOpen) openWsMenu(mb, chip, nm, w);
     });
     right.appendChild(mb);
+    right.appendChild(cv);                                  // expand chevron — the rightmost element
     chip.appendChild(right);
     chip.dataset.id = w.id;
     chip.addEventListener('pointerdown', (e) => onWsPointerDown(e, chip, w));
