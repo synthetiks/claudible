@@ -99,5 +99,5 @@ for line in os.environ.get("CLOG", "").split("\n"):
                     "subject": parts[1] if len(parts) > 1 else "",
                     "author": parts[2] if len(parts) > 2 else "",
                     "date": parts[3] if len(parts) > 3 else ""})
-print(json.dumps({"ok": True, "repo": True, "files": files, "untracked": untracked[:200], "committed": committed, "commits": commits}))
+print(json.dumps({"ok": True, "repo": True, "total": int(os.environ.get("TOTAL") or 0), "files": files, "untracked": untracked[:200], "committed": committed, "commits": commits}))
 PY
