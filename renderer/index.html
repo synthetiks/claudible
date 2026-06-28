@@ -120,7 +120,7 @@
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
-    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:7px 11px 7px;min-height:0}   /* tight: top −50% (14→7) for a bigger terminal, sides −20% (14→11), column gap −20% (11→9) */
+    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:7px 11px 4px;min-height:0}   /* tight: top 7, sides 11, gap 9; bottom 4 — the space under the command bar halved again */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
     .body.with-sessions{grid-template-columns:clamp(244px,16vw,340px) 1fr}                                   /* + docked sessions (left) */
     .body.with-sessions.sharing{grid-template-columns:clamp(244px,16vw,340px) 1fr clamp(312px,24vw,480px)}   /* both */
@@ -483,13 +483,13 @@
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background-color:var(--panel);background-image:linear-gradient(180deg,rgba(255,255,255,.022),transparent 22%);
       border-right:1px solid var(--hairline);box-shadow:inset -1px 0 0 var(--sheen);overflow:hidden}   /* ④ a real material: top-lit panel + a beveled (light-catching) right divider */
-    .body.with-sessions .sidebar{display:flex;margin:-7px 0 -7px -11px}   /* flush to the left wing — margins cancel the body padding (top 7 / left 11 / bottom 7) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
+    .body.with-sessions .sidebar{display:flex;margin:-7px 0 -4px -11px}   /* flush to the left wing — margins cancel the body padding (top 7 / left 11 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
-    .sess{position:relative;width:auto;text-align:left;padding:7px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
+    .sess{position:relative;width:auto;text-align:left;padding:6.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
       background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
-    .sess.active{background-color:rgba(255,255,255,.05);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 11%,transparent),transparent 42%);box-shadow:inset 0 1px 0 var(--sheen),inset 0 0 0 1px rgba(255,255,255,.05);border-left-color:var(--live)}    /* ①+② lit raised surface + directional accent wash */
+    .sess.active{background-color:rgba(255,255,255,.05);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 10%,transparent),transparent 44%);box-shadow:inset 0 1px 0 var(--sheen),inset 0 0 0 1px rgba(255,255,255,.05);border-left-color:var(--live)}    /* ①+② lit raised surface + directional accent wash (~10% subtler) */
     .sess.sess-live-row,.sess.sess-peer-live{background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%);box-shadow:inset 0 1px 0 var(--sheen);border-left-color:var(--ok,#5fb487)}    /* live row: green directional wash + lift */
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
@@ -587,9 +587,11 @@
     .ws-chip.active{background-color:rgba(217,119,87,.05);background-image:linear-gradient(90deg,rgba(217,119,87,.11),transparent 46%);box-shadow:inset 0 1px 0 var(--sheen)}    /* ①+② active workspace: Claude-orange wash + lift (chevron is the main expand cue) */
     .ws-chip.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     /* leading disclosure chevron — points right when collapsed, rotates down on the active (expanded) workspace */
-    .ws-chip .ws-caret{width:13px;height:13px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);transition:transform .16s,color .16s}
-    .ws-chip .ws-caret svg{width:11px;height:11px;display:block}
-    .ws-chip.active .ws-caret{transform:rotate(90deg);color:var(--ink-dim)}
+    .ws-chip .ws-caret{width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer;transition:color .16s,background .14s,border-color .14s}
+    .ws-chip .ws-caret svg{width:11px;height:11px;display:block;transition:transform .16s}
+    .ws-chip .ws-caret:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    .ws-chip.expanded .ws-caret{color:var(--ink-dim)}          /* expansion is independent of selection (.active) */
+    .ws-chip.expanded .ws-caret svg{transform:rotate(90deg)}
     .ws-chip .ws-ico{width:13px;height:13px;flex:none;color:var(--ink-faint)}
     .ws-chip.active .ws-ico{color:var(--live-soft)}
     .ws-chip .ws-name{flex:1;min-width:0;font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

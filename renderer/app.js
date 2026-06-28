@@ -2556,6 +2556,46 @@ const PERSON_ADD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const CLOUD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
 const wsSyncState = {};   // ws id -> { status:'syncing'|'idle'|'error', synced, diverged } (live, from main)
 let wsMenuFor = null;     // id of the workspace whose ▾ options menu is currently open (null = closed)
+// ── Independent, persisted expand/collapse per workspace (a free multi-expand tree). Selection (.active) and
+// expansion are ORTHOGONAL: you can collapse even the SELECTED workspace (it stays highlighted, just hides its
+// sessions), and expand as many as you like. Each NON-active expanded workspace lists its sessions WITHOUT
+// activating it (cheap list-only; the Claude session only loads when a row is clicked). ──
+let _expandedWs = null, _expandedInit = false;
+function saveExpandedWs() { try { savePrefs({ expandedWs: Array.from(_expandedWs || []) }); } catch {} }
+function expandedSet() {
+  if (!_expandedWs) { let a = []; try { a = loadPrefs().expandedWs; } catch {} _expandedWs = new Set(Array.isArray(a) ? a : []); }
+  if (!_expandedInit) { _expandedInit = true; if (_expandedWs.size === 0 && activeWsId) { _expandedWs.add(activeWsId); saveExpandedWs(); } }   // first run only: show the active workspace's sessions
+  return _expandedWs;
+}
+function isWsExpanded(id) { return expandedSet().has(id); }
+function setWsExpanded(id, on) { const s = expandedSet(); if (on) s.add(id); else s.delete(id); saveExpandedWs(); }
+const _wsSessCache = new Map();   // wsId -> { list, ts } — avoid refetching a non-active workspace's sessions on every re-render
+function renderWsSessionRow(w, s) {
+  const row = document.createElement('div'); row.className = 'sess'; row.setAttribute('role', 'button'); row.tabIndex = 0;
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s); p.title = p.textContent;
+  const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.mtime); m.appendChild(mt);
+  row.appendChild(p); row.appendChild(m);
+  const go = () => { switchWorkspace(w.id).then(() => openSession(s.id, sessTitle(s))); };   // switch to that workspace, then open the specific session
+  row.addEventListener('click', go);
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  return row;
+}
+function renderWsNonActiveSessions(w, kids) {                          // a saved-sessions list for a NON-active expanded workspace
+  const fill = (list) => {
+    Array.from(kids.querySelectorAll('.sess,.sess-empty,.newsess-row')).forEach((n) => n.remove());
+    const ordered = (list || []).slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).slice(0, 60);
+    if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
+    else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
+    const nb = document.createElement('button'); nb.className = 'newsess-row'; nb.textContent = '+ New Session';
+    nb.addEventListener('click', (e) => { e.stopPropagation(); switchWorkspace(w.id).then(() => newBlankTab(w.id, 'new')); });
+    kids.appendChild(nb);
+  };
+  const c = _wsSessCache.get(w.id);
+  if (c) fill(c.list); else { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }
+  if (!c || Date.now() - c.ts > 4000) {
+    claudible.sessionListWs(w.id).then((list) => { const arr = Array.isArray(list) ? list : []; _wsSessCache.set(w.id, { list: arr, ts: Date.now() }); if (document.body.contains(kids)) fill(arr); }).catch(() => {});
+  }
+}
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
   closeWsMenu();                 // a re-render replaces the chips/caret the open menu was anchored to
@@ -2566,15 +2606,15 @@ function renderWsChips() {
   if (el.contains(sessListEl)) sessListEl.remove();
   if (newSessEl && el.contains(newSessEl)) newSessEl.remove();
   el.innerHTML = '';
-  let nested = false;
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
-    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (w.shared ? ' shared' : '');
+    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (isWsExpanded(w.id) ? ' expanded' : '') + (w.shared ? ' shared' : '');
     chip.title = w.kind === 'legacy' ? 'Default space — quick chats, not tied to a project folder'
       : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — shared GitHub repo; sessions sync with your team')
       : (w.label + ' — a project folder on your machine (private to you)');
-    const cv = document.createElement('span'); cv.className = 'ws-caret';   // expand chevron — now seated on the RIGHT (rotates down when expanded); appended to .ws-right below
+    const cv = document.createElement('button'); cv.className = 'ws-caret'; cv.title = isWsExpanded(w.id) ? 'Collapse' : 'Expand';   // a real button → toggles THIS workspace's sessions independently, never triggers the chip's switch/drag
     cv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>';
+    cv.addEventListener('click', (e) => { e.stopPropagation(); setWsExpanded(w.id, !isWsExpanded(w.id)); renderWsChips(); });
     chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);   // workspace logo — now the leftmost element
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
     if (isLastLocal(w)) {                                              // a tiny "default" tag on the sole local workspace (the protected home)
@@ -2621,15 +2661,20 @@ function renderWsChips() {
       if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
     });
     el.appendChild(chip);
-    if (w.id === activeWsId) {                              // the expanded workspace: nest its sessions + "+ New Session" beneath it
+    if (isWsExpanded(w.id)) {                               // expanded → nest its sessions beneath it
       const kids = document.createElement('div'); kids.className = 'ws-children';
-      kids.appendChild(sessListEl);
-      if (newSessEl) kids.appendChild(newSessEl);
+      if (w.id === activeWsId) {                            // the ACTIVE workspace gets the full live list (live/joined rows + the moved #sess-list)
+        kids.appendChild(sessListEl);
+        if (newSessEl) kids.appendChild(newSessEl);
+      } else {                                              // a NON-active expanded workspace → its saved sessions, fetched without activating it
+        renderWsNonActiveSessions(w, kids);
+      }
       el.appendChild(kids);
-      nested = true;
     }
   });
-  if (!nested) { el.appendChild(sessListEl); if (newSessEl) el.appendChild(newSessEl); }   // no active match → keep the nodes attached (never orphan the sessions)
+  // The active workspace's live #sess-list / #new-session are nested above only while the active ws is EXPANDED.
+  // If it's collapsed (or there's no active match), they stay detached (preserved via .remove()) — refreshSessions
+  // still fills the ref harmlessly, and they re-nest the moment the active workspace is expanded again.
 }
 // "What's a workspace?" — one click on the ⓘ explains the concept, so the sidebar stays clean (no inline paragraphs).
 let wsInfoPop = null;
@@ -2997,6 +3042,7 @@ async function switchWorkspace(id) {
   }
   if (!t) return;
   activeWsId = id; t.wsId = id; t.session = ''; t.label = '';
+  setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)
   activeSession = null; t.curSessionLabel = '';   // the conversation list is about to change entirely
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   renderWsChips(); renderTabStrip();

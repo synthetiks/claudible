@@ -675,6 +675,17 @@ function listSessions() {
   });
 }
 ipcMain.handle('session:list', () => listSessions());
+// List ANY workspace's sessions WITHOUT activating it — for the multi-expand sidebar tree. sessions.sh is already
+// workspace-parameterized (runScript's { ws } sets that workspace's env for this call only; activeWorkspace is
+// untouched), so this just points the same reader at a different workspace.
+ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
+  const ws = registry.workspaces.find((w) => w.id === wsId);
+  if (!APPDIR_WSL || !ws) return resolve([]);
+  runner.runScript('sessions.sh', '', { ws, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
+    if (err) return resolve([]);
+    try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+  });
+}));
 ipcMain.handle('session:open', (e, { tabId, id }) => { respawnPty(tabId, id); return { ok: true }; });   // re-point an existing tab at 'new' | <session-id>
 // Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
 // switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.

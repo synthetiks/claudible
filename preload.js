@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onSyncChanged: (cb) => ipcRenderer.on('sync:changed', (_e, s) => cb(s)),
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser
+  sessionListWs: (wsId) => ipcRenderer.invoke('session:list-ws', wsId),   // list a (possibly non-active) workspace's sessions
   // audio
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
