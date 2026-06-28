@@ -1889,7 +1889,7 @@ function mergeSessionOrder(saved, list) {
 const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
 const SHARE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><polyline points="8 7 12 3 16 7"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
-const CARET_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';   // ▾ options-menu trigger (shared by workspace chips and session rows)
+const OPTIONS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>';   // "settings-2" sliders — the options trigger on session rows + workspace chips. A settings glyph (not a ▾ that wrongly implies a dropdown), distinct from both the ⋯ and the top-bar gear.
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
 // Session title: prefer the workspace-shared name (so everyone in a repo workspace sees the SAME title), then a
 // local-only override (legacy/local workspaces, or before the first poll), then the transcript-derived preview.
@@ -2198,7 +2198,7 @@ function renderSessionRow(s) {
   // so the row stays a clean title with nothing crowding it and no inline confirm strip to overflow.
   const mb = document.createElement('button');
   mb.className = 'sess-menu-btn'; mb.title = 'Session options'; mb.setAttribute('aria-label', 'Session options');
-  mb.innerHTML = CARET_SVG;
+  mb.innerHTML = OPTIONS_SVG;
   mb.addEventListener('click', (e) => {
     e.stopPropagation();
     const wasOpen = sessMenuFor === ('s:' + s.id); closeSessMenu();
@@ -2565,7 +2565,7 @@ function renderLiveTabRow(rec) {
   row.appendChild(p); row.appendChild(m);
   const mb = document.createElement('button');
   mb.className = 'sess-menu-btn'; mb.title = 'Session options'; mb.setAttribute('aria-label', 'Session options');
-  mb.innerHTML = CARET_SVG;
+  mb.innerHTML = OPTIONS_SVG;
   mb.addEventListener('click', (e) => {
     e.stopPropagation();
     const wasOpen = sessMenuFor === ('t:' + rec.tabId); closeSessMenu();
@@ -2784,7 +2784,7 @@ function renderWsChips() {
     }
     const mb = document.createElement('button');
     mb.className = 'ws-menu-btn'; mb.title = 'Manage — rename, share, export, delete';
-    mb.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>';   // ⋯ manage — distinct from the expand chevron, never confused
+    mb.innerHTML = OPTIONS_SVG;   // settings sliders — same glyph as the session-row options trigger (visual continuity); sits left of the expand chevron, never confused with it
     mb.addEventListener('click', (e) => {
       e.stopPropagation();
       const wasOpen = wsMenuFor === w.id; closeWsMenu();
