@@ -2414,6 +2414,7 @@ function openDivergedInfo(s) {
     choices: [{ key: 'ok', label: 'Got it' }],
   });
 }
+let _sessSig = '';
 async function refreshSessions() {
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
@@ -2446,6 +2447,26 @@ async function refreshSessions() {
   const act = sessIndex[activeSession];
   const at = AT();
   if (at && act && !at.curSessionLabel) { at.curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
+  // SMOOTH SWITCH: if the session SET (ids/order/titles/chips/live/joined/peers/share) is unchanged and only the
+  // highlight differs, re-apply the active/open-in-tab classes IN PLACE instead of wiping + rebuilding the whole
+  // list. This kills the "entire sidebar flickers/reloads on every session click" jank.
+  const sig = JSON.stringify({
+    ws: activeWsId,
+    o: ordered.map((s) => [s.id, sessTitle(s), !!s.deletedRemote, !!s.diverged]),
+    j: joinedLive.map((r) => [r.tabId, r.liveState, r.liveSessName || '', !!r.sessMismatch, !!r.busy]),
+    lt: liveTabs.map((r) => [r.tabId, r.session, !!r.busy, r.label || '']),
+    lp: livePeers.map((p) => [p.session, p.name || p.login || '']),
+    sh: sharedSessionId || '',
+  });
+  if (sig === _sessSig && sessListEl.querySelector('.sess')) {                       // structure unchanged → just move the highlight (no flicker)
+    Array.prototype.forEach.call(sessListEl.querySelectorAll('.sess'), (row) => {
+      const sid = row.dataset.id, tb = row.dataset.tab, lv = row.dataset.livetab;
+      if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('open-in-tab', sessionOpenInTab(sid)); }
+      if (tb || lv) row.classList.toggle('active', (tb || lv) === activeTabId);
+    });
+    updateCollab(); pollTitles(); return;
+  }
+  _sessSig = sig;
   sessListEl.innerHTML = '';
   joinedLive.forEach((rec) => sessListEl.appendChild(renderJoinedTabRow(rec)));      // peers' live sessions I've joined — pinned at the top
   ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
@@ -2535,6 +2556,13 @@ async function openSession(id, label) {
   }
   const t = AT(); if (!t) return;
   if (id !== 'new' && t.session === id && t.wsId === activeWsId) return;   // already on this one
+  // NEVER kill a session that's actively running. Re-pointing the current tab respawns its pty (main's old.kill()),
+  // so if this tab is BUSY (Claude is working), open the clicked session in a NEW background tab instead — the
+  // running one keeps going untouched. (An idle tab is safe to recycle — there's no live process to lose.)
+  if (t.busy && t.session !== id) {
+    if (tabs.size < MAX_TABS) { newBlankTab(activeWsId, id); return; }
+    toast('That session is still running — finish it or close a tab before switching'); return;
+  }
   t.session = id; t.wsId = activeWsId;
   t.label = (id === 'new') ? 'New session' : (label || 'Session');
   t.curSessionLabel = (id === 'new') ? 'New session' : (label || '');      // mirrored to guests
