@@ -390,13 +390,16 @@ case "$op" in
     ensure_worktree || fail "could not set up the sessions branch"
     git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
     out=""
-    for path in $(git -C "$WT" ls-tree -r --name-only "origin/$BR" -- live/ 2>/dev/null); do
+    # NUL-delimited (-z) + read -d '' so a branch filename containing spaces/metacharacters can never word-split
+    # or be misread; process substitution (not a pipe) keeps $out in THIS shell. (The case-guard already blocks
+    # non-live/*.json paths — this is defense-in-depth on push-controlled filenames.)
+    while IFS= read -r -d '' path; do
       case "$path" in live/*.json) ;; *) continue ;; esac
       [ "$path" = "live/$author.json" ] && continue                  # skip my own advertisement
       line="$(git -C "$WT" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r')"
       case "$line" in '{'*'}') ;; *) continue ;; esac                # only well-formed single-object lines
       [ -n "$out" ] && out="$out,$line" || out="$line"
-    done
+    done < <(git -C "$WT" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null)
     emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[$out]}"
     ;;
   title-set)

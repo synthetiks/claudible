@@ -97,7 +97,7 @@ if (-not (Test-Kokoro)) {
   Say 'Downloading Kokoro model weights (~327 MB)...'
   Remove-Item -Recurse -Force $kDir -ErrorAction SilentlyContinue          # clear any partial from a prior failed run
   Push-Location $kokoro
-  try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0 } catch {} finally { Pop-Location }
+  try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0; if ($LASTEXITCODE -ne 0) { Warn "  model downloader exited $LASTEXITCODE — will try the direct fallback" } } catch { Warn "  model downloader errored: $($_.Exception.Message)" } finally { Pop-Location }
   if (-not (Test-Kokoro)) {
     Warn 'Python downloader did not produce a valid model - falling back to a direct download of the release assets...'
     New-Item -ItemType Directory -Force -Path $kDir | Out-Null

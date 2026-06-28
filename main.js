@@ -332,7 +332,10 @@ function spawnPty(tabId, cols, rows, ws, session) {
   try {
     const runtimeId = tabRuntimeId(tabId);
     const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId });
-    if (!proc) { winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${pty.err})\r\n` }); return; }
+    if (!proc) {   // node-pty failed to load/build — on Linux this is almost always a missing C toolchain. Tell the user how to fix it instead of a bare error.
+      const hint = process.platform === 'linux' ? '\r\n  On Linux node-pty builds from source — install: sudo apt install build-essential python3   (then: npm rebuild)\r\n' : '';
+      winSend('pty:data', { tabId, data: `\r\n[claudible] terminal backend (node-pty) unavailable: ${pty.err}\r\n${hint}` }); return;
+    }
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
@@ -835,8 +838,9 @@ function ensureClone(ws) {
     const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? ws.path : '';   // the invitee's chosen clone dir (else the script's default)
     const dirArg = wsp ? ` '${wsp}'` : '';
     runner.runScript('clone-workspace.sh', `'${owner}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
-        // Surface the REAL reason so a Windows-specific failure isn't swallowed as a silent re-prompt.
-        if (err) return resolve({ ok: false, error: 'clone could not run: ' + ((err && err.message) || err) });
+        // Surface the REAL reason so a Windows-specific failure isn't swallowed as a silent re-prompt — but log the
+        // full stderr and show the user only a trimmed line (raw multi-KB git stderr shouldn't flood a toast).
+        if (err) { console.error('[claudible] clone-workspace failed:', (err && err.message) || err); return resolve({ ok: false, error: 'clone could not run: ' + String((err && err.message) || err).slice(0, 200) }); }
         let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch { return resolve({ ok: false, error: 'clone returned no result' + (String(stdout).trim() ? ' — ' + String(stdout).trim().slice(0, 200) : '') }); }
         if (r.ok) { if (wsp && r.path) ws.path = r.path; delete ws.needsClone; saveRegistry(); }
         resolve(r.ok ? { ok: true } : { ok: false, error: r.error || 'clone failed' });

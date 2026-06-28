@@ -237,7 +237,7 @@ function parseJsonOrdered(text) {
         else if (e === 'r') s += '\r';
         else if (e === 't') s += '\t';
         else if (e === 'u') {
-          const hex = text.substr(pos, 4);
+          const hex = text.slice(pos, pos + 4);
           if (!/^[0-9a-fA-F]{4}$/.test(hex)) err();
           pos += 4;
           s += String.fromCharCode(parseInt(hex, 16));
