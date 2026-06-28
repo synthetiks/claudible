@@ -768,6 +768,14 @@
     .diff-body{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
     .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}
     .diff-sec-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 2px -2px}
+    /* Repo Review header — which repo you're in + a change summary */
+    .rr-head{display:flex;flex-direction:column;gap:5px;padding:11px 13px;border:1px solid var(--hairline-soft);border-radius:10px;background:rgba(255,255,255,.025)}
+    .rr-name{display:flex;align-items:center;gap:8px;min-width:0}
+    .rr-name .rr-ico{flex:none;color:var(--ink-dim);display:flex}
+    .rr-name .rr-ico svg{width:15px;height:15px;display:block}
+    .rr-name .rr-nm{flex:none;max-width:46%;font-size:13px;font-weight:650;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rr-name .rr-id{flex:1;min-width:0;font-size:10.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rr-sum{font-size:10.5px;color:var(--ink-dim);letter-spacing:.02em}
     .diff-file{border:1px solid var(--hairline);border-radius:10px;overflow:hidden;background:#0b0d10}
     .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:#101216;border-bottom:1px solid var(--hairline)}
     .diff-path{font-size:12px;color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}
@@ -889,7 +897,7 @@
     <span class="wordmark">claudible</span>
     <div class="topbtns">
       <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
-      <button class="iconbtn" id="diff-btn" title="Review changes — what Claude changed in this repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
+      <button class="iconbtn" id="diff-btn" title="Repo Review — which repo you're in + what Claude changed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
@@ -1001,7 +1009,7 @@
   <!-- Diff Review panel: what Claude changed in the workspace's git repo, with per-hunk / per-file revert -->
   <div class="drawer-scrim" id="diff-scrim"></div>
   <div class="diffpanel" id="diffpanel" aria-hidden="true">
-    <div class="drawer-head"><span>review changes</span>
+    <div class="drawer-head"><span>repo review</span>
       <span style="margin-left:auto;display:flex;gap:4px">
         <button id="diff-refresh" title="Refresh">⟳</button>
         <button id="diff-close" title="Close">×</button>

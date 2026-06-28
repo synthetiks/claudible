@@ -1555,6 +1555,28 @@ function openDiff(open) {
   if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
   if (open) { refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open
 }
+// The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
+function repoReviewHeader(aw, files, untracked, committed, commits) {
+  const h = document.createElement('div'); h.className = 'rr-head';
+  const name = document.createElement('div'); name.className = 'rr-name';
+  const ico = document.createElement('span'); ico.className = 'rr-ico'; ico.innerHTML = (aw && aw.kind === 'repo') ? WS_REPO_SVG : WS_FOLDER_SVG;
+  const nm = document.createElement('span'); nm.className = 'rr-nm'; nm.textContent = (aw && aw.label) || 'this folder'; nm.title = nm.textContent;
+  name.appendChild(ico); name.appendChild(nm);
+  let idText;
+  if (aw && aw.kind === 'repo') idText = (aw.owner && aw.slug) ? (aw.owner + '/' + aw.slug) : (String(aw.repoUrl || '').replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '') || 'shared GitHub repo');
+  else idText = 'local folder · private to you';
+  const id = document.createElement('span'); id.className = 'rr-id'; id.textContent = idText; id.title = idText; name.appendChild(id);
+  h.appendChild(name);
+  const adds = files.reduce((s, f) => s + (f.additions || 0), 0), dels = files.reduce((s, f) => s + (f.deletions || 0), 0);
+  const parts = [];
+  if (files.length) parts.push(files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed');
+  if (adds || dels) parts.push('+' + adds + ' −' + dels);
+  if (untracked.length) parts.push(untracked.length + ' new');
+  if (commits.length) parts.push(commits.length + ' recent commit' + (commits.length > 1 ? 's' : ''));
+  const sum = document.createElement('div'); sum.className = 'rr-sum'; sum.textContent = parts.length ? parts.join('  ·  ') : 'working tree clean';
+  h.appendChild(sum);
+  return h;
+}
 let _diffSig = '', _diffBusy = false;
 async function refreshDiff(opts) {
   const body = $('diff-body'); if (!body) return;
@@ -1567,12 +1589,17 @@ async function refreshDiff(opts) {
   if (!r || !r.ok) { if (!quiet) body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
   if (!r.repo) { _diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This workspace isn’t a git repo — nothing to review.<br>Diff review works in repo workspaces (or any folder that’s a git repo).</div>'; return; }
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
+  const aw = (typeof workspaces !== 'undefined') ? workspaces.find((w) => w.id === activeWsId) : null;   // which repo this review is for
   // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
-  const sig = JSON.stringify({ f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
+  const sig = JSON.stringify({ ws: activeWsId, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
   if (quiet && sig === _diffSig) return;
   _diffSig = sig;
-  if (!files.length && !untracked.length && !committed.length) { body.innerHTML = '<div class="diff-empty">No changes yet — nothing in the working tree or recent commits. ✨</div>'; return; }
+  if (!files.length && !untracked.length && !committed.length) {
+    body.innerHTML = ''; body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits));
+    const _e = document.createElement('div'); _e.className = 'diff-empty'; _e.textContent = 'No changes yet — nothing in the working tree or recent commits. ✨'; body.appendChild(_e); return;
+  }
   body.innerHTML = '';
+  body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits));   // header: which repo + change summary
   if (files.length || untracked.length) {
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'uncommitted — in the working tree';
     body.appendChild(lbl);
@@ -2813,8 +2840,8 @@ function openGitMenu() {
   const b = $('git-btn'), m = $('git-menu'); if (!b || !m) return;
   const r = b.getBoundingClientRect();
   m.style.display = 'block';
-  m.style.top = (r.bottom + 6) + 'px';
-  m.style.left = Math.max(8, r.right - m.offsetWidth) + 'px';   // right-align under the button
+  m.style.top = Math.max(8, r.top - m.offsetHeight - 6) + 'px';   // open UPWARD — the git button sits at the terminal's bottom edge, so a downward menu clipped off-screen
+  m.style.left = Math.max(8, r.right - m.offsetWidth) + 'px';   // right-align with the button
 }
 function closeGitMenu() { const m = $('git-menu'); if (m) m.style.display = 'none'; }
 function gitCmd(cmd) {
