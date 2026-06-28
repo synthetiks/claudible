@@ -270,6 +270,7 @@ function main() {
   const out = {
     ok: true,
     repo: true,
+    total: Number(env.TOTAL) || 0,
     files,
     untracked: untracked.slice(0, 200),
     committed,

@@ -24,16 +24,28 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '{"ok":true,"rep
 diff_text="$(git -c core.quotepath=false diff HEAD --no-color 2>/dev/null)"
 untracked="$(git -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null)"
 
-# Committed: net diff of the last N commits (so work Claude already committed is still visible). Bounded so we
-# never dump the whole history; never reaches past the root commit.
+# Committed: net diff of the commits from the LAST 7 DAYS ("recent" = this week). Bounded so a very busy week never
+# dumps the world; never reaches past the root commit. ccount = lifetime total commits (shown as the tally).
 ccount="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+rcount="$(git rev-list --count --since='7 days ago' HEAD 2>/dev/null || echo 0)"
 N=0
-if [ "${ccount:-0}" -gt 1 ]; then N=10; [ "$ccount" -le "$N" ] && N=$((ccount-1)); fi
+if [ "${ccount:-0}" -gt 1 ]; then
+  N="${rcount:-0}"
+  [ "$N" -gt 20 ] && N=20                          # cap the net diff for a hyperactive week
+  [ "$N" -gt "$((ccount-1))" ] && N=$((ccount-1))  # never reach past the root commit
+fi
 cdiff_text=""; clog=""
 if [ "$N" -gt 0 ]; then
   cdiff_text="$(git -c core.quotepath=false diff "HEAD~$N" HEAD --no-color 2>/dev/null)"
   clog="$(git log --no-color --format='%h%x1f%s%x1f%an%x1f%ad' --date=short "HEAD~$N"..HEAD 2>/dev/null)"
 fi
 
+# A single env var > ~128KB (Linux MAX_ARG_STRLEN) makes the node exec below fail ("Argument list too long").
+# Keep each diff safely under that: truncate a giant working-tree diff at a line boundary; drop a giant committed
+# net-diff entirely (the commit LIST still shows — that's what "recent" is really about).
+maxb=110000
+if [ "${#diff_text}" -gt "$maxb" ]; then diff_text="${diff_text:0:$maxb}"; diff_text="${diff_text%$'\n'*}"; fi
+[ "${#cdiff_text}" -gt "$maxb" ] && cdiff_text=""
+
 unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
-DIFF="$diff_text" UNTRACKED="$untracked" CDIFF="$cdiff_text" CLOG="$clog" node "$(dirname "$0")/diff-tool.js" 2>/dev/null || printf '{"ok":true,"repo":true,"files":[],"untracked":[],"committed":[],"commits":[]}'
+DIFF="$diff_text" UNTRACKED="$untracked" CDIFF="$cdiff_text" CLOG="$clog" TOTAL="$ccount" node "$(dirname "$0")/diff-tool.js" 2>/dev/null || printf '{"ok":true,"repo":true,"total":0,"files":[],"untracked":[],"committed":[],"commits":[]}'

@@ -5,7 +5,7 @@
 //  • reads runtime/status.json (session tracker) + runtime/hooks.ndjson (Claude hook events)
 //    from the WINDOWS FS natively (no flaky 9P watch)
 //  • STT/TTS fetches run here (no renderer CORS)
-const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createShareServer } = require('./share/server');
@@ -1260,6 +1260,12 @@ ipcMain.handle('tts', async (e, text, voice) => {
   } catch (err) { return { error: String(err) }; }
 });
 ipcMain.handle('endpoints', () => ({ whisper: WHISPER, kokoro: KOKORO, pty: !!runner.ptyInfo().mod, ptyErr: runner.ptyInfo().err }));
+// Open a URL in the user's real browser (e.g. the "visit repo on GitHub" button). Validated: http(s) only — never
+// file://, custom protocols, or shell args — so a workspace's repoUrl can't be weaponized into a local-exec.
+ipcMain.handle('open-external', (e, url) => {
+  try { const u = new URL(String(url || '')); if (u.protocol === 'https:' || u.protocol === 'http:') { shell.openExternal(u.href); return { ok: true }; } } catch {}
+  return { ok: false };
+});
 
 // clipboard for the right-click menu (works regardless of renderer clipboard permissions)
 ipcMain.handle('clip:write', (e, text) => { try { clipboard.writeText(String(text ?? '')); } catch {} });

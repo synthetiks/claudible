@@ -1556,23 +1556,37 @@ function openDiff(open) {
   if (open) { refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
-function repoReviewHeader(aw, files, untracked, committed, commits) {
+function repoReviewHeader(aw, files, untracked, committed, commits, total) {
   const h = document.createElement('div'); h.className = 'rr-head';
   const name = document.createElement('div'); name.className = 'rr-name';
   const ico = document.createElement('span'); ico.className = 'rr-ico'; ico.innerHTML = (aw && aw.kind === 'repo') ? WS_REPO_SVG : WS_FOLDER_SVG;
   const nm = document.createElement('span'); nm.className = 'rr-nm'; nm.textContent = (aw && aw.label) || 'this folder'; nm.title = nm.textContent;
   name.appendChild(ico); name.appendChild(nm);
-  let idText;
-  if (aw && aw.kind === 'repo') idText = (aw.owner && aw.slug) ? (aw.owner + '/' + aw.slug) : (String(aw.repoUrl || '').replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '') || 'shared GitHub repo');
-  else idText = 'local folder · private to you';
+  let idText, url = '';
+  if (aw && aw.kind === 'repo') {
+    if (aw.owner && aw.slug) { idText = aw.owner + '/' + aw.slug; url = 'https://github.com/' + aw.owner + '/' + aw.slug; }
+    else {
+      const ru = String(aw.repoUrl || '');
+      idText = ru.replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/^git@github\.com:/i, '').replace(/\.git$/, '') || 'shared GitHub repo';
+      if (/^https?:\/\//i.test(ru)) url = ru.replace(/\.git$/, '');
+      else if (/^git@github\.com:/i.test(ru)) url = 'https://github.com/' + ru.replace(/^git@github\.com:/i, '').replace(/\.git$/, '');
+    }
+  } else idText = 'local folder · private to you';
   const id = document.createElement('span'); id.className = 'rr-id'; id.textContent = idText; id.title = idText; name.appendChild(id);
+  if (url) {                                                          // a clickable jump to the repo on GitHub (opens in the real browser)
+    const visit = document.createElement('button'); visit.className = 'rr-visit'; visit.title = 'Open ' + idText + ' on GitHub ↗'; visit.setAttribute('aria-label', 'Open this repo on GitHub');
+    visit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+    visit.addEventListener('click', (e) => { e.stopPropagation(); try { claudible.openExternal(url); } catch (_) {} });
+    name.appendChild(visit);
+  }
   h.appendChild(name);
   const adds = files.reduce((s, f) => s + (f.additions || 0), 0), dels = files.reduce((s, f) => s + (f.deletions || 0), 0);
   const parts = [];
+  if (typeof total === 'number' && total > 0) parts.push(total.toLocaleString() + ' commit' + (total > 1 ? 's' : '') + ' total');
   if (files.length) parts.push(files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed');
   if (adds || dels) parts.push('+' + adds + ' −' + dels);
   if (untracked.length) parts.push(untracked.length + ' new');
-  if (commits.length) parts.push(commits.length + ' recent commit' + (commits.length > 1 ? 's' : ''));
+  if (commits.length) parts.push(commits.length + ' this week');
   const sum = document.createElement('div'); sum.className = 'rr-sum'; sum.textContent = parts.length ? parts.join('  ·  ') : 'working tree clean';
   h.appendChild(sum);
   return h;
@@ -1590,16 +1604,17 @@ async function refreshDiff(opts) {
   if (!r.repo) { _diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This workspace isn’t a git repo — nothing to review.<br>Diff review works in repo workspaces (or any folder that’s a git repo).</div>'; return; }
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
   const aw = (typeof workspaces !== 'undefined') ? workspaces.find((w) => w.id === activeWsId) : null;   // which repo this review is for
+  const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally
   // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
-  const sig = JSON.stringify({ ws: activeWsId, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
+  const sig = JSON.stringify({ ws: activeWsId, t: total, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
   if (quiet && sig === _diffSig) return;
   _diffSig = sig;
   if (!files.length && !untracked.length && !committed.length) {
-    body.innerHTML = ''; body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits));
+    body.innerHTML = ''; body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits, total));
     const _e = document.createElement('div'); _e.className = 'diff-empty'; _e.textContent = 'No changes yet — nothing in the working tree or recent commits. ✨'; body.appendChild(_e); return;
   }
   body.innerHTML = '';
-  body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits));   // header: which repo + change summary
+  body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits, total));   // header: which repo + change summary
   if (files.length || untracked.length) {
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'uncommitted — in the working tree';
     body.appendChild(lbl);
@@ -1612,7 +1627,7 @@ async function refreshDiff(opts) {
   }
   if (committed.length) {                                              // work Claude already committed — visible, review-only
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl';
-    lbl.textContent = 'recently committed' + (commits.length ? ' · ' + commits.length + ' commit' + (commits.length > 1 ? 's' : '') : '') + ' · review only';
+    lbl.textContent = 'recent · this week' + (commits.length ? ' · ' + commits.length + ' commit' + (commits.length > 1 ? 's' : '') : '') + ' · review only';
     body.appendChild(lbl);
     if (commits.length) body.appendChild(renderCommitList(commits));
     committed.forEach((f) => body.appendChild(renderDiffFile(f, true)));

@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onSyncState: (cb) => ipcRenderer.on('sync:state', (_e, s) => cb(s)),
   onSyncChanged: (cb) => ipcRenderer.on('sync:changed', (_e, s) => cb(s)),
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser
   // audio
   stt: (arrayBuf) => ipcRenderer.invoke('stt', arrayBuf),
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
