@@ -23,7 +23,7 @@ function toHostPath(p) { return String(p == null ? '' : p); }
 function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
 
 // buildBoot via the shared pure builder (appdir = the native app root).
-function buildBoot(session, ws, runtimeId, effort) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort); }
+function buildBoot(session, ws, runtimeId, effort, permMode) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort, permMode); }
 
 // node-pty backend (same loader as wsl.js; lazy so requiring this module never forces the native load).
 let _pty = undefined;
@@ -41,10 +41,10 @@ function ptyInfo() {
 }
 
 // Spawn the Claude TUI directly under bash (no wsl.exe). cwd = $HOME (Posix), env inherited.
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
   const pty = ptyInfo();
   if (!pty.mod) return null;
-  return pty.mod.spawn('bash', ['-lc', buildBoot(session, ws, runtimeId, effort)], {
+  return pty.mod.spawn('bash', ['-lc', buildBoot(session, ws, runtimeId, effort, permMode)], {
     name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.HOME, env: process.env,
   });
 }

@@ -18,13 +18,16 @@ function wsEnv(ws) {
 
 // The `bash -lc` boot string for the Claude TUI (appdir injected — pure, so a parity test can verify it).
 // 'ultracode' isn't a CLI value: launch at xhigh, main.js injects `/effort ultracode` once it settles.
-function bootStr(appdir, session, ws, runtimeId, effort) {
+function bootStr(appdir, session, ws, runtimeId, effort, permMode) {
   if (!appdir) return 'echo "[claudible] could not resolve the app path — is the environment set up?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
   const tab = String(runtimeId || 'default');
   const effLevel = effort === 'ultracode' ? 'xhigh' : effort;
   const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(effLevel) ? ` CLAUDIBLE_EFFORT='${effLevel}'` : '';
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + ' ' + wsEnv(ws) + ' ';
+  // Only non-default modes are inlined; 'default' (or unset) omits it so session.sh launches Claude's own
+  // prompting default. session.sh ALWAYS sandboxes a foreign session regardless of this.
+  const perm = ['bypass', 'acceptEdits'].includes(permMode) ? ` CLAUDIBLE_PERMISSION_MODE='${permMode}'` : '';
+  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + ' ' + wsEnv(ws) + ' ';
   return `${prefix}bash '${appdir}/wsl/session.sh' '${appdir}'`;
 }
 

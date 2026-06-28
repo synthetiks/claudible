@@ -45,6 +45,16 @@ eq('boot strips leading-dash id',
 eq('boot appdir null -> echo fallback',
   _bootStr(null, '', legacy, 'main', ''),
   `echo "[claudible] could not resolve the app path — is the environment set up?"; sleep 8`);
+// permission mode: 'bypass'/'acceptEdits' inline CLAUDIBLE_PERMISSION_MODE (right after EFFORT); 'default'/unset omits it
+eq('boot bypass after effort',
+  _bootStr(APP, 'sess-7', repo, 'tab2', 'high', 'bypass'),
+  `CLAUDIBLE_SESSION='sess-7' CLAUDIBLE_TAB='tab2' CLAUDIBLE_EFFORT='high' CLAUDIBLE_PERMISSION_MODE='bypass' CLAUDIBLE_WS_KIND='repo' CLAUDIBLE_WS_SLUG='proj' bash '${APP}/wsl/session.sh' '${APP}'`);
+eq('boot acceptEdits no-effort',
+  _bootStr(APP, 'new', legacy, 'main', '', 'acceptEdits'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_PERMISSION_MODE='acceptEdits' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+eq('boot default mode omits perm env',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'default'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
 
 // ---- runScript / _scriptCmd : every call-site shape (main.js line cited) ----
 // sessions.sh — ws, no args  (main.js:562)

@@ -99,12 +99,15 @@ function pickResumeTarget(sel, jsonl, foreign) {
 }
 // claude.exe argv for a launch decision. Foreign sessions run SANDBOXED (no skip-perms, no --add-dir) —
 // an untrusted synced transcript must never drive tools with full $HOME (session.sh:103-111).
-function claudeArgv(launch, home, effort) {
+function claudeArgv(launch, home, effort, permMode) {
   const lvl = effort === 'ultracode' ? 'xhigh' : effort;   // 'ultracode' is injected post-settle by main.js
   const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(lvl) ? ['--effort', lvl] : [];
-  if (launch.mode === 'fresh') return ['--dangerously-skip-permissions', '--add-dir', home, ...eff];
-  if (launch.foreign) return ['--resume', launch.id, ...eff];                                  // sandboxed
-  return ['--dangerously-skip-permissions', '--resume', launch.id, '--add-dir', home, ...eff];
+  // Trusted/fresh permission flags from the user's remembered setting. 'default' (or unset) → Claude prompts.
+  const perm = permMode === 'bypass' ? ['--dangerously-skip-permissions', '--add-dir', home]
+    : permMode === 'acceptEdits' ? ['--permission-mode', 'acceptEdits'] : [];
+  if (launch.foreign) return ['--resume', launch.id, ...eff];                                  // sandboxed — NEVER perm (RCE guard)
+  if (launch.mode === 'fresh') return [...perm, ...eff];
+  return [...perm, '--resume', launch.id, ...eff];
 }
 // settings.json content (Node hooks invoked via the Windows node path, per-tab paths baked as argv).
 function settingsJson(claudeDir, nodeBin, statusPath, hooksPath) {
@@ -298,7 +301,7 @@ function detectDeps() {
 
 // 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
 // the Windows claude with WINDOWS-path args. ConPTY hosts a native console app fine (it hosts cmd/pwsh).
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
   const sdir = sessionDir(ws, home);
@@ -314,7 +317,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId } = {})
     try { fs.readFileSync(path.win32.join(pdir, '.claudible-foreign'), 'utf8').split(/\r?\n/).forEach((l) => l.trim() && foreign.add(l.trim())); } catch {}
   } catch {}
   const launch = pickResumeTarget(session, jsonl, foreign);
-  const argv = claudeArgv(launch, home, effort);
+  const argv = claudeArgv(launch, home, effort, permMode);
   const claude = whichClaude();
   // node-pty + a .cmd shim: spawn via cmd /c so the shim resolves (the known ConPTY .cmd quirk).
   const isCmd = /\.cmd$|\.bat$/i.test(claude) || claude === 'claude';

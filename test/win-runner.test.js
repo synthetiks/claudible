@@ -44,17 +44,29 @@ eq('pick default skips foreign', pickResumeTarget('', [{ id: 'foreignA' }, { id:
 eq('pick default empty -> fresh', pickResumeTarget('', [], F), { mode: 'fresh' });
 eq('pick dash-prefixed sel -> ignored -> fresh', pickResumeTarget('-evil', [], F), { mode: 'fresh' });
 
-// ---- claudeArgv (mirror session.sh resume_one / FRESH) ----
-eq('argv fresh+effort', claudeArgv({ mode: 'fresh' }, HOME, 'high'),
+// ---- claudeArgv (mirror session.sh resume_one / FRESH) — permission mode is the 4th arg ----
+// 'bypass' = the old frictionless behaviour, now opt-in: --dangerously-skip-permissions + --add-dir
+eq('argv fresh bypass+effort', claudeArgv({ mode: 'fresh' }, HOME, 'high', 'bypass'),
   ['--dangerously-skip-permissions', '--add-dir', HOME, '--effort', 'high']);
-eq('argv resume own no-effort', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, ''),
-  ['--dangerously-skip-permissions', '--resume', 's1', '--add-dir', HOME]);
-eq('argv resume FOREIGN is sandboxed', claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, 'xhigh'),
-  ['--resume', 'f1', '--effort', 'xhigh']);
-eq('argv ultracode -> xhigh', claudeArgv({ mode: 'fresh' }, HOME, 'ultracode'),
+eq('argv resume own bypass', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'bypass'),
+  ['--dangerously-skip-permissions', '--add-dir', HOME, '--resume', 's1']);
+eq('argv ultracode bypass -> xhigh', claudeArgv({ mode: 'fresh' }, HOME, 'ultracode', 'bypass'),
   ['--dangerously-skip-permissions', '--add-dir', HOME, '--effort', 'xhigh']);
-eq('argv bogus effort omitted', claudeArgv({ mode: 'fresh' }, HOME, 'turbo'),
+eq('argv bogus effort omitted (bypass)', claudeArgv({ mode: 'fresh' }, HOME, 'turbo', 'bypass'),
   ['--dangerously-skip-permissions', '--add-dir', HOME]);
+// 'default' (or unset) = Claude prompts — NO --dangerously, NO --add-dir
+eq('argv fresh default = no bypass', claudeArgv({ mode: 'fresh' }, HOME, 'high'),
+  ['--effort', 'high']);
+eq('argv resume own default = no bypass', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'default'),
+  ['--resume', 's1']);
+// 'acceptEdits' = auto-accept edits, no --add-dir
+eq('argv fresh acceptEdits', claudeArgv({ mode: 'fresh' }, HOME, '', 'acceptEdits'),
+  ['--permission-mode', 'acceptEdits']);
+eq('argv resume own acceptEdits+effort', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, 'high', 'acceptEdits'),
+  ['--permission-mode', 'acceptEdits', '--resume', 's1', '--effort', 'high']);
+// SECURITY: a FOREIGN session is ALWAYS sandboxed — even when the user's setting is 'bypass'
+eq('argv resume FOREIGN sandboxed even with bypass', claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, 'xhigh', 'bypass'),
+  ['--resume', 'f1', '--effort', 'xhigh']);
 
 // ---- settingsJson (Node hooks via the Windows node path, per-tab args baked) ----
 const s = settingsJson('C:\\Users\\X\\.claudible\\session\\.claude', 'C:\\node.exe', 'C:\\rt\\status.json', 'C:\\rt\\hooks.ndjson');

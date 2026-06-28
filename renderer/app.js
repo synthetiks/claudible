@@ -1523,6 +1523,20 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
     toast(set ? ('Default effort: ' + set + ' — applies to new sessions') : 'Default effort cleared');
   }));
 })();
+// default permission-mode selector — ships as 'default' (Claude asks); 'accept edits' / 'bypass' are opt-in + remembered
+(async () => {
+  const row = $('perm-row'); if (!row) return;
+  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.perm || 'default') === (v || 'default')));
+  let cur = 'default'; try { cur = await claudible.permissionModeGet(); } catch {}
+  paint(cur || 'default');
+  const LBL = { default: 'ask first', acceptEdits: 'auto-accept edits', bypass: 'bypass permissions' };
+  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
+    const v = b.dataset.perm || 'default';
+    let r = null; try { r = await claudible.permissionModeSet(v); } catch {}
+    const set = (r && r.ok) ? r.permissionMode : v; paint(set);
+    toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
+  }));
+})();
 // theme selector — load the saved theme, highlight it, persist + apply (UI + terminal) instantly on click
 (function () {
   const row = $('theme-row'); if (!row) return;

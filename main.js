@@ -331,7 +331,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
   ws = ws || activeWorkspace;
   try {
     const runtimeId = tabRuntimeId(tabId);
-    const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, runtimeId });
+    const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId });
     if (!proc) { winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${pty.err})\r\n` }); return; }
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
@@ -1079,6 +1079,15 @@ ipcMain.handle('effort:set', (e, level) => {
   registry.effort = ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'].includes(level) ? level : '';
   saveRegistry();
   return { ok: true, effort: registry.effort };
+});
+// Default PERMISSION mode for the user's own sessions — ships as 'default' (Claude prompts); 'bypass' & 'acceptEdits'
+// are opt-in and remembered. A FOREIGN (collaborator-synced) session is ALWAYS sandboxed regardless (session.sh /
+// win.js enforce that). Applies to the NEXT session each tab launches.
+ipcMain.handle('permissionMode:get', () => registry.permissionMode || 'default');
+ipcMain.handle('permissionMode:set', (e, mode) => {
+  registry.permissionMode = ['default', 'acceptEdits', 'bypass'].includes(mode) ? mode : 'default';
+  saveRegistry();
+  return { ok: true, permissionMode: registry.permissionMode };
 });
 // Invite a GitHub user as a push collaborator on a repo workspace's repo (Stage 2 — durable git collab).
 ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
