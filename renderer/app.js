@@ -2424,6 +2424,7 @@ async function refreshSessions() {
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
   if (!Array.isArray(list)) list = [];
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
+  _wsSessCache.set(activeWsId, { list, ts: Date.now() });                           // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash)
   const savedIds = new Set(list.map((s) => s.id));
   // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row. That covers a brand-
   // new 'new' tab AND a just-started session whose real id exists but whose transcript file hasn't been
@@ -2636,6 +2637,7 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
 }
 function renderWsChips() {
   const el = $('ws-chips'); if (!el) return;
+  const _scroll = el.scrollTop;  // preserve the sidebar scroll position across the rebuild (no jump-to-top flicker)
   closeWsMenu();                 // a re-render replaces the chips/caret the open menu was anchored to
   // Preserve the live sessions list + its inline "+ New Session" across the wipe — they get moved INTO the active
   // workspace node below. .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare
@@ -2713,6 +2715,7 @@ function renderWsChips() {
   // The active workspace's live #sess-list / #new-session are nested above only while the active ws is EXPANDED.
   // If it's collapsed (or there's no active match), they stay detached (preserved via .remove()) — refreshSessions
   // still fills the ref harmlessly, and they re-nest the moment the active workspace is expanded again.
+  el.scrollTop = _scroll;        // restore the scroll position the rebuild reset (synchronous content is in place)
 }
 // "What's a workspace?" — one click on the ⓘ explains the concept, so the sidebar stays clean (no inline paragraphs).
 let wsInfoPop = null;
@@ -3085,6 +3088,8 @@ async function switchWorkspace(id, targetSession) {
   activeSession = (sess && sess !== 'new') ? sess : null; t.curSessionLabel = (sess === 'new') ? 'New session' : '';
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   sessListEl.innerHTML = ''; _sessSig = '';        // drop the OLD workspace's session rows immediately so they don't flash under the NEW workspace before refreshSessions lands
+  const _pf = _wsSessCache.get(id);                // …and immediately PRE-FILL the new ws's rows from cache (warm if it was expanded before) so the list shows correct content instantly, not an empty gap until the live fetch lands
+  if (_pf && Array.isArray(_pf.list) && _pf.list.length) { _pf.list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).forEach((s) => { sessIndex[s.id] = s; sessListEl.appendChild(renderSessionRow(s)); }); }
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
   let failed = false;
