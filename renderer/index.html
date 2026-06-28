@@ -462,6 +462,23 @@
     .cc-head{display:flex;align-items:center;gap:11px;margin-bottom:4px}
     .cc-head h3{margin:0}
     .cc-mascot{width:34px;height:34px;border-radius:8px;display:block;flex:0 0 auto}
+    /* Claude command center — the connected view of the connect popup: version + running sessions + terminate */
+    #cc-center{display:flex;flex-direction:column;gap:11px;margin:2px 0 14px;text-align:left}
+    .cc-meta{display:flex;gap:22px}
+    .cc-stat{display:flex;flex-direction:column;gap:3px}
+    .cc-k{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+    .cc-v{color:var(--ink);font-size:12.5px}
+    .cc-sess-list{display:flex;flex-direction:column;gap:5px;max-height:208px;overflow:auto}
+    .cc-sess{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--hairline-soft);border-radius:9px;background:rgba(255,255,255,.02)}
+    .cc-sess .cc-d{width:7px;height:7px;border-radius:50%;flex:none;background:#5fb487;box-shadow:0 0 6px -1px #5fb487}
+    .cc-sess .cc-d.busy{animation:ws-sync-pulse 1s ease-in-out infinite}
+    .cc-sess .cc-d.live{background:#6aa6e0;box-shadow:0 0 6px -1px #6aa6e0}
+    .cc-sess .cc-nm{flex:1;min-width:0;color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cc-sess .cc-ws{flex:none;font-size:9px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em}
+    .cc-sess .cc-active{flex:none;font-size:8.5px;color:#7ee0a8;text-transform:uppercase;letter-spacing:.08em}
+    .cc-kill{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);font-size:13px;line-height:1;cursor:pointer;transition:all .14s}
+    .cc-kill:hover{color:#ff8e8e;border-color:rgba(210,104,95,.4);background:rgba(210,104,95,.1)}
+    .cc-kill:disabled{opacity:.3;cursor:not-allowed}
     .iconbtn:active{transform:translateY(1px)}
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background-color:var(--panel);background-image:linear-gradient(180deg,rgba(255,255,255,.022),transparent 22%);
@@ -1269,6 +1286,7 @@
       <div class="cc-head"><img class="cc-mascot" src="../assets/claude-mascot.png" alt="Claude" /><h3>Connect Claude Code</h3></div>
       <p id="cc-msg">Checking Claude Code…</p>
       <div class="ws-busy" id="cc-busy"></div>
+      <div id="cc-center" style="display:none"></div>
       <div class="row">
         <button id="cc-action" class="primary" style="display:none"></button>
         <button id="cc-done" class="ghost">Close</button>

@@ -3281,6 +3281,9 @@ window.addEventListener('keydown', (e) => {
   const wizEl = $('wizard');
   const msg = $('cc-msg'), act = $('cc-action'), busy = $('cc-busy'), doneBtn = $('cc-done'), dot = $('claude-dot');
   let poll = null, pollSince = 0, lastState = '', userDismissed = false;
+  const head = pop.querySelector('.cc-head h3'), center = $('cc-center');
+  let ccVer = '';
+  async function loadVer() { if (ccVer) return ccVer; try { ccVer = (await claudible.claudeVersion()) || ''; } catch {} return ccVer; }
   const stop = () => { if (poll) { clearInterval(poll); poll = null; } };
   async function getState() { try { return await claudible.claudeState(); } catch { return null; } }
   function toState(s) { if (!s) return ''; if (!s.installed) return 'missing'; return s.signedIn ? 'ready' : 'unconfirmed'; }
@@ -3288,6 +3291,10 @@ window.addEventListener('keydown', (e) => {
     lastState = state || '';
     if (dot) dot.className = 'claude-dot ' + (state === 'ready' ? 'ok' : state === 'missing' ? 'bad' : (state ? 'warn' : ''));
     btn.classList.toggle('attn', state === 'missing');   // nudge ONLY when truly absent (not the unconfirmed false-negative)
+    btn.title = state === 'ready' ? ('Claude Code — Connected ✓' + (ccVer ? ' · ' + ccVer : '') + ' · click for status')
+      : state === 'missing' ? 'Claude Code not installed — click to set up'
+      : state === 'unconfirmed' ? 'Claude Code installed — click to sign in'
+      : 'Claude Code — click to check status';
   }
   function fitSoon() { setTimeout(() => { try { window.dispatchEvent(new Event('resize')); } catch {} }, 450); }   // re-fit the revived terminal (it spawns at a default size)
   function open() { userDismissed = false; pop.classList.add('show'); render(); }
@@ -3295,9 +3302,12 @@ window.addEventListener('keydown', (e) => {
   async function render() {
     const st = toState(await getState());
     setDot(st); busy.classList.remove('err'); busy.textContent = '';
+    if (center) center.style.display = 'none';                                  // command center is the CONNECTED view only
+    if (head) head.textContent = st === 'ready' ? 'Claude Code' : 'Connect Claude Code';
     if (st === '') { msg.textContent = 'Couldn’t check Claude Code — try again, or open a terminal manually.'; act.style.display = 'none'; return; }
     if (st === 'ready') {
-      msg.textContent = '✓ Claude Code connected.'; act.style.display = 'none'; doneBtn.textContent = 'Done'; stop();
+      msg.textContent = '✓ Claude Code is connected.'; act.style.display = 'none'; doneBtn.textContent = 'Done'; stop();
+      renderCenter();                                                           // version + running background sessions + terminate
     } else if (st === 'missing') {
       msg.textContent = 'Claude Code isn’t installed yet. Install it now — takes a minute (Node is already set up).';
       act.style.display = ''; act.textContent = 'Install Claude Code'; act.disabled = false; act.onclick = install; doneBtn.textContent = 'Close';
@@ -3324,6 +3334,39 @@ window.addEventListener('keydown', (e) => {
       const st = toState(await getState()); setDot(st); if (st === 'ready') stop();
     }, 3000);
   }
+  function ccName(rec) {                                                        // a friendly name for any running tab/session
+    if (rec.kind === 'live') return (((rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator') + '’s live session');
+    if (rec.session && rec.session !== 'new' && typeof sessIndex !== 'undefined' && sessIndex[rec.session]) return sessTitle(sessIndex[rec.session]);
+    return tabLabel(rec);
+  }
+  function renderCenter() {                                                     // the connected "command center": version + running sessions + terminate
+    if (!center) return;
+    center.style.display = ''; center.innerHTML = '';
+    const meta = document.createElement('div'); meta.className = 'cc-meta';
+    const vS = document.createElement('div'); vS.className = 'cc-stat';
+    const vk = document.createElement('span'); vk.className = 'cc-k'; vk.textContent = 'Version'; vS.appendChild(vk);
+    const vv = document.createElement('span'); vv.className = 'cc-v'; vv.textContent = ccVer ? ('claude code ' + ccVer) : 'checking…'; vS.appendChild(vv);
+    if (!ccVer) loadVer().then((v) => { if (v) vv.textContent = 'claude code ' + v; });
+    const cS = document.createElement('div'); cS.className = 'cc-stat';
+    const ck = document.createElement('span'); ck.className = 'cc-k'; ck.textContent = 'Sessions'; cS.appendChild(ck);
+    const cv = document.createElement('span'); cv.className = 'cc-v'; cv.textContent = tabs.size + ' running'; cS.appendChild(cv);
+    meta.appendChild(vS); meta.appendChild(cS); center.appendChild(meta);
+    const list = document.createElement('div'); list.className = 'cc-sess-list';
+    Array.from(tabs.values()).forEach((rec) => {
+      const row = document.createElement('div'); row.className = 'cc-sess';
+      const d = document.createElement('span'); d.className = 'cc-d' + (rec.busy ? ' busy' : '') + (rec.kind === 'live' ? ' live' : ''); row.appendChild(d);
+      const nm = document.createElement('span'); nm.className = 'cc-nm'; nm.textContent = ccName(rec); nm.title = nm.textContent; row.appendChild(nm);
+      const ws = (typeof workspaces !== 'undefined') ? workspaces.find((w) => w.id === rec.wsId) : null;
+      if (ws) { const wl = document.createElement('span'); wl.className = 'cc-ws'; wl.textContent = ws.label; row.appendChild(wl); }
+      if (rec.tabId === activeTabId) { const a = document.createElement('span'); a.className = 'cc-active'; a.textContent = 'active'; row.appendChild(a); }
+      const kill = document.createElement('button'); kill.className = 'cc-kill'; kill.textContent = '✕';
+      kill.title = rec.kind === 'live' ? 'Leave this live session' : 'End this session';
+      kill.disabled = tabs.size <= 1;                                           // never terminate the last running session
+      kill.addEventListener('click', (e) => { e.stopPropagation(); try { closeTab(rec.tabId); } catch (_) {} renderCenter(); });
+      row.appendChild(kill); list.appendChild(row);
+    });
+    center.appendChild(list);
+  }
   btn.addEventListener('click', open);
   doneBtn.addEventListener('click', close);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pop.classList.contains('show')) { e.preventDefault(); close(); } });
@@ -3336,4 +3379,5 @@ window.addEventListener('keydown', (e) => {
     open();
   });
   getState().then((s) => setDot(toState(s)));   // initialize the dot (cheap, claude-only)
+  loadVer().then(() => { if (lastState) setDot(lastState); });   // prefetch version so the tooltip shows it; refresh the title once known
 })();
