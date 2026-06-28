@@ -160,7 +160,13 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (ws.readyState !== ws.OPEN) return;
     ws._name = name;
     if (mode === 'link') { const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok; }
-    else { ws._resume = resumeTok; }
+    else {
+      // RESUME → ROTATE: a reconnect CONSUMES the presented token and mints a fresh single-use one bound to this
+      // IP. The guest re-stores it from the hello below, so a token captured from the URL/history is useless the
+      // moment the real guest reconnects with it (defense-in-depth atop the IP binding + 15s grace window).
+      resumeTokens.delete(resumeTok);
+      const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok;
+    }
     ws.binaryType = 'nodebuffer';
     ws._alive = true;
     ws.on('pong', () => { ws._alive = true; });   // heartbeat: the client answered our ping → still connected
