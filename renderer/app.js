@@ -1809,6 +1809,7 @@ function savePrefs(patch) {
 
 // ---------- sessions sidebar (switch between Claude conversations, like Claude Code) ----------
 const sessListEl = $('sess-list');
+const newSessEl = $('new-session');   // capture ONCE (like sessListEl). getElementById returns null for a DETACHED node, so re-querying after the active workspace is collapsed/detached would lose the "+ New Session" row forever.
 const bodyEl = document.querySelector('.body');
 // activeSession / workspaces / activeWsId are declared up top (near the tabs Map) so the tab-strip boot can
 // reference them. The conversation order is stored PER workspace so switching libraries never reshuffles another's.
@@ -2619,9 +2620,8 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     const ordered = (list || []).slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).slice(0, 60);
     if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
-    const nb = document.createElement('button'); nb.className = 'newsess-row'; nb.textContent = '+ New Session';
-    nb.addEventListener('click', (e) => { e.stopPropagation(); switchWorkspace(w.id, 'new'); });   // switch to that workspace + start a fresh session, one shot
-    kids.appendChild(nb);
+    // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).
+    // A non-active workspace lists its sessions for browsing/opening; to start a new one you select it first.
   };
   const c = _wsSessCache.get(w.id);
   if (c) fill(c.list); else { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }
@@ -2646,8 +2646,7 @@ function wsChipsSig() {
 // In-place update: toggle active/expanded/shared, re-nest the live #sess-list under whoever is active now, and
 // add/remove the non-active children — WITHOUT recreating any chip (so the busy/syncing dot animations don't restart).
 function reconcileWsChips(el) {
-  const newSessEl = $('new-session');
-  if (sessListEl && sessListEl.parentNode) sessListEl.remove();      // detach the live list so we can re-nest it under the new active chip
+  if (sessListEl && sessListEl.parentNode) sessListEl.remove();      // detach the live list so we can re-nest it under the new active chip (newSessEl is the persistent module ref)
   if (newSessEl && newSessEl.parentNode) newSessEl.remove();
   const chipById = {};
   el.querySelectorAll('.ws-chip').forEach((c) => { chipById[c.dataset.id] = c; });
@@ -2679,9 +2678,8 @@ function renderWsChips() {
   // Preserve the live sessions list + its inline "+ New Session" across the wipe — they get moved INTO the active
   // workspace node below. .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare
   // renderWsChips() never drops the sessions. Without this, el.innerHTML='' would destroy the relocated nodes.
-  const newSessEl = $('new-session');
   if (el.contains(sessListEl)) sessListEl.remove();
-  if (newSessEl && el.contains(newSessEl)) newSessEl.remove();
+  if (newSessEl && el.contains(newSessEl)) newSessEl.remove();      // newSessEl: persistent module ref (survives detachment when the active ws is collapsed)
   el.innerHTML = '';
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
