@@ -718,6 +718,19 @@ ipcMain.handle('session:keep', (e, arg) => new Promise((resolve) => {
       resolve(r.ok ? r : { ok: false, error: (r.error || 'keep failed') });
     });
 }));
+// Resolve an "out of sync" (forked) session — 'remote' = take the shared copy (collaborator's, via the safe
+// import_file path), 'local' = keep mine (clears the flag + acks it so a background sync stops re-nagging).
+ipcMain.handle('session:resolveDiverged', (e, arg) => new Promise((resolve) => {
+  const id = (typeof arg === 'string') ? arg : (arg && arg.id);
+  const strategy = (arg && arg.strategy === 'local') ? 'local' : 'remote';
+  const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
+  if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
+  runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {
+      if (err) { console.error('[claudible] session:resolveDiverged:', err.message); return resolve({ ok: false, error: 'exec' }); }
+      let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
+      resolve(r.ok ? r : { ok: false, error: (r.error || 'resolve failed') });
+    });
+}));
 
 // ---- shared-session sync (repo workspaces) -----------------------------------------------------
 // Copy this workspace's Claude transcripts to/from collaborators over an ISOLATED orphan branch

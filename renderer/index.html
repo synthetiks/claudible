@@ -528,7 +528,7 @@
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
     .sess-meta{display:flex;align-items:center;gap:7px}
     .sess-meta-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row") */
-    .sess-meta{flex-wrap:wrap;row-gap:4px}   /* multiple tags (time + live + diverged) wrap to a 2nd line instead of overflowing the row */
+    .sess-meta{flex-wrap:nowrap}   /* keep the tag (out-of-sync / live) on ONE line WITH the timestamp — the time (flex:0 1 auto, its OWN overflow:hidden/ellipsis) shrinks to make room, so the chip never drops to a 2nd line; its colour still hugs just the icon+word (inline-flex). No container overflow:hidden — it would clip the live pill's "Join →" hover reveal. */
     .sess-live-ind{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
       text-transform:uppercase;color:var(--ok,#5fb487);background:none;border:none;border-radius:999px;padding:2px 4px;line-height:1}
     .sess-live-ind .liw{white-space:nowrap}

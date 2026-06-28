@@ -23,7 +23,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete|presence-set|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|resolve|presence-set|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -49,8 +49,14 @@ mark_foreign() { grep -qxF -- "$1" "$FSET" 2>/dev/null || printf '%s\n' "$1" >> 
 # A true fork (same id edited on both machines) is recorded here so sessions.sh can flag a per-row "diverged"
 # badge; cleared the moment the fork resolves (clean import / fast-forward / identical / local-ahead).
 DDSET="$PROJ/.claudible-diverged"
+# A fork the user chose to KEEP-LOCAL is acked in AKSET so import stops re-nagging it (it IS still out of sync, but
+# the user decided). Any natural resolution clears BOTH, so a genuinely new divergence can still surface later.
+AKSET="$PROJ/.claudible-diverged-ack"
+_rmline() { [ -e "$2" ] || return 0; { grep -vxF -- "$1" "$2" 2>/dev/null || true; } > "$2.tmp.$$"; mv -f "$2.tmp.$$" "$2" 2>/dev/null; }   # PID-unique tmp: a background sync + a resolve clearing different ids must not clobber each other's rewrite
 mark_diverged() { grep -qxF -- "$1" "$DDSET" 2>/dev/null || printf '%s\n' "$1" >> "$DDSET"; }
-clear_diverged() { [ -e "$DDSET" ] || return 0; { grep -vxF -- "$1" "$DDSET" 2>/dev/null || true; } > "$DDSET.tmp"; mv -f "$DDSET.tmp" "$DDSET" 2>/dev/null; }
+mark_ack() { grep -qxF -- "$1" "$AKSET" 2>/dev/null || printf '%s\n' "$1" >> "$AKSET"; }
+is_acked() { grep -qxF -- "$1" "$AKSET" 2>/dev/null; }
+clear_diverged() { _rmline "$1" "$DDSET"; _rmline "$1" "$AKSET"; }   # a resolved fork drops both the badge flag AND the keep-local ack
 # Install a branch transcript so it is ONLY ever visible in final, already-foreign, already-aged form:
 # record foreign FIRST, copy to a temp, age the temp, then atomically rename into place. This closes the
 # TOCTOU window in which a concurrently-spawned session.sh could observe a trusted, current-mtime
@@ -213,6 +219,8 @@ import_sessions() {
       import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); clear_diverged "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
       clear_diverged "$id"                                          # local is ahead of remote → our push handles it
+    elif is_acked "$id"; then
+      :                                                              # user chose KEEP-LOCAL for this fork → honor it, don't re-nag (the ack clears if it ever resolves)
     else
       DIVERGED=$((DIVERGED+1)); mark_diverged "$id"                 # true fork → leave local untouched, flag it per-row
     fi
@@ -312,6 +320,36 @@ case "$op" in
     done
     [ "$pushed" = 1 ] || fail "push failed (no access, or network)"
     emit "{\"ok\":true,\"op\":\"delete\",\"id\":\"$did\"}"
+    ;;
+  resolve)
+    # Resolve an out-of-sync (forked) session. $2=id, $3=strategy:
+    #   remote = TAKE THE SHARED COPY (the collaborator's/originator's version on the branch). Reuses import_file,
+    #            so it lands foreign + aged + atomic, exactly like a normal import — no new trust surface. The local
+    #            fork was never published (export skips foreign ids), so the branch holds ONLY the shared copy; after
+    #            taking it local == branch and the next sync clears the flag for good.
+    #   local  = KEEP MY COPY — clear the flag and ACK it so import stops re-nagging (still a fork, but I chose).
+    ensure_worktree || fail "could not set up the sessions branch"
+    rid="${2:-}"; rstrat="${3:-remote}"
+    case "$rid" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$rstrat" in remote|local) ;; *) fail "bad strategy" ;; esac
+    pull_branch || fail "pull failed"
+    tombstoned "$rid" && fail "that session was deleted everywhere"
+    if [ "$rstrat" = local ]; then
+      clear_diverged "$rid"; mark_ack "$rid"                         # clear_diverged drops both flags; re-ack so it sticks
+      emit "{\"ok\":true,\"op\":\"resolve\",\"strategy\":\"local\",\"id\":\"$rid\"}"
+    else
+      best=""; bestsz=-1
+      for f in "$WT"/sessions/*/"$rid.jsonl"; do
+        [ -e "$f" ] || continue
+        head -c 1 "$f" 2>/dev/null | grep -q '{' || continue        # must look like JSONL
+        sz="$(wc -c < "$f" 2>/dev/null || echo 0)"
+        [ "$sz" -gt "$bestsz" ] && { best="$f"; bestsz="$sz"; }       # take the largest shared copy (most turns ≈ latest)
+      done
+      [ -n "$best" ] || fail "no shared copy to take (nothing on the branch for this session)"
+      import_file "$best" "$PROJ/$rid.jsonl" "$rid" || fail "could not write the shared copy"
+      clear_diverged "$rid"
+      emit "{\"ok\":true,\"op\":\"resolve\",\"strategy\":\"remote\",\"id\":\"$rid\"}"
+    fi
     ;;
   presence-set)
     # Advertise "I'm live in session $2, joinable at $3 with token $4" so a collaborator in this workspace can

@@ -2140,8 +2140,8 @@ function renderSessionRow(s) {
     m.appendChild(db);
   } else if (s.diverged) {                                           // same session edited on both machines → soft amber "diverged" chip
     const vb = document.createElement('button');
-    vb.className = 'sess-chip diverged'; vb.title = 'Edited on both machines — your copy and the shared copy differ';
-    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>diverged';
+    vb.className = 'sess-chip diverged'; vb.title = 'Out of sync — this conversation was continued on both machines; click to resolve';
+    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>out of sync';
     vb.addEventListener('click', (e) => { e.stopPropagation(); openDivergedInfo(s); });
     m.appendChild(vb);
   }
@@ -2410,13 +2410,26 @@ async function openDeletedRemoteModal(s) {
   if (choice === 'delete') await deleteSession(s.id, 'local');       // already tombstoned on the branch → just trash the local copy
   else if (choice === 'keep') { try { await claudible.sessionKeep(s.id); } catch (e) {} refreshSessions(); }
 }
-// Same session edited on both machines (true fork) — informational.
-function openDivergedInfo(s) {
-  modalChoice({
-    title: 'This session diverged',
-    body: '“' + sessTitle(s) + '” was edited on both machines, so your copy and the shared copy differ and can’t auto-merge. Keep working in whichever copy you want; the badge clears once they line up again.',
-    choices: [{ key: 'ok', label: 'Got it' }],
+// Same session continued on both machines (a true fork). Let the user RESOLVE it, not just read an FYI:
+// 'remote' takes the shared copy (safe import_file path), 'local' keeps mine + acks so sync stops re-flagging.
+async function openDivergedInfo(s) {
+  const name = sessTitle(s);
+  const choice = await modalChoice({
+    title: 'This session is out of sync',
+    body: '“' + name + '” was continued on both machines, so your copy and the shared copy differ — they can’t auto-merge. Take the shared version to match your collaborator, or keep your own.',
+    choices: [
+      { key: 'remote', label: 'Use the shared version', sub: 'Replace your copy with the collaborator’s latest. Your local edits to this session are discarded.' },
+      { key: 'local', label: 'Keep mine', sub: 'Keep your copy and stop flagging it. It still won’t match the shared one.' },
+      { key: 'cancel', label: 'Cancel' },
+    ],
   });
+  if (choice !== 'remote' && choice !== 'local') return;
+  try {
+    const r = await claudible.resolveDiverged(s.id, choice);
+    if (r && r.ok) toast(choice === 'remote' ? 'Took the shared version' : 'Keeping your version');
+    else toast('Could not resolve' + (r && r.error ? ': ' + humanError(r.error) : ''));
+  } catch (e) { toast('Could not resolve'); }
+  refreshSessions();
 }
 let _sessSig = '';
 async function refreshSessions() {

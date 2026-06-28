@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
   sessionDelete: (id, scope) => ipcRenderer.invoke('session:delete', { id, scope }),
   sessionKeep: (id) => ipcRenderer.invoke('session:keep', { id }),   // "keep locally" a session deleted on GitHub
+  resolveDiverged: (id, strategy) => ipcRenderer.invoke('session:resolveDiverged', { id, strategy }),   // out-of-sync fork → 'remote' (take theirs) | 'local' (keep mine)
   exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
   exportSessionText: (id) => ipcRenderer.invoke('session:export-text', id),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: () => ipcRenderer.invoke('claude:version'),   // the embedded Claude Code CLI version (for the status bar)
