@@ -2570,6 +2570,7 @@ function expandedSet() {
 function isWsExpanded(id) { return expandedSet().has(id); }
 function setWsExpanded(id, on) { const s = expandedSet(); if (on) s.add(id); else s.delete(id); saveExpandedWs(); }
 const _wsSessCache = new Map();   // wsId -> { list, ts } — avoid refetching a non-active workspace's sessions on every re-render
+const _wsSessFetching = new Set();   // wsIds with a fetch in flight — dedupe concurrent fetches across rapid re-renders
 function renderWsSessionRow(w, s) {
   const row = document.createElement('div'); row.className = 'sess'; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s); p.title = p.textContent;
@@ -2592,8 +2593,16 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
   };
   const c = _wsSessCache.get(w.id);
   if (c) fill(c.list); else { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }
-  if (!c || Date.now() - c.ts > 4000) {
-    claudible.sessionListWs(w.id).then((list) => { const arr = Array.isArray(list) ? list : []; _wsSessCache.set(w.id, { list: arr, ts: Date.now() }); if (document.body.contains(kids)) fill(arr); }).catch(() => {});
+  if ((!c || Date.now() - c.ts > 4000) && !_wsSessFetching.has(w.id)) {   // skip if a fetch for this ws is already in flight
+    _wsSessFetching.add(w.id);
+    claudible.sessionListWs(w.id)
+      .then((list) => {
+        const arr = Array.isArray(list) ? list : []; _wsSessCache.set(w.id, { list: arr, ts: Date.now() });
+        if (document.body.contains(kids)) fill(arr);
+        else if (isWsExpanded(w.id)) renderWsChips();   // the container was replaced by a re-render mid-fetch → repaint from the now-fresh cache (no re-fetch)
+      })
+      .catch(() => {})
+      .finally(() => { _wsSessFetching.delete(w.id); });
   }
 }
 function renderWsChips() {
