@@ -246,8 +246,8 @@ function closeTab(tabId) {
   try { rec.term.dispose(); } catch {}
   try { rec.container.remove(); } catch {}
   tabs.delete(tabId);
-  if (activeTabId === tabId) setActiveTab(tabs.keys().next().value);
-  else renderTabStrip();
+  if (activeTabId === tabId) setActiveTab(tabs.keys().next().value);   // setActiveTab → refreshSessions (covers ✕ on the tab you're viewing)
+  else { renderTabStrip(); if (sidebarReady) refreshSessions(); }      // ✕ on a BACKGROUND tab (e.g. a joined live row you're not viewing) must still refresh the sidebar: drop its row + bring back any saved row it was deduping
 }
 
 new ResizeObserver(sync).observe(termHost);
@@ -2473,13 +2473,19 @@ async function refreshSessions() {
   }
   _sessSig = sig;
   sessListEl.innerHTML = '';
-  joinedLive.forEach((rec) => sessListEl.appendChild(renderJoinedTabRow(rec)));      // peers' live sessions I've joined — pinned at the top
-  ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
-  liveTabs.forEach((rec) => sessListEl.appendChild(renderLiveTabRow(rec)));          // live, not-yet-saved sessions, appended below
-  if (livePeers.length) {                                                            // a collaborator is live in a session we don't have locally yet
-    const _localIds = new Set(ordered.map((s) => s.id));
-    livePeers.forEach((p) => { if (!_localIds.has(p.session)) sessListEl.appendChild(renderLivePeerRow(p)); });
-  }
+  // ONE dedup authority: every session id gets EXACTLY ONE row, even when it qualifies for several passes at once.
+  // With session-sync ON, a peer's live session is BOTH git-synced to me as a saved row AND joinable as a live
+  // mirror — joining it used to render the session twice (the "I see it twice" duplicate). Priority order: the live
+  // mirror I actively joined wins (keyed by peer.session = the session I JOINED, not liveSessId, so a host who moved
+  // sessions still collapses the right row); the synced saved copy and any live-peer row for that same id are then
+  // suppressed. The saved copy returns when I LEAVE (close the joined tab → it drops out of joinedLive → next
+  // refreshSessions un-suppresses it). If the host goes OFFLINE the joined row flips to "offline" in place
+  // (setLiveState), so I close that dead mirror to bring my saved copy back — one row per session throughout.
+  const shown = new Set();
+  joinedLive.forEach((rec) => { const sid = rec.peer && rec.peer.session; if (sid) shown.add(sid); sessListEl.appendChild(renderJoinedTabRow(rec)); });   // pinned at the top
+  ordered.forEach((s) => { if (shown.has(s.id)) return; shown.add(s.id); sessListEl.appendChild(renderSessionRow(s)); });
+  liveTabs.forEach((rec) => { if (rec.session) shown.add(rec.session); sessListEl.appendChild(renderLiveTabRow(rec)); });   // live, not-yet-saved local tabs
+  livePeers.forEach((p) => { if (shown.has(p.session)) return; shown.add(p.session); sessListEl.appendChild(renderLivePeerRow(p)); });   // a collaborator live in a session not already shown (folds in the old _localIds check)
   const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
   updateCollab();                                                                   // synced repo session → tunnel up so a peer can Join live (no bottom-left indicator)
