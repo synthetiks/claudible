@@ -1979,6 +1979,26 @@ function toggleShareSession(s) {
   }
 }
 // Poll the shared branch for collaborators who are live (only in a repo workspace). Re-render on change.
+// Auto-recover joined tabs when the HOST's tunnel URL/token ROTATES. trycloudflare hands out a brand-new random
+// URL on every cloudflared restart, so a guest that joined the old URL ends up hammering a dead tunnel, gives up,
+// and shows "ended" forever — even though the host already re-advertised a fresh handle. On each presence refresh,
+// re-arm any offline/reconnecting joined tab whose host handle CHANGED, with the fresh url+token (mirrors the manual
+// rearm path in openLiveTab). Only fires on an actual url/token change, so it can't tight-loop on a stable dead URL.
+const LIVE_RECONNECTABLE = new Set(['offline', 'reconnecting']);
+function reconcileJoinedTabs() {
+  for (const rec of tabs.values()) {
+    if (rec.kind !== 'live' || !rec.peer || !rec.peer.session) continue;
+    if (!LIVE_RECONNECTABLE.has(rec.liveState)) continue;
+    const fresh = livePeers.find((p) => p.session === rec.peer.session && p.url && p.token);
+    if (!fresh || (fresh.url === rec.peer.url && fresh.token === rec.peer.token)) continue;   // no fresh handle, or unchanged → nothing new to dial
+    console.log('[live] host handle rotated — re-arming joined tab', rec.tabId, '→', fresh.url);
+    rec.peer = fresh;
+    setLiveState(rec, 'connecting');
+    claudible.liveConnect(rec.tabId, fresh, collabName())
+      .then((r) => { if (!r || !r.ok) setLiveState(rec, 'offline'); })
+      .catch((err) => { console.error('[live] re-arm rejected:', err); setLiveState(rec, 'offline'); });
+  }
+}
 async function pollLivePeers() {
   const aw = workspaces.find((w) => w.id === activeWsId);
   if (!(aw && aw.kind === 'repo')) { if (livePeers.length) { livePeers = []; livePeersSig = ''; refreshSessions(); } return; }
@@ -1987,7 +2007,7 @@ async function pollLivePeers() {
   peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 300));   // drop stale (>5 min; a live host re-stamps every ~2 min)
   const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session]]).sort());   // include local-presence so the Join badge re-renders the moment the host's session syncs into our list — not only when a peer changes (fixes "Join only shows when I click around")
   if (sig === livePeersSig) return;
-  livePeersSig = sig; livePeers = peers; refreshSessions();
+  livePeersSig = sig; livePeers = peers; refreshSessions(); reconcileJoinedTabs();   // host URL rotated? auto-reconnect dead joined tabs to the fresh handle
 }
 setInterval(pollLivePeers, 10000);
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
