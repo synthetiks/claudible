@@ -2283,7 +2283,9 @@ function startSessEdit(row, p, s) {
           try { claudible.titleSet(s.id, shared).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
         }
         p.textContent = sessTitle(s);
-        { const at = AT(); if (at && s.id === activeSession) { at.curSessionLabel = p.textContent; pushTracker(); } }   // mirror the new title to guests
+        // keep ANY open tab on this session in sync so the command center + guest tracker also show the new name
+        for (const r of tabs.values()) { if (r.session === s.id) { r.label = p.textContent; r.curSessionLabel = p.textContent; } }
+        if (AT() && s.id === activeSession) pushTracker();           // mirror the new title to guests
       }
     } catch (e) { console.error('[rename] save threw', e); }
     finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
