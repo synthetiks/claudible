@@ -342,7 +342,7 @@ claudible.onStatus((s) => {
     if (t.tabId === activeTabId) activeSession = s.sessionId;
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
-      const titles = loadPrefs().sessionTitles || {}; titles[s.sessionId] = nm; savePrefs({ sessionTitles: titles });
+      const titles = Object.assign({}, loadPrefs().sessionTitles || {}); titles[s.sessionId] = nm; savePrefs({ sessionTitles: titles });   // copy → mutable (cached map may be a frozen contextBridge object)
       const _aw = workspaces.find((w) => w.id === activeWsId);
       if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = nm; try { claudible.titleSet(s.sessionId, nm).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo workspace → share the name with collaborators
     }
@@ -1829,7 +1829,7 @@ function loadPrefs() {
     let disk = {}, ls = {};
     try { const s = window.claudible && claudible.settingsInitial; if (s && typeof s === 'object') disk = s; } catch {}
     try { ls = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch {}
-    loadPrefs._cache = Object.assign({}, ls, disk);   // disk is source of truth; ls only fills gaps (migration)
+    loadPrefs._cache = JSON.parse(JSON.stringify(Object.assign({}, ls, disk)));   // DEEP CLONE → fully mutable. settingsInitial crosses contextBridge FROZEN; a shallow merge keeps nested objects (sessionTitles, wsOrder…) read-only, so in-place writes silently vanish (the 2h "rename never saves" bug).
     try { if (window.claudible && claudible.settingsSave && Object.keys(ls).length && !Object.keys(disk).length) claudible.settingsSave(loadPrefs._cache); } catch {}
   }
   return loadPrefs._cache;
@@ -2263,29 +2263,14 @@ function startSessEdit(row, p, s) {
   const inp = document.createElement('input');
   inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = sessTitle(s);
   p.style.display = 'none'; row.insertBefore(inp, p);
-  try { if (typeof term !== 'undefined' && term && term.textarea) term.textarea.blur(); } catch {}   // release the terminal so the field can actually take focus
   inp.focus(); inp.select();
-  const focusedOnOpen = (document.activeElement === inp); let gotInput = false;   // DIAGNOSTIC: did focus + typing actually land on the field
   let done = false; let actions = null;
-  // HOLD FOCUS: xterm grabs keyboard focus aggressively. Without this the field LOOKS open but your keystrokes
-  // land in the terminal, so the field stays empty and the rename saves nothing — the real "rename does nothing"
-  // bug (confirmed: settings.json never gained the typed names). Re-claim focus every 50ms until commit.
-  const holdFocus = setInterval(() => {
-    if (done || !document.body.contains(inp)) { clearInterval(holdFocus); return; }
-    const ae = document.activeElement;
-    if (ae !== inp && !(ae && ae.closest && ae.closest('.sess-rename-actions'))) { try { inp.focus(); } catch {} }
-  }, 50);
-  inp.addEventListener('input', () => { gotInput = true; });   // DIAGNOSTIC: did any keystroke reach the field
   const commit = (save) => {
     if (done) return; done = true;
-    clearInterval(holdFocus);
-    const fieldVal = inp.value;
-    // DIAGNOSTIC written to settings.json (which every commit writes anyway) so it can be read back directly.
-    try { savePrefs({ _renameDbg: { field: fieldVal, gotInput: gotInput, focusedOnOpen: focusedOnOpen, activeAtCommit: (document.activeElement && (document.activeElement.tagName + '.' + String(document.activeElement.className || '').slice(0, 50))) || 'none', tEqPreview: (fieldVal.trim() === s.preview), preview: String(s.preview || '').slice(0, 40), save: save, ts: Date.now() } }); } catch {}
     try {
       if (save) {
-        const t = fieldVal.trim();
-        const titles = loadPrefs().sessionTitles || {};
+        const t = inp.value.trim();
+        const titles = Object.assign({}, loadPrefs().sessionTitles || {});   // COPY first → mutable (loadPrefs is deep-cloned now, but never mutate the cached map in place)
         if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
         savePrefs({ sessionTitles: titles });
         // In a repo workspace, publish the name so EVERY collaborator sees it (last-writer-wins on the branch).
@@ -2301,10 +2286,9 @@ function startSessEdit(row, p, s) {
         for (const r of tabs.values()) { if (r.session === s.id) { r.label = p.textContent; r.curSessionLabel = p.textContent; } }
         if (AT() && s.id === activeSession) pushTracker();           // mirror the new title to guests
       }
-    } catch (e) { console.error('[rename] save threw', e); }
+    } catch (e) { console.error('[rename] save failed', e); }
     finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
       try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
-      try { toast(save ? ('Renamed to “' + fieldVal.trim() + '”') : 'Rename cancelled'); } catch {}   // shows EXACTLY what the field captured
       try { refreshSessions(); } catch {}                            // reconcile any list change deferred while the rename was open
     }
   };
