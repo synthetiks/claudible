@@ -77,6 +77,8 @@ eq('settings Stop hook cmd', s.hooks.Stop[0].hooks[0].command,
 eq('settings PostToolUse matcher', s.hooks.PostToolUse[0].matcher, 'Task|Agent');
 eq('settings PreToolUse matcher', s.hooks.PreToolUse[0].matcher, 'Task|Agent');
 ok('settings is valid JSON', (() => { try { JSON.parse(JSON.stringify(s)); return true; } catch { return false; } })());
+eq('settings autoCompactEnabled off', s.autoCompactEnabled, false);                 // Claude Code auto-compact disabled by default
+eq('settings DISABLE_AUTO_COMPACT env', s.env.DISABLE_AUTO_COMPACT, '1');
 
 // ---- dependency detection (buildDepReport — the self-bootstrap provisioner's pure core) ----
 const { buildDepReport, semverGte, pickRunnable } = win._internals;

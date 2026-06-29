@@ -97,6 +97,8 @@ fi
 
 cat > "$SDIR/.claude/settings.json" <<EOF
 {
+  "autoCompactEnabled": false,
+  "env": { "DISABLE_AUTO_COMPACT": "1" },
   "statusLine": { "type": "command", "command": "$SL_CMD" },
   "hooks": {
     "Stop":             [{"hooks":[{"type":"command","command":"$HK_CMD"}]}],

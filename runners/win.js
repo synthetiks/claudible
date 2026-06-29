@@ -116,6 +116,8 @@ function settingsJson(claudeDir, nodeBin, statusPath, hooksPath) {
   const oneHook = [{ hooks: [{ type: 'command', command: hk }] }];
   const tagHook = [{ matcher: 'Task|Agent', hooks: [{ type: 'command', command: hk }] }];
   return {
+    autoCompactEnabled: false,                                       // OFF by default: Claude Code's built-in auto-compact auto-ran /compact when resuming near-full sessions (user request)
+    env: { DISABLE_AUTO_COMPACT: '1' },                              // env-var form of the same toggle (belt-and-suspenders across Claude Code versions)
     statusLine: { type: 'command', command: sl },
     hooks: { Stop: oneHook, UserPromptSubmit: oneHook, PreToolUse: tagHook, PostToolUse: tagHook },
   };
