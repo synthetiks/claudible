@@ -2263,14 +2263,26 @@ function startSessEdit(row, p, s) {
   const inp = document.createElement('input');
   inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = sessTitle(s);
   p.style.display = 'none'; row.insertBefore(inp, p);
+  try { if (typeof term !== 'undefined' && term && term.textarea) term.textarea.blur(); } catch {}   // release the terminal so the field can actually take focus
   inp.focus(); inp.select();
   let done = false; let actions = null;
+  // HOLD FOCUS: xterm grabs keyboard focus aggressively. Without this the field LOOKS open but your keystrokes
+  // land in the terminal, so the field stays empty and the rename saves nothing — the real "rename does nothing"
+  // bug (confirmed: settings.json never gained the typed names). Re-claim focus every 50ms until commit.
+  const holdFocus = setInterval(() => {
+    if (done || !document.body.contains(inp)) { clearInterval(holdFocus); return; }
+    const ae = document.activeElement;
+    if (ae !== inp && !(ae && ae.closest && ae.closest('.sess-rename-actions'))) { try { inp.focus(); } catch {} }
+  }, 50);
+  inp.addEventListener('input', () => { try { console.log('[rename] field=', JSON.stringify(inp.value)); } catch {} });   // DIAGNOSTIC: keystrokes reaching the field
   const commit = (save) => {
     if (done) return; done = true;
-    console.log('[rename] commit', save);                            // DIAGNOSTIC: confirms a trigger reached commit
+    clearInterval(holdFocus);
+    const fieldVal = inp.value;
+    console.log('[rename] commit save=' + save + ' field=' + JSON.stringify(fieldVal));
     try {
       if (save) {
-        const t = inp.value.trim();
+        const t = fieldVal.trim();
         const titles = loadPrefs().sessionTitles || {};
         if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
         savePrefs({ sessionTitles: titles });
@@ -2290,6 +2302,7 @@ function startSessEdit(row, p, s) {
     } catch (e) { console.error('[rename] save threw', e); }
     finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
       try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+      try { toast(save ? ('Renamed to “' + fieldVal.trim() + '”') : 'Rename cancelled'); } catch {}   // shows EXACTLY what the field captured
       try { refreshSessions(); } catch {}                            // reconcile any list change deferred while the rename was open
     }
   };
