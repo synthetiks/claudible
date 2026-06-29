@@ -541,6 +541,7 @@ function liveConnect(tabId, peer, name) {
   const url = String((peer && peer.url) || '');
   const tok = String((peer && peer.token) || '').replace(/[^A-Za-z0-9._~-]/g, '');
   const okUrl = isTunnelUrl(url);
+  try { console.log('[live] connect', JSON.stringify({ url, hasToken: !!tok, okUrl })); } catch {}   // DIAGNOSTIC: a join that fails here (okUrl=false or empty token) means the advertised handle was unusable — usually a stale/dead tunnel or a host↔guest build skew. Logs the exact URL the guest received so the trigger is visible at runtime.
   if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
   liveDisconnect(tabId);                                  // replace any prior socket bound to this tab
   liveTabs.set(tabId, { ws: null, url, token: tok, name: String(name || '').slice(0, 40), hostCols: 120, hostRows: 32, pid: null, readOnly: false, resume: null, retry: 0, closed: false, peer });
@@ -586,7 +587,14 @@ ipcMain.handle('share:start', (e, opts) => {
         cloudflaredProc.on('exit', () => {
           const unexpected = share.status().running;        // still "sharing" at exit ⇒ the tunnel dropped on its own (network/crash), not a clean host-stop
           cloudflaredProc = null; shareBaseUrl = null; _clearCfPid();
-          if (unexpected) winSend('share:tunnel-down', {}); // tell the host their public link is dead so guests aren't met with a silent refusal
+          if (unexpected) {
+            // The advertised live/<author>.json still points at the now-dead tunnel URL; pull it off the branch
+            // immediately so guests don't dial a dead handle (→ synchronous 'bad handle', no host prompt). Do NOT
+            // stopAdvertiseHeartbeat — it self-heals: line 639 skips dead-URL beats and re-publishes automatically
+            // once a fresh tunnel URL comes back up via ensureTunnel.
+            if (advertisedSid) runPresence('presence-clear', () => {});
+            winSend('share:tunnel-down', {});               // tell the host their public link is dead so guests aren't met with a silent refusal
+          }
         });
         base = url; remote = true;                       // public link
       } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN

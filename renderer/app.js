@@ -2107,8 +2107,16 @@ function openLiveTab(peer, localLabel) {
   setLiveState(rec, 'connecting');
   refreshSessions();                                                 // surface the joined-tab row immediately
   claudible.liveConnect(id, peer, collabName()).then((r) => {
-    if (!r || !r.ok) { toast('Could not join ' + who + ': ' + humanError(r && r.error)); closeTab(id); }   // don't leave a dead "ended" tab — close it and tell the user why
-  }).catch((err) => { console.error('[live] liveConnect rejected:', err); toast('Could not join ' + who + ' — connection failed'); closeTab(id); });
+    if (!r || !r.ok) {
+      // DON'T closeTab here — a vanishing tab leaves the guest with no ✕ to leave and no idea why (exactly the bug
+      // report). Keep the joined row in an offline state (renderJoinedTabRow always gives it a ✕ Leave) and explain.
+      // A synchronous 'bad handle' means the advertised URL/token was unusable — almost always a dead/expired tunnel
+      // or a host↔guest build skew; the diagnostic '[live] connect' log on the host side pins down which.
+      setLiveState(rec, 'offline');
+      const why = humanError(r && r.error);
+      toast('Could not join ' + who + ' — ' + why + ((r && r.error === 'bad handle') ? '. The link may be expired, or you and the host are on different app versions — make sure both are on the latest build and retry.' : ''));
+    }
+  }).catch((err) => { console.error('[live] liveConnect rejected:', err); setLiveState(rec, 'offline'); toast('Could not join ' + who + ' — connection failed'); });
  } catch (e) { console.error('[live] openLiveTab THREW:', e && (e.stack || e.message || e)); toast('Join failed: ' + ((e && e.message) || e)); }
 }
 // A joined live session as a sidebar row (pinned at the top): click to switch, ✕ to leave.
@@ -2217,6 +2225,23 @@ function renderSessionRow(s) {
   row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openSession(s.id, sessTitle(s)); } });
   return row;
 }
+// Visible ✓/✗ for an inline rename input. Without it the only ways to finish are Enter/Esc/blur, which leaves the
+// row feeling "stuck" (the ▾ is hidden during edit). The buttons bind on `mousedown` + e.preventDefault() — NOT
+// `click` — so they fire BEFORE the input's blur→commit(true): otherwise the auto-save-on-blur beats ✗ and cancel
+// could never win. Returns the wrapper so commit() can remove it alongside the input.
+function addRenameControls(inp, commit) {
+  const wrap = document.createElement('span'); wrap.className = 'sess-rename-actions';
+  const mk = (txt, save, cls, title) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'sess-rename-btn ' + cls;
+    b.textContent = txt; b.title = title; b.tabIndex = -1;
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); commit(save); });
+    return b;
+  };
+  wrap.appendChild(mk('✓', true, 'ok', 'Save (Enter)'));
+  wrap.appendChild(mk('✗', false, 'no', 'Cancel (Esc)'));
+  inp.insertAdjacentElement('afterend', wrap);
+  return wrap;
+}
 // Inline rename: pencil → editable input in place of the title; Enter/blur saves, Esc cancels. Stored in prefs.
 function startSessEdit(row, p, s) {
   if (row.querySelector('.sess-rename')) return;
@@ -2225,7 +2250,7 @@ function startSessEdit(row, p, s) {
   inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = sessTitle(s);
   p.style.display = 'none'; row.insertBefore(inp, p);
   inp.focus(); inp.select();
-  let done = false;
+  let done = false; let actions = null;
   const commit = (save) => {
     if (done) return; done = true;
     if (save) {
@@ -2244,12 +2269,14 @@ function startSessEdit(row, p, s) {
       p.textContent = sessTitle(s);
       { const at = AT(); if (at && s.id === activeSession) { at.curSessionLabel = p.textContent; pushTracker(); } }   // mirror the new title to guests
     }
-    try { inp.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+    try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+    refreshSessions();                                                 // reconcile any list change deferred while the rename was open
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
   inp.addEventListener('pointerdown', (e) => e.stopPropagation());   // don't start a row drag / open
   inp.addEventListener('click', (e) => e.stopPropagation());
+  actions = addRenameControls(inp, commit);                          // visible ✓/✗ confirm/cancel
 }
 // ---- per-session options (▾) menu: Rename / Export / Delete live here so each row stays a clean title ----
 // Mirrors the workspace ▾ menu (same .ws-menu look) and, like the workspace delete, confirms via the native
@@ -2487,6 +2514,7 @@ async function openDivergedInfo(s) {
 }
 let _sessSig = '';
 async function refreshSessions() {
+  if (sessListEl && sessListEl.querySelector('.sess-rename')) return;              // a rename input is focused → defer the whole refresh so a background poll can't wipe the in-progress edit; commit() re-runs refreshSessions when done
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
   if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
@@ -2589,7 +2617,7 @@ function startLiveRename(row, p, rec) {
   inp.className = 'sess-rename'; inp.type = 'text'; inp.maxLength = 200; inp.value = rec.label || '';
   p.style.display = 'none'; row.insertBefore(inp, p);
   inp.focus(); inp.select();
-  let done = false;
+  let done = false; let actions = null;
   const commit = (save) => {
     if (done) return; done = true;
     if (save) {
@@ -2598,12 +2626,14 @@ function startLiveRename(row, p, rec) {
       p.textContent = rec.label || 'New session';
       if (rec.tabId === activeTabId) { rec.curSessionLabel = p.textContent; pushTracker(); }   // mirror to guests
     }
-    try { inp.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+    try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+    refreshSessions();                                                 // reconcile any list change deferred while the rename was open
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
   inp.addEventListener('pointerdown', (e) => e.stopPropagation());
   inp.addEventListener('click', (e) => e.stopPropagation());
+  actions = addRenameControls(inp, commit);                          // visible ✓/✗ confirm/cancel
 }
 // Cheap in-place busy toggle on a tab's sidebar row (no disk re-read): live row by tab id, or saved row by session id.
 function markTabBusy(tabId, busy) {
