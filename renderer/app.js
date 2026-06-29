@@ -1113,7 +1113,7 @@ function refreshChatPanel() {
 function refreshCollabSurfaces() {
   refreshChatPanel();
   if (chatPanelShown) { renderChatLog(); renderRoster(); }   // context changed → repaint chat + roster for the new tab
-  renderLiveBar(); repaintVoiceForActive();
+  renderLiveBar(); repaintVoiceForActive(); updateSessionCtrlBtn();
 }
 // presence roster in the chat header: you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light
 // Your collab display name (settings) — what teammates see when you're in a synced session. Falls back to the
@@ -1139,11 +1139,21 @@ function activeRosterMembers() {
 // I'm the HOST of a live session (so I may terminate it / kick guests) when I'm NOT viewing someone else's joined
 // tab AND I'm sharing one of my own sessions (or a manual web link). A guest must never see these controls.
 function amHostingLive() { const t = AT(); return !(t && t.kind === 'live') && (!!sharedSessionId || webShare); }
+// The single session-control button in the chat head: the HOST sees "End Session" (terminate for everyone); a
+// JOINER (viewing a peer's live tab) sees "Leave Session" (disconnect + fall back to their own view). Mutually
+// exclusive — neither ever sees the other's button.
+function updateSessionCtrlBtn() {
+  const btn = $('chat-terminate'); if (!btn) return;
+  const t = AT();
+  if (t && t.kind === 'live') { btn.style.display = ''; btn.textContent = 'Leave Session'; btn.title = 'Leave this live session and return to your own'; }
+  else if (amHostingLive()) { btn.style.display = ''; btn.textContent = 'End Session'; btn.title = 'End the live session for everyone'; }
+  else { btn.style.display = 'none'; }
+}
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
   const hosting = amHostingLive();
-  const term = $('chat-terminate'); if (term) term.style.display = hosting ? '' : 'none';   // host-only "End live"
+  updateSessionCtrlBtn();                                            // host: "End Session" · joiner: "Leave Session" (mutually exclusive)
   const you = document.createElement('span'); you.className = 'rmember you';
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
   you.appendChild(document.createTextNode(youName()));
@@ -1173,6 +1183,7 @@ async function terminateLive() {
   if (go !== 'end') return;
   if (sharedSessionId) sharedSessionId = null;
   if (webShare) { webShare = false; webShareUI(false); }
+  guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
   updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions();   // updateCollab→ensureTunnel drops the tunnel (closes guests)
   toast('Live session ended');
 }
@@ -1790,7 +1801,7 @@ if (chatLog) chatLog.addEventListener('click', (e) => {
   claudible.clipWrite(cp.dataset.text || '');   // main-process clipboard → works regardless of renderer perms (matches the rest of the app)
   toast('Message copied');
 });
-{ const _term = $('chat-terminate'); if (_term) _term.addEventListener('click', () => terminateLive()); }   // host: "End live" → terminate the session
+{ const _term = $('chat-terminate'); if (_term) _term.addEventListener('click', () => { const t = AT(); if (t && t.kind === 'live') closeTab(t.tabId); else terminateLive(); }); }   // host → End Session (terminate for all); joiner → Leave Session (close the joined tab → back to single-person view)
 // Append to a SPECIFIC buffer; only repaint if that buffer is the one currently on screen.
 function chatAppend(buf, entry, onScreen) { buf.push(entry); if (buf.length > 400) buf.shift(); if (onScreen) renderChatLog(); }
 function sendChat() {
@@ -1985,12 +1996,21 @@ function toggleShareSession(s) {
 // re-arm any offline/reconnecting joined tab whose host handle CHANGED, with the fresh url+token (mirrors the manual
 // rearm path in openLiveTab). Only fires on an actual url/token change, so it can't tight-loop on a stable dead URL.
 const LIVE_RECONNECTABLE = new Set(['offline', 'reconnecting']);
-function reconcileJoinedTabs() {
+function reconcileJoinedTabs(pollOk) {
+  const ended = [];
   for (const rec of tabs.values()) {
     if (rec.kind !== 'live' || !rec.peer || !rec.peer.session) continue;
-    if (!LIVE_RECONNECTABLE.has(rec.liveState)) continue;
     const fresh = livePeers.find((p) => p.session === rec.peer.session && p.url && p.token);
-    if (!fresh || (fresh.url === rec.peer.url && fresh.token === rec.peer.token)) continue;   // no fresh handle, or unchanged → nothing new to dial
+    if (!fresh) {
+      // The host stopped advertising = they ENDED the session. If our tab has already given up (offline) or is
+      // futilely retrying (reconnecting) AND the presence poll genuinely succeeded, auto-leave back to the
+      // single-person view instead of sitting on a dead "ended" tab. pollOk guards a transient fetch error;
+      // the close is DEFERRED so we never mutate `tabs` mid-iteration.
+      if (pollOk && LIVE_RECONNECTABLE.has(rec.liveState)) ended.push(rec.tabId);
+      continue;
+    }
+    if (!LIVE_RECONNECTABLE.has(rec.liveState)) continue;
+    if (fresh.url === rec.peer.url && fresh.token === rec.peer.token) continue;   // unchanged → nothing new to dial
     console.log('[live] host handle rotated — re-arming joined tab', rec.tabId, '→', fresh.url);
     rec.peer = fresh;
     setLiveState(rec, 'connecting');
@@ -1998,16 +2018,17 @@ function reconcileJoinedTabs() {
       .then((r) => { if (!r || !r.ok) setLiveState(rec, 'offline'); })
       .catch((err) => { console.error('[live] re-arm rejected:', err); setLiveState(rec, 'offline'); });
   }
+  if (ended.length) { toast('Host ended the live session'); ended.forEach((id) => { try { closeTab(id); } catch {} }); }
 }
 async function pollLivePeers() {
   const aw = workspaces.find((w) => w.id === activeWsId);
   if (!(aw && aw.kind === 'repo')) { if (livePeers.length) { livePeers = []; livePeersSig = ''; refreshSessions(); } return; }
-  let peers = []; try { peers = await claudible.livePeers(); } catch (e) {}
+  let peers = [], pollOk = false; try { peers = await claudible.livePeers(); pollOk = true; } catch (e) {}
   const now = Date.now() / 1000;
   peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 300));   // drop stale (>5 min; a live host re-stamps every ~2 min)
   const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session]]).sort());   // include local-presence so the Join badge re-renders the moment the host's session syncs into our list — not only when a peer changes (fixes "Join only shows when I click around")
   if (sig === livePeersSig) return;
-  livePeersSig = sig; livePeers = peers; refreshSessions(); reconcileJoinedTabs();   // host URL rotated? auto-reconnect dead joined tabs to the fresh handle
+  livePeersSig = sig; livePeers = peers; refreshSessions(); reconcileJoinedTabs(pollOk);   // host URL rotated? auto-reconnect dead joined tabs · host ended? auto-leave to single view
 }
 setInterval(pollLivePeers, 10000);
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
