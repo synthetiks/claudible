@@ -2234,12 +2234,21 @@ function addRenameControls(inp, commit) {
   const mk = (txt, save, cls, title) => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'sess-rename-btn ' + cls;
     b.textContent = txt; b.title = title; b.tabIndex = -1;
-    b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); commit(save); });
+    // Robust delivery: pointerdown fires earliest (before blur), mousedown + click are belt-and-suspenders so a
+    // commit lands no matter which event the platform delivers. preventDefault keeps focus on the input so a
+    // blur→commit(true) can never beat a ✗; the done-guard makes the duplicate triggers harmless no-ops.
+    const fire = (e) => { try { e.preventDefault(); } catch {} e.stopPropagation(); console.log('[rename] btn', txt); commit(save); };
+    b.addEventListener('pointerdown', fire);
+    b.addEventListener('mousedown', fire);
+    b.addEventListener('click', fire);
     return b;
   };
   wrap.appendChild(mk('✓', true, 'ok', 'Save (Enter)'));
   wrap.appendChild(mk('✗', false, 'no', 'Cancel (Esc)'));
   inp.insertAdjacentElement('afterend', wrap);
+  // Re-assert focus next tick: opening the row's ▾ menu (and closing it) can steal focus, and without focus on the
+  // input, Enter falls through to the row's keydown (which SWITCHES sessions) instead of committing the rename.
+  setTimeout(() => { try { if (document.body.contains(inp) && document.activeElement !== inp) inp.focus(); } catch {} }, 0);
   return wrap;
 }
 // Inline rename: pencil → editable input in place of the title; Enter/blur saves, Esc cancels. Stored in prefs.
@@ -2253,24 +2262,30 @@ function startSessEdit(row, p, s) {
   let done = false; let actions = null;
   const commit = (save) => {
     if (done) return; done = true;
-    if (save) {
-      const t = inp.value.trim();
-      const titles = loadPrefs().sessionTitles || {};
-      if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
-      savePrefs({ sessionTitles: titles });
-      // In a repo workspace, publish the name so EVERY collaborator sees it (last-writer-wins on the branch).
-      // Optimistically reflect it locally so the row updates instantly; a forced poll reconciles after the push.
-      const _aw = workspaces.find((w) => w.id === activeWsId);
-      if (_aw && _aw.kind === 'repo') {
-        const shared = (t && t !== s.preview) ? t : '';
-        if (shared) remoteTitles[s.id] = shared; else delete remoteTitles[s.id];
-        try { claudible.titleSet(s.id, shared).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
+    console.log('[rename] commit', save);                            // DIAGNOSTIC: confirms a trigger reached commit
+    try {
+      if (save) {
+        const t = inp.value.trim();
+        const titles = loadPrefs().sessionTitles || {};
+        if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
+        savePrefs({ sessionTitles: titles });
+        // In a repo workspace, publish the name so EVERY collaborator sees it (last-writer-wins on the branch).
+        // Optimistically reflect it locally so the row updates instantly; a forced poll reconciles after the push.
+        const _aw = workspaces.find((w) => w.id === activeWsId);
+        if (_aw && _aw.kind === 'repo') {
+          const shared = (t && t !== s.preview) ? t : '';
+          if (shared) remoteTitles[s.id] = shared; else delete remoteTitles[s.id];
+          try { claudible.titleSet(s.id, shared).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
+        }
+        p.textContent = sessTitle(s);
+        { const at = AT(); if (at && s.id === activeSession) { at.curSessionLabel = p.textContent; pushTracker(); } }   // mirror the new title to guests
       }
-      p.textContent = sessTitle(s);
-      { const at = AT(); if (at && s.id === activeSession) { at.curSessionLabel = p.textContent; pushTracker(); } }   // mirror the new title to guests
+    } catch (e) { console.error('[rename] save threw', e); }
+    finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
+      try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+      try { toast(save ? 'Renamed' : 'Rename cancelled'); } catch {}
+      try { refreshSessions(); } catch {}                            // reconcile any list change deferred while the rename was open
     }
-    try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
-    refreshSessions();                                                 // reconcile any list change deferred while the rename was open
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
@@ -2520,6 +2535,7 @@ async function refreshSessions() {
   if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
   let list = []; try { list = await claudible.sessionList(); } catch {}
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
+  if (sessListEl && sessListEl.querySelector('.sess-rename')) return;               // a rename opened DURING the await — bail so the rebuild below can't wipe the in-flight edit (the top-of-fn guard only covers renames that existed before the await)
   if (!Array.isArray(list)) list = [];
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
   _wsSessCache.set(activeWsId, { list, ts: Date.now() });                           // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash)
@@ -2620,14 +2636,20 @@ function startLiveRename(row, p, rec) {
   let done = false; let actions = null;
   const commit = (save) => {
     if (done) return; done = true;
-    if (save) {
-      rec.label = inp.value.trim() || '';
-      rec.pendingTitle = rec.label;                                  // keep the to-persist title in sync so a rename BEFORE the session resolves sticks (and isn't clobbered by the creation-time name)
-      p.textContent = rec.label || 'New session';
-      if (rec.tabId === activeTabId) { rec.curSessionLabel = p.textContent; pushTracker(); }   // mirror to guests
+    console.log('[rename] commit', save);                            // DIAGNOSTIC: confirms a trigger reached commit
+    try {
+      if (save) {
+        rec.label = inp.value.trim() || '';
+        rec.pendingTitle = rec.label;                                  // keep the to-persist title in sync so a rename BEFORE the session resolves sticks (and isn't clobbered by the creation-time name)
+        p.textContent = rec.label || 'New session';
+        if (rec.tabId === activeTabId) { rec.curSessionLabel = p.textContent; pushTracker(); }   // mirror to guests
+      }
+    } catch (e) { console.error('[rename] save threw', e); }
+    finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
+      try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
+      try { toast(save ? 'Renamed' : 'Rename cancelled'); } catch {}
+      try { refreshSessions(); } catch {}                            // reconcile any list change deferred while the rename was open
     }
-    try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
-    refreshSessions();                                                 // reconcile any list change deferred while the rename was open
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
   inp.addEventListener('blur', () => commit(true));
