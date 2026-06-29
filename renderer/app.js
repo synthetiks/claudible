@@ -2265,6 +2265,7 @@ function startSessEdit(row, p, s) {
   p.style.display = 'none'; row.insertBefore(inp, p);
   try { if (typeof term !== 'undefined' && term && term.textarea) term.textarea.blur(); } catch {}   // release the terminal so the field can actually take focus
   inp.focus(); inp.select();
+  const focusedOnOpen = (document.activeElement === inp); let gotInput = false;   // DIAGNOSTIC: did focus + typing actually land on the field
   let done = false; let actions = null;
   // HOLD FOCUS: xterm grabs keyboard focus aggressively. Without this the field LOOKS open but your keystrokes
   // land in the terminal, so the field stays empty and the rename saves nothing — the real "rename does nothing"
@@ -2274,12 +2275,13 @@ function startSessEdit(row, p, s) {
     const ae = document.activeElement;
     if (ae !== inp && !(ae && ae.closest && ae.closest('.sess-rename-actions'))) { try { inp.focus(); } catch {} }
   }, 50);
-  inp.addEventListener('input', () => { try { console.log('[rename] field=', JSON.stringify(inp.value)); } catch {} });   // DIAGNOSTIC: keystrokes reaching the field
+  inp.addEventListener('input', () => { gotInput = true; });   // DIAGNOSTIC: did any keystroke reach the field
   const commit = (save) => {
     if (done) return; done = true;
     clearInterval(holdFocus);
     const fieldVal = inp.value;
-    console.log('[rename] commit save=' + save + ' field=' + JSON.stringify(fieldVal));
+    // DIAGNOSTIC written to settings.json (which every commit writes anyway) so it can be read back directly.
+    try { savePrefs({ _renameDbg: { field: fieldVal, gotInput: gotInput, focusedOnOpen: focusedOnOpen, activeAtCommit: (document.activeElement && (document.activeElement.tagName + '.' + String(document.activeElement.className || '').slice(0, 50))) || 'none', tEqPreview: (fieldVal.trim() === s.preview), preview: String(s.preview || '').slice(0, 40), save: save, ts: Date.now() } }); } catch {}
     try {
       if (save) {
         const t = fieldVal.trim();
