@@ -1899,10 +1899,15 @@ let sessIndex = {};                                                             
 // Session title: prefer the workspace-shared name (so everyone in a repo workspace sees the SAME title), then a
 // local-only override (legacy/local workspaces, or before the first poll), then the transcript-derived preview.
 function sessTitle(s) {
+  // The user's OWN explicit rename (saved locally) wins in their own view — it shows instantly and STICKS even if
+  // the shared-title push to the workspace branch lags or fails. A collaborator's shared name is only a fallback
+  // for sessions this user hasn't personally named. (Before: remoteTitles shadowed the local pref, so a rename
+  // whose branch push lagged/failed silently reverted to the old shared name — "I renamed it but it didn't change".)
+  const local = (loadPrefs().sessionTitles || {})[s.id];
+  if (local) return local;
   const shared = remoteTitles[s.id];
   if (shared) return shared;
-  const t = (loadPrefs().sessionTitles || {})[s.id];
-  return t || s.preview;
+  return s.preview;
 }
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
 // ---- Live sessions: advertise the session I'm hosting; discover + join a collaborator's, natively ----
@@ -2237,7 +2242,7 @@ function addRenameControls(inp, commit) {
     // Robust delivery: pointerdown fires earliest (before blur), mousedown + click are belt-and-suspenders so a
     // commit lands no matter which event the platform delivers. preventDefault keeps focus on the input so a
     // blur→commit(true) can never beat a ✗; the done-guard makes the duplicate triggers harmless no-ops.
-    const fire = (e) => { try { e.preventDefault(); } catch {} e.stopPropagation(); console.log('[rename] btn', txt); commit(save); };
+    const fire = (e) => { try { e.preventDefault(); } catch {} e.stopPropagation(); commit(save); };
     b.addEventListener('pointerdown', fire);
     b.addEventListener('mousedown', fire);
     b.addEventListener('click', fire);
@@ -2283,7 +2288,6 @@ function startSessEdit(row, p, s) {
     } catch (e) { console.error('[rename] save threw', e); }
     finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
       try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
-      try { toast(save ? 'Renamed' : 'Rename cancelled'); } catch {}
       try { refreshSessions(); } catch {}                            // reconcile any list change deferred while the rename was open
     }
   };
@@ -2647,7 +2651,6 @@ function startLiveRename(row, p, rec) {
     } catch (e) { console.error('[rename] save threw', e); }
     finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again
       try { inp.remove(); } catch {} try { actions && actions.remove(); } catch {} p.style.display = ''; row.classList.remove('renaming');
-      try { toast(save ? 'Renamed' : 'Rename cancelled'); } catch {}
       try { refreshSessions(); } catch {}                            // reconcile any list change deferred while the rename was open
     }
   };
