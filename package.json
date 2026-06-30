@@ -44,7 +44,7 @@
     "setup": "wsl.exe -e bash setup/setup.sh",
     "rebuild": "electron-rebuild -f -w node-pty",
     "postinstall": "patch-package",
-    "test": "node test/runner-parity.test.js && node test/posix-runner.test.js && node test/win-runner.test.js && node test/history.test.js && bash test/hooks-parity.sh && bash test/port-parity.sh",
+    "test": "node test/runner-parity.test.js && node test/posix-runner.test.js && node test/win-runner.test.js && node test/history.test.js && node test/identity.test.js && bash test/hooks-parity.sh && bash test/port-parity.sh",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
