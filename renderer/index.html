@@ -97,14 +97,14 @@
     .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
     /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
        Heights tuned to sit level with the adjacent tokens stat (15px digits) rather than tower over it. */
-    .ctxbar{display:inline-flex;align-items:center;gap:9px;height:24px;padding:0 11px;border-radius:7px;
+    .ctxbar{display:inline-flex;align-items:center;gap:9px;height:33px;padding:0 11px;border-radius:7px;
       background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px rgba(95,217,155,.30);
-      transition:box-shadow .25s ease}
-    .ctxlabel{font-size:9.5px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#7d8c84;flex:none}
+      transition:box-shadow .25s ease}                                                  /* box height matches the Talk/Speak (.vbox) buttons */
+    .ctxlabel{font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#f6f8fc;flex:none}  /* size = Talk/Speak label (10px); color = the CLAUDIBLE wordmark white — no green */
     .ctxsegs{display:inline-flex;align-items:center;gap:2.5px;height:15px;flex:none}
-    .ctxsegs i{width:3.5px;height:8px;border-radius:1.5px;background:rgba(132,147,166,.22);
-      transition:height .2s ease,background .25s ease}                                  /* dim, short — empty */
-    .ctxsegs i.lit{height:15px;background:linear-gradient(180deg,#69e0a2,#37a36e)}      /* tall, bright — filled */
+    .ctxsegs i{width:3.5px;height:15px;border-radius:1.5px;background:rgba(132,147,166,.22);
+      transition:background .25s ease}                                                  /* empty = dim; SAME height as filled (even row) */
+    .ctxsegs i.lit{background:linear-gradient(180deg,#69e0a2,#37a36e)}                  /* filled = bright green (differs by color only) */
     .ctxpct{min-width:30px;text-align:right;font-size:14px;font-weight:700;letter-spacing:.02em;color:#5fd49b;
       font-variant-numeric:tabular-nums}                                               /* tabular so width stays steady 6%→100% */
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives segment + percent color + pulse */
