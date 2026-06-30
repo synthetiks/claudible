@@ -75,6 +75,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "lib/**/*",
       "renderer/**/*",
       "hooks/**/*",
       "runners/**/*",
