@@ -1556,6 +1556,57 @@ function diffAction(mode, payload) {
 ipcMain.handle('diff:revert', (e, patch) => diffAction('apply-reverse', patch));
 ipcMain.handle('diff:discard', (e, relPath) => diffAction('discard', relPath));
 
+// ---- Session history: the append-only activity log behind the Repo Review feed + revert ----
+// Ships DARK behind the sessionHistory setting. The MAIN process stamps id/seq/author/machine
+// server-side (renderer supplies only the raw prompt) and persists per-workspace under
+// RT/history/<wsId>.json (main-owned, always writable, survives upgrades). Pure logic lives in lib/.
+const _hist = require('./lib/history.js');
+const _identity = require('./lib/identity.js');
+const _histStore = require('./lib/historyStore.js');
+const _os = require('os');
+function _histEnabled() { return readSettings().sessionHistory === true; }   // default OFF
+function _machineId() {
+  try {
+    const f = path.join(app.getPath('home'), '.claudible', 'machine-id');
+    try { const v = fs.readFileSync(f, 'utf8').trim(); if (v) return v; } catch {}
+    const id = require('crypto').randomUUID();
+    fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, id);
+    return id;
+  } catch { return ''; }
+}
+function _histFile(wsId) {
+  const dir = path.join(RT, 'history'); try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, String(wsId || 'default').replace(/[^A-Za-z0-9_-]/g, '-') + '.json');
+}
+ipcMain.handle('history:load', () => {
+  try {
+    const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
+    return { ok: true, enabled: _histEnabled(), entries: _histStore.load(fs, _histFile(wsId)) };
+  } catch (e) { return { ok: false, enabled: false, entries: [], error: String(e) }; }
+});
+ipcMain.handle('history:append', (e, payload) => {
+  try {
+    if (!_histEnabled()) return { ok: false, disabled: true };
+    const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : '';
+    if (!prompt.trim()) return { ok: false, error: 'empty' };
+    const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
+    const file = _histFile(wsId);
+    const log = _histStore.load(fs, file);
+    const seq = log.reduce((m, x) => Math.max(m, x.seq | 0), 0) + 1;
+    const s = readSettings();
+    const entry = _hist.makeEntry({
+      id: require('crypto').randomUUID(),
+      seq, ts: Date.now(),
+      author: _identity.resolveAuthor({ username: s.collabName, fallback: 'host' }),
+      machine: _identity.machineRecord({ savedId: _machineId(), host: _os.hostname(), os: process.platform }),
+      session: payload && payload.session ? String(payload.session) : '',
+      prompt,
+    });
+    _histStore.append(fs, file, entry);
+    return { ok: true, entry };
+  } catch (err) { console.error('[claudible] history:append:', err && err.message); return { ok: false, error: 'append' }; }
+});
+
 // Safety net: never let a stray error from a pty/agent take the whole cockpit down.
 process.on('uncaughtException', (e) => console.error('[claudible] uncaughtException:', e && e.message));
 process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
