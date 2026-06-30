@@ -1755,25 +1755,37 @@ function histRelTime(ts) {
 }
 function renderHistoryEntry(en) {
   const row = document.createElement('div'); row.className = 'hf-row';
-  const top = document.createElement('div'); top.className = 'hf-top';
-  const who = document.createElement('span'); who.className = 'hf-who'; who.textContent = en.author || 'unknown';
-  const when = document.createElement('span'); when.className = 'hf-when'; when.textContent = histRelTime(en.ts || 0);
-  try { when.title = new Date(en.ts || 0).toLocaleString(); } catch {}
-  top.appendChild(who); top.appendChild(when);
-  if (en.machine && en.machine.host) { const mc = document.createElement('span'); mc.className = 'hf-machine'; mc.textContent = en.machine.host; top.appendChild(mc); }
-  row.appendChild(top);
-  const pr = document.createElement('div'); pr.className = 'hf-prompt'; pr.textContent = en.prompt || ''; pr.title = en.prompt || '';
+  [['Session Name', histSessionName(en.session)],
+   ['Timestamp', histStamp(en.ts || 0)],
+   ['Collaborator', en.author || 'unknown']].forEach(([k, v]) => {
+    const line = document.createElement('div'); line.className = 'hf-line';
+    const ks = document.createElement('span'); ks.className = 'hf-k'; ks.textContent = k + ':';
+    const vs = document.createElement('span'); vs.className = 'hf-v'; vs.textContent = v; vs.title = v;
+    line.appendChild(ks); line.appendChild(vs); row.appendChild(line);
+  });
+  const pr = document.createElement('div'); pr.className = 'hf-content'; pr.textContent = en.prompt || '';   // full prompt, fully readable (wraps, no clamp)
   row.appendChild(pr);
-  if (en.summary && en.summary !== 'no file changes') { const sm = document.createElement('div'); sm.className = 'hf-sum'; sm.textContent = en.summary; row.appendChild(sm); }
   return row;
 }
+// Resolve a session id to its human title (local rename → shared-title cache → short id fallback).
+function histSessionName(id) {
+  if (!id) return '—';
+  try {
+    const p = loadPrefs();
+    if (p.sessionTitles && p.sessionTitles[id]) return p.sessionTitles[id];
+    const rc = p.remoteTitlesCache || {};
+    for (const k in rc) { if (rc[k] && rc[k][id]) return rc[k][id]; }
+  } catch {}
+  return String(id).slice(0, 8);
+}
+function histStamp(ts) { try { return new Date(ts).toLocaleString(); } catch { return String(ts); } }
 async function refreshHistoryFeed() {
   const wrap = $('history-feed'); if (!wrap) return;
   let r = null; try { r = await claudible.historyLoad(); } catch {}
   if (!r || !r.ok || !r.enabled || !r.entries || !r.entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
   wrap.hidden = false; wrap.innerHTML = '';
   const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
-  lbl.textContent = 'recent activity — last ' + r.entries.length + ' change' + (r.entries.length > 1 ? 's' : '');
+  lbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History</span>';   // history (rewind-clock) icon + heading
   wrap.appendChild(lbl);
   r.entries.slice().reverse().forEach((en) => wrap.appendChild(renderHistoryEntry(en)));   // newest first
 }
