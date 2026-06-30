@@ -28,3 +28,8 @@ desktop.ini
 
 # temp debug log (live-join diagnostics)
 .claudible-debug.log
+
+# local audit / planning notes — kept on disk, never committed to the shared repo
+/Finishline Audit for Security and Optimizations.md
+/MASTER-FIX-LIST.md
+/SECOND-AUDIT.md
