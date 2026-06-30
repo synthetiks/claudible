@@ -789,11 +789,15 @@
       border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
     .diffpanel.open{transform:translateX(0)}
     .diffpanel .drawer-head button{font-size:18px}
-    .diff-body{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+    .diff-body{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}   /* min-height:0 so it scrolls inside the panel instead of pushing the Session History section */
+    /* sleek per-section scrollbars — thinner than the global 9px so each pane reads as its own */
+    .diff-body::-webkit-scrollbar,.history-feed::-webkit-scrollbar{width:7px}
+    .diff-body::-webkit-scrollbar-thumb,.history-feed::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+    .diff-body::-webkit-scrollbar-thumb:hover,.history-feed::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
     /* session-history activity feed — top of the Repo Review drawer; shown only when enabled + has entries */
-    .history-feed{flex:none;max-height:46%;overflow:auto;padding:11px 14px 12px;display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--hairline)}   /* LOWER section now — the top border is the divider from Repo Review above */
+    .history-feed{flex:none;max-height:46%;overflow:auto;padding:7px 14px 12px;display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--hairline)}   /* LOWER section now — the top border is the divider from Repo Review above; nudged up a touch */
     .history-feed[hidden]{display:none}
-    .hf-lbl{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:3px}
+    .hf-lbl{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}   /* size + brightness matched to the 'repo review' drawer title */
     .hf-lbl svg{width:13px;height:13px;opacity:.85;flex:none}
     .hf-row{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
     .hf-line{display:flex;gap:6px;font-size:11px;line-height:1.5}
