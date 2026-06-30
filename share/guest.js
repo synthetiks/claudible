@@ -218,7 +218,11 @@ function applyStatus(s) {
   if (!s) return;
   if (typeof s.ctxPct === 'number') {
     $('ctxpct').textContent = s.ctxPct + '%';
-    $('ctxfill').style.width = Math.max(2, Math.min(100, s.ctxPct)) + '%';
+    var segs = $('ctxsegs');
+    if (segs) {
+      var n = segs.children.length, lit = s.ctxPct > 0 ? Math.max(1, Math.min(n, Math.round(s.ctxPct / 100 * n))) : 0;
+      for (var i = 0; i < n; i++) segs.children[i].classList.toggle('lit', i < lit);
+    }
     var bar = $('ctxbar');
     bar.classList.toggle('warn', s.ctxPct >= 70 && s.ctxPct < 85);
     bar.classList.toggle('crit', s.ctxPct >= 85);

@@ -293,18 +293,26 @@ function pushTracker() {
   if (t.kind === 'live') return;   // viewing a peer's session — never mirror THEIR tracker to YOUR guests
   try { claudible.shareTracker({ ctxPct: t.curCtxPct, cost: $('trk-cost').textContent, tokens: $('trk-tokens').textContent, session: t.curSessionLabel, sessionId: (t.session && t.session !== 'new') ? t.session : '' }); } catch {}   // sessionId lets a guest detect "host moved to a different session than I joined"
 }
+// Light the first N of the context gauge's segments to mirror pct (N proportional, min 1 once > 0).
+function paintCtxSegs(pct) {
+  const wrap = $('trk-ctxsegs'); if (!wrap) return;
+  const segs = wrap.children, n = segs.length;
+  const lit = (typeof pct === 'number' && pct > 0) ? Math.max(1, Math.min(n, Math.round(pct / 100 * n))) : 0;
+  for (let i = 0; i < n; i++) segs[i].classList.toggle('lit', i < lit);
+}
+
 // Paint the #trk-* gauges from a tab record (called for the active tab on update and on every tab switch).
 function repaintTracker(t) {
   if (!t) return;
   const pct = t.curCtxPct, bar = $('trk-ctxbar');
   if (typeof pct === 'number') {
-    $('trk-ctx').textContent = 'CONTEXT ' + pct + '%';
-    $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
+    $('trk-ctx').textContent = pct + '%';
+    paintCtxSegs(pct);
     bar.classList.toggle('warn', pct >= 70 && pct < 85);
     bar.classList.toggle('crit', pct >= 85);
     bar.title = pct >= 70 ? `context ${pct}% — click to /compact` : 'context window used';
   } else {
-    $('trk-ctx').textContent = 'CONTEXT —'; $('trk-ctxfill').style.width = '2%';
+    $('trk-ctx').textContent = '—'; paintCtxSegs(null);
     bar.classList.remove('warn', 'crit'); bar.title = 'context window used';
   }
   $('trk-cost').textContent = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
@@ -2166,13 +2174,13 @@ function repaintLiveTracker(rec) {
   if (!rec) return;
   const pct = rec.curCtxPct, bar = $('trk-ctxbar');
   if (typeof pct === 'number') {
-    $('trk-ctx').textContent = 'CONTEXT ' + pct + '%';
-    $('trk-ctxfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
+    $('trk-ctx').textContent = pct + '%';
+    paintCtxSegs(pct);
     bar.classList.toggle('warn', pct >= 70 && pct < 85);
     bar.classList.toggle('crit', pct >= 85);
     bar.title = 'host context window used';
   } else {
-    $('trk-ctx').textContent = 'CONTEXT —'; $('trk-ctxfill').style.width = '2%';
+    $('trk-ctx').textContent = '—'; paintCtxSegs(null);
     bar.classList.remove('warn', 'crit'); bar.title = 'host context window used';
   }
   $('trk-cost').textContent = rec.liveCost != null ? rec.liveCost : '$0.00'; $('trk-cost').title = 'host session cost';

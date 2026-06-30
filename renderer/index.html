@@ -95,14 +95,23 @@
     .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
     .trk-item b{font-size:15px;font-weight:700;color:var(--silver);letter-spacing:.01em}
     .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
-    .ctxbar{position:relative;width:146px;height:30px;border-radius:8px;overflow:hidden;
-      background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline);transition:box-shadow .25s ease}
-    .ctxfill{position:absolute;left:0;top:0;bottom:0;width:0;
-      background:linear-gradient(90deg,#2f6b50,#5fb487);transition:width .45s ease,background .4s ease}
-    /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives color + pulse + click */
-    .ctxbar.warn .ctxfill{background:linear-gradient(90deg,#8a6a23,#e0a93b)}
-    .ctxbar.crit .ctxfill{background:linear-gradient(90deg,#7d2f2a,#e5564b)}
-    .ctxbar.warn,.ctxbar.crit{cursor:default}
+    /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
+       Heights tuned to sit level with the adjacent tokens stat (15px digits) rather than tower over it. */
+    .ctxbar{display:inline-flex;align-items:center;gap:9px;height:24px;padding:0 11px;border-radius:7px;
+      background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px rgba(95,217,155,.30);
+      transition:box-shadow .25s ease}
+    .ctxlabel{font-size:9.5px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#7d8c84;flex:none}
+    .ctxsegs{display:inline-flex;align-items:center;gap:2.5px;height:15px;flex:none}
+    .ctxsegs i{width:3.5px;height:8px;border-radius:1.5px;background:rgba(132,147,166,.22);
+      transition:height .2s ease,background .25s ease}                                  /* dim, short — empty */
+    .ctxsegs i.lit{height:15px;background:linear-gradient(180deg,#69e0a2,#37a36e)}      /* tall, bright — filled */
+    .ctxpct{min-width:30px;text-align:right;font-size:14px;font-weight:700;letter-spacing:.02em;color:#5fd49b;
+      font-variant-numeric:tabular-nums}                                               /* tabular so width stays steady 6%→100% */
+    /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives segment + percent color + pulse */
+    .ctxbar.warn .ctxsegs i.lit{background:linear-gradient(180deg,#f0c25a,#c8902e)}
+    .ctxbar.warn .ctxpct{color:#e9b85a}
+    .ctxbar.crit .ctxsegs i.lit{background:linear-gradient(180deg,#f0746a,#cf3f37)}
+    .ctxbar.crit .ctxpct{color:#ef7a70}
     .ctxbar.warn{animation:ctxpulse-amber 2.4s ease-in-out infinite}
     .ctxbar.crit{animation:ctxpulse-red 1.7s ease-in-out infinite}
     .ctxbar.warn:hover{box-shadow:inset 0 0 0 1px rgba(224,169,59,.85)}
@@ -111,12 +120,6 @@
       50%{box-shadow:inset 0 0 0 1px rgba(224,169,59,.7),0 0 9px -1px rgba(224,169,59,.45)}}
     @keyframes ctxpulse-red{0%,100%{box-shadow:inset 0 0 0 1px rgba(229,86,75,.4)}
       50%{box-shadow:inset 0 0 0 1px rgba(229,86,75,.9),0 0 12px -1px rgba(229,86,75,.6)}}
-    /* faint divider every 10% so the fill level reads at a glance (sits above fill, below the %) */
-    .ctxticks{position:absolute;inset:0;pointer-events:none;border-radius:8px;
-      background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),
-        rgba(255,255,255,.11) calc(10% - 1px),rgba(255,255,255,.11) 10%)}
-    .ctxpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-      font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--silver);text-shadow:0 1px 3px #000,0 0 2px #000}
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
@@ -954,7 +957,7 @@
       <button class="vbox vauto on" id="vout-auto" type="button" aria-pressed="true" title="Auto-speak Claude's replies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
     </div>
     <span class="trk" title="session usage">
-      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxfill" id="trk-ctxfill"></span><span class="ctxticks"></span><span class="ctxpct" id="trk-ctx">CONTEXT —</span></span>
+      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxlabel">CONTEXT</span><span class="ctxsegs" id="trk-ctxsegs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ctxpct" id="trk-ctx">—</span></span>
       <b id="trk-cost" hidden>$0.00</b><!-- session cost now lives in the context-bar tooltip; tokens stay visible -->
       <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
     </span>
