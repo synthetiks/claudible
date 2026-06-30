@@ -692,6 +692,26 @@ function playJoin() {
     note(990, t0 + 0.12, 0.22);
   } catch (e) {}
 }
+// gentle descending "ding-dong" — distinct from playJoin's rising blip; played to the HOST the moment someone is
+// ASKING to join (the approval prompt), so a join request is audible even when you're not looking at the screen.
+let _reqCtx = null;
+function playJoinRequest() {
+  try {
+    _reqCtx = _reqCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (_reqCtx.state === 'suspended') _reqCtx.resume();
+    const ctx = _reqCtx, t0 = ctx.currentTime;
+    const note = (f, start, dur) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      og.gain.setValueAtTime(0.0001, start);
+      og.gain.exponentialRampToValueAtTime(0.11, start + 0.02);
+      og.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      o.connect(og); og.connect(ctx.destination); o.start(start); o.stop(start + dur + 0.02);
+    };
+    note(784, t0, 0.20);            // ding…
+    note(588, t0 + 0.17, 0.30);     // …dong — a soft fall, "someone's at the door"
+  } catch (e) {}
+}
 // collapse / expand the voice-out text box
 $('tts-collapse').addEventListener('click', () => {
   $('tts-wrap').classList.toggle('min');
@@ -1172,7 +1192,29 @@ function renderRoster(roster) {
     }
     el.appendChild(m);
   });
+  computeRosterOverflow();                                            // fold members past the strip's width into a "+N" pop-down
 }
+// Measure the roster strip and MOVE any chips that overflow its width into the "+N" pop-down (move, not clone, so
+// the kick buttons keep working). "You" (the first chip) always stays visible.
+function computeRosterOverflow() {
+  const el = $('chat-roster'), more = $('roster-more'), pop = $('roster-pop'); if (!el || !more || !pop) return;
+  requestAnimationFrame(() => {
+    if (!document.body.contains(el)) return;
+    const avail = el.clientWidth, overflow = [];
+    if (avail <= 0) { more.style.display = 'none'; return; }          // chat panel hidden / not laid out yet — don't fold everyone into "+N"
+    Array.prototype.forEach.call(el.children, (c, i) => {
+      if (i >= 1 && (c.offsetLeft + c.offsetWidth) > avail - 40) overflow.push(c);   // reserve ~40px for the +N pill
+    });
+    pop.innerHTML = '';
+    if (overflow.length) {
+      overflow.forEach((c) => pop.appendChild(c));
+      more.textContent = '+' + overflow.length + ' ▾'; more.style.display = '';
+    } else { more.style.display = 'none'; pop.classList.remove('show'); }
+  });
+}
+// the "+N" pill toggles the pop-down; a click anywhere else closes it
+{ const rm = $('roster-more'); if (rm) rm.addEventListener('click', (e) => { e.stopPropagation(); const p = $('roster-pop'); if (p) p.classList.toggle('show'); }); }
+document.addEventListener('click', (e) => { const p = $('roster-pop'); if (p && p.classList.contains('show') && !e.target.closest('#roster-pop') && !e.target.closest('#roster-more')) p.classList.remove('show'); });
 // End the live session entirely: disconnect everyone + drop the tunnel/advertisement (mirrors "Stop sharing").
 async function terminateLive() {
   const go = await modalChoice({
@@ -1263,6 +1305,7 @@ function paintVoiceUi(st, room) {
   const btn = $('hv-btn'), mute = $('hv-mute'), box = $('hv-members'); if (!btn) return;
   if (st && st.error === 'mic-denied') { btn.textContent = '🎙 Mic blocked'; btn.classList.remove('on'); return; }
   const joined = !!(st && st.joined);
+  { const vr = $('voicerow'); if (vr) vr.style.display = joined ? '' : 'none'; }   // voice-members row shows only while in a call (the button now lives in the head)
   btn.textContent = joined ? '🎙 Leave voice' : '🎙 Join voice';
   btn.classList.toggle('on', joined);
   if (mute) { mute.style.display = joined ? '' : 'none'; mute.textContent = (st && st.muted) ? 'Unmute' : 'Mute'; mute.classList.toggle('muted', !!(st && st.muted)); }
@@ -1326,8 +1369,8 @@ try {
       } else { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); }
     });
     if ($('hv-mute')) $('hv-mute').addEventListener('click', () => voiceRoom().toggleMute());
-  } else { const vr = $('voicerow'); if (vr) vr.style.display = 'none'; }
-} catch (e) { try { const vr = $('voicerow'); if (vr) vr.style.display = 'none'; } catch (x) {} }
+  } else { ['voicerow','hv-btn','hv-mute'].forEach((id) => { const e2 = $(id); if (e2) e2.style.display = 'none'; }); }
+} catch (e) { try { ['voicerow','hv-btn','hv-mute'].forEach((id) => { const e2 = $(id); if (e2) e2.style.display = 'none'; }); } catch (x) {} }
 
 function showLink(url) {
   shareLink.value = url; shareLink.style.display = 'block'; shareLink.style.opacity = '1';
@@ -1416,7 +1459,7 @@ function decideApproval(ok) {
   approveCur = null; approveEl.classList.remove('show');
   setTimeout(showNextApproval, 60);
 }
-claudible.onShareApproval((info) => { approveQueue.push(info); showNextApproval(); });
+claudible.onShareApproval((info) => { approveQueue.push(info); if (chimeOn) playJoinRequest(); showNextApproval(); });   // audible "ding-dong" so the host notices a join request
 claudible.onShareApprovalCancel((id) => {     // guest gave up before you decided
   approveQueue = approveQueue.filter((x) => x.id !== id);
   if (approveCur && approveCur.id === id) { approveCur = null; approveEl.classList.remove('show'); setTimeout(showNextApproval, 60); }

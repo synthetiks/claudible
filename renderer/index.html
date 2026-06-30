@@ -85,7 +85,7 @@
     /* top bar */
     .top{display:flex;align-items:center;gap:12px;padding:0 16px;
       border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,#0d0f13,#090a0c)}
-    .logo{height:32px;width:auto;display:inline-block;margin-right:4px;
+    .logo{height:30px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
     .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:#f6f8fc}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
     .topbtns{display:flex;align-items:center;gap:6px}     /* icon buttons grouped tight, right of the title */
@@ -557,7 +557,7 @@
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
       font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
-    .ws-section-head{padding:14px 9px 9px 18px}   /* left-aligned (space-between → actions stay clear at the right), title nudged a couple spaces in from the edge */
+    .ws-section-head{padding:10px 9px 6px 18px}   /* ~30% shorter top strip (was 14/9 vertical) — sleeker; left-aligned, title nudged in from the edge */
     .sh-actions{display:flex;align-items:center;gap:9px}
     .panel-close{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
     .panel-close:hover{color:var(--ink)}
@@ -819,13 +819,25 @@
     .chat{display:none;flex-direction:column;min-height:0;background:var(--panel);
       border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
     .body.sharing .chat{display:flex}
-    .chat-head{display:flex;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--hairline-soft);
-      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .chat-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--hairline-soft)}
+    .chat-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+    .chat-head-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
     .chat-head .chat-sub{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-faint);text-transform:none}
-    /* presence roster — you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light */
-    .chat-roster{margin-left:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;
-      font-size:9px;letter-spacing:.04em;color:var(--ink-faint);text-transform:none;max-width:70%}
-    .rmember{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+    /* roster strip — community icon + members inline on ONE line; overflow folds into a "+N" pop-down */
+    .roster-strip{position:relative;display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--hairline-soft)}
+    .roster-ico{flex:none;display:flex;align-items:center;color:var(--ink-faint)}
+    .roster-ico svg{width:15px;height:15px;display:block}
+    .chat-roster{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:nowrap;overflow:hidden;
+      font-size:9.5px;letter-spacing:.04em;color:var(--ink-faint);text-transform:none}   /* position:relative → chips' offsetLeft is measured against THIS strip (the overflow math depends on it) */
+    .roster-more{flex:none;width:auto;display:inline-flex;align-items:center;gap:2px;padding:2px 8px;font-size:9.5px;
+      letter-spacing:.04em;border-radius:999px;color:var(--ink-dim);background:rgba(255,255,255,.04);border:1px solid var(--hairline)}
+    .roster-more:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    .roster-pop{position:absolute;top:calc(100% - 2px);right:8px;z-index:30;display:none;flex-direction:column;gap:7px;
+      min-width:120px;max-height:220px;overflow:auto;padding:9px 11px;border-radius:9px;background:#14171c;
+      border:1px solid var(--hairline);box-shadow:0 12px 30px -12px #000}
+    .roster-pop.show{display:flex}
+    .roster-pop .rmember{font-size:10px}
+    .rmember{flex:none;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
     .rmember.you{color:var(--ink-dim)}
     /* host live-controls: a small "End live" in the chat head + a per-guest ✕ revealed on hover */
     .chat-term{flex:none;width:auto;font:inherit;font-size:10px;font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:6px;padding:2px 9px;cursor:pointer;transition:background .14s,color .14s}   /* width:auto overrides button{width:100%}; normal-case so End/Leave Session reads compact, not a stretched ribbon */
@@ -928,8 +940,8 @@
     <span class="wordmark">claudible</span>
     <div class="topbtns">
       <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
-      <button class="iconbtn" id="diff-btn" title="Repo Review — which repo you're in + what Claude changed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
+      <button class="iconbtn" id="diff-btn" title="Repo Review — which repo you're in + what Claude changed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div class="vgroup">
@@ -1023,15 +1035,26 @@
       </div>
     </div><!-- /center -->
     <div class="chat" id="chat">
-      <div class="chat-head"><span>chat</span><span class="dot" id="chat-dot"></span><button class="chat-term" id="chat-terminate" type="button" title="End the live session for everyone" style="display:none">End live</button><span class="chat-roster" id="chat-roster"></span></div>
-      <div class="voicerow" id="voicerow">
-        <button id="hv-btn" class="hv-btn" title="Talk with your viewers">🎙 Join voice</button>
-        <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
+      <div class="chat-head">
+        <span class="chat-title">Group Chat</span>
+        <span class="chat-head-actions">
+          <button id="hv-btn" class="hv-btn" title="Talk with your viewers">🎙 Join voice</button>
+          <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
+          <button class="chat-term" id="chat-terminate" type="button" title="End the live session for everyone" style="display:none">End live</button>
+        </span>
+      </div>
+      <div class="roster-strip" id="roster-strip">
+        <span class="roster-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.6 19a5.4 5.4 0 0 1 10.8 0"/><path d="M16 5.3a3 3 0 0 1 0 5.4"/><path d="M17.4 13.5A5.4 5.4 0 0 1 21 19"/></svg></span>
+        <span class="chat-roster" id="chat-roster"></span>
+        <button class="roster-more" id="roster-more" type="button" style="display:none" title="Show everyone"></button>
+        <div class="roster-pop" id="roster-pop"></div>
+      </div>
+      <div class="voicerow" id="voicerow" style="display:none">
         <div class="hv-members" id="hv-members"></div>
       </div>
       <div class="chat-log" id="chat-log"></div>
       <div class="chat-input">
-        <input type="text" id="chat-in" placeholder="message your viewer — Claude won't see this" maxlength="2000" />
+        <input type="text" id="chat-in" placeholder="Send a message" maxlength="2000" />
         <button id="chat-send">Send</button>
       </div>
     </div>
