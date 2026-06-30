@@ -111,8 +111,8 @@
        TOKENS label reuses .ctxlabel (10px, wordmark white). Value matches the % readout +2.5% to stress it. */
     .tokbar{display:inline-flex;align-items:center;gap:7px;height:33px;padding:0 11px;border-radius:7px;
       background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px rgba(95,217,155,.30)}
-    .tokval{min-width:38px;text-align:left;font-size:14.5px;font-weight:700;letter-spacing:.02em;color:#f6f8fc;
-      font-variant-numeric:tabular-nums}    /* white by default; JS tints it warm as raw token count climbs (easter egg). left-hugs the label; 38px holds 99.9k/66.9M without jitter */
+    .tokval{min-width:30px;text-align:center;transform:translateX(2px);font-size:14.5px;font-weight:700;letter-spacing:.02em;color:#f6f8fc;
+      font-variant-numeric:tabular-nums}    /* white by default; JS tints it warm as raw token count climbs (easter egg). centered + a hair right so a short value sits balanced in the box; grows to fit big values */
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives segment + percent color + pulse */
     .ctxbar.warn .ctxsegs i.lit{background:linear-gradient(180deg,#f0c25a,#c8902e)}
     .ctxbar.warn .ctxpct{color:#e9b85a}
