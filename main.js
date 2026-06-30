@@ -1580,14 +1580,15 @@ function _histFile(wsId) {
 }
 ipcMain.handle('history:load', () => {
   try {
+    if (!_histEnabled()) return { ok: true, enabled: false, entries: [] };   // off = off for reads too: don't surface entries from a previously-enabled period
     const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
-    return { ok: true, enabled: _histEnabled(), entries: _histStore.load(fs, _histFile(wsId)) };
+    return { ok: true, enabled: true, entries: _histStore.load(fs, _histFile(wsId)) };
   } catch (e) { return { ok: false, enabled: false, entries: [], error: String(e) }; }
 });
 ipcMain.handle('history:append', (e, payload) => {
   try {
     if (!_histEnabled()) return { ok: false, disabled: true };
-    const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : '';
+    const prompt = (payload && typeof payload.prompt === 'string' ? payload.prompt : '').slice(0, 8000);   // cap stored prompt: ring caps count (10) but not bytes; bounds a huge paste
     if (!prompt.trim()) return { ok: false, error: 'empty' };
     const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
     const file = _histFile(wsId);

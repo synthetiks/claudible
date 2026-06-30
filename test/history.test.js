@@ -16,6 +16,8 @@ eq('makeEntry defaults machine', e1.machine, { id: '', host: '', os: '' });
 eq('makeEntry defaults checkpointRef null', e1.checkpointRef, null);
 ok('makeEntry keeps files', e1.files.length === 1);
 eq('makeEntry coerces missing prompt to ""', makeEntry({ id: 2, seq: 2 }).prompt, '');
+// regression: a real Date.now() ms timestamp must survive intact (a `| 0` here would 32-bit-truncate it)
+eq('makeEntry preserves a full ms timestamp', makeEntry({ id: 3, ts: 1782855565601 }).ts, 1782855565601);
 
 // ---- ringPush: caps to newest MAX by seq, pure (no mutation) ----
 let log = [];
