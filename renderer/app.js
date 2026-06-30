@@ -1918,6 +1918,11 @@ function sessTitle(s) {
   if (local) return local;
   const shared = remoteTitles[s.id];
   if (shared) return shared;
+  // WARM CACHE: pollTitles persists the last-known shared names per workspace. remoteTitles is empty for the first
+  // ~2s after open (the branch read is async), so without this a collaborator/cross-machine rename flashes its
+  // auto-preview then snaps to the real name. The cache lets that name paint instantly; the live poll reconciles it.
+  const cached = ((loadPrefs().remoteTitlesCache || {})[activeWsId] || {})[s.id];
+  if (cached) return cached;
   return s.preview;
 }
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
@@ -2034,16 +2039,20 @@ setInterval(pollLivePeers, 10000);
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
 // can't spam branch reads; a forced call (after my own rename's push) bypasses the throttle. Re-render on change.
 async function pollTitles(force) {
-  const aw = workspaces.find((w) => w.id === activeWsId);
+  const myWs = activeWsId;                                                         // capture: a workspace switch mid-fetch must not write this result under the wrong ws
+  const aw = workspaces.find((w) => w.id === myWs);
   if (!(aw && aw.kind === 'repo')) { remoteTitles = {}; titlesSig = ''; return; }
   const now = Date.now();
   if (!force && now - lastTitlePoll < 15000) return;
   lastTitlePoll = now;
   let m = {}; try { m = await claudible.titleList(); } catch (e) {}
+  if (myWs !== activeWsId) return;                                                 // switched workspaces during the async read → this result is stale
   if (!m || typeof m !== 'object') m = {};
   const sig = JSON.stringify(Object.entries(m).sort());
   if (sig === titlesSig) return;
-  titlesSig = sig; remoteTitles = m; refreshSessions();
+  titlesSig = sig; remoteTitles = m;
+  try { const c = Object.assign({}, loadPrefs().remoteTitlesCache || {}); c[myWs] = m; savePrefs({ remoteTitlesCache: c }); } catch (e) {}   // warm cache → next open shows these shared names instantly (sessTitle reads it before pollTitles lands)
+  refreshSessions();
 }
 setInterval(pollTitles, 20000);
 function makeLiveBadge(peer, localLabel) {
