@@ -834,7 +834,11 @@ claudible.onHookLine((tabId, line) => {
   let o; try { o = JSON.parse(line); } catch { return; }
   if (o.hook_event_name === 'UserPromptSubmit') {
     t.busy = true; markTabBusy(t.tabId, true);
-    if (o.prompt) t.sessionLog.push({ role: 'you', text: String(o.prompt) });   // captures typed AND voice turns
+    if (o.prompt) {
+      t.sessionLog.push({ role: 'you', text: String(o.prompt) });   // captures typed AND voice turns
+      try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : ''); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists)
+      if (typeof refreshHistoryFeed === 'function') setTimeout(refreshHistoryFeed, 120);   // live-update the feed if its drawer is open
+    }
   } else if (o.hook_event_name === 'Stop') {
     t.busy = false; markTabBusy(t.tabId, false);
     // A turn just finished: if this tab is still showing a "live · unsaved" row, its transcript now exists on
@@ -1700,7 +1704,7 @@ function openDiff(open) {
   p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
   p.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
-  if (open) { refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open
+  if (open) { refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
 function repoReviewHeader(aw, files, untracked, committed, commits, total) {
@@ -1737,6 +1741,40 @@ function repoReviewHeader(aw, files, untracked, committed, commits, total) {
   const sum = document.createElement('div'); sum.className = 'rr-sum'; sum.textContent = parts.length ? parts.join('  ·  ') : 'working tree clean';
   h.appendChild(sum);
   return h;
+}
+// ---- Session-history activity feed (top of the Repo Review drawer) ----
+// Renders the last N prompts (who · when · what) from the main-owned log. Shows only when the
+// sessionHistory setting is on and there are entries — otherwise stays hidden (zero footprint).
+function histRelTime(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+function renderHistoryEntry(en) {
+  const row = document.createElement('div'); row.className = 'hf-row';
+  const top = document.createElement('div'); top.className = 'hf-top';
+  const who = document.createElement('span'); who.className = 'hf-who'; who.textContent = en.author || 'unknown';
+  const when = document.createElement('span'); when.className = 'hf-when'; when.textContent = histRelTime(en.ts || 0);
+  try { when.title = new Date(en.ts || 0).toLocaleString(); } catch {}
+  top.appendChild(who); top.appendChild(when);
+  if (en.machine && en.machine.host) { const mc = document.createElement('span'); mc.className = 'hf-machine'; mc.textContent = en.machine.host; top.appendChild(mc); }
+  row.appendChild(top);
+  const pr = document.createElement('div'); pr.className = 'hf-prompt'; pr.textContent = en.prompt || ''; pr.title = en.prompt || '';
+  row.appendChild(pr);
+  if (en.summary && en.summary !== 'no file changes') { const sm = document.createElement('div'); sm.className = 'hf-sum'; sm.textContent = en.summary; row.appendChild(sm); }
+  return row;
+}
+async function refreshHistoryFeed() {
+  const wrap = $('history-feed'); if (!wrap) return;
+  let r = null; try { r = await claudible.historyLoad(); } catch {}
+  if (!r || !r.ok || !r.enabled || !r.entries || !r.entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
+  wrap.hidden = false; wrap.innerHTML = '';
+  const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
+  lbl.textContent = 'recent activity — last ' + r.entries.length + ' change' + (r.entries.length > 1 ? 's' : '');
+  wrap.appendChild(lbl);
+  r.entries.slice().reverse().forEach((en) => wrap.appendChild(renderHistoryEntry(en)));   // newest first
 }
 let _diffSig = '', _diffBusy = false;
 async function refreshDiff(opts) {
