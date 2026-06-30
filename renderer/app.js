@@ -702,6 +702,7 @@ if (speedRange) {
 if ($('announce-done')) $('announce-done').addEventListener('change', (e) => { announceOn = e.target.checked; $('announce-toggle').classList.toggle('on', announceOn); savePrefs({ announce: announceOn }); });
 if ($('chat-chime')) $('chat-chime').addEventListener('change', (e) => { chimeOn = e.target.checked; $('chime-toggle').classList.toggle('on', chimeOn); savePrefs({ chime: chimeOn }); });
 if ($('full-readout')) $('full-readout').addEventListener('change', (e) => { fullReadout = e.target.checked; $('fullreadout-toggle').classList.toggle('on', fullReadout); savePrefs({ fullReadout: fullReadout }); });
+if ($('sess-history')) $('sess-history').addEventListener('change', (e) => { $('sesshist-toggle').classList.toggle('on', e.target.checked); savePrefs({ sessionHistory: e.target.checked }); if (typeof refreshHistoryFeed === 'function') refreshHistoryFeed(); });   // writes through savePrefs → enters the prefs cache → never clobbered; main gate reads settings.json fresh
 // soft, relaxing two-tone chime (Web Audio — no asset). Lazy ctx + resume (autoplay parks it until a gesture).
 let _chimeCtx = null;
 function playChime() {
@@ -1994,6 +1995,7 @@ function savePrefs(patch) {
   announceOn = p.announce !== false; if ($('announce-done')) { $('announce-done').checked = announceOn; $('announce-toggle').classList.toggle('on', announceOn); }
   chimeOn = p.chime !== false; if ($('chat-chime')) { $('chat-chime').checked = chimeOn; $('chime-toggle').classList.toggle('on', chimeOn); }
   fullReadout = p.fullReadout !== false; if ($('full-readout')) { $('full-readout').checked = fullReadout; $('fullreadout-toggle').classList.toggle('on', fullReadout); }
+  { const sh = p.sessionHistory === true; if ($('sess-history')) { $('sess-history').checked = sh; $('sesshist-toggle').classList.toggle('on', sh); } }   // session history: default OFF
   applyTtsSpeed(p.ttsSpeed || 0, false);
   if (p.pttKey) { if (isSafePttKey(p.pttKey)) pttKey = p.pttKey; else savePrefs({ pttKey: 'AltLeft' }); }   // self-heal a bad saved key (e.g. an old rebind to Space) so it can't keep eating the spacebar
   applyPttKey();   // render the current push-to-talk key (default or saved)
