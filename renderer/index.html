@@ -91,7 +91,7 @@
     .topbtns{display:flex;align-items:center;gap:6px}     /* icon buttons grouped tight, right of the title */
     .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
     /* session tracker */
-    .trk{margin-left:auto;display:flex;align-items:center;gap:20px}
+    .trk{margin-left:auto;display:flex;align-items:center;gap:8px}   /* context↔tokens spacing matches the Talk/Speak (.vgroup) gap */
     .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
     .trk-item b{font-size:15px;font-weight:700;color:var(--silver);letter-spacing:.01em}
     .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
@@ -109,10 +109,10 @@
       font-variant-numeric:tabular-nums}                                               /* tabular so width stays steady 6%→100% */
     /* tokens readout — a sibling box that replicates the context box (height/bg/border/glow), only narrower.
        TOKENS label reuses .ctxlabel (10px, wordmark white). Value matches the % readout +2.5% to stress it. */
-    .tokbar{display:inline-flex;align-items:center;gap:9px;height:33px;padding:0 11px;border-radius:7px;
+    .tokbar{display:inline-flex;align-items:center;gap:7px;height:33px;padding:0 11px;border-radius:7px;
       background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px rgba(95,217,155,.30)}
-    .tokval{min-width:44px;text-align:right;font-size:14.5px;font-weight:700;letter-spacing:.02em;color:#5fd49b;
-      font-variant-numeric:tabular-nums}                                               /* room for 99.9k / 66.9M, snug; tabular so no jitter */
+    .tokval{min-width:38px;text-align:left;font-size:14.5px;font-weight:700;letter-spacing:.02em;color:#f6f8fc;
+      font-variant-numeric:tabular-nums}    /* white by default; JS tints it warm as raw token count climbs (easter egg). left-hugs the label; 38px holds 99.9k/66.9M without jitter */
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives segment + percent color + pulse */
     .ctxbar.warn .ctxsegs i.lit{background:linear-gradient(180deg,#f0c25a,#c8902e)}
     .ctxbar.warn .ctxpct{color:#e9b85a}

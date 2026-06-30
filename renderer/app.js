@@ -285,6 +285,43 @@ document.querySelectorAll('.panel button').forEach((b) =>
 // conversation. We want THIS session's usage, so we subtract a baseline captured at launch and
 // re-baseline on /clear or any upstream reset. Baseline resets every app launch (fresh process).
 const fmtK = (n) => n >= 1e6 ? ((+(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)) + 'M') : (n >= 1000 ? ((+(n / 1000).toFixed(n >= 100000 ? 0 : 1)) + 'k') : String(n));
+
+// Token-count easter egg: tint the tokens readout from white toward subtle orange -> red as the
+// session's RAW token count climbs into the millions. Deliberately faint — a quiet power-user signal,
+// not a warning (most sessions sit <2M and stay ~white). Piecewise-linear RGB across the control points.
+const TOK_HUE = [
+  [1e6,  [246, 248, 252]],   // 1M  — white (warming begins only above here)
+  [2e6,  [246, 244, 238]],   // 2M  — barely warm; most users won't notice
+  [5e6,  [242, 231, 212]],   // 5M  — light orange a power user starts to catch
+  [10e6, [236, 216, 184]],   // 10M — mid orange
+  [20e6, [228, 190, 148]],   // 20M — deeper orange
+  [25e6, [223, 172, 130]],   // 25M — edging toward red
+  [35e6, [214, 132, 100]],   // 35M+ — subtle orange-red (cap)
+];
+function tokenHue(n) {
+  if (!(n > 1e6)) return '#f6f8fc';                          // <=1M: plain white
+  const s = TOK_HUE;
+  for (let i = 1; i < s.length; i++) {
+    if (n <= s[i][0]) {
+      const a = s[i - 1], b = s[i], f = (n - a[0]) / (b[0] - a[0]);
+      const c = [0, 1, 2].map(k => Math.round(a[1][k] + (b[1][k] - a[1][k]) * f));
+      return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+  }
+  const c = s[s.length - 1][1];
+  return `rgb(${c[0]},${c[1]},${c[2]})`;                     // past the last point: hold the cap
+}
+// Parse a fmtK-style string ("2.4k","1.5M") back to an approximate count — the live/host readout
+// arrives pre-formatted, so this recovers a number to drive the same tint.
+function parseTokCount(str) {
+  if (str == null) return 0;
+  const m = String(str).trim().match(/^([\d.]+)\s*([kKmM]?)/);
+  if (!m) return 0;
+  let v = parseFloat(m[1]) || 0;
+  const u = m[2].toLowerCase();
+  if (u === 'k') v *= 1e3; else if (u === 'm') v *= 1e6;
+  return v;
+}
 // Tracker accumulators are PER TAB (on each tab's record): the #trk-* DOM always projects the ACTIVE tab,
 // and only the active tab's tracker is mirrored to guests — so two concurrent sessions never cross-count.
 // Mirror the active tab's tracker (and which session is live) to any shared guests. Guests render verbatim.
@@ -318,8 +355,10 @@ function repaintTracker(t) {
   $('trk-cost').textContent = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
   if (bar) bar.title = bar.title + ' · ' + $('trk-cost').textContent + ' this session';   // append cost to the (warn-aware) context tooltip — cost lives here now
   const at = t.agentTok || 0;                                    // subagent/swarm tokens (the main meter misses these)
-  $('trk-tokens').textContent = fmtK((t.sessTok || 0) + at);
-  $('trk-tokens').title = at ? (fmtK(t.sessTok || 0) + ' main + ' + fmtK(at) + ' agents') : '';
+  const tokN = (t.sessTok || 0) + at, tokEl = $('trk-tokens');
+  tokEl.textContent = fmtK(tokN);
+  tokEl.style.color = tokenHue(tokN);                            // faint warm tint past 1M (easter egg)
+  tokEl.title = at ? (fmtK(t.sessTok || 0) + ' main + ' + fmtK(at) + ' agents') : '';
 }
 function resetStats(t) {
   t = t || AT(); if (!t) return;
@@ -2185,7 +2224,8 @@ function repaintLiveTracker(rec) {
   }
   $('trk-cost').textContent = rec.liveCost != null ? rec.liveCost : '$0.00'; $('trk-cost').title = 'host session cost';
   if (bar) bar.title = bar.title + ' · ' + $('trk-cost').textContent + ' host session cost';
-  $('trk-tokens').textContent = rec.liveTokens != null ? rec.liveTokens : '0'; $('trk-tokens').title = 'host session tokens';
+  const lt = rec.liveTokens != null ? rec.liveTokens : '0', tokEl = $('trk-tokens');
+  tokEl.textContent = lt; tokEl.style.color = tokenHue(parseTokCount(lt)); tokEl.title = 'host session tokens';
 }
 // Open (or focus) a peer's live session as a native tab in THIS window.
 function openLiveTab(peer, localLabel) {
