@@ -492,7 +492,7 @@
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
     .sess.active{background-color:color-mix(in srgb,var(--live) 5%,transparent);box-shadow:inset 0 1px 0 var(--sheen);border-left-color:transparent!important}    /* selected session → workspace-style wash (tint + ::before gradient + top sheen), NO left-corner rail; the !important neutralises the open-in-tab/busy rails that also land on the active row */
     .sess.active::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 13%,transparent),transparent 46%)}    /* the directional gradient now carries the selection (mirrors .ws-chip.active) since the rail is gone */
-    .sess.active::after{content:'';position:absolute;left:-9px;top:50%;width:9px;height:1px;background:rgba(217,119,87,.22);transform:translateY(-50%);pointer-events:none}    /* horizontal CONNECTOR elbow: same faint Claude-orange line as the .ws-children vertical guide, branching off it to touch the active session row (tree-style ├──) */
+    .sess.active::after{content:'';position:absolute;left:-9px;top:50%;width:9px;height:1px;background:rgba(217,119,87,.24);transform:translateY(-50%);pointer-events:none}    /* horizontal CONNECTOR elbow (~10% brighter): same Claude-orange as the .ws-children vertical guide, branching off it to touch the active session row (tree-style ├──) */
     .sess.active.sess-live-row,.sess.active.sess-peer-live,.sess.active.sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* an ACTIVE session that's LIVE (sharing, peer-live, OR a joined tab) → GREEN wash only (its ::before is green below); overrides the active tint so it's never an orange/green MIX. A not-live active session keeps the single-colour tint above. */
     .sess.sess-live-row,.sess.sess-peer-live{box-shadow:inset 0 1px 0 var(--sheen);border-left-color:var(--ok,#5fb487)}    /* live row: green directional wash (on ::before) + lift */
     .sess.sess-live-row::before,.sess.sess-peer-live::before,.sess.sess-joined-live::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%)}
@@ -582,7 +582,7 @@
     .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.09);border:none;border-radius:6px}
     .ws-chips::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2)}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
-    .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 12px;padding-left:7px;border-left:1px solid rgba(217,119,87,.13)}   /* nested-session guide: faint Claude-orange tint on the active branch (7px indent → session rows extend a touch further left) */
+    .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 12px;padding-left:6px;border-left:1px solid rgba(217,119,87,.14)}   /* nested-session guide: faint Claude-orange tint, ~10% brighter; 6px indent → session rows extend another touch further left */
     /* "+ New Session" — inline as the last child inside the open workspace */
     .newsess-row{display:flex;align-items:center;gap:6px;width:auto;text-align:left;margin:1px 0 0;padding:7px 6px;
       font-size:11.5px;letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
