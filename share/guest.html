@@ -79,12 +79,13 @@
     .gchat .cdot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 8px -1px var(--live);display:none;flex:none}
     .gchat.collapsed.has-unread .cdot{display:inline-block}
     .gchat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
-    .chat-msg{max-width:88%;padding:7px 10px;border-radius:9px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+    .chat-msg{position:relative;max-width:88%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}
     .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
-    .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6}
-    .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink)}
-    .chat-empty{margin:auto;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
-    .chat-sys{align-self:center;font-size:10px;letter-spacing:.04em;color:var(--ink-faint);padding:2px 4px;text-align:center}
+    .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6;border-bottom-right-radius:4px}
+    .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink);border-bottom-left-radius:4px}
+    .chat-empty{margin:auto;max-width:210px;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
+    .chat-empty::before{content:'';display:block;width:30px;height:23px;margin:0 auto 11px;border:1.5px solid currentColor;border-radius:9px 9px 9px 3px;opacity:.4}
+    .chat-sys{align-self:center;font-size:9.5px;letter-spacing:.04em;color:var(--ink-faint);padding:3px 10px;text-align:center;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:999px;margin:1px 0}
     /* name gate — viewer picks a display name before joining */
     .nameover{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(5,6,8,.94)}
     .nameover .card{max-width:360px}
@@ -93,12 +94,12 @@
     .nameover input:focus{outline:none;border-color:rgba(255,255,255,.28)}
     .nameover button{font-family:inherit;font-size:13px;color:var(--ink);background:linear-gradient(180deg,#1c2a22,#142019);
       border:1px solid #294a39;border-radius:9px;padding:11px 26px;cursor:pointer}
-    .gchat-input{display:flex;gap:7px;padding:10px;border-top:1px solid var(--hairline)}
+    .gchat-input{display:flex;align-items:center;gap:8px;padding:10px;border-top:1px solid var(--hairline)}
     .gchat-input input{flex:1;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:9px;padding:10px 11px}
     .gchat-input input:focus{outline:none;border-color:rgba(255,255,255,.24)}
-    .gchat-input button{font-family:inherit;font-size:12px;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,#101216);
-      border:1px solid var(--hairline);border-radius:9px;padding:0 14px;cursor:pointer}
+    .gchat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-family:inherit;font-size:0;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,#101216);border:1px solid var(--hairline);cursor:pointer;display:flex;align-items:center;justify-content:center}
+    .gchat-input button::after{content:'→';font-size:15px;line-height:1}
     .gchat-input button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     #terminal{background:#0a0b0d;border:1px solid var(--hairline);border-radius:11px;padding:10px 12px;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
