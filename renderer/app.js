@@ -837,7 +837,7 @@ claudible.onHookLine((tabId, line) => {
     t.busy = true; markTabBusy(t.tabId, true);
     if (o.prompt) {
       t.sessionLog.push({ role: 'you', text: String(o.prompt) });   // captures typed AND voice turns
-      try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : ''); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists)
+      try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : '', t.wsId || ''); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists). Pass the SUBMITTING tab's workspace so a mid-flight workspace switch can't write to the wrong file.
       if (typeof refreshHistoryFeed === 'function') setTimeout(refreshHistoryFeed, 120);   // live-update the feed if its drawer is open
     }
   } else if (o.hook_event_name === 'Stop') {

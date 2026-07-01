@@ -1593,7 +1593,7 @@ ipcMain.handle('history:append', (e, payload) => {
     if (!_histEnabled()) return { ok: false, disabled: true };
     const prompt = (payload && typeof payload.prompt === 'string' ? payload.prompt : '').slice(0, 8000);   // cap stored prompt: ring caps count (10) but not bytes; bounds a huge paste
     if (!prompt.trim()) return { ok: false, error: 'empty' };
-    const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
+    const wsId = (payload && payload.wsId) ? String(payload.wsId) : ((activeWorkspace && activeWorkspace.id) || 'default');   // the SUBMITTING tab's workspace, not global active — avoids a workspace-switch race writing to the wrong file (_histFile sanitizes the key)
     const file = _histFile(wsId);
     const log = _histStore.load(fs, file);
     const seq = log.reduce((m, x) => Math.max(m, x.seq | 0), 0) + 1;

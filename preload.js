@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('claudible', {
   diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),
   diffDiscard: (relPath) => ipcRenderer.invoke('diff:discard', relPath),
   // session history (the append-only activity log behind the Repo Review feed + revert; gated by the sessionHistory setting)
-  historyAppend: (prompt, session) => ipcRenderer.invoke('history:append', { prompt, session }),   // renderer sends only the raw prompt; main stamps id/seq/author/machine
+  historyAppend: (prompt, session, wsId) => ipcRenderer.invoke('history:append', { prompt, session, wsId }),   // renderer sends the raw prompt + submitting tab's workspace; main stamps id/seq/author/machine
   historyLoad: () => ipcRenderer.invoke('history:load'),
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
