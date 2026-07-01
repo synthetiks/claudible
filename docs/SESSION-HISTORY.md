@@ -4,9 +4,10 @@ A single append-only **event log** that powers two faces of the Repo Review wind
 per-prompt **activity feed** (who changed what, when, on which machine) and, built on the
 very same records, **revert** to a previous checkpoint.
 
-> **Status:** Phases 1–6 complete. Ships **dark** behind the `sessionHistory` setting
-> (default **off**) — completely inert until enabled. Phase 7 (revert UI), live multiplayer
-> sync, and the in-app smoke test are still pending.
+> **Status:** Phases 1–7 complete, including the **revert UI** (shipped `b77bc95`:
+> per-prompt code checkpoints + one-click Revert, with an undo). Ships **dark** behind the
+> `sessionHistory` setting (default **off**) — completely inert until enabled. Live multiplayer
+> sync and the in-app smoke test are still pending.
 
 ## Why one log
 The feed and revert are not two features — they're one record set with two consumers. The
@@ -59,9 +60,12 @@ node test/checkpoint.test.js     # 12  git snapshot/restore on a throwaway repo
 All wired into `npm test`. (The bash statusline-parity test fails on native Windows Git Bash —
 pre-existing and unrelated to this feature.)
 
+## Shipped since
+- **Phase 7 — revert UI (done, `b77bc95`):** click an entry's Revert → confirm → restore its
+  checkpoint, taking a fresh `undo` snapshot first so the revert is itself undoable. Revert now
+  also targets the feed's own workspace and warns if a turn is still in flight.
+
 ## What's left
-- **Phase 7 — revert UI:** click an entry → preview → confirm → restore its checkpoint, taking a
-  fresh snapshot first so the revert is itself undoable.
 - **Multiplayer:** attribute remote drivers + propagate the log over the live channel + send a
   full snapshot in the join handshake.
 - **Files-changed:** compute the per-prompt diff for the summary line.
