@@ -36,6 +36,7 @@ const GUEST_HTML = path.join(__dirname, 'guest.html');
 const RING_CAP = 256 * 1024;
 const APPROVAL_TIMEOUT = 90000;
 const MAX_GUESTS = 8;            // cap concurrent viewers (the host typically invites a few)
+const MAX_AUDIO_B64 = 128 * 1024;   // reject an oversized relayed voice frame. Real frames are ~40ms blocks (a few KB base64; ~44KB at the 16384-sample ceiling), so 128KB is generous headroom while bounding a hostile/oversized frame on the internet-facing relay
 const NAME_MAX = 40;
 const newToken = () => crypto.randomBytes(16).toString('hex');
 
@@ -271,6 +272,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       // members may send/receive; nothing reaches a non-participant or a paused/non-shared workspace.
       if (msg.type === 'audio' && typeof msg.data === 'string') {
         if (!voiceGuests.has(ws._pid)) return;
+        if (msg.data.length > MAX_AUDIO_B64) return;   // drop an oversized frame — amplification guard at the relay fan-out (a legit ~40ms block is far smaller)
         const aout = JSON.stringify({ type: 'audio', from: ws._pid, data: msg.data, sr: msg.sr });
         for (const c of clients) { if (c !== ws && voiceGuests.has(c._pid) && c.readyState === c.OPEN) { try { c.send(aout); } catch {} } }
         if (hostVoice) { try { onAudio && onAudio({ from: ws._pid, data: msg.data, sr: msg.sr }); } catch {} }
