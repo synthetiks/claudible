@@ -1334,7 +1334,7 @@ ipcMain.handle('stt', async (e, arrayBuf) => {
     const fd = new FormData();
     fd.append('file', new Blob([Buffer.from(arrayBuf)], { type: 'audio/webm' }), 'audio.webm');
     fd.append('response_format', 'json');
-    const r = await fetch(`${WHISPER}/v1/audio/transcriptions`, { method: 'POST', body: fd });
+    const r = await fetch(`${WHISPER}/v1/audio/transcriptions`, { method: 'POST', body: fd, signal: AbortSignal.timeout(70000) });   // fail cleanly if Whisper hangs, instead of undici's ~300s default (70s is generous for a long clip on CPU)
     if (!r.ok) { const j = await r.json().catch(() => ({})); return { error: (j.detail && (j.detail.message || j.detail)) || j.error || ('HTTP ' + r.status) }; }
     return await r.json();
   } catch (err) { return { error: String(err) }; }
@@ -1344,6 +1344,7 @@ ipcMain.handle('tts', async (e, text, voice) => {
     const r = await fetch(`${KOKORO}/v1/audio/speech`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'kokoro', input: text, voice: voice || 'af_bella', response_format: 'mp3', speed: 1.05 }),
+      signal: AbortSignal.timeout(70000),   // fail cleanly if Kokoro hangs, instead of undici's ~300s default
     });
     const ct = r.headers.get('content-type') || '';
     if (!r.ok || ct.includes('application/json')) {
