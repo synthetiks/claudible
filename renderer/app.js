@@ -1754,21 +1754,21 @@ function renderHistoryEntry(en, revertable) {
   if (_histExpanded.has(en.id)) pr.classList.add('expanded');
   row.appendChild(pr);
   // expand/collapse chevron — sits to the LEFT of copy; only revealed when the prompt overflows 3 lines
-  const more = document.createElement('button'); more.className = 'hf-more'; more.title = 'Expand'; more.style.display = 'none';
+  const more = document.createElement('button'); more.className = 'hf-more'; more.title = 'Expand'; more.setAttribute('aria-label', 'Expand prompt'); more.style.display = 'none';
   if (_histExpanded.has(en.id)) more.classList.add('open');
   more.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
-  more.onclick = (e) => { e.stopPropagation(); const open = pr.classList.toggle('expanded'); more.classList.toggle('open', open); more.title = open ? 'Collapse' : 'Expand'; if (open) _histExpanded.add(en.id); else _histExpanded.delete(en.id); };
+  more.onclick = (e) => { e.stopPropagation(); const open = pr.classList.toggle('expanded'); more.classList.toggle('open', open); more.title = open ? 'Collapse' : 'Expand'; more.setAttribute('aria-label', open ? 'Collapse prompt' : 'Expand prompt'); if (open) _histExpanded.add(en.id); else _histExpanded.delete(en.id); };
   row.appendChild(more);
   // Revert: only when this entry captured a code snapshot (checkpointRef) AND it's still within the kept window —
   // checkpoints are pruned to the newest 10, so an older ("show more") entry's snapshot no longer exists and its
   // button would only ever say "aged out". `revertable` is passed for the newest-10 rows.
   if (en.checkpointRef && revertable) {
-    const rev = document.createElement('button'); rev.className = 'hf-revert'; rev.title = 'Revert code to this prompt';
+    const rev = document.createElement('button'); rev.className = 'hf-revert'; rev.title = 'Revert code to this prompt'; rev.setAttribute('aria-label', 'Revert code to this prompt');
     rev.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2-9.3"/></svg>';   // rewind-arrow
     rev.onclick = (e) => { e.stopPropagation(); revertToCheckpoint(en); };
     row.appendChild(rev);
   }
-  const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt';
+  const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt'; copy.setAttribute('aria-label', 'Copy prompt');
   copy.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
   copy.onclick = (e) => { e.stopPropagation(); try { claudible.clipWrite(en.prompt || ''); } catch {} copy.classList.add('done'); toast('Prompt copied'); setTimeout(() => copy.classList.remove('done'), 900); };
   row.appendChild(copy);
