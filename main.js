@@ -63,7 +63,7 @@ function reapOrphanCloudflared() {
   _clearCfPid();
 }
 const share = createShareServer({
-  onInput: (d) => { const t = ptys.get(fgTabId); try { t && t.proc.write(d); } catch {} },   // a guest typed → into the FOREGROUND pty
+  onInput: (d, who) => { const t = ptys.get(fgTabId); if (t) { if (who && who.name) t.lastInputBy = { name: who.name, ts: Date.now() }; try { t.proc.write(d); } catch {} } },   // a guest typed → into the FOREGROUND pty; tag who typed (write path unchanged) so history can attribute it
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
   onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} },   // presence lights
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
@@ -1598,10 +1598,21 @@ ipcMain.handle('history:append', (e, payload) => {
     const log = _histStore.load(fs, file);
     const seq = log.reduce((m, x) => Math.max(m, x.seq | 0), 0) + 1;
     const s = readSettings();
+    // Attribution: a guest co-driving types into the FOREGROUND pty; if that just happened for THIS
+    // session, credit them, else the host. Recency + one-shot consume so the host's next prompt reverts,
+    // and the session guard keeps a background tab's prompt from being credited to a foreground guest.
+    let author = _identity.resolveAuthor({ username: s.collabName, fallback: 'host' });
+    try {
+      const fr = ptys.get(fgTabId), sess = payload && payload.session ? String(payload.session) : '';
+      if (fr && fr.lastInputBy && (Date.now() - fr.lastInputBy.ts) < 15000 && (fr.session || '') === sess) {
+        author = _identity.resolveAuthor({ username: fr.lastInputBy.name, fallback: author });
+        fr.lastInputBy = null;
+      }
+    } catch {}
     const entry = _hist.makeEntry({
       id: require('crypto').randomUUID(),
       seq, ts: Date.now(),
-      author: _identity.resolveAuthor({ username: s.collabName, fallback: 'host' }),
+      author,
       machine: _identity.machineRecord({ savedId: _machineId(), host: _os.hostname(), os: process.platform }),
       session: payload && payload.session ? String(payload.session) : '',
       prompt,

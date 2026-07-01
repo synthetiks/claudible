@@ -220,7 +220,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       }
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (readOnly || paused) return;   // paused = host on a private/non-granted workspace; never inject into it
-        try { onInput && onInput(msg.data); } catch {}
+        try { onInput && onInput(msg.data, { pid: ws._pid, name: ws._name }); } catch {}   // pass the typist's identity so session-history can attribute the prompt to the guest, not the host
         return;
       }
       // ---- voice room (allowed even for VIEW-ONLY guests — talking is not terminal control) ----
