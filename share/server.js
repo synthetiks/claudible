@@ -404,8 +404,14 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     for (const ws of clients) {
       if (ws._name === nm) {
         ws._kicked = true;
+        // Revoke the resume token NOW, synchronously — do NOT wait for drop() on the socket 'close' event. A
+        // server-initiated ws.close() waits up to ws's closeTimeout (~30s) for the client's close-ack; a hostile
+        // guest that withholds it keeps this token valid and re-dials ?r=<token>, whose resume branch skips BOTH
+        // approval and MAX_GUESTS — silently regaining access past the kick. Deleting here (mirrors the grace-window
+        // path below) makes the reconnect's hasResume() fail immediately. drop()'s later delete becomes a no-op.
+        if (ws._resume) { resumeTokens.delete(ws._resume); ws._resume = null; }
         try { ws.send(JSON.stringify({ type: 'denied', reason: 'removed' })); } catch {}
-        try { ws.close(); } catch {}   // → drop(): token killed, roster 'gone', "removed by host"
+        try { ws.close(); } catch {}   // → drop(): roster 'gone', "removed by host" (token already revoked above)
         hit = true;
       }
     }
