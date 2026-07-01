@@ -63,7 +63,7 @@
     *{box-sizing:border-box}
     html,body{height:100%}
     body{
-      margin:0;display:grid;grid-template-rows:50px 1fr 25px;   /* top bar 51→50 (~2.5% slimmer), status bar 26→25 (~2.5% slimmer) — chef's-kiss finesse */
+      margin:0;display:grid;grid-template-rows:50px 1fr 24px;   /* top bar 50; status bar 25→24 (~5% slimmer) — the version/status strip sits lower-profile */
       background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
       color:var(--ink);
       font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",Consolas,monospace;
@@ -129,12 +129,12 @@
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
-    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:5px 7px 4px;min-height:0}   /* slimmer even inset (was 7/11/4) → the terminal reads bigger + closer to the app edges, less app-bg frame around it */
+    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:5px 7px 4px 5.25px;min-height:0}   /* left gutter trimmed 7→5.25 (−25%): less dead space to the terminal's left. top5 / right7 / bottom4 / left5.25 */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
     .body.with-sessions{grid-template-columns:clamp(238px,15.6vw,331px) 1fr}                                   /* + docked sessions (left) — ~2.5% narrower, sleeker */
     .body.with-sessions.sharing{grid-template-columns:clamp(238px,15.6vw,331px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
-    .center{display:flex;flex-direction:column;gap:9px;min-height:0;min-width:0}   /* gap −20% (11→9): terminal sits a touch closer to the command bar */
+    .center{display:flex;flex-direction:column;gap:7.65px;min-height:0;min-width:0}   /* gap −15% more (9→7.65): the command buttons sit a touch closer to the bottom of the terminal */
     .termrow{display:flex;gap:5px;flex:1;min-height:0;min-width:0;position:relative}   /* gap terminal↔scrollbar −50% (11→5) */
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
     .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:2px;border-radius:9px;
@@ -257,19 +257,21 @@
     .cmdscroll-wrap.more-l::before{opacity:1}
     .cmdscroll-wrap.more-r::after{opacity:1}
     /* track: equal columns sized so EXACTLY 8 fit the viewport (7 inner gaps of 6px = 42px) — narrower pills, more shown */
-    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 42px) / 8);gap:6px;
-      overflow-x:auto;overflow-y:hidden;cursor:grab;touch-action:pan-x;padding-bottom:4px}   /* subtle gap between pills and the scrollbar */
+    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 42px) / 8.2);gap:6px;
+      overflow-x:auto;overflow-y:hidden;cursor:grab;touch-action:pan-x;padding-bottom:4px}   /* ~8.2 pills fit → each ~2.5% narrower; a sliver of the next peeks (scroll affordance). subtle gap to the scrollbar */
     .cmdscroll:active{cursor:grabbing}
-    /* no per-element scrollbar override → inherits the global sleek webkit scrollbar used everywhere else */
+    /* the command scrollbar: shorter + a thinner thumb than the global 9px — sleek, barely noticeable */
+    .cmdscroll::-webkit-scrollbar{height:6px}   /* −35% (9→6) */
+    .cmdscroll::-webkit-scrollbar-thumb{border-width:1px}   /* 4px visible thumb on the 6px track (global is 2px border → too thin here) */
     /* clickable scroll arrows over the edge-fades — shown only when there's more to reveal that direction */
-    .cmdarrow{position:absolute;top:0;bottom:13px;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;   /* bottom skips the 4px gap + 9px scrollbar so the arrow centers on the pill row, not the scrollbar */
+    .cmdarrow{position:absolute;top:0;bottom:10px;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;   /* bottom skips the 4px gap + 6px scrollbar so the arrow centers on the pill row, not the scrollbar */
       border:none;background:none;color:var(--ink-dim);font-size:18px;line-height:1;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .16s,color .16s}
     .cmdarrow:hover{color:var(--ink)}
     .cmdarrow-l{left:0}
     .cmdarrow-r{right:0}
     .cmdscroll-wrap.more-l .cmdarrow-l{opacity:1;pointer-events:auto}
     .cmdscroll-wrap.more-r .cmdarrow-r{opacity:1;pointer-events:auto}
-    .cmdscroll .cmdpill{min-width:0;width:auto;padding:7px 9px;
+    .cmdscroll .cmdpill{min-width:0;width:auto;padding:5.5px 9px;   /* vertical padding 7→5.5 (~10% shorter pill); width comes from the grid track above */
       font-size:11.5px;letter-spacing:.02em;color:var(--ink-dim);white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis;text-align:center;
       background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline-soft);
@@ -492,7 +494,7 @@
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background-color:var(--panel);background-image:linear-gradient(180deg,rgba(255,255,255,.022),transparent 22%);
       box-shadow:inset -1px 0 0 var(--sheen);overflow:hidden}   /* ④ a real material: top-lit panel. No hard right border — the panel-vs-bg brightness STEP is the edge; only a faint light-catching bevel (sheen) remains */
-    .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -7px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 7 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
+    .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
