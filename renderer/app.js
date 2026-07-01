@@ -1315,7 +1315,7 @@ function openVolumePopover(anchor, id, name, room) {
   closeVolumePopover();
   const cur = Math.round((room.getVolume ? room.getVolume(id) : 1) * 100);
   const pop = document.createElement('div');
-  pop.style.cssText = 'position:fixed;z-index:9999;display:flex;flex-direction:column;gap:8px;min-width:190px;padding:11px 13px;border:1px solid #2b2f37;border-radius:11px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-family:inherit;color:#e7eaef';
+  pop.style.cssText = 'position:fixed;z-index:9999;display:flex;flex-direction:column;gap:8px;min-width:190px;padding:11px 13px;border:1px solid var(--hairline);border-radius:11px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-family:inherit;color:#e7eaef';
   const head = document.createElement('div');
   head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9097a1;gap:10px';
   const hn = document.createElement('span'); hn.textContent = '🔊 ' + name;
@@ -1329,7 +1329,7 @@ function openVolumePopover(anchor, id, name, room) {
   slider.addEventListener('input', () => apply(+slider.value));
   const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px';
   const mk = (txt, val) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
-    b.style.cssText = 'flex:1;font:inherit;font-size:10.5px;color:#9097a1;background:#191c22;border:1px solid #2b2f37;border-radius:7px;padding:5px 0;cursor:pointer';
+    b.style.cssText = 'flex:1;font:inherit;font-size:10.5px;color:#9097a1;background:#191c22;border:1px solid var(--hairline);border-radius:7px;padding:5px 0;cursor:pointer';
     b.addEventListener('click', () => { slider.value = String(val); apply(val); }); return b; };
   row.appendChild(mk('Mute', 0)); row.appendChild(mk('100%', 100)); row.appendChild(mk('Max', 200));
   pop.appendChild(head); pop.appendChild(slider); pop.appendChild(row);
@@ -2737,7 +2737,7 @@ function modalChoice({ title, body, choices }) {
     const back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';   /* above toasts (10001) so a toast can't obscure the modal */
     const box = document.createElement('div');
-    box.style.cssText = 'min-width:320px;max-width:440px;padding:20px;border:1px solid #2b2f37;border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
+    box.style.cssText = 'min-width:320px;max-width:440px;padding:20px;border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
     const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px';
     const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:16px';
     const list = document.createElement('div'); list.style.cssText = 'display:flex;flex-direction:column;gap:8px';
@@ -2749,7 +2749,7 @@ function modalChoice({ title, body, choices }) {
       const lab = document.createElement('span'); lab.textContent = c.label; lab.style.cssText = 'font-weight:600';
       b.appendChild(lab);
       if (c.sub) { const sb = document.createElement('span'); sb.textContent = c.sub; sb.style.cssText = 'display:block;font-size:10.5px;font-weight:400;color:#8a929d;margin-top:2px'; b.appendChild(sb); }
-      const danger = c.danger ? 'border-color:#7a3030;color:#ff8e8e;background:rgba(150,40,40,.12)' : 'border-color:#2b2f37;color:#cfd6df;background:#191c22';
+      const danger = c.danger ? 'border-color:#7a3030;color:#ff8e8e;background:rgba(150,40,40,.12)' : 'border-color:var(--hairline);color:#cfd6df;background:#191c22';
       b.style.cssText = `text-align:left;font:inherit;font-size:12.5px;padding:9px 12px;border:1px solid;border-radius:9px;cursor:pointer;${danger}`;
       b.addEventListener('click', () => close(c.key));
       list.appendChild(b);
@@ -2766,15 +2766,15 @@ function modalPrompt({ title, body, placeholder, value, ok }) {
     const back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';   /* above toasts (10001) so a toast can't obscure the modal */
     const box = document.createElement('div');
-    box.style.cssText = 'min-width:330px;max-width:440px;padding:20px;border:1px solid #2b2f37;border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
+    box.style.cssText = 'min-width:330px;max-width:440px;padding:20px;border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
     const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px'; box.appendChild(h);
     if (body) { const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:14px'; box.appendChild(bd); }
     const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 200; inp.placeholder = placeholder || ''; inp.value = value || '';
-    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #2b2f37;border-radius:9px;background:#0a0b0d;color:#e7eaef;font:inherit;font-size:13px;outline:none;margin-bottom:16px';
+    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--hairline);border-radius:9px;background:#0a0b0d;color:#e7eaef;font:inherit;font-size:13px;outline:none;margin-bottom:16px';
     box.appendChild(inp);
     const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
-    cancel.style.cssText = 'font:inherit;font-size:12.5px;padding:8px 14px;border:1px solid #2b2f37;border-radius:9px;cursor:pointer;color:#cfd6df;background:#191c22';
+    cancel.style.cssText = 'font:inherit;font-size:12.5px;padding:8px 14px;border:1px solid var(--hairline);border-radius:9px;cursor:pointer;color:#cfd6df;background:#191c22';
     const okb = document.createElement('button'); okb.type = 'button'; okb.textContent = ok || 'OK';
     okb.style.cssText = 'font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #3a6b52;border-radius:9px;cursor:pointer;color:#dff3e8;background:rgba(95,180,135,.18)';
     row.appendChild(cancel); row.appendChild(okb); box.appendChild(row);
