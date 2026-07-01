@@ -35,12 +35,21 @@ function ghLoginCached() {
   let dir = '';
   try { dir = path.join(os.homedir(), '.claudible'); } catch { return ''; }
   const f = path.join(dir, 'gh-login');
-  try { const v = fs.readFileSync(f, 'utf8').trim(); if (v) return v; } catch {}   // cache hit ONLY if non-empty
-  // No cached login yet → resolve. Persist ONLY a real answer: caching an empty string (gh offline / not installed
-  // / not yet authenticated on the first run) would suppress the @handle FOREVER, even after `gh auth login`. A miss
-  // just costs one cheap `gh` call next prompt until it succeeds once.
+  // Cache format: a bare non-empty string = a resolved login (permanent). A JSON object {miss:<ts>} = a recorded
+  // MISS (gh offline / not installed / not yet signed in). We used to persist ONLY a success and re-probe on every
+  // miss — but `gh api user` can HANG up to its 1500ms timeout, so an offline-but-installed gh paid that cost on
+  // EVERY prompt (the hot path). Now a miss is remembered and only re-probed after MISS_TTL, and a later success
+  // overwrites it — so `gh auth login` still surfaces the @handle (within one TTL) without suppressing it forever.
+  const MISS_TTL = 10 * 60 * 1000;   // 10 min: bounds the offline re-probe to ~once per 10 min instead of per prompt
+  try {
+    const raw = fs.readFileSync(f, 'utf8').trim();
+    if (raw) {
+      if (raw[0] === '{') { try { const o = JSON.parse(raw); if (o && o.miss && (Number(o.miss) + MISS_TTL) > Date.now()) return ''; } catch {} }   // a still-fresh miss → skip the probe this turn
+      else return raw;   // bare login string (incl. files written by the old format) → resolved
+    }
+  } catch {}
   const login = sh('gh', ['api', 'user', '--jq', '.login'], 1500);
-  if (login) { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, login); } catch {} }
+  try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, login || JSON.stringify({ miss: Date.now() })); } catch {}   // persist a success (permanent) OR a timestamped miss (re-probed after MISS_TTL)
   return login;
 }
 
