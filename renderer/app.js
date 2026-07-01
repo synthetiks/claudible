@@ -1792,8 +1792,9 @@ async function revertToCheckpoint(en) {
     ],
   });
   if (choice !== 'revert') return;
+  const targetWs = _histFeedWsId || activeWsId;   // the ws this feed was loaded for — NOT activeWsId, which can lag main after a guest-driven or auto-close switch
   let r = null;
-  try { r = await claudible.checkpointRevert(en.checkpointRef, activeWsId); } catch {}
+  try { r = await claudible.checkpointRevert(en.checkpointRef, targetWs); } catch {}
   if (!r || !r.ok) {
     const why = (r && r.error === 'no such checkpoint') ? 'that snapshot has aged out (only the latest 10 are kept)'
       : (r && r.error === 'undo snapshot failed') ? 'couldn’t capture a safety snapshot first, so nothing was changed'
@@ -1803,12 +1804,12 @@ async function revertToCheckpoint(en) {
   }
   const nrem = (r.removed && r.removed.length) || 0;
   toast('Reverted' + (nrem ? ' · removed ' + nrem + ' newer file' + (nrem === 1 ? '' : 's') : ''));
-  _revertUndoWs = activeWsId;                 // surface a persistent "Undo last revert" pill atop the feed (reachable even if you look away)
+  _revertUndoWs = targetWs;                 // surface a persistent "Undo last revert" pill atop the feed (reachable even if you look away) — tied to the ws we actually reverted
   if (typeof refreshHistoryFeed === 'function') refreshHistoryFeed();
   if (typeof refreshDiff === 'function') refreshDiff();
 }
 async function undoLastRevert() {
-  let ur = null; try { ur = await claudible.checkpointUndo(activeWsId); } catch {}
+  let ur = null; try { ur = await claudible.checkpointUndo(_revertUndoWs || _histFeedWsId || activeWsId); } catch {}
   toast((ur && ur.ok) ? 'Undid the revert — working tree restored' : 'Could not undo the revert');
   _revertUndoWs = null;
   if (typeof refreshHistoryFeed === 'function') refreshHistoryFeed();
@@ -1832,16 +1833,18 @@ function histStamp(ts) {   // compact: M/D/YY H:MM (no seconds), e.g. 7/1/26 22:
 }
 let _histShown = 10;   // pagination: how many of the newest entries the feed currently reveals (grows by 10 per "show more")
 let _revertUndoWs = null;   // after a revert, the ws whose last revert is still undoable → shows the "Undo last revert" pill (cleared on undo / drawer reopen)
+let _histFeedWsId = null;   // the workspace the feed currently reflects (main-reported at load) → revert/undo act on THIS, not a possibly-stale activeWsId (guest-driven or auto-close switch can desync them)
 const _histExpanded = new Set();   // entry ids the user expanded past 3 lines — persists across live re-renders, cleared on each drawer open
 async function refreshHistoryFeed() {
   const wrap = $('history-feed'); if (!wrap) return;
   let r = null; try { r = await claudible.historyLoad(); } catch {}
+  if (r && r.ok) _histFeedWsId = r.wsId || null;   // record which workspace these entries belong to, so a later Revert/Undo targets it exactly
   if (!r || !r.ok || !r.enabled || !r.entries || !r.entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
   wrap.hidden = false; wrap.innerHTML = '';
   const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
   lbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History</span>';   // history (rewind-clock) icon + heading
   wrap.appendChild(lbl);
-  if (_revertUndoWs && _revertUndoWs === activeWsId) {                  // a revert just happened → offer a persistent, reachable undo
+  if (_revertUndoWs && _revertUndoWs === (_histFeedWsId || activeWsId)) {   // a revert just happened on the ws this feed shows → offer a persistent, reachable undo
     const u = document.createElement('button'); u.className = 'hf-undo';
     u.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg><span>Undo last revert</span>';
     u.title = 'Restore the working tree to how it was just before the revert';
@@ -2399,9 +2402,13 @@ function renderJoinedTabRow(rec) {
   const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator';
   const sessName = rec.liveSessName || '';                                          // host's real current session name (once reported), else a host-name placeholder
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + (sessName || rec.joinedAsLabel || (who + '’s session'));
-  const m = document.createElement('div'); m.className = 'sess-meta';
-  if (rec.sessMismatch) m.innerHTML = '<span class="sess-livedot"></span>⚠ host moved to another session · ' + who;
-  else m.innerHTML = '<span class="sess-livedot"></span>joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + (((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '');
+  const m = document.createElement('div'); m.className = 'sess-meta';   // who (peer name) + rec.liveReason are host-controlled → build via text nodes so they're escaped (CSP is not the only XSS guard)
+  const mdot = document.createElement('span'); mdot.className = 'sess-livedot'; m.appendChild(mdot);
+  if (rec.sessMismatch) m.appendChild(document.createTextNode('⚠ host moved to another session · ' + who));
+  else {
+    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '';
+    m.appendChild(document.createTextNode('joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
+  }
   row.appendChild(p); row.appendChild(m);
   const xb = document.createElement('button');
   xb.className = 'sess-menu-btn'; xb.title = 'Leave this live session'; xb.setAttribute('aria-label', 'Leave live session');
@@ -3612,6 +3619,7 @@ claudible.onWorkspaceActiveChanged((id) => {
   activeWsId = id; activeSession = null; lastTitlePoll = 0; titlesSig = '';
   if (t) { t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t); }   // main re-pointed the foreground tab
   refreshWorkspaces(); refreshSessions(); renderTabStrip();
+  try { if ($('diffpanel') && $('diffpanel').classList.contains('open')) { refreshHistoryFeed(); refreshDiff(); } } catch {}   // Repo Review open → keep its feed + diff on the workspace we just switched to (don't let it show the old ws)
 });
 
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
