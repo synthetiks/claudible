@@ -814,6 +814,11 @@
     .hf-row:hover .hf-more{opacity:.6}
     .hf-more:hover{opacity:1;color:var(--ink)}
     .hf-more.open{opacity:.85;transform:rotate(180deg)}   /* chevron points up = collapse; stays visible so you can close it */
+    .hf-revert{position:absolute;top:5px;right:46px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s}
+    .hf-row:hover .hf-revert{opacity:.55}
+    .hf-revert:hover{opacity:1;color:var(--warn)}   /* destructive: warns on hover */
+    .hf-undo{width:auto;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin:1px 0 3px;padding:5px 11px;font-size:11px;color:var(--warn);background:rgba(150,40,40,.1);border:1px solid #7a3030;border-radius:999px;cursor:pointer;transition:all .15s}
+    .hf-undo:hover{background:rgba(150,40,40,.2);color:#ff9e9e}
     .hf-expand{width:auto;align-self:center;margin-top:2px;padding:4px 13px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);background:none;border:1px solid var(--hairline);border-radius:999px;cursor:pointer;transition:all .15s}
     .hf-expand:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}

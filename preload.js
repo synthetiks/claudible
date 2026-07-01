@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('claudible', {
   // session history (the append-only activity log behind the Repo Review feed + revert; gated by the sessionHistory setting)
   historyAppend: (prompt, session, wsId) => ipcRenderer.invoke('history:append', { prompt, session, wsId }),   // renderer sends the raw prompt + submitting tab's workspace; main stamps id/seq/author/machine
   historyLoad: () => ipcRenderer.invoke('history:load'),
+  checkpointRevert: (id, wsId) => ipcRenderer.invoke('checkpoint:revert', { id, wsId }),   // roll the workspace repo back to a prompt's code snapshot
+  checkpointUndo: (wsId) => ipcRenderer.invoke('checkpoint:undo', { wsId }),                // undo the last revert (restores the pre-revert tree)
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceFirstRunDone: () => ipcRenderer.invoke('workspace:firstRunDone'),

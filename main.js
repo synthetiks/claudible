@@ -859,7 +859,7 @@ function startPoll() {
 function handleHook(tabId, line) {
   let ev = ''; try { ev = JSON.parse(line).hook_event_name || ''; } catch {}
   if (ev === 'UserPromptSubmit') setGenBusy(tabId, true);
-  else if (ev === 'Stop') { setGenBusy(tabId, false); const r = ptys.get(tabId); schedulePush(r && r.ws); }
+  else if (ev === 'Stop') { setGenBusy(tabId, false); const r = ptys.get(tabId); schedulePush(r && r.ws); _snapshotOnStop(tabId); }
 }
 // Clone an existing (invited) repo workspace into ~/.claudible/repos/<slug> if it isn't local yet.
 function ensureClone(ws) {
@@ -1583,6 +1583,45 @@ function _histFile(wsId) {
   const dir = path.join(RT, 'history'); try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return path.join(dir, String(wsId || 'default').replace(/[^A-Za-z0-9_-]/g, '-') + '.json');
 }
+// ---- per-prompt code checkpoints: the snapshot layer behind the Session-History "Revert" (pure lib/checkpoint.js,
+// run in the workspace repo via wsl/checkpoint.sh). We snapshot the repo when a turn ENDS (Stop → the tree has
+// settled, so no edit races the snapshot) and carry that ref as the NEXT prompt's checkpointRef — so "revert
+// prompt N" restores the code as it was going INTO N. Gated on the SAME sessionHistory setting → zero cost when off.
+const _pendingCkpt = new Map();          // wsId -> latest settled checkpoint id (attached to the next prompt's entry)
+const _ckptIdRe = /^[A-Za-z0-9_-]{1,64}$/;
+function _ckptRun(ws, argStr) {
+  return new Promise((resolve) => {
+    if (!APPDIR_WSL || !ws) return resolve(null);
+    runner.runScript('checkpoint.sh', argStr, { ws, timeout: 30000, maxBuffer: 8 * 1024 * 1024 })
+      .then(({ stdout }) => { let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {} resolve(r); })
+      .catch(() => resolve(null));
+  });
+}
+function _wsById(wsId) { try { return registry.workspaces.find((w) => w && w.id === wsId) || null; } catch { return null; } }
+// Turn ended → snapshot the settled worktree; on success it becomes the next prompt's checkpointRef, then prune any
+// snapshot the newest-10 ring no longer references (bounds .git growth on a busy repo).
+function _snapshotOnStop(tabId) {
+  try {
+    if (!_histEnabled()) return;                                     // feature off → never touch the repo
+    const rec = ptys.get(tabId); const ws = rec && rec.ws;
+    if (!ws || !ws.id || (ws.kind && ws.kind !== 'repo')) return;    // only repo workspaces have git to snapshot
+    // Invalidate the pending ref SYNCHRONOUSLY, before the async snapshot runs. history:append reads _pendingCkpt at
+    // the NEXT UserPromptSubmit; if the user fires that before this snapshot resolves, they now get NO checkpoint
+    // (null → no Revert button) instead of the PREVIOUS turn's ref — which would silently over-revert past a whole
+    // turn's edits. Fail-safe to null; the ref is filled in once the snapshot lands.
+    _pendingCkpt.set(ws.id, null);
+    const id = require('crypto').randomUUID();
+    _ckptRun(ws, 'snapshot ' + id).then((r) => {
+      if (!r || !r.ok || !r.sha) return;
+      _pendingCkpt.set(ws.id, id);
+      try {
+        const keep = _histStore.load(fs, _histFile(ws.id)).slice(-10).map((en) => en.checkpointRef).filter((x) => x && _ckptIdRe.test(x));
+        keep.push(id);
+        _ckptRun(ws, 'prune ' + keep.join(' '));
+      } catch {}
+    });
+  } catch {}
+}
 ipcMain.handle('history:load', () => {
   try {
     if (!_histEnabled()) return { ok: true, enabled: false, entries: [] };   // off = off for reads too: don't surface entries from a previously-enabled period
@@ -1590,6 +1629,19 @@ ipcMain.handle('history:load', () => {
     return { ok: true, enabled: true, entries: _histStore.load(fs, _histFile(wsId)) };
   } catch (e) { return { ok: false, enabled: false, entries: [], error: String(e) }; }
 });
+// Revert the entry's workspace repo to the code state captured at that prompt (its checkpointRef). checkpoint.sh
+// snapshots the CURRENT tree to an 'undo' ref FIRST, so the revert is reversible. Worktree-only — it does NOT
+// rewind commits (the renderer's confirm dialog says so). 'undo' is not a valid revert target here (use checkpoint:undo).
+ipcMain.handle('checkpoint:revert', (e, { id, wsId } = {}) => new Promise((resolve) => {
+  if (!_histEnabled()) return resolve({ ok: false, error: 'disabled' });
+  const cid = String(id || '');
+  if (!_ckptIdRe.test(cid) || cid === 'undo') return resolve({ ok: false, error: 'bad id' });
+  _ckptRun(_wsById(wsId) || activeWorkspace, 'restore ' + cid).then((r) => resolve(r || { ok: false, error: 'revert failed' }));
+}));
+ipcMain.handle('checkpoint:undo', (e, { wsId } = {}) => new Promise((resolve) => {
+  if (!_histEnabled()) return resolve({ ok: false, error: 'disabled' });
+  _ckptRun(_wsById(wsId) || activeWorkspace, 'restore undo').then((r) => resolve(r || { ok: false, error: 'undo failed' }));
+}));
 ipcMain.handle('history:append', (e, payload) => {
   try {
     if (!_histEnabled()) return { ok: false, disabled: true };
@@ -1618,6 +1670,7 @@ ipcMain.handle('history:append', (e, payload) => {
       machine: _identity.machineRecord({ savedId: _machineId(), host: _os.hostname(), os: process.platform }),
       session: payload && payload.session ? String(payload.session) : '',
       prompt,
+      checkpointRef: _pendingCkpt.get(wsId) || null,   // the settled snapshot from the previous turn = the code state going INTO this prompt (null until the first turn ends → that prompt gets no revert target)
     });
     _histStore.append(fs, file, entry);
     return { ok: true, entry };

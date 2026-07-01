@@ -1699,7 +1699,7 @@ function openDiff(open) {
   p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
   p.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
-  if (open) { _histShown = 10; _histExpanded.clear(); refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open; history feed starts at the latest 10, all collapsed
+  if (open) { _histShown = 10; _histExpanded.clear(); _revertUndoWs = null; refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open; history feed starts at the latest 10, all collapsed
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
 function repoReviewHeader(aw, files, untracked, committed, commits, total) {
@@ -1740,7 +1740,7 @@ function repoReviewHeader(aw, files, untracked, committed, commits, total) {
 // ---- Session-history activity feed (top of the Repo Review drawer) ----
 // Renders the last N prompts (who · when · what) from the main-owned log. Shows only when the
 // sessionHistory setting is on and there are entries — otherwise stays hidden (zero footprint).
-function renderHistoryEntry(en) {
+function renderHistoryEntry(en, revertable) {
   const row = document.createElement('div'); row.className = 'hf-row';
   const meta = document.createElement('div'); meta.className = 'hf-meta';
   [['Name', histSessionName(en.session)],
@@ -1761,12 +1761,58 @@ function renderHistoryEntry(en) {
   more.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
   more.onclick = (e) => { e.stopPropagation(); const open = pr.classList.toggle('expanded'); more.classList.toggle('open', open); more.title = open ? 'Collapse' : 'Expand'; if (open) _histExpanded.add(en.id); else _histExpanded.delete(en.id); };
   row.appendChild(more);
+  // Revert: only when this entry captured a code snapshot (checkpointRef) AND it's still within the kept window —
+  // checkpoints are pruned to the newest 10, so an older ("show more") entry's snapshot no longer exists and its
+  // button would only ever say "aged out". `revertable` is passed for the newest-10 rows.
+  if (en.checkpointRef && revertable) {
+    const rev = document.createElement('button'); rev.className = 'hf-revert'; rev.title = 'Revert code to this prompt';
+    rev.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2-9.3"/></svg>';   // rewind-arrow
+    rev.onclick = (e) => { e.stopPropagation(); revertToCheckpoint(en); };
+    row.appendChild(rev);
+  }
   const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt';
   copy.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
   copy.onclick = (e) => { e.stopPropagation(); try { claudible.clipWrite(en.prompt || ''); } catch {} copy.classList.add('done'); toast('Prompt copied'); setTimeout(() => copy.classList.remove('done'), 900); };
   row.appendChild(copy);
   requestAnimationFrame(() => { if (_histExpanded.has(en.id) || pr.scrollHeight > pr.clientHeight + 2) more.style.display = ''; });   // show expand only when there's more than 3 lines to read
   return row;
+}
+// Roll the working tree back to the code snapshot captured at this prompt. Destructive (working-tree ONLY — it does
+// not rewind commits), so we confirm first; checkpoint.sh captures an 'undo' snapshot before restoring, which we
+// then offer so the revert is reversible.
+async function revertToCheckpoint(en) {
+  if (!en || !en.checkpointRef) return;
+  const name = histSessionName(en.session);
+  const choice = await modalChoice({
+    title: 'Revert code to this prompt?',
+    body: 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.',
+    choices: [
+      { key: 'revert', label: 'Revert working files', sub: 'Roll the code back to this point. An "Undo last revert" appears after.', danger: true },
+      { key: 'cancel', label: 'Cancel' },
+    ],
+  });
+  if (choice !== 'revert') return;
+  let r = null;
+  try { r = await claudible.checkpointRevert(en.checkpointRef, activeWsId); } catch {}
+  if (!r || !r.ok) {
+    const why = (r && r.error === 'no such checkpoint') ? 'that snapshot has aged out (only the latest 10 are kept)'
+      : (r && r.error === 'undo snapshot failed') ? 'couldn’t capture a safety snapshot first, so nothing was changed'
+      : (r && r.error === 'disabled') ? 'session history is off' : (r && r.error) ? r.error : 'unknown error';
+    toast('Could not revert — ' + why);
+    return;
+  }
+  const nrem = (r.removed && r.removed.length) || 0;
+  toast('Reverted' + (nrem ? ' · removed ' + nrem + ' newer file' + (nrem === 1 ? '' : 's') : ''));
+  _revertUndoWs = activeWsId;                 // surface a persistent "Undo last revert" pill atop the feed (reachable even if you look away)
+  if (typeof refreshHistoryFeed === 'function') refreshHistoryFeed();
+  if (typeof refreshDiff === 'function') refreshDiff();
+}
+async function undoLastRevert() {
+  let ur = null; try { ur = await claudible.checkpointUndo(activeWsId); } catch {}
+  toast((ur && ur.ok) ? 'Undid the revert — working tree restored' : 'Could not undo the revert');
+  _revertUndoWs = null;
+  if (typeof refreshHistoryFeed === 'function') refreshHistoryFeed();
+  if (typeof refreshDiff === 'function') refreshDiff();
 }
 // Resolve a session id to its human title (local rename → shared-title cache → short id fallback).
 function histSessionName(id) {
@@ -1785,6 +1831,7 @@ function histStamp(ts) {   // compact: M/D/YY H:MM (no seconds), e.g. 7/1/26 22:
   } catch { return String(ts); }
 }
 let _histShown = 10;   // pagination: how many of the newest entries the feed currently reveals (grows by 10 per "show more")
+let _revertUndoWs = null;   // after a revert, the ws whose last revert is still undoable → shows the "Undo last revert" pill (cleared on undo / drawer reopen)
 const _histExpanded = new Set();   // entry ids the user expanded past 3 lines — persists across live re-renders, cleared on each drawer open
 async function refreshHistoryFeed() {
   const wrap = $('history-feed'); if (!wrap) return;
@@ -1794,9 +1841,16 @@ async function refreshHistoryFeed() {
   const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
   lbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History</span>';   // history (rewind-clock) icon + heading
   wrap.appendChild(lbl);
+  if (_revertUndoWs && _revertUndoWs === activeWsId) {                  // a revert just happened → offer a persistent, reachable undo
+    const u = document.createElement('button'); u.className = 'hf-undo';
+    u.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg><span>Undo last revert</span>';
+    u.title = 'Restore the working tree to how it was just before the revert';
+    u.onclick = () => undoLastRevert();
+    wrap.appendChild(u);
+  }
   const all = r.entries.slice().reverse();                             // newest first
   const shown = Math.min(_histShown, all.length);
-  all.slice(0, shown).forEach((en) => wrap.appendChild(renderHistoryEntry(en)));
+  all.slice(0, shown).forEach((en, i) => wrap.appendChild(renderHistoryEntry(en, i < 10)));   // only the newest 10 keep a live checkpoint (pruned beyond that) → only they get a Revert button
   if (all.length > shown) {                                            // reveal the next 10 on click, then keep scrolling
     const more = document.createElement('button'); more.className = 'hf-expand';
     more.textContent = 'Show ' + Math.min(10, all.length - shown) + ' more';
