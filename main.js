@@ -1669,7 +1669,7 @@ ipcMain.handle('history:load', () => {
   try {
     if (!_histEnabled()) return { ok: true, enabled: false, entries: [] };   // off = off for reads too: don't surface entries from a previously-enabled period
     const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
-    return { ok: true, enabled: true, entries: _histStore.load(fs, _histFile(wsId)) };
+    return { ok: true, enabled: true, wsId, entries: _histStore.load(fs, _histFile(wsId)) };   // wsId = the workspace these entries belong to, so the renderer reverts against IT (not a possibly-stale activeWsId)
   } catch (e) { return { ok: false, enabled: false, entries: [], error: String(e) }; }
 });
 // Revert the entry's workspace repo to the code state captured at that prompt (its checkpointRef). checkpoint.sh
