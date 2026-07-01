@@ -69,10 +69,8 @@ contextBridge.exposeInMainWorld('claudible', {
   pluginsToggle: (key, enable) => ipcRenderer.invoke('plugins:toggle', { key, enable }),
   onWorkspaceActiveChanged: (cb) => ipcRenderer.on('workspace:active-changed', (_e, id) => cb(id)),
   // shared-session sync (repo workspaces): same sessions across collaborators, over the repo's git
-  syncStatus: (id) => ipcRenderer.invoke('session:syncStatus', id),
   syncSetEnabled: (id, enabled) => ipcRenderer.invoke('session:syncSetEnabled', { id, enabled }),
   syncNow: (id) => ipcRenderer.invoke('session:syncNow', id),
-  workspaceDiscover: () => ipcRenderer.invoke('workspace:discover'),
   onSyncState: (cb) => ipcRenderer.on('sync:state', (_e, s) => cb(s)),
   onSyncChanged: (cb) => ipcRenderer.on('sync:changed', (_e, s) => cb(s)),
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
@@ -85,13 +83,11 @@ contextBridge.exposeInMainWorld('claudible', {
   onHookLine: (cb) => ipcRenderer.on('hook:line', (_e, { tabId, line }) => cb(tabId, line)),
   onWorkflowAgents: (cb) => ipcRenderer.on('workflow:agents', (_e, { tabId, workflows }) => cb(tabId, workflows)),
   onAgentTokens: (cb) => ipcRenderer.on('agent-tokens', (_e, { tabId, agentTok }) => cb(tabId, agentTok)),
-  hookTest: () => ipcRenderer.invoke('hook:test'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),   // s carries s.tabId
   onProvision: (cb) => ipcRenderer.on('provision', (_e, m) => cb(m)),   // first-run voice setup progress {phase,msg}
   // live terminal sharing
   shareStart: (opts) => ipcRenderer.invoke('share:start', opts || {}),
   shareStop: () => ipcRenderer.invoke('share:stop'),
-  shareStatus: () => ipcRenderer.invoke('share:status'),
   shareNewLink: () => ipcRenderer.invoke('share:newlink'),
   shareKick: (name) => ipcRenderer.invoke('share:kick', { name }),   // host removes one guest by name
   shareApprove: (id, ok) => ipcRenderer.invoke('share:approve', { id, ok }),
@@ -112,7 +108,6 @@ contextBridge.exposeInMainWorld('claudible', {
   liveAdvertise: (sessionId, name) => ipcRenderer.invoke('live:advertise', { sessionId, name }),
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
   livePeers: () => ipcRenderer.invoke('live:peers'),
-  liveJoin: (peer, name) => ipcRenderer.invoke('live:join', { peer, name }),   // open the peer's session in a SEPARATE window (fallback)
   // native joined tab: main holds a client WebSocket to the peer; the renderer draws a normal xterm tab and
   // co-drives over IPC (the renderer's CSP forbids a wss:// socket, so the socket lives in main).
   liveConnect: (tabId, peer, name) => ipcRenderer.invoke('live:connect', { tabId, peer, name }),
@@ -136,7 +131,6 @@ contextBridge.exposeInMainWorld('claudible', {
   titleList: () => ipcRenderer.invoke('title:list'),
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
-  saveSession: (text) => ipcRenderer.invoke('save-session', text),
   // clipboard (handled in main so it works regardless of web clipboard permissions)
   clipWrite: (text) => ipcRenderer.invoke('clip:write', text),
   clipRead: () => ipcRenderer.invoke('clip:read'),

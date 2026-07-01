@@ -1071,14 +1071,7 @@ if ($('seg-term')) {
   }, 1000);
 }
 
-// ---------- Save Session (pop-out tab) ----------
-function buildTranscript() {
-  const head = 'Claudible session — ' + new Date().toLocaleString() + '\n' + '='.repeat(48) + '\n\n';
-  const at = AT();
-  const body = (at ? at.sessionLog : []).map((turn) => `[${turn.role}]\n${turn.text}\n`).join('\n');
-  return head + (body || '(no turns recorded this session yet)') + '\n';
-}
-// (save-session and clear-input toolbar buttons removed — sessions auto-save; the git button now sits bottom-right)
+// (Save Session pop-out removed — sessions auto-save; the git button sits bottom-right. buildTranscript() dropped as dead code.)
 
 // ---------- right-click menu: Copy / Paste / Select All (terminal + selectable UI text) ----------
 // Electron ships no default context menu and xterm copies nothing on its own, so wire one up. Copy uses
@@ -1746,13 +1739,6 @@ function repoReviewHeader(aw, files, untracked, committed, commits, total) {
 // ---- Session-history activity feed (top of the Repo Review drawer) ----
 // Renders the last N prompts (who · when · what) from the main-owned log. Shows only when the
 // sessionHistory setting is on and there are entries — otherwise stays hidden (zero footprint).
-function histRelTime(ts) {
-  const s = Math.max(0, (Date.now() - ts) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  return Math.floor(s / 86400) + 'd ago';
-}
 function renderHistoryEntry(en) {
   const row = document.createElement('div'); row.className = 'hf-row';
   const meta = document.createElement('div'); meta.className = 'hf-meta';
