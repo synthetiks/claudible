@@ -129,7 +129,7 @@
     /* body */
     /* panels scale with the window: chat + sessions widen on big screens, never narrower than today's px on small.
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
-    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:7px 11px 4px;min-height:0}   /* tight: top 7, sides 11, gap 9; bottom 4 — the space under the command bar halved again */
+    .body{display:grid;grid-template-columns:1fr;gap:9px;padding:5px 7px 4px;min-height:0}   /* slimmer even inset (was 7/11/4) → the terminal reads bigger + closer to the app edges, less app-bg frame around it */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
     .body.with-sessions{grid-template-columns:clamp(238px,15.6vw,331px) 1fr}                                   /* + docked sessions (left) — ~2.5% narrower, sleeker */
     .body.with-sessions.sharing{grid-template-columns:clamp(238px,15.6vw,331px) 1fr clamp(312px,24vw,480px)}   /* both */
@@ -212,9 +212,9 @@
     .sum-stats{margin-top:2px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint)}
     .sum-bar{flex:none;width:110px;height:5px;border-radius:3px;background:#1a1d23;overflow:hidden}
     .sum-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#5fb487,#6aa6e0);transition:width .4s cubic-bezier(.4,0,.2,1)}
-    #terminal{background:var(--terminal-bg);border:1px solid var(--hairline);border-radius:11px;
+    #terminal{background:var(--terminal-bg);border:none;border-radius:9px;
       flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
-      box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
+      box-shadow:inset 0 22px 60px -56px #000}   /* frameless "blackboard": no border, no outer 1px ring, no raised top lip — just a whisper of recessed inner depth so it reads as the app's OWN surface, not a card floating in a card */
     /* one xterm mount per tab, stacked; only the active tab shows. Padding lives here so the xterm stays inset. */
     .term-host{position:absolute;inset:0;display:none;padding:10px 12px}
     .term-host.active{display:block}
@@ -492,7 +492,7 @@
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;background-color:var(--panel);background-image:linear-gradient(180deg,rgba(255,255,255,.022),transparent 22%);
       box-shadow:inset -1px 0 0 var(--sheen);overflow:hidden}   /* ④ a real material: top-lit panel. No hard right border — the panel-vs-bg brightness STEP is the edge; only a faint light-catching bevel (sheen) remains */
-    .body.with-sessions .sidebar{display:flex;margin:-7px 0 -4px -11px}   /* flush to the left wing — margins cancel the body padding (top 7 / left 11 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
+    .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -7px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 7 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
