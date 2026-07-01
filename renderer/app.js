@@ -278,6 +278,7 @@ document.querySelectorAll('.panel button').forEach((b) =>
   $('sb-kokoro').textContent = 'kokoro ' + ep.kokoro.split(':').pop();
   // the embedded Claude Code CLI version, left of whisper/kokoro — hidden gracefully if it can't be resolved
   try { const cv = await claudible.claudeVersion(); const el = $('sb-claude'); if (el) { if (cv) { el.textContent = 'claude code ' + cv; el.style.display = ''; } else { el.style.display = 'none'; } } } catch {}
+  try { const av = await claudible.appVersion(); const ve = $('app-ver'); if (ve && av) ve.textContent = 'claudible v' + av; } catch {}   // real version, not the hardcoded 'v0.2'
 })();
 
 // ---------- session tracker ----------

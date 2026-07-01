@@ -1416,6 +1416,7 @@ ipcMain.handle('session:export-text', async (e, sessionId) => {
 // The embedded Claude Code CLI version, for the status bar. Resolved once via a tiny cross-backend script and
 // cached (it's stable for the app's lifetime); returns '' if claude isn't resolvable so the bar just hides it.
 let _claudeVer;   // undefined = not fetched yet
+ipcMain.handle('app:version', () => app.getVersion());   // the real Claudible version (package.json) for the status-bar badge — was hardcoded in the HTML
 ipcMain.handle('claude:version', () => {
   if (_claudeVer !== undefined) return _claudeVer;
   return new Promise((resolve) => {

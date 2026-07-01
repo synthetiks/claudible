@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('claudible', {
   exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
   exportSessionText: (id) => ipcRenderer.invoke('session:export-text', id),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: () => ipcRenderer.invoke('claude:version'),   // the embedded Claude Code CLI version (for the status bar)
+  appVersion: () => ipcRenderer.invoke('app:version'),   // Claudible's own version (package.json) for the status-bar badge
   latestReply: (id) => ipcRenderer.invoke('session:latest-reply', id),   // a session's last assistant reply (for manual Speak / re-listen)
   // first-run onboarding wizard (connect Claude → workspace → GitHub)
   onboardStatus: () => ipcRenderer.invoke('onboard:status'),             // { claudeInstalled, claudeSignedIn, claudeVersion, ghInstalled, ghSignedIn, ghAccount, voiceReady, voiceProvisioning }
