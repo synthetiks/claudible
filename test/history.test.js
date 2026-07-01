@@ -33,7 +33,9 @@ const A = [makeEntry({ id: 'x', seq: 1, ts: 1, prompt: 'a' }), makeEntry({ id: '
 const B = [makeEntry({ id: 'y', seq: 2, ts: 2, prompt: 'b' }), makeEntry({ id: 'z', seq: 3, ts: 3, prompt: 'c' })];
 const m = mergeLogs(A, B);
 eq('merge dedupes by id', m.length, 3);
-eq('merge ordered by seq', m.map(e => e.id), ['x', 'y', 'z']);
+eq('merge ordered by ts', m.map(e => e.id), ['x', 'y', 'z']);
+// ts (globally comparable) must win over per-machine seq: q has a LOWER seq but a LATER ts → sorts last
+eq('merge orders by ts, not per-machine seq', mergeLogs([makeEntry({ id: 'p', seq: 5, ts: 1 })], [makeEntry({ id: 'q', seq: 1, ts: 9 })]).map(e => e.id), ['p', 'q']);
 eq('merge respects cap', mergeLogs(log, [makeEntry({ id: 99, seq: 99, ts: 99 })]).length, MAX_ENTRIES);
 
 // ---- summarizeFiles: the feed's GitHub-style one-liner ----
