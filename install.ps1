@@ -8,7 +8,7 @@
 #                             # mode remains the proven default.
 # It handles Windows Node, dependencies, the voice build, a Desktop shortcut, and launch. The only things it
 # can't conjure are git (the README one-liner installs that before the clone) and, in WSL mode, WSL2 itself.
-param([switch]$Native)
+param([switch]$Native, [switch]$NoUpdate)
 $ErrorActionPreference = 'Stop'
 $app = $PSScriptRoot
 Set-Location $app
@@ -43,6 +43,20 @@ if (-not (Test-Node)) {
     Die "Node installed but isn't visible in this window yet. Open a NEW PowerShell and run:`n  powershell -NoProfile -ExecutionPolicy Bypass -File `"$app\install.ps1`""
   }
   Write-Host "  Node ready - continuing." -ForegroundColor Green
+}
+
+# Self-update: re-running the installer on an existing clone must build the LATEST code, not the commit it was
+# cloned at (a stale build is the root cause of cross-machine live-join skew). Only when this is a CLEAN git
+# checkout (never clobber local edits); non-fatal on any failure. Opt out with -NoUpdate.
+if (-not $NoUpdate -and (Test-Path (Join-Path $app '.git')) -and (Get-Command git -ErrorAction SilentlyContinue)) {
+  Step 'Update' 'Refreshing to the latest Claudible (git pull)...'
+  if (& git -C $app status --porcelain) {
+    Write-Host '  Local changes present - skipping auto-update (building your current tree).' -ForegroundColor Yellow
+  } else {
+    & git -C $app pull --ff-only
+    if ($LASTEXITCODE -ne 0) { Write-Host '  Could not fast-forward - continuing with the current checkout.' -ForegroundColor Yellow }
+    else { Write-Host '  Up to date.' -ForegroundColor Green }
+  }
 }
 
 Step '1/4' 'Installing dependencies (npm install)...'
@@ -93,7 +107,13 @@ if ($Native) {
 
 Step '3/4' 'Creating the Desktop shortcut...'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'launch\make-shortcut.ps1')
+if ($LASTEXITCODE -ne 0) { Write-Host '  (Desktop shortcut step reported an issue - you can still launch via: npm start.)' -ForegroundColor Yellow }
 
 Step '4/4' 'Launching Claudible...'
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','npm','start' -WorkingDirectory $app -WindowStyle Hidden
-Write-Host "`n[OK] Done. Claudible is starting, and there's a 'Claudible' shortcut on your Desktop." -ForegroundColor Green
+$proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','npm','start' -WorkingDirectory $app -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 3   # a hidden fire-and-forget launch used to print success even if the app instantly died; catch an immediate crash
+if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+  Write-Host "`n[!] Claudible exited immediately (code $($proc.ExitCode)). Launch manually to see the error:`n    cd `"$app`"; npm start" -ForegroundColor Yellow
+} else {
+  Write-Host "`n[OK] Done. Claudible is starting, and there's a 'Claudible' shortcut on your Desktop." -ForegroundColor Green
+}

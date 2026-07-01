@@ -16,10 +16,28 @@ pkg() {   # install system packages via apt (Debian/WSL) or brew (macOS); fail i
 }
 
 case "$dep" in
-  node)        have node && ok; pkg nodejs npm || err "no apt/brew to install node"; have node && ok || err "node still missing" ;;
+  node)
+    # Presence isn't enough — Claudible needs >=22.12, and the distro 'nodejs' package is often older. Gate on
+    # VERSION (not just `have node`) so the System-check wizard can actually self-heal an outdated node.
+    nok() { have node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' >/dev/null 2>&1; }
+    nok && ok
+    if have apt-get; then curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/dev/null 2>&1; sudo apt-get install -y nodejs >/dev/null 2>&1
+    elif have brew; then brew install node@22 >/dev/null 2>&1; brew link --overwrite --force node@22 >/dev/null 2>&1
+    else err "no apt/brew to install node"; fi
+    nok && ok || err "node is still older than 22.12 — upgrade from https://nodejs.org"
+    ;;
   git)         have git && ok;  pkg git        || err "no apt/brew to install git";  have git && ok  || err "git still missing" ;;
   gh)          have gh && ok;   pkg gh         || err "could not install gh (see https://cli.github.com)"; have gh && ok || err "gh still missing" ;;
-  cloudflared) have cloudflared && ok; pkg cloudflared || err "could not install cloudflared"; have cloudflared && ok || err "cloudflared still missing" ;;
+  cloudflared)
+    have cloudflared && ok
+    pkg cloudflared && { have cloudflared && ok; }   # apt on stock WSL usually lacks cloudflared → fall back to Cloudflare's official static binary
+    arch="$(uname -m)"; case "$arch" in x86_64|amd64) a=amd64 ;; aarch64|arm64) a=arm64 ;; armv7l) a=arm ;; *) a=amd64 ;; esac
+    tmp="$(mktemp)"
+    if curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$a" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+      chmod +x "$tmp"; sudo mv "$tmp" /usr/local/bin/cloudflared 2>/dev/null || { mkdir -p "$HOME/.local/bin"; mv "$tmp" "$HOME/.local/bin/cloudflared"; }
+    fi
+    have cloudflared && ok || err "could not install cloudflared (https://developers.cloudflare.com/cloudflared/)"
+    ;;
   uv)
     have uv && ok
     curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
