@@ -1111,6 +1111,8 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   openGen++;   // supersede any in-flight workspace:open clone for the workspace being deleted (mirrors create/switch)
   const fgWasHere = !!(fgRec() && fgRec().ws && fgRec().ws.id === id);
   for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id) rec.ws = fallback; }   // repoint any tab inside it
+  const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
+  _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id);               // drop the deleted ws's leftover per-workspace state
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
   saveRegistry(); syncShare();
