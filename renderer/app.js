@@ -2400,6 +2400,24 @@ claudible.onLiveStatus((p) => {
   if (p.tabId === activeTabId) repaintLiveTracker(rec);
   if (rec.liveSessName !== prevName || rec.sessMismatch !== prevMismatch) refreshSessions();   // reflect the real session name / mismatch on the sidebar row
 });
+// The "out of sync" / "removed" conflict chips, shared by the active-workspace row (renderSessionRow) AND the
+// expanded-tree row (renderWsSessionRow) — the latter previously drew NO chip, so divergence was invisible there.
+// For a non-active tree row pass its workspace `w` so a click switches there first (else resolve/delete targets
+// the wrong workspace's PROJ). Active rows pass w=null and open the modal directly.
+function appendConflictChip(m, s, w) {
+  const act = (open) => (e) => { e.stopPropagation(); if (w && w.id !== activeWsId) switchWorkspace(w.id, s.id); open(s); };
+  if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip
+    const db = document.createElement('button');
+    db.className = 'sess-chip removed'; db.title = 'Deleted from GitHub by a collaborator';
+    db.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>removed';
+    db.addEventListener('click', act(openDeletedRemoteModal)); m.appendChild(db);
+  } else if (s.diverged) {                                           // same session edited on both machines → soft amber "diverged" chip
+    const vb = document.createElement('button');
+    vb.className = 'sess-chip diverged'; vb.title = 'Out of sync — this conversation was continued on both machines; click to resolve';
+    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>out of sync';
+    vb.addEventListener('click', act(openDivergedInfo)); m.appendChild(vb);
+  }
+}
 function renderSessionRow(s) {
   const row = document.createElement('div');
   row.className = 'sess' + (s.id === activeSession ? ' active' : '') + (sessionOpenInTab(s.id) ? ' open-in-tab' : '');
@@ -2420,19 +2438,7 @@ function renderSessionRow(s) {
     if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s))); }   // a collaborator is live here → green bar + calm dot, "Join" on hover (carry this row's name onto the joined tab)
   }
   row.appendChild(p); row.appendChild(m);
-  if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip
-    const db = document.createElement('button');
-    db.className = 'sess-chip removed'; db.title = 'Deleted from GitHub by a collaborator';
-    db.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>removed';
-    db.addEventListener('click', (e) => { e.stopPropagation(); openDeletedRemoteModal(s); });
-    m.appendChild(db);
-  } else if (s.diverged) {                                           // same session edited on both machines → soft amber "diverged" chip
-    const vb = document.createElement('button');
-    vb.className = 'sess-chip diverged'; vb.title = 'Out of sync — this conversation was continued on both machines; click to resolve';
-    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>out of sync';
-    vb.addEventListener('click', (e) => { e.stopPropagation(); openDivergedInfo(s); });
-    m.appendChild(vb);
-  }
+  appendConflictChip(m, s, null);                                    // active-workspace row: chip opens the resolve modal directly
   // A single ▾ opens the per-session options menu (Rename / Export / Delete) — mirrors the workspace ▾ menu,
   // so the row stays a clean title with nothing crowding it and no inline confirm strip to overflow.
   const mb = document.createElement('button');
@@ -2959,6 +2965,7 @@ function renderWsSessionRow(w, s) {
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s); p.title = p.textContent;
   const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.mtime); m.appendChild(mt);
   row.appendChild(p); row.appendChild(m);
+  appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
   const go = () => { switchWorkspace(w.id, s.id); };   // switch to that workspace AND open the specific session in one shot (single respawn, no flicker)
   row.addEventListener('click', go);
   row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });

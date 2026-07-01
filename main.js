@@ -803,6 +803,7 @@ function runSync(ws, op, opts) {
 }
 // Locked, state-broadcasting sync: tells the renderer 'syncing'→'idle'/'error' (status button) and asks it
 // to refresh the switcher when the active workspace gained/changed sessions. Requires sync ON + cloned.
+const _syncDivSeen = new Map();   // ws.id -> last-seen diverged count, so a divergence-only sync notifies the renderer only on a real change (not every poll tick)
 async function doSync(ws, op, opts) {
   if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) return { ok: false, error: 'sync off' };
   if (syncLock.has(ws.id)) return { ok: false, error: 'busy' };
@@ -810,7 +811,9 @@ async function doSync(ws, op, opts) {
   try { win && win.webContents.send('sync:state', { id: ws.id, status: 'syncing' }); } catch {}
   const r = await runSync(ws, op, opts);
   syncLock.delete(ws.id);
-  const changed = !!(r && (r.imported || r.updated || r.pushed));
+  const divNow = (r && r.diverged) || 0, divPrev = _syncDivSeen.get(ws.id) || 0;
+  _syncDivSeen.set(ws.id, divNow);
+  const changed = !!(r && (r.imported || r.updated || r.pushed)) || (divNow !== divPrev);   // a divergence-only sync must notify too — but only when the fork set CHANGES (divNow is recomputed every tick, so a raw OR would refresh forever)
   try { win && win.webContents.send('sync:state', { id: ws.id, status: r && r.ok ? 'idle' : 'error', synced: r && r.synced, diverged: r && r.diverged }); } catch {}
   if (changed) { try { win && win.webContents.send('sync:changed', { id: ws.id }); } catch {} }   // renderer refreshes only if it's the shown workspace
   return r;
