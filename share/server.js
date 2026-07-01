@@ -197,6 +197,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     // colliding name AND orphan its un-kickable "Guest (2)" roster entry. hello.you (below) echoes the name back.
     if (mode === 'link') name = uniqueName(name, nameTaken);
     else if (back && back.name) name = back.name;
+    else name = uniqueName(name, nameTaken);   // resume with NO grace record (multi-tab / token reuse) → still keep the roster unique rather than trusting the raw ?n=
     ws._name = name;
     if (mode === 'link') { const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok; }
     else {

@@ -100,7 +100,12 @@ function joinAndHello(port, cred) {
     eq('resume restores the RESERVED suffixed name, not the stale ?n=', b2.you, 'Guest (2)');
     ok('guest A is unaffected by B reconnecting', a.you === 'Guest');
 
-    try { a.ws.close(); c.ws.close(); b2.ws.close(); } catch {}
+    // A resume with a valid token but NO grace record (a 2nd socket reusing a still-live token, e.g. a duplicated
+    // tab) must NOT trust the raw ?n= — it still gets uniquified so it can't collide with the tab holding the name.
+    const a3 = await joinAndHello(port, `r=${encodeURIComponent(a.resume)}&n=Guest`);   // A never dropped → no pendingDrop
+    ok('resume without a grace record is still uniquified (not the raw ?n=)', a3.you !== 'Guest' && /^Guest \(\d+\)$/.test(a3.you));
+
+    try { a.ws.close(); c.ws.close(); b2.ws.close(); a3.ws.close(); } catch {}
   } catch (e) {
     fail++; console.error('  FAIL integration threw: ' + (e && e.message));
   } finally {
