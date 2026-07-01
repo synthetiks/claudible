@@ -800,15 +800,20 @@
     .hf-lbl{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}   /* size + brightness matched to the 'repo review' drawer title */
     .hf-lbl svg{width:13px;height:13px;opacity:.85;flex:none}
     .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
-    .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:10.5px;line-height:1.4;padding-right:18px}   /* Name / Time / User on one line; right pad clears the hover copy button */
+    .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:10.5px;line-height:1.4;padding-right:42px}   /* Name / Time / User on one line; right pad clears the hover expand + copy buttons */
     .hf-pair{white-space:nowrap}
     .hf-k{color:var(--ink-faint);letter-spacing:.02em}
     .hf-v{color:var(--silver);font-weight:600}
-    .hf-content{margin-top:3px;font-size:12px;color:var(--ink);line-height:1.45;white-space:pre-wrap;word-break:break-word}   /* fully readable — no truncation */
+    .hf-content{margin-top:3px;font-size:12px;color:var(--ink);line-height:1.45;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}   /* clamp to 3 lines to conserve space on long prompts; the ▾ expand button reveals the rest */
+    .hf-content.expanded{display:block;-webkit-line-clamp:unset;overflow:visible}
     .hf-copy{position:absolute;top:5px;right:6px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s}
     .hf-row:hover .hf-copy{opacity:.6}
     .hf-copy:hover{opacity:1;color:var(--ink)}
     .hf-copy.done{opacity:1;color:var(--ok)}
+    .hf-more{position:absolute;top:5px;right:26px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s,transform .18s}
+    .hf-row:hover .hf-more{opacity:.6}
+    .hf-more:hover{opacity:1;color:var(--ink)}
+    .hf-more.open{opacity:.85;transform:rotate(180deg)}   /* chevron points up = collapse; stays visible so you can close it */
     .hf-expand{width:auto;align-self:center;margin-top:2px;padding:4px 13px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);background:none;border:1px solid var(--hairline);border-radius:999px;cursor:pointer;transition:all .15s}
     .hf-expand:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}

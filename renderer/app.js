@@ -1705,7 +1705,7 @@ function openDiff(open) {
   p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
   p.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
-  if (open) { _histShown = 10; refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open; start the history feed at the latest 10
+  if (open) { _histShown = 10; _histExpanded.clear(); refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open; history feed starts at the latest 10, all collapsed
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
 function repoReviewHeader(aw, files, untracked, committed, commits, total) {
@@ -1765,12 +1765,20 @@ function renderHistoryEntry(en) {
     pair.appendChild(ks); pair.appendChild(vs); meta.appendChild(pair);
   });
   row.appendChild(meta);
-  const pr = document.createElement('div'); pr.className = 'hf-content'; pr.textContent = en.prompt || '';   // full prompt, fully readable (wraps, no clamp)
+  const pr = document.createElement('div'); pr.className = 'hf-content'; pr.textContent = en.prompt || '';   // clamped to 3 lines by CSS; expand reveals the rest
+  if (_histExpanded.has(en.id)) pr.classList.add('expanded');
   row.appendChild(pr);
+  // expand/collapse chevron — sits to the LEFT of copy; only revealed when the prompt overflows 3 lines
+  const more = document.createElement('button'); more.className = 'hf-more'; more.title = 'Expand'; more.style.display = 'none';
+  if (_histExpanded.has(en.id)) more.classList.add('open');
+  more.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+  more.onclick = (e) => { e.stopPropagation(); const open = pr.classList.toggle('expanded'); more.classList.toggle('open', open); more.title = open ? 'Collapse' : 'Expand'; if (open) _histExpanded.add(en.id); else _histExpanded.delete(en.id); };
+  row.appendChild(more);
   const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt';
   copy.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
   copy.onclick = (e) => { e.stopPropagation(); try { claudible.clipWrite(en.prompt || ''); } catch {} copy.classList.add('done'); toast('Prompt copied'); setTimeout(() => copy.classList.remove('done'), 900); };
   row.appendChild(copy);
+  requestAnimationFrame(() => { if (_histExpanded.has(en.id) || pr.scrollHeight > pr.clientHeight + 2) more.style.display = ''; });   // show expand only when there's more than 3 lines to read
   return row;
 }
 // Resolve a session id to its human title (local rename → shared-title cache → short id fallback).
@@ -1790,6 +1798,7 @@ function histStamp(ts) {   // compact: M/D/YY H:MM (no seconds), e.g. 7/1/26 22:
   } catch { return String(ts); }
 }
 let _histShown = 10;   // pagination: how many of the newest entries the feed currently reveals (grows by 10 per "show more")
+const _histExpanded = new Set();   // entry ids the user expanded past 3 lines — persists across live re-renders, cleared on each drawer open
 async function refreshHistoryFeed() {
   const wrap = $('history-feed'); if (!wrap) return;
   let r = null; try { r = await claudible.historyLoad(); } catch {}
