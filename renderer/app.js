@@ -2989,7 +2989,7 @@ async function openSession(id, label) {
     if (tabs.size < MAX_TABS) { newBlankTab(activeWsId, id); return; }
     toast('That session is still running — finish it or close a tab before switching'); return;
   }
-  t.session = id; t.wsId = activeWsId;
+  t.session = id; t.wsId = activeWsId; t.pendingTitle = null;   // re-pointing to another session drops any name typed for a not-yet-resolved new session (else it leaks onto THIS one)
   t.label = (id === 'new') ? 'New session' : (label || 'Session');
   t.curSessionLabel = (id === 'new') ? 'New session' : (label || '');      // mirrored to guests
   activeSession = (id === 'new') ? null : id;
@@ -3540,7 +3540,7 @@ async function switchWorkspace(id, targetSession) {
   }
   if (!t) return;
   const sess = targetSession || '';                 // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
-  activeWsId = id; t.wsId = id; t.session = sess; t.label = (sess === 'new') ? 'New session' : '';
+  activeWsId = id; t.wsId = id; t.session = sess; t.pendingTitle = null; t.label = (sess === 'new') ? 'New session' : '';   // switching ws drops a stale pending name (typed for a new session in the OLD ws) so it can't be published onto a session in the NEW ws
   setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)
   activeSession = (sess && sess !== 'new') ? sess : null; t.curSessionLabel = (sess === 'new') ? 'New session' : '';
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
