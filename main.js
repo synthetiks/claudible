@@ -605,7 +605,7 @@ ipcMain.handle('share:start', (e, opts) => {
             // immediately so guests don't dial a dead handle (→ synchronous 'bad handle', no host prompt). Do NOT
             // stopAdvertiseHeartbeat — it self-heals: line 639 skips dead-URL beats and re-publishes automatically
             // once a fresh tunnel URL comes back up via ensureTunnel.
-            if (advertisedSid) runPresence('presence-clear', () => {});
+            if (advertisedSid) runPresence('presence-clear', () => {}, advertisedWs);   // clear on the advertised ws (not the current active one)
             winSend('share:tunnel-down', {});               // tell the host their public link is dead so guests aren't met with a silent refusal
           }
         });
@@ -641,9 +641,9 @@ ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, 
 // the same workspace can JOIN it natively — no link to paste. Join opens the proven guest page in a Claudible
 // window (reuses the whole mirror/chat/voice stack), so it's "through Claudible", not an external browser. ----
 const liveWindows = new Set();
-function runPresence(args, cb) {
+function runPresence(args, cb, ws) {
   if (!APPDIR_WSL) return cb && cb(null);
-  runner.runScript('sessions-sync.sh', `${args}`, { ws: activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {
+  runner.runScript('sessions-sync.sh', `${args}`, { ws: ws || activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
@@ -653,15 +653,19 @@ function runPresence(args, cb) {
 // host stops showing as "live"), so a still-live host must re-stamp its ts periodically. The timer lives in MAIN
 // on purpose — renderer timers get throttled when the window is backgrounded, which is exactly when we must NOT
 // silently go stale. Each beat is one tiny presence-set commit; a ~2 min cadence keeps the git noise low.
-let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '';
-function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; }
-function startAdvertiseHeartbeat(sid) {
+// advertisedWs = the workspace we advertised ON (its live/<login>.json lives on THAT repo's sessions branch). Pinned
+// here so a later presence-set/clear targets it even after the user switches the cockpit to another workspace — else
+// the clear runs against the new active ws (nothing there) and the OLD ws stays "live" until its ~5-min TTL expires.
+let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '', advertisedWs = null;
+function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; advertisedWs = null; }
+function startAdvertiseHeartbeat(sid, ws) {
   advertisedSid = sid;                                   // a session switch just re-points which sid we re-stamp
+  advertisedWs = ws || advertisedWs || activeWorkspace;  // remember the ws this presence belongs to (for the heartbeat + clear)
   if (advertiseTimer) return;
   advertiseTimer = setInterval(() => {
     const st = share.status();
     if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
-    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, () => {});
+    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, () => {}, advertisedWs);
   }, 120000);
   if (advertiseTimer.unref) advertiseTimer.unref();
 }
@@ -670,13 +674,14 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   const st = share.status();
   if (!sid || !st.running || !st.token) return resolve({ ok: false, error: 'not live' });
   advertisedNameB64 = Buffer.from(String((payload && payload.name) || '')).toString('base64');   // chosen display name → presence (badge/roster)
+  const ws = activeWorkspace;                             // the ws we're advertising on RIGHT NOW — pin it so a later switch can't misdirect the clear
   // NEVER publish a non-tunnel (loopback/dead) URL to remote peers — they'd dial their own machine. If the tunnel
   // isn't up yet, arm the heartbeat anyway so presence is pushed the instant a real *.trycloudflare.com URL appears,
   // and tell the caller so the host can be warned their share isn't remotely reachable.
-  if (!isTunnelUrl(shareBaseUrl)) { startAdvertiseHeartbeat(sid); return resolve({ ok: false, error: 'tunnel-down' }); }
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { startAdvertiseHeartbeat(sid); resolve(r || { ok: false }); });
+  if (!isTunnelUrl(shareBaseUrl)) { startAdvertiseHeartbeat(sid, ws); return resolve({ ok: false, error: 'tunnel-down' }); }
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { startAdvertiseHeartbeat(sid, ws); resolve(r || { ok: false }); }, ws);
 }));
-ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true })); }));
+ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = advertisedWs; stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true }), ws); }));   // clear on the ws we advertised on, not the (possibly-switched) active one
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
 // Shared session names: publish my rename to meta/<login>.json on the branch; read the merged (last-writer-wins)
 // map back. The name goes out-of-band as base64 so arbitrary text can never break the shell command.
