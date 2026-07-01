@@ -50,11 +50,21 @@ let cloudflaredProc = null, shareBaseUrl = null;
 const _cfPidFile = () => path.join(RT, 'cloudflared.pid');
 function _writeCfPid(pid) { try { fs.writeFileSync(_cfPidFile(), String(pid || '')); } catch {} }
 function _clearCfPid() { try { fs.unlinkSync(_cfPidFile()); } catch {} }
+// Match the process's EXECUTABLE NAME, not a substring of its full command line: a recycled pid running e.g.
+// `tail cloudflared.log` or an editor with "cloudflared" in a path would substring-match and get killed. We only
+// ever spawn a binary named cloudflared[.exe], so an exact basename match identifies our orphan without false hits.
 function _isCloudflaredPid(pid) {
   try {
-    if (process.platform === 'linux') return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').includes('cloudflared');
-    if (process.platform === 'win32') return /cloudflared/i.test(require('child_process').execFileSync('tasklist', ['/FI', 'PID eq ' + pid, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true }));
-    return /cloudflared/i.test(require('child_process').execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }));   // mac/other posix
+    if (process.platform === 'linux') {
+      const argv0 = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').split('\0')[0] || '';   // argv[0] = the executable (NUL-delimited cmdline)
+      return path.basename(argv0) === 'cloudflared';
+    }
+    if (process.platform === 'win32') {
+      const out = require('child_process').execFileSync('tasklist', ['/FI', 'PID eq ' + pid, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true });
+      return /^"cloudflared\.exe"/i.test(String(out).trim());   // the image name is the FIRST CSV field
+    }
+    const out = require('child_process').execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });   // comm = executable name only (no args) — mac/other posix
+    return path.basename(String(out).trim()) === 'cloudflared';
   } catch { return false; }
 }
 function reapOrphanCloudflared() {
