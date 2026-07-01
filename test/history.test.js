@@ -21,9 +21,9 @@ eq('makeEntry preserves a full ms timestamp', makeEntry({ id: 3, ts: 17828555656
 
 // ---- ringPush: caps to newest MAX by seq, pure (no mutation) ----
 let log = [];
-for (let i = 1; i <= 12; i++) log = ringPush(log, makeEntry({ id: i, seq: i, ts: i, author: 'MK', prompt: 'p' + i }));
+for (let i = 1; i <= MAX_ENTRIES + 2; i++) log = ringPush(log, makeEntry({ id: i, seq: i, ts: i, author: 'MK', prompt: 'p' + i }));
 eq('ring capped at MAX', log.length, MAX_ENTRIES);
-eq('ring kept newest', log[log.length - 1].seq, 12);
+eq('ring kept newest', log[log.length - 1].seq, MAX_ENTRIES + 2);
 eq('ring dropped oldest (1,2 gone -> starts at 3)', log[0].seq, 3);
 const before = []; const after = ringPush(before, e1);
 ok('ringPush does not mutate input', before.length === 0 && after.length === 1);

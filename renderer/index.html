@@ -795,15 +795,22 @@
     .diff-body::-webkit-scrollbar-thumb,.history-feed::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
     .diff-body::-webkit-scrollbar-thumb:hover,.history-feed::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
     /* session-history activity feed — top of the Repo Review drawer; shown only when enabled + has entries */
-    .history-feed{flex:none;max-height:46%;overflow:auto;padding:7px 14px 12px;display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--hairline)}   /* LOWER section now — the top border is the divider from Repo Review above; nudged up a touch */
+    .history-feed{flex:none;max-height:58%;overflow:auto;padding:7px 14px 12px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--hairline)}   /* LOWER section — top border is the divider; taller (58%) so it starts higher up */
     .history-feed[hidden]{display:none}
     .hf-lbl{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}   /* size + brightness matched to the 'repo review' drawer title */
     .hf-lbl svg{width:13px;height:13px;opacity:.85;flex:none}
-    .hf-row{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
-    .hf-line{display:flex;gap:6px;font-size:11px;line-height:1.5}
-    .hf-k{flex:none;min-width:96px;color:var(--ink-faint);letter-spacing:.03em}
-    .hf-v{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--silver);font-weight:600}
-    .hf-content{margin-top:5px;font-size:12px;color:var(--ink);line-height:1.45;white-space:pre-wrap;word-break:break-word}   /* fully readable — no truncation */
+    .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
+    .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:10.5px;line-height:1.4;padding-right:18px}   /* Name / Time / User on one line; right pad clears the hover copy button */
+    .hf-pair{white-space:nowrap}
+    .hf-k{color:var(--ink-faint);letter-spacing:.02em}
+    .hf-v{color:var(--silver);font-weight:600}
+    .hf-content{margin-top:3px;font-size:12px;color:var(--ink);line-height:1.45;white-space:pre-wrap;word-break:break-word}   /* fully readable — no truncation */
+    .hf-copy{position:absolute;top:5px;right:6px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s}
+    .hf-row:hover .hf-copy{opacity:.6}
+    .hf-copy:hover{opacity:1;color:var(--ink)}
+    .hf-copy.done{opacity:1;color:var(--ok)}
+    .hf-expand{width:auto;align-self:center;margin-top:2px;padding:4px 13px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);background:none;border:1px solid var(--hairline);border-radius:999px;cursor:pointer;transition:all .15s}
+    .hf-expand:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}
     .diff-sec-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 2px -2px}
     /* Repo Review header — which repo you're in + a change summary */

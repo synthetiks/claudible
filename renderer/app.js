@@ -1705,7 +1705,7 @@ function openDiff(open) {
   p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
   p.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
-  if (open) { refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open
+  if (open) { _histShown = 10; refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open; start the history feed at the latest 10
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
 function repoReviewHeader(aw, files, untracked, committed, commits, total) {
@@ -1755,16 +1755,22 @@ function histRelTime(ts) {
 }
 function renderHistoryEntry(en) {
   const row = document.createElement('div'); row.className = 'hf-row';
-  [['Session Name', histSessionName(en.session)],
-   ['Timestamp', histStamp(en.ts || 0)],
-   ['Collaborator', en.author || 'unknown']].forEach(([k, v]) => {
-    const line = document.createElement('div'); line.className = 'hf-line';
-    const ks = document.createElement('span'); ks.className = 'hf-k'; ks.textContent = k + ':';
+  const meta = document.createElement('div'); meta.className = 'hf-meta';
+  [['Name', histSessionName(en.session)],
+   ['Time', histStamp(en.ts || 0)],
+   ['User', en.author || 'unknown']].forEach(([k, v]) => {
+    const pair = document.createElement('span'); pair.className = 'hf-pair';
+    const ks = document.createElement('span'); ks.className = 'hf-k'; ks.textContent = k + ': ';
     const vs = document.createElement('span'); vs.className = 'hf-v'; vs.textContent = v; vs.title = v;
-    line.appendChild(ks); line.appendChild(vs); row.appendChild(line);
+    pair.appendChild(ks); pair.appendChild(vs); meta.appendChild(pair);
   });
+  row.appendChild(meta);
   const pr = document.createElement('div'); pr.className = 'hf-content'; pr.textContent = en.prompt || '';   // full prompt, fully readable (wraps, no clamp)
   row.appendChild(pr);
+  const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt';
+  copy.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  copy.onclick = (e) => { e.stopPropagation(); try { claudible.clipWrite(en.prompt || ''); } catch {} copy.classList.add('done'); toast('Prompt copied'); setTimeout(() => copy.classList.remove('done'), 900); };
+  row.appendChild(copy);
   return row;
 }
 // Resolve a session id to its human title (local rename → shared-title cache → short id fallback).
@@ -1778,7 +1784,12 @@ function histSessionName(id) {
   } catch {}
   return String(id).slice(0, 8);
 }
-function histStamp(ts) { try { return new Date(ts).toLocaleString(); } catch { return String(ts); } }
+function histStamp(ts) {   // compact: M/D/YY H:MM (no seconds), e.g. 7/1/26 22:05
+  try { const d = new Date(ts), p2 = (n) => String(n).padStart(2, '0');
+    return (d.getMonth() + 1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(2) + ' ' + d.getHours() + ':' + p2(d.getMinutes());
+  } catch { return String(ts); }
+}
+let _histShown = 10;   // pagination: how many of the newest entries the feed currently reveals (grows by 10 per "show more")
 async function refreshHistoryFeed() {
   const wrap = $('history-feed'); if (!wrap) return;
   let r = null; try { r = await claudible.historyLoad(); } catch {}
@@ -1787,7 +1798,15 @@ async function refreshHistoryFeed() {
   const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
   lbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History</span>';   // history (rewind-clock) icon + heading
   wrap.appendChild(lbl);
-  r.entries.slice().reverse().forEach((en) => wrap.appendChild(renderHistoryEntry(en)));   // newest first
+  const all = r.entries.slice().reverse();                             // newest first
+  const shown = Math.min(_histShown, all.length);
+  all.slice(0, shown).forEach((en) => wrap.appendChild(renderHistoryEntry(en)));
+  if (all.length > shown) {                                            // reveal the next 10 on click, then keep scrolling
+    const more = document.createElement('button'); more.className = 'hf-expand';
+    more.textContent = 'Show ' + Math.min(10, all.length - shown) + ' more';
+    more.onclick = () => { _histShown += 10; refreshHistoryFeed(); };
+    wrap.appendChild(more);
+  }
 }
 let _diffSig = '', _diffBusy = false;
 async function refreshDiff(opts) {
