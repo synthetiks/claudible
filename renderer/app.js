@@ -2313,7 +2313,12 @@ function setLiveState(rec, state, detail) {
   rec.liveState = state || '';
   rec.liveReason = detail || rec.liveReason || '';
   const meta = document.querySelector('[data-livetab="' + rec.tabId + '"] .sess-meta');
-  if (meta) meta.innerHTML = '<span class="sess-livedot"></span>joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + (((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '');
+  if (meta) {   // build via text nodes — rec.liveReason is a host-controlled ('denied') string; textContent escapes it (CSP is not the only XSS guard)
+    meta.textContent = '';
+    const dot = document.createElement('span'); dot.className = 'sess-livedot'; meta.appendChild(dot);
+    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '';
+    meta.appendChild(document.createTextNode('joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
+  }
   let ov = rec.container.querySelector('.live-ov');
   if (!(state && state !== 'live')) { if (ov) ov.classList.remove('show'); return; }
   if (!ov) { ov = document.createElement('div'); ov.className = 'live-ov'; rec.container.appendChild(ov); }
