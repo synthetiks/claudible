@@ -1777,22 +1777,28 @@ function renderHistoryEntry(en, revertable) {
   requestAnimationFrame(() => { if (_histExpanded.has(en.id) || pr.scrollHeight > pr.clientHeight + 2) more.style.display = ''; });   // show expand only when there's more than 3 lines to read
   return row;
 }
+// Is any local tab bound to this workspace mid-turn (Claude actively editing its files)? A revert then races those
+// writes — checkout-index -a -f overwrites the tree and untracked files are deleted while Claude creates/edits them,
+// leaving a half-written tree that the next Stop snapshots as "settled". So we warn before reverting a busy ws.
+function wsBusy(wsId) { if (!wsId) return false; for (const t of tabs.values()) if (t && t.wsId === wsId && t.busy) return true; return false; }
 // Roll the working tree back to the code snapshot captured at this prompt. Destructive (working-tree ONLY — it does
 // not rewind commits), so we confirm first; checkpoint.sh captures an 'undo' snapshot before restoring, which we
 // then offer so the revert is reversible.
 async function revertToCheckpoint(en) {
   if (!en || !en.checkpointRef) return;
+  const targetWs = _histFeedWsId || activeWsId;   // the ws this feed was loaded for — NOT activeWsId, which can lag main after a guest-driven or auto-close switch
   const name = histSessionName(en.session);
+  const busy = wsBusy(targetWs);
   const choice = await modalChoice({
     title: 'Revert code to this prompt?',
-    body: 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.',
+    body: (busy ? '⚠ Claude is still working in this workspace — reverting now can clobber its in-flight edits and leave a half-written tree. It’s safest to wait for the turn to finish.\n\n' : '')
+      + 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.',
     choices: [
-      { key: 'revert', label: 'Revert working files', sub: 'Roll the code back to this point. An "Undo last revert" appears after.', danger: true },
+      { key: 'revert', label: busy ? 'Revert anyway' : 'Revert working files', sub: 'Roll the code back to this point. An "Undo last revert" appears after.', danger: true },
       { key: 'cancel', label: 'Cancel' },
     ],
   });
   if (choice !== 'revert') return;
-  const targetWs = _histFeedWsId || activeWsId;   // the ws this feed was loaded for — NOT activeWsId, which can lag main after a guest-driven or auto-close switch
   let r = null;
   try { r = await claudible.checkpointRevert(en.checkpointRef, targetWs); } catch {}
   if (!r || !r.ok) {
@@ -1915,6 +1921,14 @@ function renderCommitList(commits) {
   return box;
 }
 async function doDiffRevert(patch, btn, label) {
+  if (wsBusy(activeWsId)) {   // reverting a hunk/file while Claude edits the same worktree races its writes — confirm first
+    const go = await modalChoice({
+      title: 'Claude is still working',
+      body: 'Reverting these changes now can clobber Claude’s in-flight edits in this workspace. It’s safest to wait for the turn to finish. Revert anyway?',
+      choices: [{ key: 'go', label: 'Revert anyway', danger: true }, { key: 'cancel', label: 'Cancel' }],
+    });
+    if (go !== 'go') return;
+  }
   btn.disabled = true;
   let r = null; try { r = await claudible.diffRevert(patch); } catch {}
   if (r && r.ok) { toast(label || 'Reverted'); refreshDiff(); }
