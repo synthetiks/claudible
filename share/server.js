@@ -19,7 +19,9 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { WebSocketServer } = require('ws');
+// NB: 'ws' is lazy-required inside start() (the only place it's used), NOT at module load — so this file's pure
+// helpers (uniqueName/cleanName) stay require-able in an environment without node_modules installed (the CI test
+// job runs pure Node + bash with no `npm ci`). Loading it eagerly here would crash that suite.
 
 const NM = path.join(__dirname, '..', 'node_modules');
 const ASSETS = {
@@ -365,6 +367,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       if (Object.prototype.hasOwnProperty.call(ASSETS, u)) return serveFile(res, ASSETS[u].file, ASSETS[u].type);
       res.writeHead(404); res.end('not found');
     });
+    const { WebSocketServer } = require('ws');   // lazy: only when a share actually starts (keeps the module loadable without node_modules — see top-of-file note)
     wss = new WebSocketServer({ noServer: true });
     server.on('upgrade', (req, socket, head) => {
       const mode = wsAuth(req.url);
