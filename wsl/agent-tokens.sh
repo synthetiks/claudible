@@ -5,6 +5,7 @@
 # the resent context every turn and cache_read_input_tokens is re-reads, so both are excluded.
 # $1 = session id. Workspace cwd from CLAUDIBLE_WS_* (mirrors the other scripts). Prints one integer.
 set -u
+. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
 case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac

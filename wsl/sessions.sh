@@ -3,6 +3,7 @@
 # Each conversation is a <session-id>.jsonl under ~/.claude/projects/<encoded cwd>/. We emit
 # [{id, mtime, preview, msgs}] sorted newest-first so the renderer can show a session switcher.
 set -u
+. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → ensure it is, or this returns []
 # Per-workspace cwd (mirrors session.sh): list conversations for the SELECTED workspace's dir.
 # Unset / bad slug → the original single session dir. Slug is a strict [A-Za-z0-9-] leaf.
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"

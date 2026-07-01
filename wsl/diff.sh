@@ -6,6 +6,7 @@
 #   * recently-COMMITTED changes (net diff of the last few commits) → so work that's already committed is still
 #     reviewable (git diff HEAD alone shows nothing once Claude commits). Committed changes are review-only.
 set -u
+. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
 case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac

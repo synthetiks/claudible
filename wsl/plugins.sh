@@ -4,6 +4,7 @@
 # Args: $1 = op (list|toggle); for toggle: $2 = plugin key (name@marketplace), $3 = enable|disable.
 # Emits JSON.
 set -u
+. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
 
 op="${1:-list}"
 case "$op" in

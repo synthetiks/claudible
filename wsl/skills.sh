@@ -5,6 +5,7 @@
 # Args: $1 = op (list|set); for set: $2 = skill name, $3 = state (on|off|name-only|user-invocable-only).
 # cwd derived from CLAUDIBLE_WS_KIND/CLAUDIBLE_WS_SLUG like the other scripts. Emits JSON.
 set -u
+. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
 
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
