@@ -110,16 +110,25 @@ function claudeArgv(launch, home, effort, permMode) {
   return [...perm, '--resume', launch.id, ...eff];
 }
 // settings.json content (Node hooks invoked via the Windows node path, per-tab paths baked as argv).
-function settingsJson(claudeDir, nodeBin, statusPath, hooksPath) {
+function settingsJson(claudeDir, nodeBin, statusPath, hooksPath, contextPath) {
   const sl = `"${nodeBin}" "${path.win32.join(claudeDir, 'statusline.js')}" "${statusPath}"`;
   const hk = `"${nodeBin}" "${path.win32.join(claudeDir, 'hook.js')}" "${hooksPath}"`;
   const oneHook = [{ hooks: [{ type: 'command', command: hk }] }];
   const tagHook = [{ matcher: 'Task|Agent', hooks: [{ type: 'command', command: hk }] }];
+  // Identity/live-state context hook (same as the wsl backend): tells the model which machine/user/live-session
+  // it's on — the fix for a transcript synced from another machine. Runs on SessionStart + alongside telemetry on
+  // UserPromptSubmit (so it survives compaction). contextPath falsy → omitted (parity with session.sh's CX guard).
+  const hooks = { Stop: oneHook, UserPromptSubmit: oneHook, PreToolUse: tagHook, PostToolUse: tagHook };
+  if (contextPath) {
+    const cx = `"${nodeBin}" "${path.win32.join(claudeDir, 'context-hook.js')}" "${contextPath}"`;
+    hooks.SessionStart = [{ hooks: [{ type: 'command', command: cx }] }];
+    hooks.UserPromptSubmit = [{ hooks: [{ type: 'command', command: hk }, { type: 'command', command: cx }] }];
+  }
   return {
     autoCompactEnabled: false,                                       // OFF by default: Claude Code's built-in auto-compact auto-ran /compact when resuming near-full sessions (user request)
     env: { DISABLE_AUTO_COMPACT: '1' },                              // env-var form of the same toggle (belt-and-suspenders across Claude Code versions)
     statusLine: { type: 'command', command: sl },
-    hooks: { Stop: oneHook, UserPromptSubmit: oneHook, PreToolUse: tagHook, PostToolUse: tagHook },
+    hooks,
   };
 }
 // Stage the shared Node hooks + write settings.json into <sdir>\.claude. Returns the runtime paths.
@@ -128,16 +137,20 @@ function installHooks(sdir, tabRuntimeId) {
   const rt = path.join(runtimeDir(), 'tabs', String(tabRuntimeId || 'default'));   // writable runtime root (CLAUDIBLE_RUNTIME when packaged), matches what main.js's pollers read
   const statusPath = path.join(rt, 'status.json');
   const hooksPath = path.join(rt, 'hooks.ndjson');
+  const contextPath = path.join(rt, 'context.json');   // identity/live-state main writes; the context hook reads it (matches main.js's per-tab path)
   fs.mkdirSync(cdir, { recursive: true }); fs.mkdirSync(rt, { recursive: true });
   try { fs.writeFileSync(hooksPath, ''); fs.writeFileSync(statusPath, '{}'); } catch {}   // fresh per launch
   fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js'));
   fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js'));
+  // Stage the context hook too (additive; its absence in an older bundle just omits the identity injection).
+  let hasContext = false;
+  try { fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'context-hook.js'), path.win32.join(cdir, 'context-hook.js')); hasContext = true; } catch {}
   // MUST be a real node.exe, NOT process.execPath (= electron.exe under Electron, which won't run a .js
   // without ELECTRON_RUN_AS_NODE). Claudible's installer guarantees Windows Node 22.12+ on PATH.
   const nodeBin = whichNode();
   fs.writeFileSync(path.win32.join(cdir, 'settings.json'),
-    JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath), null, 2));
-  return { cdir, statusPath, hooksPath };
+    JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2));
+  return { cdir, statusPath, hooksPath, contextPath };
 }
 
 // ---- node-pty backend (same loader) -------------------------------------------------------------

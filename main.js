@@ -65,7 +65,7 @@ function reapOrphanCloudflared() {
 const share = createShareServer({
   onInput: (d, who) => { const t = ptys.get(fgTabId); if (t) { if (who && who.name) t.lastInputBy = { name: who.name, ts: Date.now() }; try { t.proc.write(d); } catch {} } },   // a guest typed → into the FOREGROUND pty; tag who typed (write path unchanged) so history can attribute it
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
-  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} },   // presence lights
+  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(fgTabId); } catch {} },   // presence lights; refresh the host tab's injected context so the model sees who's here
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
   onApprovalCancel: (id) => { try { win && win.webContents.send('share:approval-cancel', id); } catch {} },
   onChat: (m) => { try { win && win.webContents.send('share:chat', m); } catch {} },   // guest → host chat
@@ -356,6 +356,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
+    _writeContext(tabId);                                 // seed this tab's identity/live-state file before Claude's first prompt fires the context hook
     if (registry.effort === 'ultracode') armUltracode(tabId, proc);   // switch the new session into ultracode mode once it settles
     if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
     if (tabId === fgTabId) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the foreground tab drives the guest mirror
@@ -439,6 +440,7 @@ function setForegroundTab(tabId) {
   if (ws) { try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {} }
   if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
   syncShare();
+  _writeAllContexts();                                    // foreground changed → which tab is "hosting" changed; refresh every tab's context
 }
 ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
   const intent = tabIntent.get(tabId); tabIntent.delete(tabId);
@@ -547,7 +549,7 @@ function liveConnect(tabId, peer, name) {
   liveDisconnect(tabId);                                  // replace any prior socket bound to this tab
   liveTabs.set(tabId, { ws: null, url, token: tok, name: String(name || '').slice(0, 40), hostCols: 120, hostRows: 32, pid: null, readOnly: false, resume: null, retry: 0, closed: false, peer });
   openLiveSocket(tabId);
-  return { ok: true };
+  return { ok: true };   // a joined tab has no local Claude to inject into — nothing to write here (see _liveStateFor)
 }
 function liveDisconnect(tabId) {
   const r = liveTabs.get(tabId); if (!r) return;
@@ -601,6 +603,7 @@ ipcMain.handle('share:start', (e, opts) => {
       } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN
       shareBaseUrl = base;
       const st = share.status();
+      _writeAllContexts();                                // now hosting → tell the model (the fg tab's context flips to "hosting")
       return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, readOnly: st.readOnly };
     } catch (err) { return { ok: false, error: String(err.message || err) }; }
   })();
@@ -612,6 +615,8 @@ ipcMain.handle('share:stop', async () => {
   cloudflaredProc = null; shareBaseUrl = null;
   stopAdvertiseHeartbeat();                              // no longer hosting → stop re-stamping presence
   share.stop();
+  _lastRoster = [];
+  _writeAllContexts();                                   // sharing ended → the fg tab's context drops the "hosting" block (back to solo)
   return { ok: true };
 });
 ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time link (re-invite)
@@ -1583,6 +1588,44 @@ function _histFile(wsId) {
   const dir = path.join(RT, 'history'); try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return path.join(dir, String(wsId || 'default').replace(/[^A-Za-z0-9_-]/g, '-') + '.json');
 }
+
+// ---- app→Claude identity/live-state channel: per-tab context.json read by the context hook, so the model
+// ALWAYS knows which machine/user it's on and the live-session state — even after a transcript synced from a
+// collaborator's machine (the hook also resolves ground-truth host/user itself; this adds what the shell can't
+// know: the collab display name + live-session role). Written on spawn + every live-state transition.
+let _lastRoster = [];                                     // cache the host roster main forwards, so context.json can name who's here
+// The live-state main can meaningfully inject is HOSTING: the foreground tab, while sharing, runs the LOCAL Claude
+// that guests drive — so telling that Claude "you're hosting, N guests (names)" is real and reachable. A JOINED tab
+// is only a mirror of a PEER's session: there's no local Claude to inform (the model you talk to there is the
+// host's, which already gets the hosting context on THEIR machine), so we don't fabricate a local 'joined' block.
+// When hosting stops, this returns null → the model correctly reads "solo" from the absence of a live line.
+function _liveStateFor(tabId) {
+  try {
+    if (tabId === fgTabId && share.status && share.status().running) {   // the shared (foreground) tab while sharing → I'm HOSTING
+      const st = share.status();
+      const names = _lastRoster.filter((g) => g && g.state !== 'gone' && !g.host).map((g) => g.name).filter(Boolean);
+      return { role: 'hosting', session: advertisedSid || '', guests: st.guests || names.length || 0, names };
+    }
+  } catch {}
+  return null;                                            // solo/local (or a joined mirror tab) → no live block
+}
+function _writeContext(tabId) {
+  try {
+    const rec = ptys.get(tabId); if (!rec) return;
+    const s = readSettings();
+    const ctx = {
+      collabName: (s.collabName || '').toString().slice(0, 60),
+      workspace: rec.ws ? ((rec.ws.label || rec.ws.slug || '') + (rec.ws.kind && rec.ws.kind !== 'legacy' ? ' (' + rec.ws.kind + ')' : '')) : '',
+      machineId: _machineId(), host: _os.hostname(), os: process.platform,
+      live: _liveStateFor(tabId),
+      ts: Date.now(),
+    };
+    const dir = path.join(RT, 'tabs', rec.runtimeId); try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    const file = path.join(dir, 'context.json');
+    try { fs.writeFileSync(file + '.tmp', JSON.stringify(ctx)); fs.renameSync(file + '.tmp', file); } catch {}   // atomic: the hook never reads a half-written file
+  } catch {}
+}
+function _writeAllContexts() { try { for (const id of ptys.keys()) _writeContext(id); } catch {} }   // a global live-state change (share start/stop, roster) touches every tab's file
 // ---- per-prompt code checkpoints: the snapshot layer behind the Session-History "Revert" (pure lib/checkpoint.js,
 // run in the workspace repo via wsl/checkpoint.sh). We snapshot the repo when a turn ENDS (Stop → the tree has
 // settled, so no edit races the snapshot) and carry that ref as the NEXT prompt's checkpointRef — so "revert

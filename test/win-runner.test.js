@@ -79,6 +79,17 @@ eq('settings PreToolUse matcher', s.hooks.PreToolUse[0].matcher, 'Task|Agent');
 ok('settings is valid JSON', (() => { try { JSON.parse(JSON.stringify(s)); return true; } catch { return false; } })());
 eq('settings autoCompactEnabled off', s.autoCompactEnabled, false);                 // Claude Code auto-compact disabled by default
 eq('settings DISABLE_AUTO_COMPACT env', s.env.DISABLE_AUTO_COMPACT, '1');
+// no contextPath → identity hook omitted (parity with an older bundle / session.sh's CX guard)
+ok('no contextPath → no SessionStart', s.hooks.SessionStart === undefined);
+eq('no contextPath → UserPromptSubmit has only the telemetry hook', s.hooks.UserPromptSubmit[0].hooks.length, 1);
+// WITH contextPath → the identity hook is wired on SessionStart + as a 2nd UserPromptSubmit hook
+const sc = settingsJson('C:\\Users\\X\\.claudible\\session\\.claude', 'C:\\node.exe', 'C:\\rt\\status.json', 'C:\\rt\\hooks.ndjson', 'C:\\rt\\context.json');
+ok('contextPath → SessionStart wired', Array.isArray(sc.hooks.SessionStart) && sc.hooks.SessionStart[0].hooks.length === 1);
+eq('contextPath → SessionStart runs context-hook.js', sc.hooks.SessionStart[0].hooks[0].command,
+  '"C:\\node.exe" "C:\\Users\\X\\.claudible\\session\\.claude\\context-hook.js" "C:\\rt\\context.json"');
+eq('contextPath → UserPromptSubmit has telemetry + context (2 hooks)', sc.hooks.UserPromptSubmit[0].hooks.length, 2);
+eq('contextPath → telemetry hook still first', sc.hooks.UserPromptSubmit[0].hooks[0].command, s.hooks.Stop[0].hooks[0].command);
+ok('contextPath settings still valid JSON', (() => { try { JSON.parse(JSON.stringify(sc)); return true; } catch { return false; } })());
 
 // ---- dependency detection (buildDepReport — the self-bootstrap provisioner's pure core) ----
 const { buildDepReport, semverGte, pickRunnable } = win._internals;

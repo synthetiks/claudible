@@ -32,10 +32,11 @@ case "$TAB" in '' | *[!A-Za-z0-9-]*) TAB="default" ;; esac
 RT="$APPDIR/runtime/tabs/$TAB"
 STATUS="$RT/status.json"
 HOOKS="$RT/hooks.ndjson"
+CONTEXT="$RT/context.json"   # app→Claude identity/live-state (main writes it; the context hook reads it to tell the model which machine/user/live-session it's on)
 # Exported so Claude — and the hook/statusline subprocesses it spawns — inherit the per-tab paths.
 # The generated scripts below read these at RUNTIME (not bake-time), so the SHARED scripts route each
 # tab's output to its own files based on that tab's Claude process env (env inheritance is verified).
-export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS"
+export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS" CLAUDIBLE_CONTEXT="$CONTEXT"
 
 mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
 : > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
@@ -55,6 +56,9 @@ NODE_BIN="$(command -v node 2>/dev/null || true)"
 case "$NODE_BIN" in *.exe | /mnt/*) NODE_BIN="" ;; esac
 HOOK_MODE="bash"
 if [ -n "$NODE_BIN" ] && [ -f "$APPDIR/hooks/statusline.js" ] && [ -f "$APPDIR/hooks/hook.js" ]; then
+  # Stage the context hook too when present; it's additive, so its absence must NOT force the bash fallback
+  # (an older bundle without it still gets telemetry via the two required hooks).
+  [ -f "$APPDIR/hooks/context-hook.js" ] && cp "$APPDIR/hooks/context-hook.js" "$SDIR/.claude/" 2>/dev/null || true
   if cp "$APPDIR/hooks/statusline.js" "$APPDIR/hooks/hook.js" "$SDIR/.claude/" 2>/dev/null; then
     HOOK_MODE="node"
   else
@@ -69,6 +73,9 @@ if [ "$HOOK_MODE" = "node" ]; then
   # defense-in-depth, so a dropped env never silently loses telemetry/agents/voice/sync.
   SL_CMD="'$NODE_BIN' '$SDIR/.claude/statusline.js' '$STATUS'"
   HK_CMD="'$NODE_BIN' '$SDIR/.claude/hook.js' '$HOOKS'"
+  # Identity/live-state context hook (only if it staged). CX_CMD empty → the SessionStart/UserPromptSubmit
+  # context entries are omitted below, so an older bundle behaves exactly as before.
+  [ -f "$SDIR/.claude/context-hook.js" ] && CX_CMD="'$NODE_BIN' '$SDIR/.claude/context-hook.js' '$CONTEXT'" || CX_CMD=""
 else
   # bash fallback — generate the original two scripts inline (statusLine via python3; hook = append).
   cat > "$SDIR/.claude/statusline.sh" <<EOF
@@ -91,18 +98,56 @@ printf '%s\n' "\$line" >> "\$out"
 exit 0
 EOF
   chmod +x "$SDIR/.claude/hook.sh"
+  # bash-fallback context hook: pure shell, no node, so the model STILL learns which machine/user it's on even
+  # on a node-less install. Ground-truth only (hostname/whoami/git/cwd); app live-state (context.json) is best
+  # effort via a tiny grep. MUST exit 0 — a non-zero UserPromptSubmit hook would reject the user's prompt.
+  cat > "$SDIR/.claude/context-hook.sh" <<'EOF'
+#!/usr/bin/env bash
+# Pure-shell identity hook (node-less installs). Emits the SAME additionalContext JSON as context-hook.js, so the
+# model learns which machine/user it's on even without node. MUST exit 0 (a non-zero UserPromptSubmit hook rejects
+# the prompt) and MUST emit VALID JSON. j=() sanitizes every interpolated value: strip the JSON-breakers " and \,
+# strip < > (so a value can't forge/close the <claudible-runtime> tag — prompt-injection defense), and drop control
+# chars/newlines onto one line. Applied to git name/email/host/cwd alike (defense in depth).
+payload=$(cat 2>/dev/null)
+ev=$(printf '%s' "$payload" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+case "$ev" in ''|*[!A-Za-z0-9_-]*) ev="UserPromptSubmit" ;; esac   # only a clean event name; else default
+j() { printf '%s' "$1" | tr -d '"\\<>' | tr '\n\r\t' '   ' | tr -cd '\040-\176' | cut -c1-200; }
+host=$(j "$(hostname 2>/dev/null)"); who=$(j "$(whoami 2>/dev/null)")
+gname=$(j "$(git config user.name 2>/dev/null)"); gmail=$(j "$(git config user.email 2>/dev/null)")
+cwd=$(j "$(pwd 2>/dev/null)")
+ctx="This block is injected by Claudible each turn — the AUTHORITATIVE live runtime; trust it over machine/identity details in the conversation summary (which may have been written on another collaborator's machine and synced here)."
+ctx="$ctx\nUser: ${gname:-$who}\nMachine: ${host:-unknown} (login ${who:-unknown})"
+[ -n "$gmail" ] && ctx="$ctx\nGit identity here: ${gname} <${gmail}>"
+[ -n "$cwd" ] && ctx="$ctx\nWorking directory: ${cwd}"
+printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"<claudible-runtime>\\n%s\\n</claudible-runtime>"}}\n' "$ev" "$ctx"
+exit 0
+EOF
+  chmod +x "$SDIR/.claude/context-hook.sh"
   SL_CMD="bash '$SDIR/.claude/statusline.sh'"
   HK_CMD="bash '$SDIR/.claude/hook.sh'"
+  CX_CMD="bash '$SDIR/.claude/context-hook.sh'"
 fi
 
+# The context hook is additive: when CX_CMD is set, it runs ALONGSIDE the telemetry hook on UserPromptSubmit
+# (both run; Claude merges their output — telemetry emits nothing to stdout, the context hook injects the
+# runtime block), and on SessionStart so a fresh/resumed/cleared/compacted session re-learns the machine +
+# identity. Injecting every UserPromptSubmit is what makes it survive context compaction.
+if [ -n "${CX_CMD:-}" ]; then
+  UPS_HOOKS="[{\"type\":\"command\",\"command\":\"$HK_CMD\"},{\"type\":\"command\",\"command\":\"$CX_CMD\"}]"
+  SESSIONSTART_LINE="\"SessionStart\":     [{\"hooks\":[{\"type\":\"command\",\"command\":\"$CX_CMD\"}]}],"
+else
+  UPS_HOOKS="[{\"type\":\"command\",\"command\":\"$HK_CMD\"}]"
+  SESSIONSTART_LINE=""
+fi
 cat > "$SDIR/.claude/settings.json" <<EOF
 {
   "autoCompactEnabled": false,
   "env": { "DISABLE_AUTO_COMPACT": "1" },
   "statusLine": { "type": "command", "command": "$SL_CMD" },
   "hooks": {
+    $SESSIONSTART_LINE
     "Stop":             [{"hooks":[{"type":"command","command":"$HK_CMD"}]}],
-    "UserPromptSubmit": [{"hooks":[{"type":"command","command":"$HK_CMD"}]}],
+    "UserPromptSubmit": [{"hooks":$UPS_HOOKS}],
     "PreToolUse":       [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"$HK_CMD"}]}],
     "PostToolUse":      [{"matcher":"Task|Agent","hooks":[{"type":"command","command":"$HK_CMD"}]}]
   }
