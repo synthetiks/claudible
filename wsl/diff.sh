@@ -44,9 +44,14 @@ fi
 # A single env var > ~128KB (Linux MAX_ARG_STRLEN) makes the node exec below fail ("Argument list too long").
 # Keep each diff safely under that: truncate a giant working-tree diff at a line boundary; drop a giant committed
 # net-diff entirely (the commit LIST still shows — that's what "recent" is really about).
+# MAX_ARG_STRLEN is a BYTE limit, but bash ${#…}/slicing count CHARACTERS under a UTF-8 locale — so a multibyte-heavy
+# diff (CJK/Cyrillic/etc.) could pass the char cap yet exceed the byte limit, failing the exec → silent empty diff.
+# Measure + slice in BYTES (LC_ALL=C); the trailing-newline trim then drops any half-cut multibyte char at the cut.
 maxb=110000
+_lc="${LC_ALL-}"; _lcset="${LC_ALL+x}"; LC_ALL=C
 if [ "${#diff_text}" -gt "$maxb" ]; then diff_text="${diff_text:0:$maxb}"; diff_text="${diff_text%$'\n'*}"; fi
 [ "${#cdiff_text}" -gt "$maxb" ] && cdiff_text=""
+if [ -n "$_lcset" ]; then LC_ALL="$_lc"; else unset LC_ALL; fi
 
 unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
 DIFF="$diff_text" UNTRACKED="$untracked" CDIFF="$cdiff_text" CLOG="$clog" TOTAL="$ccount" node "$(dirname "$0")/diff-tool.js" 2>/dev/null || printf '{"ok":true,"repo":true,"total":0,"files":[],"untracked":[],"committed":[],"commits":[]}'
