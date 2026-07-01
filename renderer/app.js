@@ -42,7 +42,7 @@ const TERM_OPTS = {
   theme: { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8',
            selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
 };
-const tabs = new Map();           // tabId -> per-tab record (own xterm/fit/container + tracker/agents/sessionLog)
+const tabs = new Map();           // tabId -> per-tab record (own xterm/fit/container + tracker/agents)
 let activeTabId = null;
 
 // ---------- themes: re-tint the UI (CSS :root vars via html[data-theme]) + the xterm terminal palette ----------
@@ -88,7 +88,7 @@ function makeTab(tabId, wsId, session, opts) {
   else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
   const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '',
-    baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, sessionLog: [], curCtxPct: null, curSessionLabel: '',
+    baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, curCtxPct: null, curSessionLabel: '',
     agents: new Map(), workflows: [], agentTok: 0,
     liveReadOnly: false, hostCols: 120, hostRows: 32, liveState: '', liveCost: null, liveTokens: null, hostName: '' };
   tabs.set(tabId, rec);
@@ -363,7 +363,7 @@ function repaintTracker(t) {
 }
 function resetStats(t) {
   t = t || AT(); if (!t) return;
-  t.baseCost = null; t.sessTok = 0; t.agentTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.sessionLog.length = 0; t.curCtxPct = null;
+  t.baseCost = null; t.sessTok = 0; t.agentTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.curCtxPct = null;
   if (t.tabId === activeTabId) { repaintTracker(t); pushTracker(); }
 }
 // First-run voice setup (packaged native Windows only) → a quiet, persistent status-bar CHIP (#sb-voice), not a
@@ -837,9 +837,8 @@ claudible.onHookLine((tabId, line) => {
   if (o.hook_event_name === 'UserPromptSubmit') {
     t.busy = true; markTabBusy(t.tabId, true);
     if (o.prompt) {
-      t.sessionLog.push({ role: 'you', text: String(o.prompt) });   // captures typed AND voice turns
       try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : '', t.wsId || ''); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists). Pass the SUBMITTING tab's workspace so a mid-flight workspace switch can't write to the wrong file.
-      if (typeof refreshHistoryFeed === 'function') setTimeout(refreshHistoryFeed, 120);   // live-update the feed if its drawer is open
+      if (typeof refreshHistoryFeed === 'function' && $('diffpanel') && $('diffpanel').classList.contains('open')) setTimeout(refreshHistoryFeed, 120);   // live-update the feed ONLY when its drawer is actually open (else it's a wasted historyLoad + off-screen DOM rebuild every prompt)
     }
   } else if (o.hook_event_name === 'Stop') {
     t.busy = false; markTabBusy(t.tabId, false);
@@ -847,7 +846,6 @@ claudible.onHookLine((tabId, line) => {
     // disk, so refresh the sidebar to collapse that live row into its proper saved session row.
     if (sidebarReady && t.wsId === activeWsId && sessListEl && sessListEl.querySelector('.sess.sess-live[data-tab="' + t.tabId + '"]')) refreshSessions();
     if (o.last_assistant_message) {
-      t.sessionLog.push({ role: 'claude', text: String(o.last_assistant_message) });
       if (tabId === activeTabId) {   // only the FOREGROUND tab speaks / fills the Speak box, so background turns never talk over it
         const reply = stripForSpeech(o.last_assistant_message);
         lastReply = reply;                  // remember it for the manual "▶ Speak" button
@@ -2936,7 +2934,6 @@ function startLiveRename(row, p, rec) {
   let done = false; let actions = null;
   const commit = (save) => {
     if (done) return; done = true;
-    console.log('[rename] commit', save);                            // DIAGNOSTIC: confirms a trigger reached commit
     try {
       if (save) {
         rec.label = inp.value.trim() || '';
