@@ -481,6 +481,9 @@ function connect() {
         myPid = msg.pid || null;                                // our voice-room peer id
         if (Array.isArray(msg.voice)) voice.setMembers(msg.voice);   // who's already in the voice room
         if (msg.host) hostName = msg.host;
+        // The host may have disambiguated our name (a second "Guest" becomes "Guest (2)") — adopt what it assigned so
+        // OUR own chat bubbles read right AND a later resume reconnects with the unique name (we send it as ?n=).
+        if (msg.you && msg.you !== myName) { myName = msg.you; try { sessionStorage.setItem(NAME_KEY, myName); } catch (e) {} }
         $('ro').style.display = readOnly ? '' : 'none';
         document.body.classList.toggle('ro', readOnly);
         applyReadOnlyInput();                                 // read-only: a tap won't raise the soft keyboard

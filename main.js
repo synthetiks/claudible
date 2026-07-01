@@ -496,6 +496,7 @@ function openLiveSocket(tabId) {
         gotHello = true; r.pid = m.pid || null; r.readOnly = !!m.readOnly;
         r.hostCols = m.cols || r.hostCols || 120; r.hostRows = m.rows || r.hostRows || 32;
         if (m.resume) r.resume = m.resume;
+        if (m.you) r.name = String(m.you).slice(0, 40);   // adopt the name the host assigned (may be disambiguated); so if a later IP-roam reconnect falls back to the link (no grace record to restore), our ?n= re-sends the unique name instead of the stale original
         liveSend(tabId, 'live:hello', { readOnly: r.readOnly, cols: r.hostCols, rows: r.hostRows, host: m.host, you: m.you, pid: r.pid, paused: !!m.paused, voice: Array.isArray(m.voice) ? m.voice : [] });
         break;
       case 'status': liveSend(tabId, 'live:status', { status: m.status || {} }); break;

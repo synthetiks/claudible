@@ -58,6 +58,25 @@ function cleanName(n, fallback) {
   const s = (n == null ? "" : String(n)).replace(/[\x00-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
   return s || fallback;
 }
+const eqCI = (a, b) => String(a == null ? "" : a).toLowerCase() === String(b == null ? "" : b).toLowerCase();   // names compare case-insensitively ("mk" and "MK" are the same person to a human)
+// Disambiguate a display name against everyone already present. The roster/kick/chat-attribution logic is all
+// KEYED BY NAME, so two guests who pick the same name (or both default to "Guest") would otherwise collapse into a
+// single roster entry — the second's presence would clobber the first, one drop would mark BOTH "gone", and a kick
+// would hit both. Rather than reject the join (forcing a rename), we make the name unique for the joiner by
+// appending " (2)", " (3)"… — so joining always succeeds and the existing by-name logic becomes correct by
+// construction. The base is truncated to leave room for the suffix; a full-length base would otherwise slice the
+// suffix back off and silently defeat the guarantee. Pure + deterministic (isTaken reports use); exported for tests.
+function uniqueName(base, isTaken, max) {
+  const cap = max || NAME_MAX;
+  const b = cleanName(base, "Guest");
+  if (!isTaken(b)) return b;
+  for (let i = 2; i < 1000; i++) {
+    const suffix = " (" + i + ")";
+    const cand = cleanName(b.slice(0, Math.max(1, cap - suffix.length)) + suffix, "Guest");
+    if (!isTaken(cand)) return cand;
+  }
+  return cleanName(b.slice(0, Math.max(1, cap - 8)) + " " + newToken().slice(0, 6), "Guest");   // pathological (998 collisions) — random tail
+}
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
@@ -155,9 +174,29 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   }
   function systemChat(text) { relayChat({ type: 'chat', role: 'system', text }, null); }
 
+  // Is this display name already in use by someone present? Checks the host, every live client, AND anyone still
+  // inside their reconnect grace window (a briefly-dropped guest whose name is theirs to return to). Case-insensitive.
+  function nameTaken(nm) {
+    if (eqCI(nm, hostName)) return true;
+    for (const ws of clients) { if (eqCI(ws._name, nm)) return true; }
+    for (const p of pendingDrops.values()) { if (p && eqCI(p.name, nm)) return true; }
+    return false;
+  }
+
   // Start streaming to a guest. Fresh 'link' joins mint a private resume token + announce them.
   function admit(ws, mode, name, resumeTok) {
     if (ws.readyState !== ws.OPEN) return;
+    // Look up the returning guest's grace-window record FIRST — it's the SERVER's record of the exact name they
+    // dropped under, and the roster identity below is resolved from it (not the client's ?n=).
+    const back = (mode === 'resume' && resumeTok) ? pendingDrops.get(resumeTok) : null;
+    // A FRESH joiner gets a roster-unique name here — inside admit's single synchronous critical section, BEFORE
+    // clients.add below, so no two joins racing through the approval queue can slip identical names past (and the
+    // check never matches the joiner against itself). A RESUME returns to its RESERVED name (back.name), NOT the
+    // client-supplied ?n=: for a native guest that ?n= is the stale ORIGINAL (main.js never re-sends the assigned
+    // name), and for a hostile guest it's attacker-controlled — trusting it would revert a suffixed guest to a
+    // colliding name AND orphan its un-kickable "Guest (2)" roster entry. hello.you (below) echoes the name back.
+    if (mode === 'link') name = uniqueName(name, nameTaken);
+    else if (back && back.name) name = back.name;
     ws._name = name;
     if (mode === 'link') { const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok; }
     else {
@@ -173,7 +212,6 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     clients.add(ws);
     ws._pid = 'g' + (++pidSeq); byPid.set(ws._pid, ws);   // stable peer-id for voice signaling
     // Returning from a transient drop within the grace window → cancel the pending "left" and restore voice.
-    const back = (mode === 'resume' && resumeTok) ? pendingDrops.get(resumeTok) : null;
     if (back) { clearTimeout(back.timer); pendingDrops.delete(resumeTok); if (back.wasVoice) voiceGuests.add(ws._pid); }
     ws._presence = 'active'; roster.set(name, 'active');
     notifyGuests(); notifyRoster();
@@ -452,4 +490,4 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
-module.exports = { createShareServer };
+module.exports = { createShareServer, uniqueName, cleanName };

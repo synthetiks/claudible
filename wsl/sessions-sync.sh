@@ -57,6 +57,11 @@ mark_diverged() { grep -qxF -- "$1" "$DDSET" 2>/dev/null || printf '%s\n' "$1" >
 mark_ack() { grep -qxF -- "$1" "$AKSET" 2>/dev/null || printf '%s\n' "$1" >> "$AKSET"; }
 is_acked() { grep -qxF -- "$1" "$AKSET" 2>/dev/null; }
 clear_diverged() { _rmline "$1" "$DDSET"; _rmline "$1" "$AKSET"; }   # a resolved fork drops both the badge flag AND the keep-local ack
+# Within a SINGLE import pass, divergence must WIN regardless of author-dir glob order: once an id is flagged a fork
+# (or protected as a kept-local ack) THIS run, a later ff / identical / local-ahead resolution from a DIFFERENT
+# author dir for the same id must not clear it — that ordering hole was the "sometimes doesn't auto-flag" bug. The
+# caller (import_sessions) seeds a run-scoped `_divset` of space-delimited ids; we skip the clear only for those.
+clear_diverged_run() { case " ${_divset:-} " in *" $1 "*) return 0 ;; esac; clear_diverged "$1"; }
 # Install a branch transcript so it is ONLY ever visible in final, already-foreign, already-aged form:
 # record foreign FIRST, copy to a temp, age the temp, then atomically rename into place. This closes the
 # TOCTOU window in which a concurrently-spawned session.sh could observe a trusted, current-mtime
@@ -202,7 +207,9 @@ import_sessions() {
   apply_tombstones                                                  # honor collaborators' "delete everywhere"
   IMPORTED=0; UPDATED=0; DIVERGED=0
   [ -d "$WT/sessions" ] || return 0
-  local f id dest dsz
+  # _divset seeds the run-scoped guard read by clear_diverged_run: an id added here (a fork flagged, or a kept-local
+  # ack) can no longer be cleared by a later author dir THIS pass, so a fork is flagged no matter the glob order.
+  local f id dest dsz _divset=" "
   for f in "$WT"/sessions/*/*.jsonl; do
     [ -e "$f" ] || continue
     id="$(basename "$f" .jsonl)"
@@ -211,18 +218,18 @@ import_sessions() {
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
     dest="$PROJ/$id.jsonl"
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
-      import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); clear_diverged "$id"; }; continue
+      import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); clear_diverged_run "$id"; }; continue
     fi
-    if cmp -s "$f" "$dest"; then clear_diverged "$id"; continue; fi  # identical → leave trust status unchanged, resolve any fork flag
+    if cmp -s "$f" "$dest"; then clear_diverged_run "$id"; continue; fi  # identical → leave trust status unchanged, resolve any fork flag
     dsz="$(wc -c < "$dest" 2>/dev/null || echo 0)"
     if [ "$(wc -c < "$f")" -gt "$dsz" ] && head -c "$dsz" "$f" | cmp -s - "$dest"; then
-      import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); clear_diverged "$id"; }   # remote = local + more turns → ff (now foreign)
+      import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); clear_diverged_run "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
-      clear_diverged "$id"                                          # local is ahead of remote → our push handles it
+      clear_diverged_run "$id"                                       # local is ahead of remote → our push handles it
     elif is_acked "$id"; then
-      :                                                              # user chose KEEP-LOCAL for this fork → honor it, don't re-nag (the ack clears if it ever resolves)
+      _divset="$_divset$id "                                        # user chose KEEP-LOCAL: honor it AND protect the ack from a same-run clear by another author dir (don't re-nag)
     else
-      DIVERGED=$((DIVERGED+1)); mark_diverged "$id"                 # true fork → leave local untouched, flag it per-row
+      DIVERGED=$((DIVERGED+1)); mark_diverged "$id"; _divset="$_divset$id "   # true fork → leave local untouched, flag it, and make the flag sticky for the rest of this pass
     fi
   done
   return 0
@@ -389,18 +396,22 @@ case "$op" in
     # frequent (~10s) poll can never fight the background sync's merge on the same worktree. Renderer filters stale ts.
     ensure_worktree || fail "could not set up the sessions branch"
     git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
-    out=""
-    # NUL-delimited (-z) + read -d '' so a branch filename containing spaces/metacharacters can never word-split
-    # or be misread; process substitution (not a pipe) keeps $out in THIS shell. (The case-guard already blocks
-    # non-live/*.json paths — this is defense-in-depth on push-controlled filenames.)
-    while IFS= read -r -d '' path; do
-      case "$path" in live/*.json) ;; *) continue ;; esac
-      [ "$path" = "live/$author.json" ] && continue                  # skip my own advertisement
-      line="$(git -C "$WT" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r')"
-      case "$line" in '{'*'}') ;; *) continue ;; esac                # only well-formed single-object lines
-      [ -n "$out" ] && out="$out,$line" || out="$line"
-    done < <(git -C "$WT" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null)
-    emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[$out]}"
+    # Emit each collaborator's live/<author>.json blob on its own line, then let node JSON-validate each so a single
+    # corrupt/torn/concatenated file ("{}x{}") is DROPPED instead of poisoning the whole peers[] array — which would
+    # make the renderer's JSON.parse throw and silently kill the roster / "Join live" badge (the brace-only guard
+    # this replaces accepted such junk verbatim). NUL-delimited (-z) + read -d '' keeps push-controlled filenames
+    # from word-splitting; the case-guard blocks non-live/*.json paths (defense-in-depth). head -c 4096 caps a
+    # pathological file so it can't blow up the parse. One node spawn total.
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+    result="$(
+      while IFS= read -r -d '' path; do
+        case "$path" in live/*.json) ;; *) continue ;; esac
+        [ "$path" = "live/$author.json" ] && continue                # skip my own advertisement
+        git -C "$WT" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r'; printf '\n'
+      done < <(git -C "$WT" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null) \
+      | (unset MSYS_NO_PATHCONV; node "$(dirname "$0")/sessions-sync-tool.js" presence-filter)
+    )"
+    [ -n "$result" ] && emit "$result" || emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[]}"   # node absent/failed → still emit a valid (empty) list so the renderer never chokes
     ;;
   title-set)
     # Share a session's display NAME across the workspace: merge {id:{title,ts}} into my OWN meta/<author>.json

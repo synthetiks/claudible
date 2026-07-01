@@ -405,11 +405,36 @@ function titleRead() {
   process.stdout.write(encVal(result, /*ensureAscii=*/ true) + '\n'); // print() adds newline
 }
 
+// subcommand "presence-filter": read candidate live/<author>.json blobs from stdin (one per line), keep ONLY those
+// that parse as a single well-formed JSON object, and print the complete presence-list result line. A strict
+// JSON.parse rejects exactly the junk the old brace-only bash guard let through — torn writes, trailing garbage
+// ("{}x{}"), two concatenated objects — so one corrupt collaborator file can no longer poison the whole peers[]
+// array (which would make the renderer's JSON.parse throw and silently kill the roster / "Join live" badge). Each
+// surviving object is re-serialized so the emitted array is guaranteed valid JSON.
+function presenceFilter() {
+  let d = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (c) => { d += c; });
+  process.stdin.on('end', () => {
+    const out = [];
+    for (const ln of d.split('\n')) {
+      const s = ln.trim();
+      if (!s) continue;
+      let o;
+      try { o = JSON.parse(s); } catch (e) { continue; }              // not a single valid JSON value → drop this peer, keep the rest
+      if (o && typeof o === 'object' && !Array.isArray(o)) out.push(JSON.stringify(o));   // must be a plain object (a bare number/array/null/true is not a peer)
+    }
+    process.stdout.write('{"ok":true,"op":"presence-list","peers":[' + out.join(',') + ']}\n');
+  });
+}
+
 const sub = process.argv[2];
 if (sub === 'title-write') {
   titleWrite();
 } else if (sub === 'title-read') {
   titleRead();
+} else if (sub === 'presence-filter') {
+  presenceFilter();
 } else {
   process.stderr.write('unknown subcommand\n');
   process.exit(1);

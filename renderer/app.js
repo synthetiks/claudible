@@ -1187,7 +1187,7 @@ function refreshCollabSurfaces() {
 function collabName() { return (loadPrefs().collabName || '').trim(); }
 function youName() {
   const t = AT();
-  if (t && t.kind === 'live') return collabName() || 'You';   // on a joined session you appear by your collab name
+  if (t && t.kind === 'live') return t.liveYou || collabName() || 'You';   // on a joined session you appear by the name the host registered (disambiguated if it collided), falling back to your collab name
   return collabLive ? (collabName() || 'You') : (hostDisplayName || collabName() || 'You');
 }
 // The "who's here" members for the ACTIVE context: your guests (host-share), or — on a joined tab — the host plus
@@ -1195,7 +1195,7 @@ function youName() {
 function activeRosterMembers() {
   const t = AT();
   if (t && t.kind === 'live') {
-    const me = collabName() || 'Guest', out = [];   // the name the host's server registered us under (mirror its cleanName fallback) so we don't list ourselves twice
+    const me = t.liveYou || collabName() || 'Guest', out = [];   // dedup against the name the host's server actually registered us under (its hello.you — disambiguated if our name collided) so we never list ourselves twice
     if (t.hostName) out.push({ name: t.hostName, state: 'active', host: true });
     (t.roster || []).forEach((g) => { if (g.name !== me) out.push(g); });
     return out;
@@ -2364,6 +2364,7 @@ claudible.onLiveHello((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
   rec.liveReadOnly = !!p.readOnly; rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows;
   rec.livePid = p.pid || null; if (p.host) rec.hostName = p.host;
+  if (p.you) rec.liveYou = p.you;                                   // the name the host's server registered us under (may be disambiguated, e.g. "MK (2)") — used to dedup ourselves out of the roster below
   setLiveState(rec, p.paused ? 'paused' : 'live');
   if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { rec.term.focus(); } catch {} } }
 });
