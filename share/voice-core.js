@@ -110,6 +110,14 @@
       isJoined: function () { return joined; },
       join: function () {
         if (joined) return Promise.resolve();
+        // Some in-app webviews (Slack/Discord/Instagram/Facebook embedded browsers) don't expose
+        // navigator.mediaDevices even over https. Reading .getUserMedia off undefined would throw SYNCHRONOUSLY —
+        // before a promise exists — so the caller's .catch() never runs and the mic-denied UI is skipped (silent
+        // no-op). Guard it: surface the same 'mic-denied' feedback and return a REJECTED promise instead of throwing.
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          try { opts.onUi && opts.onUi({ joined: false, muted: false, members: [], error: 'mic-denied' }); } catch (x) {}
+          return Promise.reject(new Error('no-mediaDevices'));
+        }
         return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }).then(function (s) {
           localStream = s; joined = true; muted = false;
           opts.setJoined(true); ensureOut(); startCapture(s); ui();
