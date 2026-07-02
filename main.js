@@ -73,7 +73,24 @@ function reapOrphanCloudflared() {
   _clearCfPid();
 }
 const share = createShareServer({
-  onInput: (d, who) => { const t = ptys.get(fgTabId); if (t) { if (who && who.name) t.lastInputBy = { name: who.name, ts: Date.now() }; try { t.proc.write(d); } catch {} } },   // a guest typed → into the FOREGROUND pty; tag who typed (write path unchanged) so history can attribute it
+  // A guest typed → into the FOREGROUND pty; tag who typed so history AND the context hook can attribute it.
+  // The context write happens BEFORE proc.write: it's synchronous, so the Enter that submits a prompt always
+  // lands with typedBy already on disk when Claude fires UserPromptSubmit. Throttled — rewrite only when the
+  // typist CHANGES or every 5s during a burst (keeps typedBy.ts fresh for the hook's 20s window without a
+  // per-keystroke fs write); any HOST keystroke clears it (pty:input below), so "fresh typedBy" ⇒ guest-driven.
+  onInput: (d, who) => {
+    const t = ptys.get(fgTabId);
+    if (!t) return;
+    if (who && who.name) {
+      const prev = t.lastInputBy;
+      t.lastInputBy = { name: who.name, ts: Date.now() };
+      if (!prev || prev.name !== who.name || (t.lastInputBy.ts - (t.typistWrittenTs || 0)) > 5000) {
+        t.typistWrittenTs = t.lastInputBy.ts;
+        try { _writeContext(fgTabId); } catch {}
+      }
+    }
+    try { t.proc.write(d); } catch {}
+  },
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
   onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(fgTabId); } catch {} },   // presence lights; refresh the host tab's injected context so the model sees who's here
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
@@ -126,7 +143,7 @@ const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<ta
 const SETTINGS_FILE = path.join(RT, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { const prevHist = readSettings().sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -309,7 +326,7 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {   // one-shot, scoped to this contents: a reload won't stack a 2nd set of pollers/timers
     if (DEBUG) { try { win.webContents.openDevTools({ mode: 'detach' }); } catch {} }   // only with CLAUDIBLE_DEBUG=1
     if (!ensureVoiceProvisioned()) startVoiceServices();   // packaged win: provision voice on first run, else just start (idempotent)
-    pollStatus(); pollHooks(); pollAgentTokens();
+    pollStatus(); pollHooks(); pollAgentTokens(); pollContextHeartbeat();
     // spawn-on-size fallback: if the renderer never reports a size, seed the first tab ('main') at a default
     setTimeout(() => { if (ptys.size === 0) spawnPty('main', 120, 32, activeWorkspace, ''); }, 1800);
     startPoll();            // adaptive background session sync for the active repo workspace
@@ -450,6 +467,9 @@ function setForegroundTab(tabId) {
   if (ws) { try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {} }
   if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
   syncShare();
+  // Foreground changed → guest input now targets a different pty; any pending typist tag belonged to the
+  // OLD foreground's in-flight typing and must not attribute a prompt submitted after the switch.
+  try { for (const r of ptys.values()) { r.lastInputBy = null; r.typistWrittenTs = 0; } } catch {}
   _writeAllContexts();                                    // foreground changed → which tab is "hosting" changed; refresh every tab's context
 }
 ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
@@ -457,7 +477,14 @@ ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
   const rec = ptys.get(tabId);
   spawnPty(tabId, cols, rows, (rec && rec.ws) || (intent && intent.ws) || activeWorkspace, (rec && rec.session) || (intent && intent.session) || '');
 });
-ipcMain.on('pty:input', (e, { tabId, data }) => { const t = ptys.get(tabId); if (t) { try { t.proc.write(data); } catch {} } });
+ipcMain.on('pty:input', (e, { tabId, data }) => {
+  const t = ptys.get(tabId);
+  if (!t) return;
+  // A HOST keystroke ends any pending guest attribution: last typist wins. One context write per
+  // guest→host transition (t.lastInputBy is only ever set while a guest was typing), so this stays cold.
+  if (t.lastInputBy) { t.lastInputBy = null; t.typistWrittenTs = 0; try { _writeContext(tabId); } catch {} }
+  try { t.proc.write(data); } catch {}
+});
 ipcMain.on('pty:resize', (e, { tabId, cols, rows }) => {
   const t = ptys.get(tabId); if (!t) return;
   t.cols = cols || t.cols; t.rows = rows || t.rows;
@@ -1221,6 +1248,12 @@ ipcMain.handle('share:status', () => share.status());
 // never clobber one meter; every 'status' IPC carries its tabId so the renderer routes it to the right tab.
 const lastStatusByTab = new Map();   // tabId -> last raw status json (dedupe)
 const appIntervals = [];   // long-lived poller intervals — cleared on window-all-closed so none leak or fire against a dead window (H3)
+// Heartbeat for the app→Claude context channel: the hook drops live/typedBy from a context.json whose ts is
+// >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
+// session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.
+function pollContextHeartbeat() {
+  appIntervals.push(setInterval(() => { try { if (ptys.has(fgTabId)) _writeContext(fgTabId); } catch {} }, 5 * 60 * 1000));
+}
 function pollStatus() {
   appIntervals.push(setInterval(() => {
     for (const [tabId, rec] of ptys) {
@@ -1641,7 +1674,11 @@ function _writeContext(tabId) {
       collabName: (s.collabName || '').toString().slice(0, 60),
       workspace: rec.ws ? ((rec.ws.label || rec.ws.slug || '') + (rec.ws.kind && rec.ws.kind !== 'legacy' ? ' (' + rec.ws.kind + ')' : '')) : '',
       machineId: _machineId(), host: _os.hostname(), os: process.platform,
+      runner: runner.id,   // flavor (wsl | win | posix) — ONLY main knows this; the hook can't sniff it from env
       live: _liveStateFor(tabId),
+      // Who typed the in-flight prompt: a co-driving guest (set on their keystrokes, cleared by any host
+      // keystroke / foreground switch). The hook treats it as guest-authored only while fresh (<20s) AND hosting.
+      typedBy: (rec.lastInputBy && rec.lastInputBy.name) ? { name: String(rec.lastInputBy.name).slice(0, 60), ts: rec.lastInputBy.ts } : null,
       ts: Date.now(),
     };
     const dir = path.join(RT, 'tabs', rec.runtimeId); try { fs.mkdirSync(dir, { recursive: true }); } catch {}

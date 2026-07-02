@@ -77,6 +77,13 @@ function main() {
   let app = {};
   const ctxFile = process.env.CLAUDIBLE_CONTEXT || process.argv[2] || '';
   if (ctxFile) { try { app = JSON.parse(fs.readFileSync(ctxFile, 'utf8')) || {}; } catch { app = {}; } }
+  // Belt & suspenders vs a context.json abandoned by a crashed/killed app: the VOLATILE half (live-session
+  // state, who-typed) must not be asserted from a stale file. main refreshes the foreground tab's ts at least
+  // every 5 min while running, so a ts older than 10 min means the writer is gone — drop live/typedBy but KEEP
+  // the stable facts (collabName/workspace/runner/machineId stay correct even from an old write).
+  if (app && typeof app === 'object' && Number(app.ts) > 0 && (Date.now() - Number(app.ts)) > 10 * 60 * 1000) {
+    delete app.live; delete app.typedBy;
+  }
 
   // Sanitize EVERY value that enters the injected block. Some of these are attacker-influenced: a remote guest
   // fully controls their display name (?n=), and a synced workspace/session name is collaborator-authored. Without
@@ -97,12 +104,38 @@ function main() {
   if (ghLogin) who.push('@' + clean(ghLogin, 40));
   else if (gitName) who.push(clean(gitName, 60));
   lines.push('User (you are talking to): ' + (who.filter(Boolean).length ? who.filter(Boolean).join(' ') : (clean(user, 40) || 'unknown')));
-  lines.push('Machine: ' + (clean(host, 60) || 'unknown') + (user ? ' (login ' + clean(user, 40) + ')' : ''));
+  // Per-turn AUTHORSHIP — while hosting a live session the prompt may have been typed by a co-driving guest.
+  // main writes typedBy on guest keystrokes (throttled ≤5s) and CLEARS it on any host keystroke, so at
+  // UserPromptSubmit a fresh typedBy means the guest drove THIS prompt. 20s freshness covers the write
+  // throttle + submit latency; only meaningful on UserPromptSubmit (a SessionStart has no authored prompt).
+  const hosting = app.live && typeof app.live === 'object' && app.live.role === 'hosting';
+  if (event === 'UserPromptSubmit' && hosting) {
+    const tb = app.typedBy;
+    const fresh = tb && typeof tb === 'object' && tb.name && Number(tb.ts) > 0 && (Date.now() - Number(tb.ts)) < 20000;
+    lines.push(fresh
+      ? 'This prompt was typed by: GUEST "' + clean(tb.name, 40) + '" — a co-driving guest is talking to you this turn; address them, not the host'
+      : 'This prompt was typed by: the HOST' + (app.collabName ? ' (' + clean(app.collabName, 60) + ')' : ''));
+  }
+  // Machine: ground truth (this execution space) first; the app-side view reconciles the WSL-vs-Windows
+  // hostname split (same physical box, two names) and machine-id is the app's stable per-machine identity
+  // (what session-history entries are stamped with).
+  let machineLine = 'Machine: ' + (clean(host, 60) || 'unknown') + (user ? ' (login ' + clean(user, 40) + ')' : '');
+  if (app.host && clean(app.host, 60) && clean(app.host, 60) !== clean(host, 60)) machineLine += ' — app-side host: ' + clean(app.host, 60);
+  if (app.machineId) machineLine += ' — machine-id: ' + clean(app.machineId, 40);
+  lines.push(machineLine);
+  // Flavor — which of the three claudible configurations is running. Only main's runner.id is authoritative
+  // (in-hook env sniffing can't tell 'wsl flavor' from 'posix runner inside WSL'). Unknown values are skipped
+  // (build skew: an older/newer main may write ids this hook doesn't know).
+  const FLAVORS = { wsl: 'wsl — Windows app + WSL backend', win: 'win — native Windows (no WSL)', posix: 'posix — native Linux/macOS' };
+  if (app.runner && FLAVORS[app.runner]) lines.push('Claudible flavor: ' + FLAVORS[app.runner]);
   if (gitEmail) lines.push('Git identity here: ' + (gitName ? clean(gitName, 60) + ' <' + clean(gitEmail, 60) + '>' : clean(gitEmail, 60)));
   if (cwd) lines.push('Working directory: ' + clean(cwd, 200));
   if (app.workspace) lines.push('Claudible workspace: ' + clean(app.workspace, 120));
 
   // Live-session state — the "am I hosting / joined / did it end, and who's here" half of the ask.
+  // Today's main only ever writes role:'hosting' (a joined tab mirrors a PEER's session — no local Claude to
+  // inform — and stopping just removes the live block, absence = solo). The 'joined'/'ended' branches are kept
+  // deliberately: hook and app can skew across builds, so this hook renders every role a context.json might carry.
   if (app.live && typeof app.live === 'object') {
     const L = app.live;
     if (L.role === 'hosting') {

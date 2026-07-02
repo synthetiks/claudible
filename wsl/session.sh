@@ -99,8 +99,10 @@ exit 0
 EOF
   chmod +x "$SDIR/.claude/hook.sh"
   # bash-fallback context hook: pure shell, no node, so the model STILL learns which machine/user it's on even
-  # on a node-less install. Ground-truth only (hostname/whoami/git/cwd); app live-state (context.json) is best
-  # effort via a tiny grep. MUST exit 0 — a non-zero UserPromptSubmit hook would reject the user's prompt.
+  # on a node-less install. Ground-truth ONLY (hostname/whoami/git/cwd) — app state (context.json: collab name,
+  # live session, typist, flavor) is deliberately NOT parsed here: those values are collaborator/guest-influenced
+  # and the node hook's sanitizer is the only vetted injection defense for them. MUST exit 0 — a non-zero
+  # UserPromptSubmit hook would reject the user's prompt.
   cat > "$SDIR/.claude/context-hook.sh" <<'EOF'
 #!/usr/bin/env bash
 # Pure-shell identity hook (node-less installs). Emits the SAME additionalContext JSON as context-hook.js, so the
