@@ -419,9 +419,11 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     }
     // also evict a guest of that name still in the reconnect grace window (disconnected, token alive) so a
     // backgrounded tab can't silently rejoin past the kick.
+    let graceKicked = false;
     for (const [tok, p] of Array.from(pendingDrops.entries())) {
-      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} pendingDrops.delete(tok); resumeTokens.delete(tok); roster.set(nm, 'gone'); hit = true; }
+      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} pendingDrops.delete(tok); resumeTokens.delete(tok); roster.set(nm, 'gone'); hit = true; graceKicked = true; }
     }
+    if (graceKicked) { try { systemChat(nm + ' was removed by the host'); } catch {} }   // a guest kicked while in the reconnect grace window has no live socket, so drop()'s "removed by host" line never fires — announce it here for parity
     if (hit) notifyRoster();
     return hit;
   }
