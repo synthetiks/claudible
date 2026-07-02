@@ -207,7 +207,14 @@ function loadRegistry() {
     reg.activeId = (reg.workspaces.find((w) => w.kind === 'local') || reg.workspaces[0]).id;
   return reg;
 }
-function saveRegistry() { try { fs.writeFileSync(WORKSPACES, JSON.stringify(registry, null, 2)); } catch (e) { console.error('[claudible] workspaces.json:', e.message); } }
+// Atomic (tmp+rename) so a crash mid-write can't leave a TORN workspaces.json — a corrupt file made
+// loadRegistry silently rebuild from scratch, losing permissionMode/effort/the whole library. Returns
+// whether the write actually landed so settings-like callers (permissionMode:set) can tell the user
+// instead of reporting success for a change that will vanish on relaunch.
+function saveRegistry() {
+  try { fs.writeFileSync(WORKSPACES + '.tmp', JSON.stringify(registry, null, 2)); fs.renameSync(WORKSPACES + '.tmp', WORKSPACES); return true; }
+  catch (e) { console.error('[claudible] workspaces.json:', e.message); return false; }
+}
 let registry = loadRegistry();
 let activeWorkspace = registry.workspaces.find((w) => w.id === registry.activeId) || registry.workspaces[0];
 
@@ -375,11 +382,20 @@ function spawnPty(tabId, cols, rows, ws, session) {
   ws = ws || activeWorkspace;
   try {
     const runtimeId = tabRuntimeId(tabId);
+    // One honest line per spawn: the mode this session was ASKED to run with and where it came from — the
+    // first thing to check when "bypass is on in settings but the session prompts". (A foreign session is
+    // still sandboxed downstream regardless; session.sh / win.js print that override into the terminal.)
+    console.log('[claudible] spawn tab=' + tabId + ' ws=' + ((ws && (ws.slug || ws.id)) || 'default')
+      + ' permission-mode=' + (registry.permissionMode || 'default') + ' (from workspaces.json registry)');
     const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId });
     if (!proc) {   // node-pty failed to load/build — on Linux this is almost always a missing C toolchain. Tell the user how to fix it instead of a bare error.
       const hint = process.platform === 'linux' ? '\r\n  On Linux node-pty builds from source — install: sudo apt install build-essential python3   (then: npm rebuild)\r\n' : '';
       winSend('pty:data', { tabId, data: `\r\n[claudible] terminal backend (node-pty) unavailable: ${pty.err}\r\n${hint}` }); return;
     }
+    // Win-runner parity with session.sh's foreign notice: the wsl/posix bootstrap echoes "opening a
+    // collaborator's session…" into the terminal itself; claude.exe is spawned directly (no wrapping shell),
+    // so the runner flags the decision and main injects the same line — the sandbox override must never be silent.
+    if (proc.claudibleForeign) winSend('pty:data', { tabId, data: "[claudible] opening a collaborator's session — Claude will ask before running tools.\r\n" });
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
@@ -1179,7 +1195,10 @@ ipcMain.handle('effort:set', (e, level) => {
 ipcMain.handle('permissionMode:get', () => registry.permissionMode || 'default');
 ipcMain.handle('permissionMode:set', (e, mode) => {
   registry.permissionMode = ['default', 'acceptEdits', 'bypass'].includes(mode) ? mode : 'default';
-  saveRegistry();
+  // A persist failure must be LOUD: the in-memory mode applies to this run, but it will silently revert on
+  // relaunch ("bypass is on in my settings but off when I launch" — the exact bug this closes).
+  const persisted = saveRegistry();
+  if (!persisted) return { ok: false, error: 'could not write workspaces.json — the mode applies to THIS run only and will reset on relaunch', permissionMode: registry.permissionMode };
   return { ok: true, permissionMode: registry.permissionMode };
 });
 // Invite a GitHub user as a push collaborator on a repo workspace's repo (Stage 2 — durable git collab).
