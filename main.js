@@ -277,7 +277,7 @@ function ensureVoiceProvisioned() {
 function createWindow() {
   win = new BrowserWindow({
     width: 1320, height: 860, backgroundColor: '#070809',
-    icon: path.join(__dirname, 'assets', 'claudible.ico'),   // window + taskbar branding (the headphones/mic guy)
+    icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'claudible.ico' : 'icon.png'),   // window + taskbar branding (the headphones/mic guy); .ico decodes only on Windows
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   Menu.setApplicationMenu(null);   // no default menu → no View>Reload/Force-Reload that would re-init pollers & corrupt the hook stream
