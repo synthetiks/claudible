@@ -2,6 +2,34 @@
 
 All notable changes to Claudible are documented here.
 
+## [Unreleased]
+
+### Session history grew up — and is now ON by default
+- **Live multiplayer feed:** the per-prompt history streams to connected guests (full log on join, per-entry updates live) — a joined cockpit shows "Session History · from the host". Same privacy rules as the terminal mirror: private workspaces never leave the machine.
+- **"Changes: 3 files (+42/−10)"** on every entry (per-file breakdown on hover), computed when the turn settles.
+- **The first prompt is revertable** (a checkpoint now seeds at session start, not after the first full turn), and entries authored on another machine hide their Revert button (their snapshots live in that machine's clone).
+- `sessionHistory` **defaults on**; explicit off still respected.
+
+### The model knows who's talking (multiplayer identity)
+- Every turn now tells the embedded Claude **who typed the prompt** (host vs a named co-driving guest), **which machine** it's on (stable machine-id + both hostname views), and **which Claudible flavor** is running (WSL / native Windows / Linux). No more addressing the host while a guest is driving, or stale machine identity after a synced transcript.
+
+### Session switching fixed (the "empty session" bug)
+- The resume fallback can no longer mistake a tab-switch **kill** for a resume **refusal** — the thing that minted multiplying "(empty session)" stubs.
+- Killed tabs' WSL-side processes are now **actually reaped** (ConPTY kills never crossed the WSL boundary; zombies survived for days), including a startup sweep for crash leftovers — and each session generation gets its own runtime dir so a zombie can never pollute the live tab's telemetry.
+- Promptless stub sessions are hidden from the session picker and refused by sync in both directions.
+- A slow workspace clone can no longer stomp the session you just clicked.
+
+### Permissions you can trust
+- A permission-mode change that fails to save **says so** (and the registry write is now atomic) instead of silently reverting on relaunch.
+- The status bar always shows the active mode (`perms: ask first / auto-accept edits / bypass`).
+- The native-Windows runner now prints the collaborator-session sandbox notice instead of sandboxing silently.
+
+### Agents cockpit
+- Every agent tile shows **which model runs it** (fable 5 / sonnet 5 / opus 4.8 …), read live from the agent's transcript.
+
+### Public-beta hygiene
+- SECURITY.md rewritten to match the shipped app (real network-surface map, the actual permission model, private vulnerability reporting); README/SETUP/docs scrubbed of private-repo instructions and stale "pending" claims; Linux window icon + "Git for Windows" label fixed off-Windows.
+
 ## [0.6.0] — 2026-07-02
 
 A big feature + polish release: a full session-history/revert system, a visual redesign, and a large security & reliability pass.
@@ -38,6 +66,27 @@ Making a fresh install "paste one line and go," to production standards.
 - **One-click installers via electron-builder.** A packaging config (`package.json#build`) + CI matrix (`.github/workflows/build.yml`) produce a Windows NSIS installer (you pick the folder), a Linux AppImage/deb, and a macOS dmg — no git clone, npm, or build toolchain for end users. `asar: false` keeps the bash scripts + Node helpers + hooks readable on disk (they're executed by PATH). The Linux target is **built + layout-verified locally** (electron 42, node-pty bundled, the right files included/excluded); Windows/mac artifacts build in CI.
 - **Native Linux + macOS backends.** A `Runner` seam routes every OS-coupled call through `runners/{wsl,posix,win}.js`; the Posix backend is live-tested on Linux (runScript + a real node-pty spawn). macOS shares it (one documented non-UTF-8 diff caveat tracked for when the dmg ships).
 - **WSL-free native-Windows path (authored, smoke-gated).** `install.ps1 -Native` provisions native Windows Claude Code + the prebuilt voice services (`setup/setup-win.ps1`: the A0-proven `whisper-server.exe` with no compiler, + Kokoro on CPU torch) and pins the `win` runner. Download URLs + zip layout + the npm package are verified against live sources; the PowerShell is AST-parsed clean. The end-to-end native install + voice runtime still need a Windows smoke test (`docs/SMOKE.md`) — the WSL path remains the proven default.
+
+## [0.5.3] — 2026-06-26
+- Fixed session-sync setup failing on native Windows ("could not set up sync", missing sessions) — the same literal-`/c/…` path root cause as 0.5.2, one level deeper in git's config.
+
+## [0.5.2] — 2026-06-26
+- Custom workspace folders land where you chose them on native Windows (a `C:\Games\…` pick no longer becomes `C:\c\Games\…`): paths now cross the MSYS boundary in mixed `C:/…` form.
+
+## [0.5.1] — 2026-06-26
+- Desktop shortcut is created reliably on every install; Claude-connect detection works when native Windows keeps credentials in Credential Manager; clone failures surface a real error instead of silence.
+
+## [0.5.0] — 2026-06-25
+- **Cross-device workspace sync**: make a local workspace synced (and shareable) in one click, GitHub-backed; fast one-call discovery of your synced workspaces on any device. Engine live-tested against real GitHub.
+
+## [0.4.0] — 2026-06-25
+- **First-run Get-Started wizard**: connect Claude → pick a workspace → connect GitHub, shown once — replacing the cold open.
+
+## [0.3.1] — 2026-06-24
+- Fixed the first real native-Windows install crash (CreateProcess error 193): `claude` now resolves to a runnable `.cmd`/`.exe`, not npm's extensionless shim.
+
+## [0.3.0] — 2026-06-24
+- **Claudible ships as a prebuilt Windows installer** — double-click `.exe`, no clone/npm/PowerShell — while the git-clone path stays for devs, Linux, and terminal users.
 
 ## [0.2.0] — Hardening & Polish
 
