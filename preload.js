@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld('claudible', {
   diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),
   diffDiscard: (relPath) => ipcRenderer.invoke('diff:discard', relPath),
   // session history (the append-only activity log behind the Repo Review feed + revert; gated by the sessionHistory setting)
-  historyAppend: (prompt, session, wsId) => ipcRenderer.invoke('history:append', { prompt, session, wsId }),   // renderer sends the raw prompt + submitting tab's workspace; main stamps id/seq/author/machine
+  historyAppend: (prompt, session, wsId, tabId) => ipcRenderer.invoke('history:append', { prompt, session, wsId, tabId }),   // renderer sends the raw prompt + submitting tab's workspace + tabId; main stamps id/seq/author/machine and attributes co-drive by tabId
   historyLoad: () => ipcRenderer.invoke('history:load'),
   checkpointRevert: (id, wsId) => ipcRenderer.invoke('checkpoint:revert', { id, wsId }),   // roll the workspace repo back to a prompt's code snapshot
   checkpointUndo: (wsId) => ipcRenderer.invoke('checkpoint:undo', { wsId }),                // undo the last revert (restores the pre-revert tree)

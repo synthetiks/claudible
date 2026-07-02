@@ -1724,8 +1724,13 @@ ipcMain.handle('history:append', (e, payload) => {
     // and the session guard keeps a background tab's prompt from being credited to a foreground guest.
     let author = _identity.resolveAuthor({ username: s.collabName, fallback: 'host' });
     try {
-      const fr = ptys.get(fgTabId), sess = payload && payload.session ? String(payload.session) : '';
-      if (fr && fr.lastInputBy && (Date.now() - fr.lastInputBy.ts) < 15000 && (fr.session || '') === sess) {
+      // Credit a co-driving guest only when the FOREGROUND tab (the only one a guest's input reaches, via onInput →
+      // ptys.get(fgTabId)) is the tab that submitted THIS prompt. Match on tabId — the old `fr.session === payload.session`
+      // check silently failed because a pty record's `.session` is only set at spawn (stays '' for a new session) while
+      // the renderer submits the real UUID, so it never matched and every guest prompt fell through to the host.
+      const fr = ptys.get(fgTabId);
+      const submittedByFg = payload && payload.tabId != null && String(payload.tabId) === String(fgTabId);
+      if (fr && submittedByFg && fr.lastInputBy && (Date.now() - fr.lastInputBy.ts) < 15000) {
         author = _identity.resolveAuthor({ username: fr.lastInputBy.name, fallback: author });
         fr.lastInputBy = null;
       }

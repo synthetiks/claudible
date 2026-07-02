@@ -837,7 +837,7 @@ claudible.onHookLine((tabId, line) => {
   if (o.hook_event_name === 'UserPromptSubmit') {
     t.busy = true; markTabBusy(t.tabId, true);
     if (o.prompt) {
-      try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : '', t.wsId || ''); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists). Pass the SUBMITTING tab's workspace so a mid-flight workspace switch can't write to the wrong file.
+      try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : '', t.wsId || '', t.tabId); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists). Pass the SUBMITTING tab's workspace + tabId so main can write to the right file AND attribute a co-drive prompt to the foreground guest.
       if (typeof refreshHistoryFeed === 'function' && $('diffpanel') && $('diffpanel').classList.contains('open')) setTimeout(refreshHistoryFeed, 120);   // live-update the feed ONLY when its drawer is actually open (else it's a wasted historyLoad + off-screen DOM rebuild every prompt)
     }
   } else if (o.hook_event_name === 'Stop') {
