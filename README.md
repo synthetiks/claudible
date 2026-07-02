@@ -19,21 +19,15 @@
 
 ## Claude Code is single-player. Claudible makes it multiplayer — and wraps it in a cockpit.
 
-Claude Code is brilliant, but it's **one person, one terminal, one agent.** Claudible turns your *running* session into a **room your team can join:** drop a private, approval-gated link in Slack, a teammate opens it in their browser — laptop or phone — and they're *inside your live session.* They watch, they chat, or they **take the keyboard** and co-drive the same Claude. Pair-program with AI *and* humans, build a repo together, onboard someone by handing them the wheel, debug in real time.
+Claude Code is one person, one terminal, one agent. Claudible turns your *running* session into a room your team can join: drop a private, approval-gated link in Slack, a teammate opens it in their browser — laptop or phone — and they're inside your live session. They can watch, chat, or take the keyboard and co-drive the same Claude: pair-program, onboard someone by handing them the wheel, debug together in real time.
 
-And around that, Claudible is a **Swiss-army knife for Claude Code** — everything you wish the terminal had, in one place: fully-local **two-way voice** (talk to it, hear it back), **live context/cost/token telemetry** with a `/compact` guardrail, a **live agents cockpit** (watch your subagents and workflow swarms work — tools, tokens, results), and **one-click** slash-commands. All wrapping the *real* Claude Code TUI, untouched (xterm.js, full scrollback).
-
-> **Windows · Linux · macOS** · voice is fully local · MIT
+Around that session sits the cockpit: fully-local **two-way voice** (talk to it, hear it back), **live context/cost/token telemetry** with a `/compact` guardrail, a **live agents cockpit** (watch subagents and workflow swarms work — tools, tokens, results), and **one-click** slash-commands. All wrapping the real Claude Code TUI, untouched (xterm.js, full scrollback).
 
 ## 🤝 Multiplayer — your session, shared
-Click **Share** and Claudible hands you a private invite link to your *live* session. It's **reusable and approval-gated** — up to 8 people can open it, each waiting in a lobby until you approve them by name. Pick the mode per share:
-- **Read-only** — guests watch the live terminal and chat, but can't type.
-- **Interactive** — guests type into the *same* Claude Code session you're driving.
-
-There's a **human↔human chat** alongside the terminal, a **voice room**, names for everyone, and a **mobile-friendly** browser viewer so someone can follow from a phone. With [`cloudflared`](https://github.com/cloudflare/cloudflared) it's a free `https://…trycloudflare.com` tunnel a colleague on any network can reach (without it, localhost/LAN). Nothing is hosted by us — the tunnel connects *out* from your machine. → [details + security](#live-session-sharing--pair-programming)
+Click **Share** and Claudible hands you a private invite link to your *live* session — reusable, approval-gated (each guest waits in a lobby until you approve them by name, up to 8), and **read-only** (watch + chat) or **interactive** (type into the same session) per share. Guests get a chat, a voice room, and a mobile-friendly viewer; with [`cloudflared`](https://github.com/cloudflare/cloudflared) the link is a free `https://…trycloudflare.com` tunnel that works across networks (without it, localhost/LAN). Nothing is hosted by us — the tunnel connects *out* from your machine. → [details + security](#live-session-sharing--pair-programming)
 
 ## 🧰 The cockpit — a Swiss-army knife for Claude Code
-- 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js, full scrollback) in a sleek obsidian-dark UI. Your session, untouched.
+- 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js, full scrollback) in an obsidian-dark UI. Your session, untouched.
 - 🎙️ **Two-way local voice** — hold a key and talk; hear replies read back. Whisper + Kokoro run **on your machine** — no cloud, no Claude.ai voice sign-in, no telemetry from Claudible. (The embedded Claude Code talks to Anthropic exactly as the normal CLI does.)
 - 📊 **Live telemetry** — context %, cost, and tokens at a glance, with a guardrail (amber → red) and a one-tap `/compact` before you run out of room.
 - 🛰️ **Live agents cockpit** — watch your subagents and workflow swarms work in real time: their task, tool-by-tool activity, token burn, and final results.
@@ -53,7 +47,7 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 
 ## Install & run
 
-**Two ways in — pick by who you are:**
+**Two ways in:**
 
 | | ⬇️ **Download the app** | 🛠️ **Build from source** |
 |---|---|---|
@@ -85,7 +79,7 @@ The simplest path. **No git, no `npm`, no PowerShell scripts, no `system32` snag
 
 ### 🛠️ Build from source
 
-For developers, Linux, and terminal users who'd rather `git clone` and run a script (no installer). One `Runner` seam picks the backend per OS. Maturity, honestly: **Windows + WSL2** is the battle-tested path; **Linux** is verified (native backend live-tested, AppImage builds); **native Windows** and **macOS** are code-complete with runtime smoke tests in progress.
+For developers, Linux, and terminal users who'd rather `git clone` and run a script (no installer). One `Runner` seam picks the backend per OS. Maturity, honestly: **Windows + WSL2** is the battle-tested path; **Linux** is verified (native backend live-tested, packaged AppImage boot-tested); **native Windows** and **macOS** are code-complete with runtime smoke tests in progress.
 
 <details open><summary><h3>🪟 Windows 11 + WSL2 — recommended</h3></summary>
 
@@ -138,7 +132,7 @@ npm install            # builds node-pty for Linux (needs build-essential + pyth
 bash setup/setup.sh    # whisper.cpp + Kokoro (~480 MB models on first run)  ·  NOT `npm run setup` (that's the Windows→WSL wrapper)
 npm start              # auto-selects the native Linux backend (no WSL involved)
 ```
-Packaged installers build with `npm run dist:linux` (AppImage + `.deb`). The native backend (`runScript` + a real node-pty spawn) is live-tested; a 123 MB AppImage builds clean.
+Packaged installers build with `npm run dist:linux` (AppImage + `.deb`); the 0.6.0 AppImage is built and boot-verified. The native backend (`runScript` + a real node-pty spawn) is live-tested.
 </details>
 
 <details><summary><h3>🍎 macOS · new</h3></summary>
@@ -177,7 +171,7 @@ Click **Share** to live-share your *running* Claude Code session: Claudible spin
 - **Read-only** — guests watch the live terminal and can chat, but can't type.
 - **Interactive** — guests type into the *same* Claude Code session you're driving.
 
-There's a **human↔human chat** alongside the terminal, names for the host and each guest, and a **mobile-friendly** browser viewer (the cockpit's custom scroll gutter included) so someone can follow along from a phone. Rotate the invite anytime without dropping current guests. Nothing is hosted by us — the tunnel connects *out* from your machine; see [Security & privacy](#security--privacy) for what that exposes.
+There's a **human↔human chat** alongside the terminal, names for the host and each guest, and a **mobile-friendly** browser viewer so someone can follow along from a phone. Rotate the invite anytime without dropping current guests. Nothing is hosted by us — the tunnel connects *out* from your machine; see [Security & privacy](#security--privacy) for what that exposes.
 
 ### How joining works — and why it's safe
 When you click **Share**, Claudible starts a tiny web server **on your own machine** (loopback). If
