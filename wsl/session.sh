@@ -187,6 +187,14 @@ case "${CLAUDIBLE_PERMISSION_MODE:-}" in
   acceptEdits) PERM=(--permission-mode acceptEdits) ;;
   *)           PERM=() ;;                                # default → Claude asks before running tools
 esac
+# KILL-AWARENESS — the phantom-session fix. The "<4s ⇒ resume refused" heuristic below cannot, by itself,
+# tell "claude refused to resume" from "the user switched tabs and the pty was torn down under us": both
+# return fast. Falling through to FRESH after a KILL is what minted the multiplying "(empty session)"
+# stubs (an orphaned, promptless claude creates a new .jsonl). Two guards:
+#  • trap: a delivered HUP/TERM (pty teardown) exits IMMEDIATELY — never reaches the fallback.
+#  • exit-code: claude dying to a SIGNAL (rc >= 128) means WE were killed, not refused — checked at both
+#    fallback sites. A genuine refusal exits with a normal code and still gets the fresh-session fallback.
+trap 'exit 0' HUP TERM
 resume_one() {   # $1 = session id — trusted (own) launches in PERM mode; foreign ALWAYS sandboxed (prompts)
   if is_foreign "$1"; then
     echo "[claudible] opening a collaborator's session — Claude will ask before running tools."
@@ -210,8 +218,9 @@ if [ -n "$SEL" ]; then
   # session (e.g. one that ended mid-tool-call) and exit IMMEDIATELY rather than opening the TUI; a real
   # resumed session blocks until quit, so a return in under ~4s means resume failed → fall back to fresh.
   START=$(date +%s)
-  resume_one "$SEL"
+  resume_one "$SEL"; RC=$?
   [ $(( $(date +%s) - START )) -ge 4 ] && exit 0
+  [ "$RC" -ge 128 ] && exit 0   # claude died to a signal = OUR pty was killed (tab switch/close) — a fresh session here would be an orphaned phantom
   echo "[claudible] couldn't resume that session — starting a fresh one."
   exec "${FRESH[@]}"
 fi
@@ -228,8 +237,9 @@ while IFS= read -r f; do
 done < <(ls -1t "$PROJ"/*.jsonl 2>/dev/null)
 if [ -n "$LATEST" ]; then
   START=$(date +%s)
-  claude "${PERM[@]}" --resume "$LATEST" "${EFF[@]}"
+  claude "${PERM[@]}" --resume "$LATEST" "${EFF[@]}"; RC=$?
   [ $(( $(date +%s) - START )) -ge 4 ] && exit 0   # resumed and used, then quit normally — done
+  [ "$RC" -ge 128 ] && exit 0   # killed mid-resume (tab switch/close), not refused — no phantom fresh session
   echo "[claudible] couldn't resume the previous conversation — starting a fresh one."
 fi
 exec "${FRESH[@]}"
