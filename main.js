@@ -143,7 +143,7 @@ const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<ta
 const SETTINGS_FILE = path.join(RT, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} if (obj && obj.sessionHistory === true) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -1687,7 +1687,7 @@ const _hist = require('./lib/history.js');
 const _identity = require('./lib/identity.js');
 const _histStore = require('./lib/historyStore.js');
 const _os = require('os');
-function _histEnabled() { return readSettings().sessionHistory === true; }   // default OFF
+function _histEnabled() { return readSettings().sessionHistory !== false; }   // default ON (shipped after the multiplayer sync + smoke pass); explicit false = off. Must mirror the renderer's toggle-init read.
 function _machineId() {
   try {
     const f = path.join(app.getPath('home'), '.claudible', 'machine-id');

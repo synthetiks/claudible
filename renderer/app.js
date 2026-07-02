@@ -2166,7 +2166,7 @@ function savePrefs(patch) {
   announceOn = p.announce !== false; if ($('announce-done')) { $('announce-done').checked = announceOn; $('announce-toggle').classList.toggle('on', announceOn); }
   chimeOn = p.chime !== false; if ($('chat-chime')) { $('chat-chime').checked = chimeOn; $('chime-toggle').classList.toggle('on', chimeOn); }
   fullReadout = p.fullReadout !== false; if ($('full-readout')) { $('full-readout').checked = fullReadout; $('fullreadout-toggle').classList.toggle('on', fullReadout); }
-  { const sh = p.sessionHistory === true; if ($('sess-history')) { $('sess-history').checked = sh; $('sesshist-toggle').classList.toggle('on', sh); } }   // session history: default OFF
+  { const sh = p.sessionHistory !== false; if ($('sess-history')) { $('sess-history').checked = sh; $('sesshist-toggle').classList.toggle('on', sh); } }   // session history: default ON (absence = on; explicit false = off) — must mirror main's _histEnabled
   applyTtsSpeed(p.ttsSpeed || 0, false);
   if (p.pttKey) { if (isSafePttKey(p.pttKey)) pttKey = p.pttKey; else savePrefs({ pttKey: 'AltLeft' }); }   // self-heal a bad saved key (e.g. an old rebind to Space) so it can't keep eating the spacebar
   applyPttKey();   // render the current push-to-talk key (default or saved)
