@@ -59,7 +59,7 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 |---|---|---|
 | **For** | Most people — just want to run it | Developers · Linux · terminal users |
 | **Windows** | Double-click `Claudible-Setup.exe` | `install.ps1` (clone + build) |
-| **Linux / macOS** | *(installers coming)* | `install.sh` / `npm run setup` |
+| **Linux / macOS** | *(installers coming)* | `bash setup/setup.sh` |
 | **Comes from** | [**Releases**](https://github.com/thecrazydev1/claudible/releases) | `git clone` |
 
 During beta the repo is **private**, so either path needs a GitHub account that's a **collaborator** on it (to download a release asset *or* to clone).
@@ -199,7 +199,7 @@ anyone who held it.
 > test) or send a **fresh link**. Only people you explicitly approve ever get in, so opening it up that way is safe.
 
 ## Security & privacy
-- **The embedded Claude runs with `--dangerously-skip-permissions` and `--add-dir $HOME`.** This is deliberate — Claudible is a personal, local cockpit and that keeps the voice/one-click flow frictionless — but it means the embedded Claude Code can read and act across your home directory without per-action prompts. Run it on a machine you trust, the same way you'd run `claude` yourself with permissions skipped. To change it, edit the `exec claude …` lines in `wsl/session.sh`.
+- **Permissions are yours to set.** By default the embedded Claude Code **prompts before running tools**, exactly like the normal CLI. In **Settings** you can pick a remembered mode: **Accept edits**, or **Bypass permissions** (`--dangerously-skip-permissions --add-dir $HOME`) for a frictionless one-click/voice flow — that's powerful, so only use it on a machine you trust. A session **synced from a collaborator is ALWAYS sandboxed** (normal prompting, no `--add-dir`, never auto-resumed) regardless of your setting, so an untrusted transcript can't drive tools with full `$HOME` access.
 - **Voice is local; Claude Code is not.** Speech-to-text (Whisper) and text-to-speech (Kokoro) run entirely on your machine, and Claudible sends no telemetry. The embedded **Claude Code** sends your prompts and code to Anthropic exactly as the normal CLI does — Claudible doesn't change that.
 - **The voice services bind `0.0.0.0`** so the Windows app can reach them across the WSL2 NIC. On WSL2's default NAT networking they aren't exposed to your LAN; if you enable WSL2 *mirrored* networking they become reachable from the host's interfaces, so don't run mirrored networking on an untrusted network.
 - **Live co-work is off until you click Share, and exposes your session for as long as it's on.** The quick-tunnel URL is public-but-unguessable; anyone with the link reaches the lobby, but **no one sees or touches your terminal until you approve them**, and **interactive** access lets an approved guest type into a Claude Code session that runs with skipped permissions — so only share interactive with people you trust, prefer read-only otherwise, and stop sharing (or rotate the link) when you're done.

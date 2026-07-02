@@ -2,7 +2,29 @@
 
 All notable changes to Claudible are documented here.
 
-## [Unreleased] — Frictionless install
+## [0.6.0] — 2026-07-02
+
+A big feature + polish release: a full session-history/revert system, a visual redesign, and a large security & reliability pass.
+
+### Session History + one-click Revert (new, ships behind the `sessionHistory` setting)
+- A per-prompt **activity feed** in the Repo Review drawer — who drove each turn, when, on which machine — built on a single append-only event log.
+- **Git-backed per-prompt checkpoints** with a **one-click Revert** (and an Undo): roll the working tree back to the code as it was going into any of the last 10 prompts. Reversible — it snapshots the current tree first, and never touches gitignored files or your commits.
+
+### Redesign
+- **Soft-seam UI** — regions separate by stepped background shades instead of hard borders; chips became quiet filled pills.
+- **Frameless "blackboard" terminal** — the terminal reads as the app's own surface, not a card in a card; sleeker command bar + tighter spacing.
+- **Live Agents cockpit** — watch a subagent/workflow swarm think in parallel: type-hued tiles, each with a live "current tool" line, over a telemetry hero (running/done/tokens). The parallelism a bare terminal can't show.
+- **Elevated all 6 themes** — vivid, mutually-distinct green/blue accents and deeper contrast, WCAG-validated (ink ≥ 15:1, accents ≥ 4.5:1). Fixed themes where green and blue had collapsed into one color.
+- **Live runtime identity** injected into the model's context each turn (which machine/user, live-session state) — so a transcript synced from another machine no longer confuses the model.
+
+### Security & reliability
+- **Live share:** a kicked guest can no longer regain access via a still-valid resume token; presence now clears on the workspace you actually advertised on; host-controlled peer strings are escaped in the UI; relayed voice frames are size-capped.
+- **Session history:** co-drive prompts are attributed to the guest who typed them (not the host); a stale checkpoint ref is cleared when the setting toggles.
+- **Voice:** STT/TTS calls now time out instead of hanging ~5 min on a stuck local service; the mic-blocked state surfaces in embedded browsers.
+- **Sync/diff:** the diff is bounded by bytes (multibyte diffs no longer vanish); a deleted workspace's debounced push is cancelled; the out-of-sync resolve targets the right workspace.
+- **Terminal:** an unfocused text selection no longer shows a stray grey highlight band.
+
+## [0.5.4] — Frictionless install
 
 Making a fresh install "paste one line and go," to production standards.
 
