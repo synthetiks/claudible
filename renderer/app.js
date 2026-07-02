@@ -1659,14 +1659,21 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
 (async () => {
   const row = $('perm-row'); if (!row) return;
   const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.perm || 'default') === (v || 'default')));
-  let cur = 'default'; try { cur = await claudible.permissionModeGet(); } catch {}
-  paint(cur || 'default');
   const LBL = { default: 'ask first', acceptEdits: 'auto-accept edits', bypass: 'bypass permissions' };
+  // Status-bar chip: the mode the app will launch NEW sessions with, always visible — so "settings say
+  // bypass but the session asks" is diagnosable at a glance (either this chip disagrees with what you set →
+  // the setting didn't persist, or the terminal shows the collaborator-session sandbox notice → the RCE guard).
+  const chip = $('sb-perm');
+  const paintChip = (v) => { if (chip) chip.textContent = 'perms: ' + (LBL[v || 'default'] || v); };
+  let cur = 'default'; try { cur = await claudible.permissionModeGet(); } catch {}
+  paint(cur || 'default'); paintChip(cur || 'default');
   row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
     const v = b.dataset.perm || 'default';
     let r = null; try { r = await claudible.permissionModeSet(v); } catch {}
-    const set = (r && r.ok) ? r.permissionMode : v; paint(set);
-    toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
+    const set = (r && r.permissionMode) ? r.permissionMode : v; paint(set); paintChip(set);
+    // A failed persist must NOT toast like a success — the mode holds for THIS run but resets on relaunch.
+    if (r && r.ok === false) toast('Permission: ' + (LBL[set] || set) + ' — set for THIS run, but SAVING FAILED (' + (r.error || 'disk error') + ')');
+    else toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
   }));
 })();
 // theme selector — load the saved theme, highlight it, persist + apply (UI + terminal) instantly on click
