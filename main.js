@@ -143,7 +143,7 @@ const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<ta
 const SETTINGS_FILE = path.join(RT, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} if (obj && obj.sessionHistory === true) { try { _seedCkpt(activeWorkspace); } catch {} } } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} if (obj && obj.sessionHistory === true) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -447,6 +447,24 @@ function syncShare() {
   if (!share.status().running) return;
   try { share.setPaused(!isShareable(activeWorkspace)); } catch {}
   try { share.setWorkspaces(grantedList()); } catch {}
+  try { _pushHistoryToShare(); } catch {}                  // guests' Session-History feed follows the live workspace (share start / foreground / ws switches all route through here)
+}
+// History over the live channel (SESSION-HISTORY.md chose live-channel over git): push the ACTIVE workspace's
+// log to guests — a full snapshot on syncShare transitions, per-entry increments on append/stat-stamp. Gated
+// exactly like the terminal mirror: only a shareable workspace's history leaves the machine, and the server
+// clears its cache while paused (same privacy rule as scrollback/status).
+function _pushHistoryToShare() {
+  if (!share.status().running) return;
+  const ws = activeWorkspace;
+  if (ws && ws.id && isShareable(ws) && _histEnabled()) share.pushHistory(_histStore.load(fs, _histFile(ws.id)));
+  else share.pushHistory([]);
+}
+function _pushHistoryEntryToShare(wsId, entry) {
+  try {
+    if (!share.status().running || !entry) return;
+    const ws = activeWorkspace;
+    if (ws && ws.id === wsId && isShareable(ws) && _histEnabled()) share.pushHistoryEntry(entry);
+  } catch {}
 }
 // Switch a tab's terminal to a chosen session ('new' | <session-id> | '' = resume latest). Kills that
 // tab's current pty (its guarded handlers go quiet, since the map entry is deleted BEFORE the kill) and
@@ -564,6 +582,24 @@ function openLiveSocket(tabId) {
       case 'audio': liveSend(tabId, 'live:audio', { from: m.from, data: m.data, sr: m.sr }); break;
       case 'pending': liveSend(tabId, 'live:state', { state: 'pending' }); break;
       case 'denied': r.closed = true; liveSend(tabId, 'live:state', { state: 'denied', reason: m.reason || '' }); break;
+      // Session-History over the live channel: the host pushes its active workspace's log (full snapshot on
+      // join/transition, per-entry increments after). Held in-memory on the liveTab (a joined tab is an
+      // ephemeral mirror — nothing durable) and normalized through makeEntry so a skewed/hostile host can't
+      // hand the renderer an unexpected shape. View-only: entries from a peer are NEVER revert targets here.
+      case 'history': {
+        const list = Array.isArray(m.entries) ? m.entries.slice(-200) : [];
+        r.history = list.map((x) => _hist.makeEntry(Object.assign({}, x, { prompt: String((x && x.prompt) || '').slice(0, 8000) })));
+        liveSend(tabId, 'live:history', { entries: r.history });
+        break;
+      }
+      case 'history-entry': {
+        if (m.entry && typeof m.entry === 'object' && m.entry.id) {
+          const en = _hist.makeEntry(Object.assign({}, m.entry, { prompt: String(m.entry.prompt || '').slice(0, 8000) }));
+          r.history = _hist.mergeLogs(r.history || [], [en]);   // by-id union — an updated entry (Stop-time file stats) replaces itself
+          liveSend(tabId, 'live:history', { entries: r.history });
+        }
+        break;
+      }
       default: break;   // workspaces / ws-sessions / ws-transcript / rtc: unused by the native joined tab
     }
   });
@@ -1754,6 +1790,7 @@ function _snapshotOnStop(tabId) {
             if (!en) return;
             en.files = n.files.slice(0, 500);   // bound a pathological turn (mass rename) — the feed only sums these
             _histStore.save(fs, _histFile(ws.id), log);
+            _pushHistoryEntryToShare(ws.id, en);   // guests' feeds pick up the "3 files (+42/-10)" line live
           } catch {}
         });
       }
@@ -1784,7 +1821,7 @@ ipcMain.handle('history:load', () => {
   try {
     if (!_histEnabled()) return { ok: true, enabled: false, entries: [] };   // off = off for reads too: don't surface entries from a previously-enabled period
     const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
-    return { ok: true, enabled: true, wsId, entries: _histStore.load(fs, _histFile(wsId)) };   // wsId = the workspace these entries belong to, so the renderer reverts against IT (not a possibly-stale activeWsId)
+    return { ok: true, enabled: true, wsId, machineId: _machineId(), entries: _histStore.load(fs, _histFile(wsId)) };   // wsId = the workspace these entries belong to, so the renderer reverts against IT; machineId lets the feed hide Revert on entries authored elsewhere (their snapshot refs don't travel)
   } catch (e) { return { ok: false, enabled: false, entries: [], error: String(e) }; }
 });
 // Revert the entry's workspace repo to the code state captured at that prompt (its checkpointRef). checkpoint.sh
@@ -1836,6 +1873,7 @@ ipcMain.handle('history:append', (e, payload) => {
       checkpointRef: _pendingCkpt.get(wsId) || null,   // the settled snapshot from the previous turn = the code state going INTO this prompt (null until the first turn ends → that prompt gets no revert target)
     });
     _histStore.append(fs, file, entry);
+    _pushHistoryEntryToShare(wsId, entry);   // live guests see the new prompt in their feed immediately
     return { ok: true, entry };
   } catch (err) { console.error('[claudible] history:append:', err && err.message); return { ok: false, error: 'append' }; }
 });

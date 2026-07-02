@@ -1803,8 +1803,11 @@ function renderHistoryEntry(en, revertable) {
   row.appendChild(more);
   // Revert: only when this entry captured a code snapshot (checkpointRef) AND it's still within the kept window —
   // checkpoints are pruned to the newest 10, so an older ("show more") entry's snapshot no longer exists and its
-  // button would only ever say "aged out". `revertable` is passed for the newest-10 rows.
-  if (en.checkpointRef && revertable) {
+  // button would only ever say "aged out". `revertable` is passed for the newest-10 rows. Entries stamped on a
+  // DIFFERENT machine (live-synced from a collaborator) are never revertable here: their snapshot refs live in
+  // that machine's repo clone, not this one. An empty machine id (pre-stamp era) is treated as local.
+  const localSnap = !en.machine || !en.machine.id || !_histMachineId || en.machine.id === _histMachineId;
+  if (en.checkpointRef && revertable && localSnap) {
     const rev = document.createElement('button'); rev.className = 'hf-revert'; rev.title = 'Revert code to this prompt'; rev.setAttribute('aria-label', 'Revert code to this prompt');
     rev.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2-9.3"/></svg>';   // rewind-arrow
     rev.onclick = (e) => { e.stopPropagation(); revertToCheckpoint(en); };
@@ -1880,11 +1883,34 @@ function histStamp(ts) {   // compact: M/D/YY H:MM (no seconds), e.g. 7/1/26 22:
 let _histShown = 10;   // pagination: how many of the newest entries the feed currently reveals (grows by 10 per "show more")
 let _revertUndoWs = null;   // after a revert, the ws whose last revert is still undoable → shows the "Undo last revert" pill (cleared on undo / drawer reopen)
 let _histFeedWsId = null;   // the workspace the feed currently reflects (main-reported at load) → revert/undo act on THIS, not a possibly-stale activeWsId (guest-driven or auto-close switch can desync them)
+let _histMachineId = '';    // THIS machine's stable id (main-reported at load) — entries stamped on another machine hide their Revert button (their snapshot refs don't travel)
 const _histExpanded = new Set();   // entry ids the user expanded past 3 lines — persists across live re-renders, cleared on each drawer open
 async function refreshHistoryFeed() {
   const wrap = $('history-feed'); if (!wrap) return;
+  // A JOINED live tab renders the HOST's feed (pushed over the live channel into tab.liveHistory) —
+  // view-only: the snapshots behind Revert live in the host's repo clone, so no entry is revertable here.
+  const at = AT();
+  if (at && at.kind === 'live') {
+    const entries = at.liveHistory || [];
+    _histFeedWsId = null;
+    if (!entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
+    wrap.hidden = false; wrap.innerHTML = '';
+    const llbl = document.createElement('div'); llbl.className = 'hf-lbl';
+    llbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History · from the host</span>';
+    wrap.appendChild(llbl);
+    const lall = entries.slice().reverse();
+    const lshown = Math.min(_histShown, lall.length);
+    lall.slice(0, lshown).forEach((en) => wrap.appendChild(renderHistoryEntry(en, false)));
+    if (lall.length > lshown) {
+      const lmore = document.createElement('button'); lmore.className = 'hf-expand';
+      lmore.textContent = 'Show ' + Math.min(10, lall.length - lshown) + ' more';
+      lmore.onclick = () => { _histShown += 10; refreshHistoryFeed(); };
+      wrap.appendChild(lmore);
+    }
+    return;
+  }
   let r = null; try { r = await claudible.historyLoad(); } catch {}
-  if (r && r.ok) _histFeedWsId = r.wsId || null;   // record which workspace these entries belong to, so a later Revert/Undo targets it exactly
+  if (r && r.ok) { _histFeedWsId = r.wsId || null; _histMachineId = r.machineId || ''; }   // record which workspace these entries belong to (Revert/Undo target it exactly) + THIS machine's id (entries stamped elsewhere aren't revertable here)
   if (!r || !r.ok || !r.enabled || !r.entries || !r.entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
   wrap.hidden = false; wrap.innerHTML = '';
   const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
@@ -2093,6 +2119,13 @@ claudible.onLiveChat((p) => {
   const buf = chatBufFor(rec), onScreen = activeTabId === p.tabId;
   if (p.role === 'system') chatAppend(buf, { sys: true, text: p.text }, onScreen);
   else if (p.text) { chatAppend(buf, { who: p.name || rec.hostName || 'host', text: p.text, mine: false }, onScreen); if (chimeOn) playChime(); }   // chime even if the live tab is backgrounded (parity with host chat)
+});
+// A JOINED session's Session-History feed (the host pushes its log over the live channel) → held on the live
+// tab's record; the Repo Review drawer renders it view-only when that tab is active (see refreshHistoryFeed).
+claudible.onLiveHistory((p) => {
+  if (!p) return; const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
+  rec.liveHistory = Array.isArray(p.entries) ? p.entries : [];
+  if (activeTabId === p.tabId && $('diffpanel') && $('diffpanel').classList.contains('open')) { try { refreshHistoryFeed(); } catch {} }   // live-update only when the drawer is actually looking at it
 });
 chatReset();
 

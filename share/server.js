@@ -90,6 +90,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   let cols = 120, rows = 32;
   let ring = Buffer.alloc(0);
   let lastStatus = null;
+  let lastHistory = [];   // the active workspace's session-history log (host-pushed) — replayed to late joiners like lastStatus
   let paused = false;            // host is in a NON-granted workspace → stream nothing to guests
   let workspaces = [];           // granted workspace library shown to guests: [{id,label,kind,live}]
   const clients = new Set();
@@ -222,8 +223,9 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (back && back.wasVoice) broadcastVoice();           // re-list them as a voice member under the new pid
     try {
       ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused, pid: ws._pid, voice: voiceMembers() }));
-      // Never replay status/scrollback while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
+      // Never replay status/scrollback/history while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
       if (!paused && lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
+      if (!paused && lastHistory.length) ws.send(JSON.stringify({ type: 'history', entries: lastHistory }));
       if (!paused && ring.length) ws.send(ring);
     } catch {}
     if (mode === 'link') systemChat(name + ' joined');   // only on a fresh join, not on reconnect
@@ -359,7 +361,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     requireApproval = opts.requireApproval !== false;
     hostName = cleanName(opts.name, 'Host');
     linkToken = newToken(); resumeTokens.clear();
-    ring = Buffer.alloc(0); lastStatus = null; paused = false; workspaces = [];
+    ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; paused = false; workspaces = [];
     server = http.createServer((req, res) => {
       const u = (req.url || '').split('?')[0];
       if (u === '/' || u === '/index.html') {
@@ -467,8 +469,25 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // The private workspace NAME is deliberately NOT broadcast (guests show a generic "private" message).
   function setPaused(p) {
     paused = !!p;
-    if (paused) { ring = Buffer.alloc(0); lastStatus = null; }
+    if (paused) { ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; }   // history is per-workspace content, same privacy rule as scrollback/status
     const s = JSON.stringify({ type: 'paused', paused });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  }
+  // Session-history over the live channel (SESSION-HISTORY.md: live-channel, not git). Same privacy model as
+  // status/ring: cached for late joiners (replayed on admit), never sent or retained while paused. The host
+  // pushes a full snapshot on share-start/foreground/toggle transitions and per-entry increments after that.
+  function pushHistory(entries) {
+    lastHistory = Array.isArray(entries) ? entries.slice(-200) : [];
+    if (paused) { lastHistory = []; return; }
+    const s = JSON.stringify({ type: 'history', entries: lastHistory });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  }
+  function pushHistoryEntry(entry) {
+    if (paused || !entry || typeof entry !== 'object' || !entry.id) return;
+    const i = lastHistory.findIndex((e) => e && e.id === entry.id);   // an update (e.g. Stop-time file stats) replaces its entry
+    if (i >= 0) lastHistory[i] = entry; else lastHistory.push(entry);
+    if (lastHistory.length > 200) lastHistory = lastHistory.slice(-200);
+    const s = JSON.stringify({ type: 'history-entry', entry });
     for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
   }
   // Push the granted workspace library (stripped to {id,label,kind,live}) to guests.
@@ -501,7 +520,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
 module.exports = { createShareServer, uniqueName, cleanName };

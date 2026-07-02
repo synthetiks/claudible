@@ -129,6 +129,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onLiveVoiceMembers: (cb) => ipcRenderer.on('live:voice-members', (_e, p) => cb(p)),
   onLiveAudio: (cb) => ipcRenderer.on('live:audio', (_e, p) => cb(p)),
   onLiveState: (cb) => ipcRenderer.on('live:state', (_e, p) => cb(p)),
+  onLiveHistory: (cb) => ipcRenderer.on('live:history', (_e, p) => cb(p)),   // the host's Session-History feed for a joined tab (view-only)
   // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
   titleSet: (id, name) => ipcRenderer.invoke('title:set', { id, name }),
   titleList: () => ipcRenderer.invoke('title:list'),
