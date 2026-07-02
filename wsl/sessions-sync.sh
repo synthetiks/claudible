@@ -217,6 +217,7 @@ import_sessions() {
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac  # reject leading/trailing-dash ids (argv tricks)
     tombstoned "$id" && continue                                    # deleted everywhere → never re-import
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
+    grep -aq '"type":"user"' "$f" 2>/dev/null || continue            # never import a promptless stub (defense against collaborators on builds that still export them)
     dest="$PROJ/$id.jsonl"
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
       import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); clear_diverged_run "$id"; }; continue
@@ -252,6 +253,7 @@ export_sessions() {
     grep -qxF -- "$id" "$FSET" 2>/dev/null && continue              # imported (foreign) → never republish under our name
     m="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"; age=$(( $(date +%s) - m ))   # torn-write guard: skip a file still (GNU stat -c, BSD/macOS stat -f fallback)
     [ "$age" -ge 0 ] && [ "$age" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ] && continue   # being written (~2s); ignore future mtimes (clock skew)
+    grep -aq '"type":"user"' "$f" 2>/dev/null || continue            # promptless stub (fork artifact / killed boot) — noise that must never spread to collaborators; it exports once it gains a real prompt
     dest="$WT/sessions/$author/$id.jsonl"
     if ! cmp -s "$f" "$dest" 2>/dev/null; then cp -f "$f" "$dest" 2>/dev/null && PUSHED=$((PUSHED+1)); fi
   done

@@ -2927,6 +2927,13 @@ async function refreshSessions() {
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;               // a rename opened DURING the await — bail so the rebuild below can't wipe the in-flight edit (the top-of-fn guard only covers renames that existed before the await)
   if (!Array.isArray(list)) list = [];
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
+  // Hide promptless stubs ('(empty session)' — fork artifacts / killed boots): clicking one can only re-fail
+  // resume (nothing to resume) and mint ANOTHER stub. A stub reappears the moment it gains a real user
+  // message; a live tab currently sitting on one keeps it reachable via the liveSessions carve-out.
+  {
+    const liveSessions = new Set(Array.from(tabs.values()).map((r) => r.session).filter(Boolean));
+    list = list.filter((s) => (s.msgs || 0) > 0 || liveSessions.has(s.id));
+  }
   _wsSessCache.set(activeWsId, { list, ts: Date.now() });                           // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash)
   const savedIds = new Set(list.map((s) => s.id));
   // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row — but ONLY for a session
