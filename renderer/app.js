@@ -2471,7 +2471,7 @@ claudible.onLiveStatus((p) => {
 // For a non-active tree row pass its workspace `w` so a click switches there first (else resolve/delete targets
 // the wrong workspace's PROJ). Active rows pass w=null and open the modal directly.
 function appendConflictChip(m, s, w) {
-  const act = (open) => (e) => { e.stopPropagation(); if (w && w.id !== activeWsId) switchWorkspace(w.id, s.id); open(s); };
+  const act = (open) => async (e) => { e.stopPropagation(); if (w && w.id !== activeWsId) await switchWorkspace(w.id, s.id); open(s); };   // AWAIT the switch so main's activeWorkspace is re-pointed BEFORE resolve/delete runs (else a fast confirm targets the old workspace's repo)
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip
     const db = document.createElement('button');
     db.className = 'sess-chip removed'; db.title = 'Deleted from GitHub by a collaborator';
