@@ -146,72 +146,96 @@
     .termseg .agent-badge{position:absolute;top:0;right:1px;width:6px;height:6px;border-radius:50%;
       background:var(--live);box-shadow:0 0 6px -1px var(--live);display:none}
     .termseg button.has-badge .agent-badge{display:block}
+    /* ═══════ Agents cockpit — watch your swarm think in parallel (the thing a bare terminal can't show) ═══════ */
     #agents-pane{position:absolute;inset:0;z-index:16;display:none;flex-direction:column;overflow:auto;
-      background:#0c0e12;border:1px solid var(--hairline);border-radius:11px;padding:46px 14px 14px}
+      background:radial-gradient(130% 90% at 50% -12%, rgba(106,166,224,.055), transparent 62%), var(--terminal-bg);
+      border-radius:9px;padding:44px 16px 20px}   /* frameless, matches the blackboard terminal it overlays */
     #agents-pane.show{display:flex}
-    .agents-list{max-width:680px;margin:0 auto;width:100%}   /* a centered column, not edge-to-edge — the 'too wide' fix */
+    .agents-list{max-width:1000px;margin:0 auto;width:100%}
     .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
-    .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.6;max-width:300px}
-    .agents-empty-ico{display:block;width:36px;height:36px;margin:0 auto 13px;opacity:.5}
-    .agents-empty-ico svg{width:36px;height:36px}
-    .agents-section{font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-faint);margin:6px 0 8px;padding-left:2px}
-    /* agent row — Task subagents (simple) + swarm agents (rich: expandable into a live activity cockpit) */
-    .agent-row{position:relative;border:1px solid var(--hairline);border-left:3px solid var(--rail, var(--hairline));border-radius:9px;overflow:hidden;margin-bottom:7px;
-      background:linear-gradient(180deg,#131519,#0e1013);transition:border-color .14s,box-shadow .14s}
-    .agent-row.running::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;pointer-events:none;opacity:.75;
-      background:linear-gradient(90deg,transparent,var(--amber),transparent);background-size:200% 100%;animation:agentsweep 2s linear infinite}
-    .agent-row.rich .agent-head{cursor:pointer}
-    .agent-row.rich:hover{border-color:rgba(255,255,255,.15)}
-    .agent-row.expanded{border-color:rgba(255,255,255,.18);box-shadow:inset 0 1px 0 var(--sheen),0 10px 28px -20px #000}
-    .agent-head{display:flex;align-items:flex-start;gap:10px;padding:9px 11px}
-    .agent-head .agent-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px;background:#3a3f47;position:relative}
-    .agent-row.running .agent-dot{background:var(--amber);box-shadow:0 0 9px -1px var(--amber);animation:micpulse 1s ease-in-out infinite}
-    .agent-row.running .agent-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--amber);opacity:.5;animation:agentRing 1.4s ease-out infinite}
-    .agent-row.done .agent-dot{background:#5fb487;box-shadow:0 0 8px -2px #5fb487}
-    .agent-row.err .agent-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
-    .agent-body{flex:1;min-width:0}
-    .agent-name{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    /* stat chips — the numbers that matter, at a glance */
-    .agent-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
-    .chip{font-size:9px;letter-spacing:.03em;text-transform:uppercase;padding:2px 6px;border-radius:5px;background:rgba(255,255,255,.05);color:var(--ink-dim);white-space:nowrap}   /* quiet filled pill — a ~5% white fill that adapts to whatever surface it sits on, no stroke */
-    .chip-type{color:var(--ink);background:color-mix(in srgb, var(--rail, #8493a6) 22%, transparent)}   /* type chip: the rail tint alone carries it now — dropped the 1px stroke so it groups as a soft block, not a boxed outline */
-    .chip-tok{color:#6aa6e0}
-    .chip-err{color:#fff;background:rgba(229,86,75,.7)}
-    .agent-row.running .chip-dur{color:var(--amber)}
-    /* tool-glyph activity strip — recent tools, colored by kind; the latest pulses while running */
-    .agent-strip{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
-    .tb{font-size:8.5px;font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;padding:2px 6px;border-radius:4px;background:#181b20;color:var(--ink-dim);white-space:nowrap}
+    .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.7;max-width:320px}
+    .agents-empty-ico{display:block;width:40px;height:40px;margin:0 auto 14px;opacity:.42}
+    .agents-empty-ico svg{width:40px;height:40px}
+    /* ── hero telemetry: the swarm read as ONE living system (count · running/done · tokens · progress) ── */
+    .agents-hero{position:relative;display:flex;align-items:center;gap:14px;padding:14px 17px 17px;margin-bottom:16px;border-radius:13px;overflow:hidden;
+      background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));box-shadow:inset 0 1px 0 var(--sheen)}
+    .agents-hero.live{box-shadow:inset 0 1px 0 var(--sheen),0 0 0 1px rgba(224,169,59,.10),0 10px 38px -24px rgba(224,169,59,.55)}
+    .hero-glyph{flex:none;width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:var(--ink-dim);border-radius:11px;background:rgba(255,255,255,.05)}
+    .hero-glyph svg{width:26px;height:26px}
+    .agents-hero.live .hero-glyph{color:var(--warn);animation:micpulse 1.7s ease-in-out infinite}
+    .hero-main{flex:1;min-width:0}
+    .hero-title{font-size:15px;font-weight:650;letter-spacing:.01em;color:var(--ink);display:flex;align-items:center;gap:9px}
+    .hero-live-pill{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--warn);display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;background:rgba(224,169,59,.14)}
+    .hero-live-pill .ld{width:6px;height:6px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px -1px var(--warn);animation:micpulse 1s ease-in-out infinite}
+    .hero-sub{margin-top:3px;font-size:10.5px;color:var(--ink-faint);letter-spacing:.02em}
+    .hero-stats{flex:none;display:flex;gap:8px}
+    .hstat{min-width:54px;text-align:center;padding:6px 11px;border-radius:9px;background:rgba(255,255,255,.04)}
+    .hstat-n{font-size:16px;font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
+    .hstat-l{margin-top:4px;font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+    .hstat.run .hstat-n{color:var(--warn)}
+    .hstat.done .hstat-n{color:var(--ok)}
+    .hstat.tok .hstat-n{color:var(--accent)}
+    .hero-prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.06)}
+    .hero-prog-fill{height:100%;background:linear-gradient(90deg,var(--ok),var(--accent));transition:width .5s cubic-bezier(.4,0,.2,1)}
+    /* ── groups (Running / Done), each a responsive grid so parallelism is VISIBLE at a glance ── */
+    .agents-group{margin-bottom:15px}
+    .agents-group-hd{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 9px 2px}
+    .agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(234px,1fr));gap:10px}
+    /* ── agent tile — a living cell you watch think: type-hued, live "now" line, drill-down detail ── */
+    .agent-tile{position:relative;display:flex;flex-direction:column;gap:8px;padding:11px 12px 10px 14px;min-width:0;border-radius:11px;overflow:hidden;
+      background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.007));box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);transition:box-shadow .16s,transform .16s}
+    .agent-tile::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--rail,#8493a6);opacity:.85}   /* type-hued edge = swarm identity at a glance */
+    .agent-tile.rich{cursor:pointer}
+    .agent-tile.rich:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.11),0 8px 24px -18px #000;transform:translateY(-1px)}
+    .agent-tile.running{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--rail,#8493a6) 34%,transparent),0 0 26px -18px var(--rail,#8493a6)}   /* breathing hue glow while working */
+    .agent-tile.running::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;pointer-events:none;opacity:.8;
+      background:linear-gradient(90deg,transparent,var(--rail,#8493a6),transparent);background-size:200% 100%;animation:agentsweep 2.1s linear infinite}
+    .agent-tile.done{opacity:.9}
+    .agent-tile.err::before{background:var(--live)}
+    .agent-tile.expanded{grid-column:1/-1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 14px 34px -22px #000}
+    .tile-top{display:flex;align-items:flex-start;gap:8px}
+    .tile-dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:3px;background:#3a3f47;position:relative}
+    .agent-tile.running .tile-dot{background:var(--warn);box-shadow:0 0 9px -1px var(--warn);animation:micpulse 1s ease-in-out infinite}
+    .agent-tile.running .tile-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--warn);opacity:.5;animation:agentRing 1.4s ease-out infinite}
+    .agent-tile.done .tile-dot{background:var(--ok);box-shadow:0 0 8px -2px var(--ok)}
+    .agent-tile.err .tile-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
+    .tile-name{flex:1;min-width:0;font-size:12px;line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .tile-type{flex:none;align-self:flex-start;font-size:8px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink);background:color-mix(in srgb,var(--rail,#8493a6) 26%,transparent)}
+    /* the "now" line — WHAT this agent is doing right now (the watch-it-think magic) */
+    .tile-now{display:flex;align-items:center;gap:6px;min-width:0;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-dim);white-space:nowrap;overflow:hidden}
+    .tile-now-ind{flex:none;width:5px;height:5px;border-radius:50%;background:var(--ink-faint)}
+    .agent-tile.running .tile-now{color:var(--ink)}
+    .agent-tile.running .tile-now-ind{background:var(--rail,#8493a6);box-shadow:0 0 7px -1px var(--rail,#8493a6);animation:micpulse 1.1s ease-in-out infinite}
+    .tile-now .nm{color:var(--ink);font-weight:600;flex:none}
+    .tile-now .tg{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-faint)}
+    .tile-foot{display:flex;align-items:center;gap:12px;font-size:9.5px;color:var(--ink-faint);letter-spacing:.02em;font-variant-numeric:tabular-nums}
+    .tile-foot .fm{display:inline-flex;align-items:center;gap:4px}
+    .tile-foot .fm b{font-weight:650;color:var(--ink-dim)}
+    .tile-foot .fm.tok b{color:var(--accent)}
+    .agent-tile.running .tile-foot .fm.dur b{color:var(--warn)}
+    .tile-foot .fm.err{color:var(--live)}
+    .agent-chev{margin-left:auto;flex:none;color:var(--ink-faint);font-size:13px;line-height:1;transition:transform .18s,color .14s}
+    .agent-tile.rich:hover .agent-chev{color:var(--ink)}
+    .agent-tile.expanded .agent-chev{transform:rotate(180deg)}
+    /* drill-down detail — the agent's task, its full tool-call feed, and its final result */
+    .tile-detail{display:none;margin-top:2px;padding-top:10px;border-top:1px solid var(--hairline-soft)}
+    .agent-tile.expanded .tile-detail{display:block}
+    .agent-task{margin:0 0 9px;font-size:11px;line-height:1.5;color:var(--ink-dim)}
+    .agent-feed{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+    .agent-tool{display:inline-flex;gap:6px;align-items:center;line-height:1.4}
+    .agent-tool .agent-tt{min-width:0;max-width:220px;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .agent-result{font-size:11px;line-height:1.55;color:var(--ink);background:rgba(0,0,0,.22);border-radius:8px;padding:9px 11px;max-height:150px;overflow:auto}
+    /* tool badges — colored by kind (shared by the "now" line + the expanded feed) */
+    .tb{font-size:8.5px;font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.05);color:var(--ink-dim);white-space:nowrap}
     .tb-sh{color:#e0a93b;background:rgba(224,169,59,.13)}
     .tb-read{color:#6aa6e0;background:rgba(106,166,224,.13)}
     .tb-find{color:#7fb0e6;background:rgba(106,166,224,.10)}
     .tb-edit{color:#5fb487;background:rgba(95,180,135,.13)}
     .tb-web{color:#b48ce0;background:rgba(180,140,224,.13)}
     .tb-agent{color:#e08cc0;background:rgba(224,140,192,.13)}
-    .tb-misc{color:var(--ink-faint);background:#181b20}
-    .agent-row.running .agent-strip .tb:last-child{animation:micpulse 1.1s ease-in-out infinite}
-    .agent-chev{flex:none;align-self:center;color:var(--ink-faint);font-size:13px;line-height:1;transition:transform .18s,color .14s}
-    .agent-row.rich .agent-head:hover .agent-chev{color:var(--ink)}
-    .agent-row.expanded .agent-chev{transform:rotate(180deg)}
-    /* expandable detail — the agent's task, its live tool-call feed, and its final result */
-    .agent-detail{display:none;padding:0 11px 11px 30px;border-top:1px solid var(--hairline-soft)}
-    .agent-row.expanded .agent-detail{display:block}
-    .agent-task{margin:9px 0;font-size:11px;line-height:1.45;color:var(--ink-dim)}
-    .agent-feed{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
-    .agent-tool{display:flex;gap:7px;align-items:center;line-height:1.4}
-    .agent-tool .agent-tt{min-width:0;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .agent-result{font-size:11px;line-height:1.5;color:var(--ink);background:#0b0d10;border:1px solid var(--hairline-soft);border-radius:7px;padding:8px 10px;max-height:120px;overflow:auto}
+    .tb-misc{color:var(--ink-faint);background:rgba(255,255,255,.05)}
     @keyframes agentRing{0%{transform:scale(.7);opacity:.6}100%{transform:scale(1.3);opacity:0}}
     @keyframes agentsweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
-    /* swarm summary header — reads the whole group as one unit (count · running/done · tokens) with a progress bar */
-    .agents-summary{display:flex;align-items:center;gap:11px;padding:10px 13px;margin-bottom:12px;border:1px solid var(--hairline);border-radius:11px;
-      background:linear-gradient(180deg,#15181d,#0e1013);box-shadow:inset 0 1px 0 var(--sheen)}
-    .sum-ico{flex:none;width:26px;height:26px;color:var(--ink-dim);display:flex;align-items:center;justify-content:center}
-    .sum-ico svg{width:22px;height:22px}
-    .sum-meta{flex:1;min-width:0}
-    .sum-title{font-size:13px;color:var(--ink);font-weight:600;letter-spacing:.01em}
-    .sum-stats{margin-top:2px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint)}
-    .sum-bar{flex:none;width:110px;height:5px;border-radius:3px;background:#1a1d23;overflow:hidden}
-    .sum-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#5fb487,#6aa6e0);transition:width .4s cubic-bezier(.4,0,.2,1)}
     #terminal{background:var(--terminal-bg);border:none;border-radius:9px;
       flex:1;min-width:0;min-height:0;overflow:hidden;position:relative;
       box-shadow:inset 0 22px 60px -56px #000}   /* frameless "blackboard": no border, no outer 1px ring, no raised top lip — just a whisper of recessed inner depth so it reads as the app's OWN surface, not a card floating in a card */

@@ -943,57 +943,67 @@ function typeHue(type) {   // the agent-type → left-rail hue (gives the swarm 
   return '#8493a6';
 }
 function toolBadge(t) { const b = document.createElement('span'); b.className = 'tb tb-' + toolCat(t.name); b.textContent = t.name; if (t.target) b.title = t.name + ' ' + t.target; return b; }
-// One card per agent — Task subagents (simple) + workflow/Agent-tool agents (rich: chips, a tool-glyph strip, and an
-// expandable detail with the task, full tool feed, and result).
-function agentRow(a, nowSec) {
+// One TILE per agent — a living cell in the swarm grid. Face: status dot · task name · type pill · a live "now" line
+// (the tool it's running right now) · metrics (elapsed · tokens · tools). Click a rich tile to drill into the full
+// task, tool-call feed, and result. Works for BOTH workflow-swarm agents (live tool feed) and Task subagents.
+function agentTile(a, nowSec) {
   const running = a.status === 'running';
   const tools = Array.isArray(a.tools) ? a.tools : [];
-  const rich = tools.length > 0 || !!(a.result && a.result.length) || (a.tokens || 0) > 0;
-  const row = document.createElement('div');
-  row.className = 'agent-row ' + (running ? 'running' : (a.ok === false ? 'err' : 'done')) + (rich ? ' rich' : '') + (expandedAgents.has(a.id) ? ' expanded' : '');
-  if (a.type) row.style.setProperty('--rail', typeHue(a.type));
-  const head = document.createElement('div'); head.className = 'agent-head';
-  const dot = document.createElement('span'); dot.className = 'agent-dot'; head.appendChild(dot);
-  const c = document.createElement('div'); c.className = 'agent-body';
+  const rich = tools.length > 0 || !!(a.result && a.result.length) || (a.tokens || 0) > 0 || !!(a.prompt && a.prompt.trim());
+  const tile = document.createElement('div');
+  tile.className = 'agent-tile ' + (running ? 'running' : (a.ok === false ? 'err' : 'done')) + (rich ? ' rich' : '') + (expandedAgents.has(a.id) ? ' expanded' : '');
+  if (a.type) tile.style.setProperty('--rail', typeHue(a.type));
   const label = a.desc || a.label || 'agent';
-  const name = document.createElement('div'); name.className = 'agent-name'; name.textContent = label; name.title = label; c.appendChild(name);
-  // stat chips — the numbers that matter, at a glance
-  const chips = document.createElement('div'); chips.className = 'agent-chips';
-  const chip = (cls, txt, ds) => { const e = document.createElement('span'); e.className = 'chip ' + cls; e.textContent = txt; if (ds != null) e.dataset.start = ds; chips.appendChild(e); };
-  if (a.type) chip('chip-type', a.type);
-  const startSec = a.start || (a.startedAt ? a.startedAt / 1000 : null);
-  if (running) chip('chip-dur', startSec ? fmtDur(nowSec - startSec) : '0s', startSec || '');
-  else { const d = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : ''); if (d) chip('chip-dur', d); }
-  if ((a.tokens || 0) > 0) chip('chip-tok', fmtK(a.tokens) + ' tok');
-  const tc = a.toolCount || tools.length; if (tc > 0) chip('chip-tools', tc + (tc === 1 ? ' tool' : ' tools'));
-  if (a.ok === false) chip('chip-err', 'failed');
-  c.appendChild(chips);
-  if (tools.length) {   // tool-glyph activity strip (the recent tools, colored by kind)
-    const strip = document.createElement('div'); strip.className = 'agent-strip';
-    tools.slice(-8).forEach((t) => strip.appendChild(toolBadge(t)));
-    c.appendChild(strip);
+  // top row: status dot · task name · type pill
+  const top = document.createElement('div'); top.className = 'tile-top';
+  const dot = document.createElement('span'); dot.className = 'tile-dot'; top.appendChild(dot);
+  const name = document.createElement('div'); name.className = 'tile-name'; name.textContent = label; name.title = label; top.appendChild(name);
+  if (a.type) { const tp = document.createElement('span'); tp.className = 'tile-type'; tp.textContent = a.type; top.appendChild(tp); }
+  tile.appendChild(top);
+  // "now" line: the current action — pulses while running (the watch-it-think magic)
+  const now = document.createElement('div'); now.className = 'tile-now';
+  const ind = document.createElement('span'); ind.className = 'tile-now-ind'; now.appendChild(ind);
+  if (running) {
+    const lt = tools.length ? tools[tools.length - 1] : null;   // workflow agents carry a live tool feed; latest = what it's doing now
+    if (lt) { const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = lt.name; now.appendChild(nm);
+      const tg = document.createElement('span'); tg.className = 'tg'; tg.textContent = lt.target || ''; now.appendChild(tg); }
+    else { const tg = document.createElement('span'); tg.className = 'tg'; tg.textContent = 'working…'; now.appendChild(tg); }   // Task subagents report tools only at the end → show a live "working…"
+  } else {
+    const tg = document.createElement('span'); tg.className = 'tg';
+    tg.textContent = (a.result && a.result.trim()) ? a.result.trim() : ((a.toolCount || 0) ? (a.toolCount + ' tool calls') : 'done');
+    now.appendChild(tg);
   }
-  head.appendChild(c);
-  if (rich) { const chev = document.createElement('span'); chev.className = 'agent-chev'; chev.textContent = '⌄'; head.appendChild(chev); }
-  row.appendChild(head);
-  if (rich) {   // expandable detail: task · full tool feed · result
-    const det = document.createElement('div'); det.className = 'agent-detail';
+  tile.appendChild(now);
+  // metrics foot: elapsed · tokens · tools (+ a chevron on rich tiles)
+  const foot = document.createElement('div'); foot.className = 'tile-foot';
+  const fm = (cls, html, ds) => { const e = document.createElement('span'); e.className = 'fm ' + cls; e.innerHTML = html; if (ds != null) e.dataset.start = ds; foot.appendChild(e); };
+  const startSec = a.start || (a.startedAt ? a.startedAt / 1000 : null);
+  if (running) fm('dur', '<b>' + (startSec ? fmtDur(nowSec - startSec) : '0s') + '</b>', startSec || '');
+  else { const d = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : ''); if (d) fm('dur', '<b>' + d + '</b>'); }
+  if ((a.tokens || 0) > 0) fm('tok', '<b>' + fmtK(a.tokens) + '</b> tok');
+  const tc = a.toolCount || tools.length; if (tc > 0) fm('tool', '<b>' + tc + '</b> ' + (tc === 1 ? 'tool' : 'tools'));
+  if (a.ok === false) fm('err', 'failed');
+  if (rich) { const chev = document.createElement('span'); chev.className = 'agent-chev'; chev.textContent = '⌄'; foot.appendChild(chev); }
+  tile.appendChild(foot);
+  // drill-down detail: task · full tool feed · result
+  if (rich) {
+    const det = document.createElement('div'); det.className = 'tile-detail';
     const taskText = (a.prompt && a.prompt.trim()) || (label !== 'agent' ? label : '');
     if (taskText) { const task = document.createElement('div'); task.className = 'agent-task'; task.textContent = taskText; det.appendChild(task); }
     if (tools.length) {
       const feed = document.createElement('div'); feed.className = 'agent-feed';
-      tools.forEach((t) => { const r = document.createElement('div'); r.className = 'agent-tool';
-        r.appendChild(toolBadge(t)); const s = document.createElement('span'); s.className = 'agent-tt'; s.textContent = t.target || ''; r.appendChild(s); feed.appendChild(r); });
+      tools.forEach((t) => { const r = document.createElement('span'); r.className = 'agent-tool';
+        r.appendChild(toolBadge(t)); if (t.target) { const s = document.createElement('span'); s.className = 'agent-tt'; s.textContent = t.target; r.appendChild(s); } feed.appendChild(r); });
       det.appendChild(feed);
     }
     if (!running && a.result) { const res = document.createElement('div'); res.className = 'agent-result'; res.textContent = a.result; det.appendChild(res); }
-    row.appendChild(det);
-    head.addEventListener('click', () => {
-      if (expandedAgents.has(a.id)) { expandedAgents.delete(a.id); row.classList.remove('expanded'); }
-      else { expandedAgents.add(a.id); row.classList.add('expanded'); }
+    tile.appendChild(det);
+    tile.addEventListener('click', () => {
+      if (expandedAgents.has(a.id)) { expandedAgents.delete(a.id); tile.classList.remove('expanded'); }
+      else { expandedAgents.add(a.id); tile.classList.add('expanded'); }
     });
   }
-  return row;
+  return tile;
 }
 let _agentsSig = '';
 function renderAgents() {
@@ -1017,38 +1027,53 @@ function renderAgents() {
   // CSS entry animations). When unchanged, just advance the running timers in place.
   // toolCount + tokens in the sig → the cockpit rebuilds as a running agent does work (new tool calls / tokens),
   // not just on membership changes. Expanded rows survive it (expandedAgents set); entry animation removed so no flash.
-  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '') + (a.toolCount || 0) + (a.tokens || 0)), done.map((a) => (a.desc || a.label || '') + a.status + (a.toolCount || 0)), doneAll.length]);
+  const totalTok = all.reduce((s, a) => s + (a.tokens || 0), 0);
+  const totalTools = all.reduce((s, a) => s + (a.toolCount || (Array.isArray(a.tools) ? a.tools.length : 0)), 0);
+  // Rebuild only when membership/status/work changes — NOT every 1s tick. The latest tool per RUNNING agent is in the
+  // sig so the "now" line updates live as it works; totalTok too so the hero re-reads. Between rebuilds, only the
+  // running elapsed timers tick in place (below). Expanded tiles survive (expandedAgents set).
+  const latestTool = (a) => (a.tools && a.tools.length) ? (a.tools[a.tools.length - 1].name + (a.tools[a.tools.length - 1].target || '')) : '';
+  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '') + (a.toolCount || 0) + (a.tokens || 0) + latestTool(a)), done.map((a) => (a.desc || a.label || '') + a.status + (a.toolCount || 0)), doneAll.length, totalTok]);
   if (sig === _agentsSig) {
-    el.querySelectorAll('.chip-dur[data-start]').forEach((m) => { m.textContent = fmtDur(nowSec - parseFloat(m.dataset.start)); });   // tick the running timers in place
+    el.querySelectorAll('[data-start]').forEach((m) => { const b = m.querySelector('b') || m; b.textContent = fmtDur(nowSec - parseFloat(m.dataset.start)); });   // tick the running elapsed timers in place
     return;
   }
   _agentsSig = sig;
   if (!all.length) {
     el.innerHTML = '<div class="agents-empty"><span class="agents-empty-ico">' + SWARM_SVG + '</span>'
-      + 'No agents running.<br>When Claude spawns subagents or a workflow swarm, they appear here.</div>';
+      + 'No agents running.<br>When Claude spawns subagents or a workflow swarm, they light up here — live.</div>';
     return;
   }
   el.innerHTML = '';
-  // swarm summary — reads the group as ONE unit: count · running/done · total tokens, with a progress bar
-  const totalTok = all.reduce((s, a) => s + (a.tokens || 0), 0);
-  const sum = document.createElement('div'); sum.className = 'agents-summary';
-  sum.innerHTML = '<span class="sum-ico">' + SWARM_SVG + '</span>';
-  const sm = document.createElement('div'); sm.className = 'sum-meta';
-  const stT = document.createElement('div'); stT.className = 'sum-title'; stT.textContent = all.length + (all.length === 1 ? ' agent' : ' agents');
-  const stS = document.createElement('div'); stS.className = 'sum-stats'; stS.textContent = running.length + ' running · ' + doneAll.length + ' done' + (totalTok > 0 ? ' · ' + fmtK(totalTok) + ' tok' : '');
-  sm.appendChild(stT); sm.appendChild(stS); sum.appendChild(sm);
-  const sb = document.createElement('div'); sb.className = 'sum-bar'; const sf = document.createElement('div'); sf.className = 'sum-fill'; sf.style.width = (all.length ? Math.round((doneAll.length / all.length) * 100) : 0) + '%'; sb.appendChild(sf); sum.appendChild(sb);
-  el.appendChild(sum);
-  if (running.length) {
-    const hd = document.createElement('div'); hd.className = 'agents-section'; hd.textContent = 'Running · ' + running.length; el.appendChild(hd);
-    running.forEach((a) => el.appendChild(agentRow(a, nowSec)));
-  }
-  if (done.length) {
-    const hd = document.createElement('div'); hd.className = 'agents-section';
-    hd.textContent = 'Done · ' + doneAll.length + (doneAll.length > done.length ? ' (showing ' + done.length + ')' : '');
-    el.appendChild(hd);
-    done.forEach((a) => el.appendChild(agentRow(a, nowSec)));
-  }
+  // ── hero telemetry: the swarm as ONE living system ──
+  const live = running.length > 0;
+  const hero = document.createElement('div'); hero.className = 'agents-hero' + (live ? ' live' : '');
+  hero.innerHTML = '<span class="hero-glyph">' + SWARM_SVG + '</span>';
+  const hm = document.createElement('div'); hm.className = 'hero-main';
+  const ht = document.createElement('div'); ht.className = 'hero-title'; ht.appendChild(document.createTextNode('Agent Swarm'));
+  if (live) { const pill = document.createElement('span'); pill.className = 'hero-live-pill'; pill.innerHTML = '<span class="ld"></span>' + running.length + ' live'; ht.appendChild(pill); }
+  const hs = document.createElement('div'); hs.className = 'hero-sub';
+  hs.textContent = all.length + (all.length === 1 ? ' agent' : ' agents') + ' · ' + doneAll.length + ' done' + (totalTools ? ' · ' + totalTools + ' tool calls' : '');
+  hm.appendChild(ht); hm.appendChild(hs); hero.appendChild(hm);
+  const stats = document.createElement('div'); stats.className = 'hero-stats';
+  const hstat = (cls, n, l) => { const s = document.createElement('div'); s.className = 'hstat ' + cls; s.innerHTML = '<div class="hstat-n">' + n + '</div><div class="hstat-l">' + l + '</div>'; stats.appendChild(s); };
+  hstat('run', running.length, 'running');
+  hstat('done', doneAll.length, 'done');
+  if (totalTok > 0) hstat('tok', fmtK(totalTok), 'tokens');
+  hero.appendChild(stats);
+  const prog = document.createElement('div'); prog.className = 'hero-prog';
+  const pf = document.createElement('div'); pf.className = 'hero-prog-fill'; pf.style.width = (all.length ? Math.round((doneAll.length / all.length) * 100) : 0) + '%'; prog.appendChild(pf); hero.appendChild(prog);
+  el.appendChild(hero);
+  // ── groups: Running (the live action) then Done, each a responsive grid so parallelism is visible ──
+  const group = (title, list) => {
+    if (!list.length) return;
+    const g = document.createElement('div'); g.className = 'agents-group';
+    const hd = document.createElement('div'); hd.className = 'agents-group-hd'; hd.textContent = title; g.appendChild(hd);
+    const grid = document.createElement('div'); grid.className = 'agents-grid'; list.forEach((a) => grid.appendChild(agentTile(a, nowSec))); g.appendChild(grid);
+    el.appendChild(g);
+  };
+  group('Running · ' + running.length, running);
+  group('Done · ' + doneAll.length + (doneAll.length > done.length ? ' (showing ' + done.length + ')' : ''), done);
 }
 function setAgentsView(on) {
   agentsView = on;
