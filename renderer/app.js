@@ -39,8 +39,8 @@ const BASE_LH = 1.15;   // terminal line-height
 const TERM_OPTS = {
   fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
   fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 5000,
-  theme: { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8',
-           selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
+  theme: { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc',
+           selectionBackground: '#272c35', black: '#070809', brightBlack: '#565c66' },
 };
 const tabs = new Map();           // tabId -> per-tab record (own xterm/fit/container + tracker/agents)
 let activeTabId = null;
@@ -49,12 +49,12 @@ let activeTabId = null;
 // Dark = default (no data-theme attr). The UI palettes live in index.html (html[data-theme="…"]); these are the
 // matching TERMINAL palettes. applyTheme also updates TERM_OPTS so newly-spawned tabs adopt the chosen palette.
 const TERM_THEMES = {
-  dark:      { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8', selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
-  graphite:  { background: '#11141b', foreground: '#e8ecf3', cursor: '#cfd8e4', selectionBackground: '#2c3441', black: '#0d1015', brightBlack: '#687283' },
-  starlight: { background: '#1a1f27', foreground: '#f4f7fc', cursor: '#dde4ee', selectionBackground: '#343c4a', black: '#161a21', brightBlack: '#7c8693' },
-  midnight:  { background: '#081227', foreground: '#d4e2f5', cursor: '#a9c1e8', selectionBackground: '#1b3354', black: '#050b18', brightBlack: '#54668a' },
-  aurora:    { background: '#0e0a20', foreground: '#e3dcf3', cursor: '#bdaee2', selectionBackground: '#29204f', black: '#0b0717', brightBlack: '#675b86' },
-  evergreen: { background: '#07140d', foreground: '#d6ecdf', cursor: '#a6dab9', selectionBackground: '#143826', black: '#050c08', brightBlack: '#4e7860' },
+  dark:      { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc', selectionBackground: '#272c35', black: '#070809', brightBlack: '#565c66' },
+  graphite:  { background: '#13161d', foreground: '#e9edf4', cursor: '#cfd8e4', selectionBackground: '#313846', black: '#0e1116', brightBlack: '#6b7482' },
+  starlight: { background: '#1c212a', foreground: '#f4f7fc', cursor: '#dde4ee', selectionBackground: '#3e4756', black: '#171b22', brightBlack: '#808a99' },
+  midnight:  { background: '#0a1426', foreground: '#d6e4f6', cursor: '#a9c6ee', selectionBackground: '#214264', black: '#060d1c', brightBlack: '#566a90' },
+  aurora:    { background: '#0f0a22', foreground: '#e6dff6', cursor: '#c3aef0', selectionBackground: '#2f2358', black: '#0b0818', brightBlack: '#6b5e8c' },
+  evergreen: { background: '#081610', foreground: '#d8efe1', cursor: '#a6dcbb', selectionBackground: '#1b4129', black: '#050d09', brightBlack: '#517d64' },
 };
 function applyTheme(name) {
   const t = TERM_THEMES[name] ? name : 'dark';
