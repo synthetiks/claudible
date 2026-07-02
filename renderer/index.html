@@ -92,9 +92,6 @@
     .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
     /* session tracker */
     .trk{margin-left:auto;display:flex;align-items:center;gap:8px}   /* context↔tokens spacing matches the Talk/Speak (.vgroup) gap */
-    .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
-    .trk-item b{font-size:15px;font-weight:700;color:var(--silver);letter-spacing:.01em}
-    .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
     /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
        Heights tuned to sit level with the adjacent tokens stat (15px digits) rather than tower over it. */
     .ctxbar{display:inline-flex;align-items:center;gap:9px;height:33px;padding:0 11px;border-radius:7px;
@@ -394,12 +391,9 @@
     .out{margin-top:11px;font-size:12px;color:var(--ink-dim);min-height:17px;line-height:1.5;
       white-space:pre-wrap;word-break:break-word;transition:color .2s}
     .out.live{color:var(--ink)}
-    .lat{color:var(--steel)}
     input[type=text]{width:100%;font-family:inherit;font-size:12px;color:var(--ink);
       background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color .16s}
     input[type=text]:focus{outline:none;border-color:rgba(255,255,255,.24)}
-    .devrow{display:flex;align-items:center;gap:10px;margin-top:2px}
-    .devrow button{width:auto;padding:7px 11px;font-size:10px;color:var(--ink-faint)}
     /* status bar */
     .status{display:flex;align-items:center;gap:18px;padding:0 16px;
       border-top:1px solid var(--hairline);font-size:10px;letter-spacing:.1em;color:var(--ink-faint);
@@ -448,7 +442,6 @@
       border-radius:9px;background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 1px 0 var(--sheen);
       font-size:11px;letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}
     .vbox .vdot{width:8px;height:8px;border-radius:50%;background:#3a3f47;flex:none;transition:.2s}
-    .vbox .vlbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
     .vbox .vstat{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
     /* Voice In — click to talk; lights red while recording */
     .vin{cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s,color .16s}
@@ -591,7 +584,7 @@
     .sess-rename-btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25)}
     /* workspace bar — the two-level top of the sidebar (which library the sessions below belong to) */
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
-    .ws-section-head,.sess-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
+    .ws-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
       font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
     .ws-section-head{padding:7px 9px 3px 18px}   /* another ~10% shorter (was 9/5 vertical) — sleeker; left-aligned, title nudged in from the edge */
     .sh-actions{display:flex;align-items:center;gap:9px}
@@ -625,10 +618,6 @@
       border-radius:6px;cursor:pointer;box-shadow:none;transition:background .14s,color .14s}
     .newsess-row:hover{background:rgba(255,255,255,.045);color:var(--ink-dim)}
     /* SESSIONS section header — just the label + "+ New"; the active workspace is already shown above */
-    .sess-section-head{padding:12px 14px 9px}
-    .newsess-mini{width:auto;padding:2px 10px 3px;font-size:11px;letter-spacing:.02em;text-transform:none;color:var(--ink-dim);
-      background:none;border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
-    .newsess-mini:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:7px 5px;border:1px solid transparent;
       border-radius:7px;background:none;cursor:pointer;box-shadow:none;
       transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),color .14s}
@@ -669,25 +658,10 @@
     .ws-menu .ws-mi.danger{color:#d2685f}
     .ws-menu .ws-mi.danger:hover{background:rgba(210,104,95,.12);color:#e0796f}
     .ws-menu .ws-menu-sep{height:1px;background:var(--hairline);margin:5px 6px}
-    .ws-chip .ws-kind{margin-left:auto;font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);flex:none}
-    /* per-chip actions: share toggle (grant to guests) + repo collaborator invite + sessions sync */
-    .ws-chip .ws-share,.ws-chip .ws-invite,.ws-chip .ws-sync{width:auto;padding:3px;border:1px solid transparent;border-radius:6px;
-      background:none;color:var(--ink-faint);cursor:pointer;display:flex;box-shadow:none;flex:none;transition:all .15s}
-    .ws-chip .ws-share{margin-left:auto}                    /* push actions to the right edge of the chip */
-    .ws-chip .ws-share svg,.ws-chip .ws-invite svg,.ws-chip .ws-sync svg{width:13px;height:13px;display:block}
-    .ws-chip .ws-actsep{width:1px;height:13px;background:var(--hairline);margin:0 3px;flex:none}   /* divides GUESTS (eye/invite) from SYNC (cloud) */
-    .ws-chip.shared .ws-share{color:#5fb487}               /* green eye = live screen-share is ON (guests can watch) */
-    .ws-chip .ws-sync.on{color:#6aa6e0}                    /* blue cloud = GitHub session-sync is ON */
-    .ws-chip .ws-sync.syncing{color:#6aa6e0;animation:ws-sync-pulse 1s ease-in-out infinite}
-    .ws-chip .ws-sync.err{color:#d2685f}
     @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
-    .ws-chip .ws-edit{width:auto;padding:3px;border:1px solid transparent;border-radius:6px;background:none;
-      color:var(--ink-faint);cursor:pointer;display:flex;box-shadow:none;flex:none;transition:all .15s}
-    .ws-chip .ws-edit svg{width:13px;height:13px;display:block}
     .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:11.5px;color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:2px 6px}
     .ws-chip .ws-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
-    .ws-chip .ws-share:hover,.ws-chip .ws-invite:hover,.ws-chip .ws-sync:hover,.ws-chip .ws-edit:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     /* transient toast (button feedback / coming-soon) */
     .toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(12px);opacity:0;pointer-events:none;
       background:linear-gradient(180deg,#191c22,#0f1115);border:1px solid var(--hairline);border-radius:10px;
@@ -889,7 +863,6 @@
     .chat-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--hairline-soft)}
     .chat-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
     .chat-head-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
-    .chat-head .chat-sub{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-faint);text-transform:none}
     /* roster strip — community icon + members inline on ONE line; overflow folds into a "+N" pop-down */
     .roster-strip{position:relative;display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--hairline-soft)}
     .roster-ico{flex:none;display:flex;align-items:center;color:var(--ink-faint)}
@@ -986,9 +959,9 @@
        ============================================================ */
     :root{ --ease-pop:cubic-bezier(.2,.7,.2,1) }
     /* 1 — buttons: weighted easing + a 1px hover lift, settling on press (transform only → never clips) */
-    .iconbtn,.vbox,.ws-chip,.ext-tog,.newsess-mini,.ws-add,.share-btn{ transition:all .16s var(--ease-pop) }
-    .iconbtn:hover,.vbox:hover,.ws-chip:hover,.ext-tog:hover,.newsess-mini:hover,.ws-add:hover,.share-btn:hover{ transform:translateY(-1px) }
-    .iconbtn:active,.ws-chip:active,.ext-tog:active,.newsess-mini:active,.ws-add:active,.share-btn:active{ transform:translateY(0) }
+    .iconbtn,.vbox,.ws-chip,.ext-tog,.ws-add,.share-btn{ transition:all .16s var(--ease-pop) }
+    .iconbtn:hover,.vbox:hover,.ws-chip:hover,.ext-tog:hover,.ws-add:hover,.share-btn:hover{ transform:translateY(-1px) }
+    .iconbtn:active,.ws-chip:active,.ext-tog:active,.ws-add:active,.share-btn:active{ transform:translateY(0) }
     /* depth on the most-visible buttons (top bar = visible overflow, shadow renders clean; keeps the inset sheen) */
     .iconbtn{ box-shadow:inset 0 1px 0 var(--sheen),0 2px 5px rgba(0,0,0,.38) }
     .iconbtn:hover{ box-shadow:inset 0 1px 0 var(--sheen),0 5px 12px rgba(0,0,0,.5) }
@@ -997,7 +970,7 @@
     #agents-pane{ border-top-color:rgba(255,255,255,.12) }   /* light-from-above top edge */
     /* 3 — cohesive keyboard focus ring (outline = separate from box-shadow; clobbers nothing) */
     .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.share-btn:focus-visible,
-    .ws-chip:focus-visible,.ext-tog:focus-visible,.newsess-mini:focus-visible,.ws-add:focus-visible,.panel-close:focus-visible,
+    .ws-chip:focus-visible,.ext-tog:focus-visible,.ws-add:focus-visible,.panel-close:focus-visible,
     .vin:focus-visible,.vout:focus-visible,.vauto:focus-visible,input:focus-visible{ outline:1.5px solid rgba(207,214,223,.55); outline-offset:2px }
   </style>
 </head>

@@ -742,9 +742,8 @@ ipcMain.handle('share:kick', (e, arg) => { try { return { ok: !!share.kickGuest(
 ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, !!(arg && arg.ok)));   // host's verdict
 
 // ---- Live sessions: advertise the session I'm hosting (presence on the shared branch) so a collaborator in
-// the same workspace can JOIN it natively — no link to paste. Join opens the proven guest page in a Claudible
-// window (reuses the whole mirror/chat/voice stack), so it's "through Claudible", not an external browser. ----
-const liveWindows = new Set();
+// the same workspace can JOIN it natively — no link to paste. Joins run through liveConnect (a client
+// WebSocket mirrored into a cockpit tab), so it's "through Claudible", not an external browser. ----
 function runPresence(args, cb, ws) {
   if (!APPDIR_WSL) return cb && cb(null);
   runner.runScript('sessions-sync.sh', `${args}`, { ws: ws || activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
@@ -796,32 +795,6 @@ ipcMain.handle('title:set', (e, { id, name }) => new Promise((resolve) => {
   runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }));
 }));
 ipcMain.handle('title:list', () => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {})); }));
-ipcMain.handle('live:join', (e, payload) => {
-  try {
-    const peer = (payload && payload.peer) || {};
-    const url = String(peer.url || '');
-    const tok = String(peer.token || '').replace(/[^A-Za-z0-9._~-]/g, '');
-    const okUrl = isTunnelUrl(url);
-    if (!okUrl || !tok) return { ok: false, error: 'bad handle' };
-    const who = String(peer.name || peer.login || '').replace(/[^A-Za-z0-9 _.-]/g, '');
-    const myName = String((payload && payload.name) || '').slice(0, 40);   // how I appear to the host I'm joining
-    const w = new BrowserWindow({
-      width: 1200, height: 800, backgroundColor: '#070809',
-      title: 'Claudible — live session' + (who ? ' · ' + who : ''),
-      webPreferences: { nodeIntegration: false, contextIsolation: true },
-    });
-    try { w.removeMenu(); } catch {}
-    // Lock the join window to the (host-pinned) tunnel origin: deny popups and block navigation anywhere else, so
-    // even a compromised guest page can't redirect this window — carrying the share token in its URL — to an
-    // attacker origin.
-    try { w.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); } catch {}
-    w.webContents.on('will-navigate', (ev, navUrl) => { try { if (!String(navUrl).startsWith(url + '/')) ev.preventDefault(); } catch { try { ev.preventDefault(); } catch {} } });
-    w.webContents.on('will-redirect', (ev, navUrl) => { try { if (!String(navUrl).startsWith(url + '/')) ev.preventDefault(); } catch { try { ev.preventDefault(); } catch {} } });   // 3xx redirects don't re-fire will-navigate — guard them too
-    w.loadURL(`${url}/?t=${tok}` + (myName ? `&n=${encodeURIComponent(myName)}` : ''));
-    liveWindows.add(w); w.on('closed', () => liveWindows.delete(w));
-    return { ok: true };
-  } catch (err) { return { ok: false, error: String(err.message || err) }; }
-});
 
 // ---- sessions (list / switch) ----
 function listSessions() {
@@ -1034,12 +1007,6 @@ function discoverWorkspaces() {
 function syncAllEnabled() {
   for (const ws of registry.workspaces) if (ws.kind === 'repo' && ws.syncSessions && !ws.needsClone) doSync(ws, 'sync', {});
 }
-ipcMain.handle('session:syncStatus', (e, id) => {
-  const ws = registry.workspaces.find((w) => w.id === (id || registry.activeId)) || activeWorkspace;
-  if (!ws || ws.kind !== 'repo') return { ok: true, kind: ws ? ws.kind : '', enabled: false, ready: false };
-  if (ws.needsClone) return { ok: true, kind: 'repo', enabled: false, ready: false, needsClone: true };
-  return runSync(ws, 'status', {}).then((r) => ({ ok: true, kind: 'repo', enabled: !!ws.syncSessions, ready: !!(r && r.ready), synced: (r && r.synced) || 0 }));
-});
 // Turn sync on/off for a workspace. Enabling = one-time consent to publish this workspace's transcripts;
 // it clones if needed, sets up the branch, and kicks a first sync. Disabling leaves all files in place.
 ipcMain.handle('session:syncSetEnabled', async (e, payload) => {
@@ -1065,7 +1032,6 @@ ipcMain.handle('session:syncNow', async (e, id) => {   // the manual "sync now" 
   const live = (activeWorkspace && ws.id === activeWorkspace.id) ? await liveIdNow() : '';
   return doSync(ws, 'sync', { live });
 });
-ipcMain.handle('workspace:discover', () => discoverWorkspaces());
 
 // Make a LOCAL workspace SYNCED across devices: turn its folder into a private GitHub repo IN PLACE (so its
 // existing sessions stay linked — they're keyed by the unchanged path), then enable session sync. Powers the
@@ -1315,7 +1281,6 @@ ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
 }));
 ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests
 ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } catch {} });   // host → guests chat
-ipcMain.handle('share:status', () => share.status());
 
 // ---- session tracker: poll EACH live tab's runtime/tabs/<tab>/status.json (Windows FS, native read) ----
 // Per-tab files (written by session.sh via the inherited CLAUDIBLE_STATUS env) so concurrent sessions
@@ -1405,12 +1370,6 @@ function pollHooks() {
     }
   }, 80));   // base tick; idle tabs are sampled at ~480ms via the hot/cold gate above
 }
-ipcMain.handle('hook:test', async () => {
-  const ts = Date.now();
-  const rec = fgRec();
-  try { if (rec) fs.appendFileSync(path.join(RT, 'tabs', rec.runtimeId, 'hooks.ndjson'), JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: 'hook link OK', sent_ms: ts }) + '\n'); } catch {}
-  return ts;
-});
 
 // ---- workflow / swarm agents: the Workflow tool spawns agents OUTSIDE the Task-hook path, so the Agents
 // tab can't see them via hooks. They DO write per-agent files under the session's subagents dir (in WSL's
@@ -1478,19 +1437,6 @@ ipcMain.handle('open-external', (e, url) => {
 // clipboard for the right-click menu (works regardless of renderer clipboard permissions)
 ipcMain.handle('clip:write', (e, text) => { try { clipboard.writeText(String(text ?? '')); } catch {} });
 ipcMain.handle('clip:read', () => { try { return clipboard.readText(); } catch { return ''; } });
-
-// save the current session transcript -> a .txt the user picks (defaults to Desktop)
-ipcMain.handle('save-session', async (e, text) => {
-  try {
-    const d = new Date();
-    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-    const defaultPath = path.join(app.getPath('desktop'), `claudible-session-${stamp}.txt`);
-    const { canceled, filePath } = await dialog.showSaveDialog(win, { defaultPath, filters: [{ name: 'Text', extensions: ['txt'] }] });
-    if (canceled || !filePath) return { canceled: true };
-    fs.writeFileSync(filePath, text, 'utf8');
-    return { saved: filePath };
-  } catch (err) { return { error: String(err) }; }
-});
 
 // Export a saved session as a SELF-CONTAINED, shareable HTML replay (no server, works offline). Reads the
 // transcript for the active workspace's session via transcript.sh, renders it, and lets the user pick where
