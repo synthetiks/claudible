@@ -175,6 +175,22 @@ const RT_GUEST = runner.toGuestPath(RT) || '';
 // Inline the active workspace as env (kind + strict-allowlisted slug) so the wsl scripts run in THAT
 // workspace's own cwd. slug is re-sanitised here too (defense in depth) since it's interpolated into bash.
 function tabRuntimeId(tabId) { return String(tabId || '').replace(/[^A-Za-z0-9-]/g, '') || 'default'; }
+// Per-SPAWN generation id: each pty generation gets its OWN runtime/tabs/<tab>-g<N>/ dir. A zombie writer from
+// a killed generation (WSL-side processes survive ConPTY kills — see killtree.sh) can then never bleed its
+// status.json/hooks.ndjson into the generation currently on screen; the old dir simply stops being read.
+let _spawnGen = 0;
+const _bootNonce = Date.now().toString(36).slice(-5);   // gen ids must be unique ACROSS runs too — a leftover main-g1 from the last launch must never collide with this launch's first gen (the startup sweep's delayed rm would hit the live dir)
+function nextRuntimeId(tabId) { return tabRuntimeId(tabId) + '-g' + _bootNonce + '-' + (++_spawnGen); }
+// Reap a killed generation's WSL/posix-side process tree (bash session.sh + claude + children), then drop its
+// runtime dir. The win runner spawns claude.exe directly under ConPTY — its kill already reaches everything.
+function _killSessionTree(runtimeId) {
+  if (!runtimeId || runner.id === 'win') return;
+  try {
+    runner.runScript('killtree.sh', `'${String(runtimeId)}'`, { timeout: 8000 }).then(() => {
+      setTimeout(() => { try { fs.rmSync(path.join(RT, 'tabs', String(runtimeId)), { recursive: true, force: true }); } catch {} }, 250);
+    });
+  } catch {}
+}
 try { fs.mkdirSync(RT, { recursive: true }); } catch {}
 // Sweep orphaned diff-action temp files from a previous run (a crash/kill between write and unlink) — M1.
 try { for (const f of fs.readdirSync(RT)) if (/^diffaction-.*\.tmp$/.test(f)) { try { fs.unlinkSync(path.join(RT, f)); } catch {} } } catch {}
@@ -381,7 +397,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
   }
   ws = ws || activeWorkspace;
   try {
-    const runtimeId = tabRuntimeId(tabId);
+    const runtimeId = nextRuntimeId(tabId);
     // One honest line per spawn: the mode this session was ASKED to run with and where it came from — the
     // first thing to check when "bypass is on in settings but the session prompts". (A foreign session is
     // still sandboxed downstream regardless; session.sh / win.js print that override into the terminal.)
@@ -479,10 +495,11 @@ function respawnPty(tabId, session) {
   }
   const old = rec && rec.proc;
   ptys.delete(tabId);                                       // drop the entry first → the old handlers' guard goes quiet
-  // NB: do NOT clear hookState/lastStatusByTab here. The retained per-tab offset + pollHooks' truncation detection
-  // (st.size < offset → reset, once session.sh actually truncates hooks.ndjson) is what PREVENTS replay; clearing it
-  // would make pollHooks re-read the OLD session's still-on-disk hooks from offset 0 and replay them to TTS.
   if (old) { try { old.kill(); } catch {} }
+  if (rec) _killSessionTree(rec.runtimeId);                 // the ConPTY kill never reaches the WSL side — reap the old generation's bash/claude tree
+  // Each generation writes to its OWN runtime dir now (nextRuntimeId), so clearing the poller cursors is both
+  // safe (the new file starts empty — nothing to replay) and required (stale offsets belong to the old gen's file).
+  hookState.delete(tabId); lastStatusByTab.delete(tabId);
   spawnPty(tabId, cols, rows, ws, session);
   if (tabId === fgTabId) syncShare();                       // refresh the granted library (live flag) for guests
 }
@@ -539,6 +556,7 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   setGenBusy(tabId, false);
   ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId); tabIntent.delete(tabId);
   if (rec) { try { rec.proc.kill(); } catch {} }
+  if (rec) _killSessionTree(rec.runtimeId);                            // reap the WSL-side tree too (ConPTY kill stops at the Windows boundary)
   liveDisconnect(tabId);                                               // also drop a joined live socket if this was a live tab
   if (fgTabId === tabId) fgTabId = ptys.keys().next().value || null;   // renderer will foreground the next tab explicitly
   return { ok: true };
@@ -1882,11 +1900,27 @@ ipcMain.handle('history:append', (e, payload) => {
 process.on('uncaughtException', (e) => console.error('[claudible] uncaughtException:', e && e.message));
 process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
 
-app.whenReady().then(() => { reapOrphanCloudflared(); createWindow(); });
+// Startup sweep: every dir under runtime/tabs/ is a DEAD generation at this point (no tabs exist yet) —
+// left by the previous run or a crash. Reap each one's possibly-still-alive WSL-side tree (boot.pid +
+// killtree's recycled-pid guard make this safe), then drop the dir. This is what finally retires zombies
+// that survived a force-kill of the whole app.
+function reapDeadGenerations() {
+  try {
+    const dir = path.join(RT, 'tabs');
+    for (const name of fs.readdirSync(dir)) {
+      if (!/^[A-Za-z0-9-]+$/.test(name)) continue;
+      _killSessionTree(name);
+      setTimeout(() => { try { fs.rmSync(path.join(dir, name), { recursive: true, force: true }); } catch {} }, 3000);
+    }
+  } catch {}
+}
+app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); });
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
   try { stopAdvertiseHeartbeat(); } catch {}
-  try { for (const { proc } of ptys.values()) { try { proc.kill(); } catch {} } ptys.clear(); } catch {}
+  // Kill Windows-side ptys AND reap each WSL-side tree — the execFile'd wsl.exe survives our exit, so the
+  // reap completes even though the app is quitting (this is how zombies stopped accumulating across restarts).
+  try { for (const rec of ptys.values()) { try { rec.proc.kill(); } catch {} _killSessionTree(rec.runtimeId); } ptys.clear(); } catch {}
   try { for (const id of [...liveTabs.keys()]) liveDisconnect(id); } catch {}   // close any joined peer sockets
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   try { share.stop(); } catch {}

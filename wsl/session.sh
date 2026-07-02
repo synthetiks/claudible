@@ -39,6 +39,11 @@ CONTEXT="$RT/context.json"   # app→Claude identity/live-state (main writes it;
 export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS" CLAUDIBLE_CONTEXT="$CONTEXT"
 
 mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
+# Our pid + kernel start-time, so killtree.sh can reap this generation's whole tree (ConPTY kills never reach
+# the WSL side). Start-time (field 22 of /proc/self/stat; field 20 after stripping "pid (comm) ") makes the
+# pidfile recycle-proof — and unlike a cmdline check it survives the FRESH branch's exec into claude (exec
+# keeps pid AND start-time). comm can contain spaces/parens, hence the strip-past-last-')' dance.
+printf '%s %s\n' "$$" "$(sed 's/.*) //' "/proc/$$/stat" 2>/dev/null | awk '{print $20}' || echo 0)" > "$RT/boot.pid"
 : > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
 printf '{}' > "$STATUS" # clear stale status so the meter starts blank, not on last session's numbers
 
