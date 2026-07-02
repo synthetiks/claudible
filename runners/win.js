@@ -339,7 +339,12 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const file = isCmd ? (process.env.COMSPEC || 'cmd.exe') : claude;
   const args = isCmd ? ['/c', claude, ...argv] : argv;
   const env = Object.assign({}, process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
-  return pty.mod.spawn(file, args, { name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: sdir, env });
+  const proc = pty.mod.spawn(file, args, { name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: sdir, env });
+  // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —
+  // main injects the same line into the terminal when it sees this flag). Never weakens the guard: argv above
+  // already excluded the perm flags for a foreign resume.
+  if (proc && launch.foreign) { proc.claudibleForeign = true; console.log('[claudible] win: foreign (collaborator-synced) session — sandboxed regardless of permission-mode setting'); }
+  return proc;
 }
 
 // 🟡 runScript — reuse the wsl/*.sh fleet UNCHANGED via git-bash. Same shared scriptCmd; the wrapper is
