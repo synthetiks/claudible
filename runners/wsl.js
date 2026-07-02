@@ -38,9 +38,13 @@ function toHostPath(guestPath) {
   catch { return ''; }
 }
 
-// Host-FS runtime root the pollers read (was main.js:81). On WSL the scripts write here via the
-// /mnt/c guest path passed as $APPDIR; on native it's just a local dir. Same value either way here.
-function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
+// Host-FS runtime root the pollers read (was main.js:81). On WSL the scripts ALWAYS write
+// $APPDIR/runtime (session.sh derives it from the app dir — the runtime root is not threaded into
+// bash). CLAUDIBLE_RUNTIME is therefore deliberately IGNORED here: honoring it would split-brain the
+// channel (main reads/writes the relocated dir while session.sh's hooks write the app dir → dead
+// telemetry, a second settings.json, an unread context.json). Only the win runner — whose hook paths
+// are baked from THIS function, keeping writer and reader coherent — honors the relocation.
+function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 
 // --- Claude Code session bootstrap (was main.js:103-122) -----------------------------------------
 // Command construction (wsEnv + the boot string) is OS-agnostic and lives in _shared.js (also used by

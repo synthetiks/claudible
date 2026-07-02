@@ -20,7 +20,9 @@ const APP_ROOT = path.resolve(__dirname, '..');
 function appDirGuest() { return APP_ROOT; }
 function toGuestPath(p) { return String(p == null ? '' : p); }
 function toHostPath(p) { return String(p == null ? '' : p); }
-function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
+// session.sh ALWAYS derives runtime from $APPDIR (the root isn't threaded into bash), so CLAUDIBLE_RUNTIME
+// is deliberately ignored — honoring it would split main's reads from the hooks' writes (see wsl.js).
+function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 
 // buildBoot via the shared pure builder (appdir = the native app root).
 function buildBoot(session, ws, runtimeId, effort, permMode) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort, permMode); }
