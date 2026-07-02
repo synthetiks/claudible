@@ -384,6 +384,7 @@ if (claudible.onProvision) claudible.onProvision((m) => {
 });
 claudible.onStatus((s) => {
   const t = tabs.get(s.tabId); if (!t) return;   // route the status to the tab it belongs to
+  if (s.model) t.model = s.model;   // the tab's CURRENT model (statusline display name) — inherited by hook agents spawned without an explicit model override
   // Reconcile the tab's UI session with the REAL session id Claude's pty reports — the pty is the source of truth.
   // Covers a freshly-started 'new' tab AND the case where an explicitly-opened session was unresumable (e.g. a
   // collaborator deleted it) and the runner fell back to a different one — without this the highlight sticks wrong.
@@ -889,6 +890,7 @@ function onAgentStart(t, o) {
   const ti = o.tool_input || {};
   t.agents.set(id, { id: id, desc: String(ti.description || ti.subagent_type || 'subagent'), type: String(ti.subagent_type || ''),
     prompt: String(ti.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 600),   // the agent's task → shown in the expanded card
+    model: String(ti.model || '') || (t.model || ''),   // explicit override wins; else the agent inherits the tab's model AT SPAWN TIME (a later /model switch mustn't relabel old agents)
     status: 'running', startedAt: Date.now(), durationMs: null, ok: true });
   if (t.tabId === activeTabId) { renderAgents(); if (!agentsView) { const s = $('seg-agents'); if (s) s.classList.add('has-badge'); } }   // badge while you're on the terminal
 }
@@ -950,6 +952,15 @@ function toolBadge(t) { const b = document.createElement('span'); b.className = 
 // One TILE per agent — a living cell in the swarm grid. Face: status dot · task name · type pill · a live "now" line
 // (the tool it's running right now) · metrics (elapsed · tokens · tools). Click a rich tile to drill into the full
 // task, tool-call feed, and result. Works for BOTH workflow-swarm agents (live tool feed) and Task subagents.
+// Normalize any model spelling to a short human label: raw api ids ('claude-opus-4-8',
+// 'claude-haiku-4-5-20251001'), statusline display names ('Fable 5'), or Agent-tool overrides ('sonnet').
+function fmtModel(s) {
+  s = String(s || '').trim();
+  if (!s) return '';
+  if (/\s/.test(s) && !/^claude-/i.test(s)) return s.toLowerCase();          // already a display name
+  s = s.toLowerCase().replace(/^claude-/, '').replace(/-\d{8}$/, '');        // strip vendor prefix + date stamp
+  return s.replace(/-(\d)/g, ' $1').replace(/(\d) (\d)/g, '$1.$2').replace(/-/g, ' ');   // opus-4-8 → opus 4.8
+}
 function agentTile(a, nowSec) {
   const running = a.status === 'running';
   const tools = Array.isArray(a.tools) ? a.tools : [];
@@ -963,6 +974,11 @@ function agentTile(a, nowSec) {
   const dot = document.createElement('span'); dot.className = 'tile-dot'; top.appendChild(dot);
   const name = document.createElement('div'); name.className = 'tile-name'; name.textContent = label; name.title = label; top.appendChild(name);
   if (a.type) { const tp = document.createElement('span'); tp.className = 'tile-type'; tp.textContent = a.type; top.appendChild(tp); }
+  // model chip — WHICH brain is running this agent (raw id from a workflow transcript, display name or the
+  // Agent-tool override for hook agents). Users deliberately mix tiers (cheap sweeps on sonnet, judges on
+  // opus); the cockpit must show the mix.
+  const mdl = fmtModel(a.model);
+  if (mdl) { const mp = document.createElement('span'); mp.className = 'tile-model'; mp.textContent = mdl; mp.title = 'model: ' + a.model; top.appendChild(mp); }
   tile.appendChild(top);
   // "now" line: the current action — pulses while running (the watch-it-think magic)
   const now = document.createElement('div'); now.className = 'tile-now';

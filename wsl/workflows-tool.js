@@ -109,9 +109,14 @@ function parseTimestamp(ts) {
   return ms / 1000;
 }
 
+// --with-model (argv flag, set by workflows.sh) additionally reports each agent's MODEL, read from its
+// transcript's assistant messages. Opt-in ONLY: test/port-parity.sh runs this tool WITHOUT the flag and
+// byte-compares against the original python transform — the unflagged output must stay identical forever.
+let WITH_MODEL = false;
+
 function parseAgent(f) {
   // Read an agent transcript fully: prompt (label), start, tool-call feed, tokens, final result text.
-  let start = null, label = '', lastText = '', tools = [], usage = {}, seq = 0;
+  let start = null, label = '', lastText = '', tools = [], usage = {}, seq = 0, model = '';
   const usageOrder = []; // preserve insertion order of request ids (python dict order)
   try {
     let lines;
@@ -144,6 +149,7 @@ function parseAgent(f) {
           label = pySplitJoin(txt).slice(0, 90);
         }
       } else if (t === 'assistant' && isObj(msg)) {
+        if (WITH_MODEL && typeof msg.model === 'string' && msg.model) model = msg.model;   // last one wins (mid-run switches show the current model)
         const c = msg.content;
         if (Array.isArray(c)) {
           for (const x of c) {
@@ -177,7 +183,7 @@ function parseAgent(f) {
   }
   let tokens = 0;
   for (const rid of usageOrder) tokens += usage[rid].in + usage[rid].out;
-  return {
+  const out = {
     label: label,
     start: start,
     tools: tools,
@@ -185,6 +191,8 @@ function parseAgent(f) {
     tokens: tokens,
     result: pySplitJoin(lastText).slice(0, 280),
   };
+  if (WITH_MODEL) out.model = model;   // key only exists in flagged mode — the parity (unflagged) shape is untouched
+  return out;
 }
 
 function pyInt(v) {
@@ -211,7 +219,9 @@ function getMtimeSec(p) {
 }
 
 function main() {
-  const root = process.argv[2];
+  let args = process.argv.slice(2);
+  if (args[0] === '--with-model') { WITH_MODEL = true; args = args.slice(1); }
+  const root = args[0];
   const now = Date.now() / 1000;
   const RECENT = 900;
   const STALE = 180;
@@ -232,7 +242,10 @@ function main() {
     try { st = fs.statSync(af); } catch (e) { return parseAgent(af); }
     const key = Math.trunc(st.mtimeMs / 1000) + ':' + st.size;
     const ent = cache[aid];
-    if (ent && typeof ent === 'object' && ent.key === key && Object.prototype.hasOwnProperty.call(ent, 'info')) return ent.info;
+    // A cache entry written pre---with-model (or by an unflagged run) lacks the model key — re-parse once
+    // rather than serving a stale shape; the refreshed entry then carries it.
+    const shapeOk = !WITH_MODEL || (ent && ent.info && Object.prototype.hasOwnProperty.call(ent.info, 'model'));
+    if (ent && typeof ent === 'object' && ent.key === key && Object.prototype.hasOwnProperty.call(ent, 'info') && shapeOk) return ent.info;
     const info = parseAgent(af);
     cache[aid] = { key: key, info: info };
     return info;
@@ -297,7 +310,7 @@ function main() {
       let last = null;
       try { last = Math.trunc(getMtimeSec(af)); } catch (e) { last = null; }
       const isRunning = (!done.has(aid)) && (last !== null) && ((now - last) <= STALE);
-      agents.push({
+      const a = {
         id: String(aid).slice(0, 9),
         label: info.label || 'agent',
         status: isRunning ? 'running' : 'done',
@@ -307,7 +320,9 @@ function main() {
         toolCount: info.toolCount,
         tools: info.tools.slice(-12),
         result: isRunning ? '' : info.result,
-      });
+      };
+      if (WITH_MODEL) a.model = info.model || '';
+      agents.push(a);
     }
     if (agents.length === 0) continue;
     let running = 0;
