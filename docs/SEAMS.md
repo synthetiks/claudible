@@ -1,5 +1,7 @@
 # Claudible — Seam Map (Part 0, step 0.1 deliverable)
 
+> **📜 Historical snapshot.** This seam map was the Part-0 inventory taken BEFORE the Runner refactor; every call site listed here has since been routed through `runners/{wsl,win,posix}.js`. Kept as the contract reference.
+
 This document is the **contract for the Runner refactor** (`OS-CONVERSION-PLAN.md` §0.2–0.3). It
 inventories every OS-coupled call site in the codebase — today they are all unconditionally
 **Windows + WSL** (there is *zero* runtime OS detection anywhere: `process.platform` / `os.platform`

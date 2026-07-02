@@ -1,5 +1,7 @@
 # Claudible — Pre-Release Test Checklist
 
+> **📜 Historical QA checklist (2026-06-24).** The Windows (WSL + native) and Linux tiers have since been exercised by real releases and boot tests; kept as the reference list for future release passes (macOS tier still pending hardware).
+
 The multi-OS smoke pass before a wider release. Tiers are ordered fastest-and-highest-coverage first.
 Reference for the full per-backend acceptance: [SMOKE.md](SMOKE.md).
 

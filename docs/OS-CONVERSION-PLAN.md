@@ -1,5 +1,7 @@
 # Claudible — Master OS Conversion Plan
 
+> **📜 Historical engineering document.** This was the working plan for the multi-OS conversion; the work has since **shipped** (Runner seam, native Windows, Linux — macOS is code-complete pending a hardware smoke). Kept for context — see READMEs *Platform support* for current reality.
+
 Goal: take Claudible from **one shippable target** (Windows + WSL) to **four**, by isolating
 every OS-coupled call behind a single seam and then implementing that seam per platform. The
 WSL path stays the default and untouched until each native path passes the same smoke test.

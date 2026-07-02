@@ -46,7 +46,7 @@ so they can be smoke-tested without risk. Run the 10-point list above under each
 (`bash.exe` — already an install prereq). **No WSL.** Launch with the env var set, e.g. in PowerShell:
 `$env:CLAUDIBLE_RUNNER='win'; npm start` (from the install folder). `Remove-Item Env:\CLAUDIBLE_RUNNER` to revert.
 
-**Native install smoke (A5/A3 — authored, never run on Windows yet):** from the cloned repo,
+**Native install smoke (A5/A3 — since validated by real hardware installs across v0.3.0–v0.5.x releases; kept as the reference checklist):** from the cloned repo,
 `.\install.ps1 -Native` should: install Windows Claude Code if missing, run `setup\setup-win.ps1` (download the
 prebuilt `whisper-server.exe` + ggml-base model; clone Kokoro + `uv sync --extra cpu` + its model), and pin
 `CLAUDIBLE_RUNNER=win`. **Watch for, in order:** (1) `uv` resolves after winget/installer (PATH refresh);

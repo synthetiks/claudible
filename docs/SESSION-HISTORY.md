@@ -4,10 +4,13 @@ A single append-only **event log** that powers two faces of the Repo Review wind
 per-prompt **activity feed** (who changed what, when, on which machine) and, built on the
 very same records, **revert** to a previous checkpoint.
 
-> **Status:** Phases 1–7 complete, including the **revert UI** (shipped `b77bc95`:
-> per-prompt code checkpoints + one-click Revert, with an undo). Ships **dark** behind the
-> `sessionHistory` setting (default **off**) — completely inert until enabled. Live multiplayer
-> sync and the in-app smoke test are still pending.
+> **Status: SHIPPED, default ON.** Phases 1–7 complete (`b77bc95`: per-prompt code checkpoints +
+> one-click Revert with undo), plus the follow-ups that finished the feature (`53ca63f..61edcf1`):
+> per-prompt file stats ("3 files (+42/−10)"), a seed checkpoint so the FIRST prompt is revertable,
+> live multiplayer sync (full log in the join handshake + per-entry broadcast, merged via
+> `mergeLogs`; guests render a view-only feed), and Revert hidden on entries stamped by another
+> machine (their snapshot refs don't travel). The `sessionHistory` setting now defaults **on**;
+> explicit `false` turns it off.
 
 ## Why one log
 The feed and revert are not two features — they're one record set with two consumers. The
@@ -66,7 +69,9 @@ pre-existing and unrelated to this feature.)
   also targets the feed's own workspace and warns if a turn is still in flight.
 
 ## What's left
-- **Multiplayer:** attribute remote drivers + propagate the log over the live channel + send a
-  full snapshot in the join handshake.
-- **Files-changed:** compute the per-prompt diff for the summary line.
-- **Smoke test:** verify capture + feed in the running app before the flag defaults on.
+Everything in the original list shipped (multiplayer sync over the live channel, per-prompt
+files-changed stats, default-on). Remaining ideas, deliberately deferred:
+- **Durable cross-machine merge** into a collaborator's own workspace log (needs a shared
+  workspace-identity key; today a guest's feed is live/in-memory for the joined tab).
+- **Remote revert** — pushing/fetching checkpoint refs so an entry made on another machine is
+  revertable here; today those entries hide the Revert button instead.

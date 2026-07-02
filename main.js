@@ -1698,7 +1698,7 @@ ipcMain.handle('diff:revert', (e, patch) => diffAction('apply-reverse', patch));
 ipcMain.handle('diff:discard', (e, relPath) => diffAction('discard', relPath));
 
 // ---- Session history: the append-only activity log behind the Repo Review feed + revert ----
-// Ships DARK behind the sessionHistory setting. The MAIN process stamps id/seq/author/machine
+// Gated on the sessionHistory setting (default ON since 61edcf1). The MAIN process stamps id/seq/author/machine
 // server-side (renderer supplies only the raw prompt) and persists per-workspace under
 // RT/history/<wsId>.json (main-owned, always writable, survives upgrades). Pure logic lives in lib/.
 const _hist = require('./lib/history.js');

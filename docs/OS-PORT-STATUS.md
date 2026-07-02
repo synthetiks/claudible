@@ -1,5 +1,7 @@
 # OS Port — Live Status
 
+> **📜 Historical status snapshot (last updated 2026-06-23).** Superseded by shipped releases v0.3.0–v0.6.0: native Windows has had multiple real hardware installs and the Linux AppImage is boot-verified. Only the macOS runtime smoke remains hardware-gated. See READMEs *Platform support* for current reality.
+
 Running progress against `docs/OS-CONVERSION-PLAN.md`. Updated as each piece lands so an interrupted
 session can resume cleanly. **Legend:** ✅ done+verified · 🟡 code-complete, runtime-gated · ⬜ not started.
 
