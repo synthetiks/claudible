@@ -623,7 +623,13 @@ ipcMain.handle('share:start', (e, opts) => {
 ipcMain.handle('share:stop', async () => {
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   cloudflaredProc = null; shareBaseUrl = null;
+  // Clear presence on the workspace we ACTUALLY advertised on — do it HERE, before stopAdvertiseHeartbeat nulls
+  // advertisedWs. The renderer's follow-up live:unadvertise runs AFTER a workspace switch has already re-pointed
+  // activeWorkspace, so if we left the clear to it, advertisedWs would be null and it'd clear the WRONG (new) repo,
+  // leaving the old repo advertised as "live · Join" until its ~5-min TTL. Clearing here makes it ordering-independent.
+  const advWs = advertisedWs, wasAdvertising = !!advertisedSid;
   stopAdvertiseHeartbeat();                              // no longer hosting → stop re-stamping presence
+  if (wasAdvertising) runPresence('presence-clear', () => {}, advWs);   // pull the stale live/<login>.json off the advertised repo's branch now
   share.stop();
   _lastRoster = [];
   _writeAllContexts();                                   // sharing ended → the fg tab's context drops the "hosting" block (back to solo)
