@@ -105,6 +105,21 @@ ok('restore of unknown id → ok:false', tool('restore', 'nope').ok === false);
   fs.rmSync(R3, { recursive: true, force: true });
 }
 
+// ===== numstat subcommand: the Stop-time "what changed this turn" stats main.js stamps onto entry.files =====
+{
+  W('s1.txt', 'one\ntwo\n');
+  tool('snapshot', 'ns1');
+  W('s1.txt', 'one\nTWO\nthree\n'); W('s2.txt', 'new\n');
+  tool('snapshot', 'ns2');
+  const ns = tool('numstat', 'ns1', 'ns2');
+  ok('numstat ok + files array', ns.ok === true && Array.isArray(ns.files) && ns.files.length >= 2);
+  const by = Object.fromEntries((ns.files || []).map((f) => [f.path, f]));
+  ok('numstat modified file counted', by['s1.txt'] && by['s1.txt'].add >= 1);
+  ok('numstat added file counted', by['s2.txt'] && by['s2.txt'].add === 1 && by['s2.txt'].del === 0);
+  ok('numstat bad from-id rejected', tool('numstat', '../evil', 'ns2').ok === false);
+  ok('numstat unresolvable ref → ok with files:[]', (() => { const r = tool('numstat', 'nope', 'ns2'); return r.ok === true && r.files.length === 0; })());
+}
+
 fs.rmSync(repo, { recursive: true, force: true });
 console.log(`\ncheckpoint-tool (real temp repo): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

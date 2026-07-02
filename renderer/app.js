@@ -1777,12 +1777,18 @@ function repoReviewHeader(aw, files, untracked, committed, commits, total) {
 function renderHistoryEntry(en, revertable) {
   const row = document.createElement('div'); row.className = 'hf-row';
   const meta = document.createElement('div'); meta.className = 'hf-meta';
+  // "3 files (+42/-10)" — mirrors lib/history.js summarizeFiles (the sandboxed renderer can't require lib/);
+  // stamped by main at Stop-time from the checkpoint numstat, so it appears once the turn settles.
+  const filesLine = (en.files && en.files.length)
+    ? en.files.length + ' file' + (en.files.length === 1 ? '' : 's')
+      + ' (+' + en.files.reduce((n, f) => n + (f.add | 0), 0) + '/-' + en.files.reduce((n, f) => n + (f.del | 0), 0) + ')'
+    : '';
   [['Name', histSessionName(en.session)],
    ['Time', histStamp(en.ts || 0)],
-   ['User', en.author || 'unknown']].forEach(([k, v]) => {
+   ['User', en.author || 'unknown']].concat(filesLine ? [['Changes', filesLine, en.files.slice(0, 30).map((f) => '+' + (f.add | 0) + '/-' + (f.del | 0) + '  ' + f.path).join('\n')]] : []).forEach(([k, v, tip]) => {
     const pair = document.createElement('span'); pair.className = 'hf-pair';
     const ks = document.createElement('span'); ks.className = 'hf-k'; ks.textContent = k + ': ';
-    const vs = document.createElement('span'); vs.className = 'hf-v'; vs.textContent = v; vs.title = v;
+    const vs = document.createElement('span'); vs.className = 'hf-v'; vs.textContent = v; vs.title = tip || v;   // Changes hovers the per-file breakdown
     pair.appendChild(ks); pair.appendChild(vs); meta.appendChild(pair);
   });
   row.appendChild(meta);

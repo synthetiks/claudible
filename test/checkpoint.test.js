@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
-const { snapshot, resolve, restore } = require('../lib/checkpoint.js');
+const { snapshot, resolve, restore, numstat, parseNumstat } = require('../lib/checkpoint.js');
 
 let pass = 0, fail = 0;
 function ok(label, c) { c ? pass++ : (fail++, console.error('  FAIL ' + label)); }
@@ -55,6 +55,28 @@ eq('HEAD still untouched after restore', git(['rev-parse', 'HEAD']).stdout.trim(
 
 // --- missing checkpoint -> ok:false ---
 ok('restore of unknown id -> ok:false', restore(git, 'nope', rmFile).ok === false);
+
+// --- numstat: what changed between two checkpoints (feeds entry.files → "3 files (+42/-10)") ---
+{
+  W('a.txt', 'L1\nL2\nL3\n'); W('n.txt', 'N1\n');
+  snapshot(git, 'ns1', tmpIdx);
+  W('a.txt', 'L1\nCHANGED\nL3\nL4\n'); rmFile('n.txt'); W('m.txt', 'M1\n');
+  snapshot(git, 'ns2', tmpIdx);
+  const files = numstat(git, 'ns1', 'ns2');
+  const by = Object.fromEntries(files.map((f) => [f.path, f]));
+  ok('numstat sees the modified file', by['a.txt'] && by['a.txt'].add >= 1 && by['a.txt'].del >= 1);
+  ok('numstat sees the deleted file', by['n.txt'] && by['n.txt'].del >= 1 && by['n.txt'].add === 0);
+  ok('numstat sees the added file', by['m.txt'] && by['m.txt'].add >= 1 && by['m.txt'].del === 0);
+  ok('numstat with an unresolvable ref → [] (best-effort, no throw)', Array.isArray(numstat(git, 'nope', 'ns2')) && numstat(git, 'nope', 'ns2').length === 0);
+}
+// --- parseNumstat: pure text→data (binary "-" → 0/0, junk lines dropped) ---
+{
+  const p = parseNumstat('12\t3\tsrc/x.js\n-\t-\tassets/logo.png\n\ngarbage line\n0\t7\tgone.txt\n');
+  eq('parseNumstat count (junk dropped)', p.length, 3);
+  ok('parseNumstat add/del parsed', p[0].path === 'src/x.js' && p[0].add === 12 && p[0].del === 3);
+  ok('parseNumstat binary → 0/0 with path kept', p[1].path === 'assets/logo.png' && p[1].add === 0 && p[1].del === 0);
+  ok('parseNumstat empty/null input → []', parseNumstat('').length === 0 && parseNumstat(null).length === 0);
+}
 
 fs.rmSync(repo, { recursive: true, force: true });
 console.log(`\ncheckpoint (real temp repo): ${pass} passed, ${fail} failed`);

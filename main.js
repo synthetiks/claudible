@@ -1728,6 +1728,11 @@ function _snapshotOnStop(tabId) {
     if (!_histEnabled()) return;                                     // feature off → never touch the repo
     const rec = ptys.get(tabId); const ws = rec && rec.ws;
     if (!ws || !ws.id || (ws.kind && ws.kind !== 'repo')) return;    // only repo workspaces have git to snapshot
+    // The entry this turn belongs to = the NEWEST entry at Stop-fire time, captured SYNCHRONOUSLY: if the user
+    // submits the next prompt before the async snapshot lands, a new entry appends after this — stamping "what
+    // changed" by id keeps the stats on the turn that actually made them.
+    let turnEntry = null;
+    try { const log = _histStore.load(fs, _histFile(ws.id)); turnEntry = log.length ? log[log.length - 1] : null; } catch {}
     // Invalidate the pending ref SYNCHRONOUSLY, before the async snapshot runs. history:append reads _pendingCkpt at
     // the NEXT UserPromptSubmit; if the user fires that before this snapshot resolves, they now get NO checkpoint
     // (null → no Revert button) instead of the PREVIOUS turn's ref — which would silently over-revert past a whole
@@ -1737,6 +1742,20 @@ function _snapshotOnStop(tabId) {
     _ckptRun(ws, 'snapshot ' + id).then((r) => {
       if (!r || !r.ok || !r.sha) return;
       _pendingCkpt.set(ws.id, id);
+      // Stamp the turn's entry with its file stats: diff(state going INTO the prompt → the settled state now).
+      // Best-effort — a null/pruned 'from' ref just means no stats (files stays []), never an error.
+      if (turnEntry && turnEntry.checkpointRef && _ckptIdRe.test(turnEntry.checkpointRef) && turnEntry.checkpointRef !== id) {
+        _ckptRun(ws, 'numstat ' + turnEntry.checkpointRef + ' ' + id).then((n) => {
+          try {
+            if (!n || !n.ok || !Array.isArray(n.files)) return;
+            const log = _histStore.load(fs, _histFile(ws.id));
+            const en = log.find((x) => x.id === turnEntry.id);
+            if (!en) return;
+            en.files = n.files.slice(0, 500);   // bound a pathological turn (mass rename) — the feed only sums these
+            _histStore.save(fs, _histFile(ws.id), log);
+          } catch {}
+        });
+      }
       try {
         const keep = _histStore.load(fs, _histFile(ws.id)).slice(-10).map((en) => en.checkpointRef).filter((x) => x && _ckptIdRe.test(x));
         keep.push(id);

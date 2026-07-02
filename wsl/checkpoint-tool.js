@@ -6,6 +6,7 @@
 //   snapshot <id>          -> { ok, id, sha }
 //   restore  <id>          -> { ok, id, undo, removed[] }   (snapshots the CURRENT tree to the 'undo' ref FIRST)
 //   prune    <keepId...>   -> { ok, pruned[] }              (drop every ckpt ref not in the keep list, never 'undo')
+//   numstat  <from> <to>   -> { ok, files:[{path,add,del}] } (what changed between two checkpoints; unresolvable -> [])
 const cp = require('child_process');
 const os = require('os');
 const path = require('path');
@@ -64,6 +65,11 @@ function main() {
   if (sub === 'prune') {
     const keep = process.argv.slice(3).filter(validId);
     return emit({ ok: true, pruned: ck.prune(git, keep) });
+  }
+  if (sub === 'numstat') {
+    const to = process.argv[4];
+    if (!validId(id) || !validId(to)) return emit({ ok: false, error: 'bad id' });
+    return emit({ ok: true, files: ck.numstat(git, id, to) });   // either ref unresolvable → files:[] (stats are best-effort, never an error)
   }
   return emit({ ok: false, error: 'bad subcommand' });
 }
