@@ -143,7 +143,7 @@ const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<ta
 const SETTINGS_FILE = path.join(RT, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory === true; fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== !!(obj && obj.sessionHistory === true)) { try { _pendingCkpt.clear(); } catch {} if (obj && obj.sessionHistory === true) { try { _seedCkpt(activeWorkspace); } catch {} } } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -400,6 +400,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
     _writeContext(tabId);                                 // seed this tab's identity/live-state file before Claude's first prompt fires the context hook
+    _seedCkpt(ws);                                        // repo ws + history on → snapshot now so even the FIRST prompt gets a Revert target
     if (registry.effort === 'ultracode') armUltracode(tabId, proc);   // switch the new session into ultracode mode once it settles
     if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
     if (tabId === fgTabId) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the foreground tab drives the guest mirror
@@ -1761,6 +1762,21 @@ function _snapshotOnStop(tabId) {
         keep.push(id);
         _ckptRun(ws, 'prune ' + keep.join(' '));
       } catch {}
+    });
+  } catch {}
+}
+// First-prompt revertability: _pendingCkpt is in-memory only, so the first prompt after an app start, a
+// session (re)spawn, or turning the setting on carried checkpointRef=null (no Revert button) until one full
+// turn completed. Seed a settled snapshot when a repo workspace's session comes up and no ref is pending.
+// Guarded fill: a Stop-cycle snapshot landing mid-seed wins — never stomp a newer ref with the seed.
+function _seedCkpt(ws) {
+  try {
+    if (!_histEnabled() || !ws || !ws.id || (ws.kind && ws.kind !== 'repo')) return;
+    if (_pendingCkpt.get(ws.id)) return;                             // a live ref already covers the next prompt
+    const id = require('crypto').randomUUID();
+    _ckptRun(ws, 'snapshot ' + id).then((r) => {
+      if (!r || !r.ok || !r.sha) return;
+      if (!_pendingCkpt.get(ws.id)) _pendingCkpt.set(ws.id, id);
     });
   } catch {}
 }
