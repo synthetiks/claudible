@@ -12,7 +12,7 @@
   <img alt="voice 100%25 local" src="https://img.shields.io/badge/voice-100%25%20local-5fb487">
   <img alt="platform Windows, Linux, macOS" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20Linux%20%C2%B7%20macOS-7c5cff">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-6aa9ff">
-  <img alt="status private beta" src="https://img.shields.io/badge/status-private%20beta-e0a93b">
+  <img alt="status public beta" src="https://img.shields.io/badge/status-public%20beta-e0a93b">
 </p>
 
 ---
@@ -30,8 +30,9 @@ Click **Share** and Claudible hands you a private invite link to your *live* ses
 - 🖥️ **The real Claude Code, embedded** — the actual TUI (xterm.js, full scrollback) in an obsidian-dark UI. Your session, untouched.
 - 🎙️ **Two-way local voice** — hold a key and talk; hear replies read back. Whisper + Kokoro run **on your machine** — no cloud, no Claude.ai voice sign-in, no telemetry from Claudible. (The embedded Claude Code talks to Anthropic exactly as the normal CLI does.)
 - 📊 **Live telemetry** — context %, cost, and tokens at a glance, with a guardrail (amber → red) and a one-tap `/compact` before you run out of room.
-- 🛰️ **Live agents cockpit** — watch your subagents and workflow swarms work in real time: their task, tool-by-tool activity, token burn, and final results.
+- 🛰️ **Live agents cockpit** — watch your subagents and workflow swarms work in real time: their task, tool-by-tool activity, token burn, **which model runs each agent**, and final results.
 - 🎛️ **One-click controls** — fire `/effort`, `/compact`, `/status` & friends from buttons; no commands to memorize.
+- 🕘 **Session history + one-click Revert** — a per-prompt activity feed (who ran what, when, and what changed: "3 files (+42/−10)"), with a git-backed snapshot per turn so you can roll the code back to any of the last 10 prompts — and undo the revert. Live guests see the feed too.
 - 🗂️ **Workspaces + session sync** — organize sessions per repo, and (with `gh`) keep shared sessions in sync with collaborators.
 
 ## Prerequisites
@@ -56,7 +57,7 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 | **Linux / macOS** | *(installers coming)* | `bash setup/setup.sh` |
 | **Comes from** | [**Releases**](https://github.com/thecrazydev1/claudible/releases) | `git clone` |
 
-During beta the repo is **private**, so either path needs a GitHub account that's a **collaborator** on it (to download a release asset *or* to clone).
+Claudible is in **public beta** — expect fast releases and the occasional rough edge; [issues](https://github.com/thecrazydev1/claudible/issues) are very welcome.
 
 ---
 
@@ -73,7 +74,7 @@ The simplest path. **No git, no `npm`, no PowerShell scripts, no `system32` snag
 - **Node.js 22.12+** for Windows ([nodejs.org](https://nodejs.org)) — Claude Code's hooks need a real `node`.
 - **Git for Windows** ([git-scm.com](https://git-scm.com/download/win)) — provides the `bash.exe` the voice services run through.
 
-> 🔒 While the repo is private, downloading a release asset requires being **signed in to GitHub** with access. <br> 🧪 The native-Windows runtime (esp. voice) is the newest path — if voice doesn't come up, the WSL build below is the proven one, and the log is at `%USERPROFILE%\.claudible\logs\`.
+> 🧪 The native-Windows runtime (esp. voice) is the newest path — if voice doesn't come up, the WSL build below is the proven one, and the log is at `%USERPROFILE%\.claudible\logs\`.
 
 ---
 
