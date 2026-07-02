@@ -845,7 +845,7 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
     try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
   });
 }));
-ipcMain.handle('session:open', (e, { tabId, id }) => { respawnPty(tabId, id); return { ok: true }; });   // re-point an existing tab at 'new' | <session-id>
+ipcMain.handle('session:open', (e, { tabId, id }) => { openGen++; respawnPty(tabId, id); return { ok: true }; });   // re-point an existing tab at 'new' | <session-id>. openGen++ supersedes any in-flight workspace:open clone — without it, a slow clone's continuation would respawn the tab AFTER this click and silently stomp the session the user just chose.
 // Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
 // switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.
 ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
