@@ -40,7 +40,7 @@ const TERM_OPTS = {
   fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
   fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 5000,
   theme: { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc',
-           selectionBackground: '#272c35', selectionInactiveBackground: '#272c35', black: '#070809', brightBlack: '#565c66' },
+           selectionBackground: '#272c35', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#070809', brightBlack: '#565c66' },
 };
 const tabs = new Map();           // tabId -> per-tab record (own xterm/fit/container + tracker/agents)
 let activeTabId = null;
@@ -49,15 +49,16 @@ let activeTabId = null;
 // Dark = default (no data-theme attr). The UI palettes live in index.html (html[data-theme="…"]); these are the
 // matching TERMINAL palettes. applyTheme also updates TERM_OPTS so newly-spawned tabs adopt the chosen palette.
 const TERM_THEMES = {
-  // selectionInactiveBackground MUST be set too — else an UNFOCUSED selection (e.g. after you scroll up / click the
-  // gutter) falls back to xterm's default neutral grey (~#3a3d41), a theme-clashing band at the terminal top. Pin it
-  // to each theme's own selection color so a selection reads the same, calm, theme-tinted, whether focused or not.
-  dark:      { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc', selectionBackground: '#272c35', selectionInactiveBackground: '#272c35', black: '#070809', brightBlack: '#565c66' },
-  graphite:  { background: '#13161d', foreground: '#e9edf4', cursor: '#cfd8e4', selectionBackground: '#313846', selectionInactiveBackground: '#313846', black: '#0e1116', brightBlack: '#6b7482' },
-  starlight: { background: '#1c212a', foreground: '#f4f7fc', cursor: '#dde4ee', selectionBackground: '#3e4756', selectionInactiveBackground: '#3e4756', black: '#171b22', brightBlack: '#808a99' },
-  midnight:  { background: '#0a1426', foreground: '#d6e4f6', cursor: '#a9c6ee', selectionBackground: '#214264', selectionInactiveBackground: '#214264', black: '#060d1c', brightBlack: '#566a90' },
-  aurora:    { background: '#0f0a22', foreground: '#e6dff6', cursor: '#c3aef0', selectionBackground: '#2f2358', selectionInactiveBackground: '#2f2358', black: '#0b0818', brightBlack: '#6b5e8c' },
-  evergreen: { background: '#081610', foreground: '#d8efe1', cursor: '#a6dcbb', selectionBackground: '#1b4129', selectionInactiveBackground: '#1b4129', black: '#050d09', brightBlack: '#517d64' },
+  // selectionInactiveBackground = TRANSPARENT on purpose: when the terminal is UNFOCUSED (you scrolled up via the
+  // gutter, or clicked away), a lingering text selection must show NO highlight — otherwise it rendered as a band
+  // at the top of the scrollback (xterm's default is a ~#3a3d41 grey; even a themed color still read as a "weird
+  // highlighted line"). The ACTIVE selection (selectionBackground) still shows while you're actually selecting.
+  dark:      { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc', selectionBackground: '#272c35', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#070809', brightBlack: '#565c66' },
+  graphite:  { background: '#13161d', foreground: '#e9edf4', cursor: '#cfd8e4', selectionBackground: '#313846', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#0e1116', brightBlack: '#6b7482' },
+  starlight: { background: '#1c212a', foreground: '#f4f7fc', cursor: '#dde4ee', selectionBackground: '#3e4756', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#171b22', brightBlack: '#808a99' },
+  midnight:  { background: '#0a1426', foreground: '#d6e4f6', cursor: '#a9c6ee', selectionBackground: '#214264', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#060d1c', brightBlack: '#566a90' },
+  aurora:    { background: '#0f0a22', foreground: '#e6dff6', cursor: '#c3aef0', selectionBackground: '#2f2358', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#0b0818', brightBlack: '#6b5e8c' },
+  evergreen: { background: '#081610', foreground: '#d8efe1', cursor: '#a6dcbb', selectionBackground: '#1b4129', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#050d09', brightBlack: '#517d64' },
 };
 function applyTheme(name) {
   const t = TERM_THEMES[name] ? name : 'dark';
