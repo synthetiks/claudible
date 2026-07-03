@@ -1395,7 +1395,7 @@ function paintVoiceUi(st, room) {
   if (st && st.error === 'mic-denied') { btn.textContent = '🎙 Mic blocked'; btn.classList.remove('on'); return; }
   const joined = !!(st && st.joined);
   { const vr = $('voicerow'); if (vr) vr.style.display = joined ? '' : 'none'; }   // voice-members row shows only while in a call (the button now lives in the head)
-  btn.textContent = joined ? '🎙 Leave voice' : '🎙 Join voice';
+  btn.innerHTML = '<span class="hv-ic">🎙</span> ' + (joined ? 'Leave voice' : 'Join voice');   // static strings only — the icon span keeps the mic ~10% larger than the label (.hv-ic)
   btn.classList.toggle('on', joined);
   if (mute) { mute.style.display = joined ? '' : 'none'; mute.textContent = (st && st.muted) ? 'Unmute' : 'Mute'; mute.classList.toggle('muted', !!(st && st.muted)); }
   if (box) {

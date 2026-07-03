@@ -715,6 +715,11 @@
       background:linear-gradient(180deg,#0c0e12,#0a0b0d);flex:none}
     .hv-members:empty{display:none}
     .hv-btn,.hv-mute{width:auto;flex:none;padding:6px 11px;font-size:11px;border-radius:8px;box-shadow:none}
+    /* Join voice + End/Leave Session must read as the SAME control size (they sit in the same live cluster).
+       Shared chip metrics: one height, one min-width, centered content. Join voice slims its side padding
+       (it ran wide) and its mic icon renders ~10% larger than the label via .hv-ic. */
+    .hv-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;min-width:112px;padding:0 8px}
+    .hv-btn .hv-ic{font-size:13px;line-height:1}
     .hv-btn.on{color:#fff;border-color:#5fb487;background:rgba(95,180,135,.16)}
     .hv-mute.muted{color:#fff;border-color:var(--live);background:rgba(229,86,75,.16)}
     .hv-members{display:flex;align-items:center;flex-wrap:wrap;gap:5px;width:100%}
@@ -880,7 +885,7 @@
     .rmember{flex:none;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
     .rmember.you{color:var(--ink-dim)}
     /* host live-controls: a small "End live" in the chat head + a per-guest ✕ revealed on hover */
-    .chat-term{flex:none;width:auto;font:inherit;font-size:10px;font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:6px;padding:2px 9px;cursor:pointer;transition:background .14s,color .14s}   /* width:auto overrides button{width:100%}; normal-case so End/Leave Session reads compact, not a stretched ribbon */
+    .chat-term{flex:none;width:auto;font:inherit;font-size:11px;font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background .14s,color .14s}   /* width:auto overrides button{width:100%}; sized to MATCH .hv-btn (same height/min-width/radius) so End/Leave and Join voice read as one control family */
     .chat-term:hover{background:rgba(229,86,75,.26);color:#ff9b91}
     .rkick{flex:none;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin-left:1px;border:none;border-radius:4px;background:none;color:var(--ink-faint);font-size:10px;line-height:1;cursor:pointer;opacity:0;transition:opacity .14s,color .14s}
     .rmember:hover .rkick{opacity:.75}
@@ -1078,7 +1083,7 @@
       <div class="chat-head">
         <span class="chat-title">Group Chat</span>
         <span class="chat-head-actions">
-          <button id="hv-btn" class="hv-btn" title="Talk with your viewers">🎙 Join voice</button>
+          <button id="hv-btn" class="hv-btn" title="Talk with your viewers"><span class="hv-ic">🎙</span> Join voice</button>
           <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
           <button class="chat-term" id="chat-terminate" type="button" title="End the live session for everyone" style="display:none">End live</button>
         </span>
