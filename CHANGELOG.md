@@ -2,7 +2,7 @@
 
 All notable changes to Claudible are documented here.
 
-## [Unreleased]
+## [0.7.0] — 2026-07-03
 
 ### Session history grew up — and is now ON by default
 - **Live multiplayer feed:** the per-prompt history streams to connected guests (full log on join, per-entry updates live) — a joined cockpit shows "Session History · from the host". Same privacy rules as the terminal mirror: private workspaces never leave the machine.

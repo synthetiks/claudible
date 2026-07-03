@@ -1,6 +1,6 @@
 {
   "name": "claudible",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Multiplayer cockpit for Claude Code: invite anyone into your live session to watch, talk, and co-drive. Fully-local push-to-talk voice, live telemetry, an agents cockpit, session history with one-click revert. Windows (WSL2 or native) · Linux · macOS.",
   "license": "MIT",
   "author": "the_crazydev",
