@@ -1757,7 +1757,7 @@ function openDiff(open) {
   p.classList.toggle('open', open); if (s) s.classList.toggle('open', open);
   p.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (_diffTimer) { clearInterval(_diffTimer); _diffTimer = null; }
-  if (open) { _histShown = 10; _histExpanded.clear(); _revertUndoWs = null; refreshHistoryFeed(); refreshDiff(); _diffTimer = setInterval(() => refreshDiff({ quiet: true }), 4000); }   // keep it live while open; history feed starts at the latest 10, all collapsed
+  if (open) { _histShown = 10; _histExpanded.clear(); _phExpanded.clear(); _revertUndoWs = null; renderProjectHistory(); _diffTimer = setInterval(() => refreshExpandedProjects({ quiet: true }), 4000); }   // build the project accordion; keep expanded cards live while open
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
 function repoReviewHeader(aw, files, untracked, committed, commits, total) {
@@ -1909,72 +1909,132 @@ let _revertUndoWs = null;   // after a revert, the ws whose last revert is still
 let _histFeedWsId = null;   // the workspace the feed currently reflects (main-reported at load) → revert/undo act on THIS, not a possibly-stale activeWsId (guest-driven or auto-close switch can desync them)
 let _histMachineId = '';    // THIS machine's stable id (main-reported at load) — entries stamped on another machine hide their Revert button (their snapshot refs don't travel)
 const _histExpanded = new Set();   // entry ids the user expanded past 3 lines — persists across live re-renders, cleared on each drawer open
-async function refreshHistoryFeed() {
-  const wrap = $('history-feed'); if (!wrap) return;
-  // A JOINED live tab renders the HOST's feed (pushed over the live channel into tab.liveHistory) —
-  // view-only: the snapshots behind Revert live in the host's repo clone, so no entry is revertable here.
-  const at = AT();
-  if (at && at.kind === 'live') {
-    const entries = at.liveHistory || [];
-    _histFeedWsId = null;
-    if (!entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
-    wrap.hidden = false; wrap.innerHTML = '';
-    const llbl = document.createElement('div'); llbl.className = 'hf-lbl';
-    llbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History · from the host</span>';
-    wrap.appendChild(llbl);
-    const lall = entries.slice().reverse();
+// Load ONE project's session-history feed into `wrap`. targetWsId picks the project (main defaults to active
+// when null). `liveEntries` (a joined tab's host-pushed log) short-circuits the IPC and renders view-only.
+async function loadHistoryInto(targetWsId, wrap, liveEntries) {
+  if (!wrap) return;
+  if (liveEntries) {   // joined live tab → the HOST's feed; nothing revertable here (snapshots live on the host)
+    const lall = (liveEntries || []).slice().reverse();
+    if (!lall.length) { wrap.innerHTML = '<div class="ph-empty">No session history yet.</div>'; return; }
+    wrap.innerHTML = '';
     const lshown = Math.min(_histShown, lall.length);
     lall.slice(0, lshown).forEach((en) => wrap.appendChild(renderHistoryEntry(en, false)));
-    if (lall.length > lshown) {
-      const lmore = document.createElement('button'); lmore.className = 'hf-expand';
-      lmore.textContent = 'Show ' + Math.min(10, lall.length - lshown) + ' more';
-      lmore.onclick = () => { _histShown += 10; refreshHistoryFeed(); };
-      wrap.appendChild(lmore);
-    }
+    if (lall.length > lshown) { const lmore = document.createElement('button'); lmore.className = 'hf-expand'; lmore.textContent = 'Show ' + Math.min(10, lall.length - lshown) + ' more'; lmore.onclick = () => { _histShown += 10; loadHistoryInto(targetWsId, wrap, liveEntries); }; wrap.appendChild(lmore); }
     return;
   }
-  let r = null; try { r = await claudible.historyLoad(); } catch {}
-  if (r && r.ok) { _histFeedWsId = r.wsId || null; _histMachineId = r.machineId || ''; }   // record which workspace these entries belong to (Revert/Undo target it exactly) + THIS machine's id (entries stamped elsewhere aren't revertable here)
-  if (!r || !r.ok || !r.enabled || !r.entries || !r.entries.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
-  wrap.hidden = false; wrap.innerHTML = '';
-  const lbl = document.createElement('div'); lbl.className = 'hf-lbl';
-  lbl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg><span>Session History</span>';   // history (rewind-clock) icon + heading
-  wrap.appendChild(lbl);
-  if (_revertUndoWs && _revertUndoWs === (_histFeedWsId || activeWsId)) {   // a revert just happened on the ws this feed shows → offer a persistent, reachable undo
+  let r = null; try { r = await claudible.historyLoad(targetWsId); } catch {}
+  if (r && r.ok) { _histFeedWsId = r.wsId || null; _histMachineId = r.machineId || ''; }
+  if (!r || !r.ok || !r.enabled || !r.entries || !r.entries.length) { wrap.innerHTML = '<div class="ph-empty">No session history in this project yet.</div>'; return; }
+  wrap.innerHTML = '';
+  if (_revertUndoWs && _revertUndoWs === (r.wsId || targetWsId)) {   // a revert just happened on THIS project → offer a reachable undo
     const u = document.createElement('button'); u.className = 'hf-undo';
     u.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg><span>Undo last revert</span>';
     u.title = 'Restore the working tree to how it was just before the revert';
-    u.onclick = () => undoLastRevert();
+    u.onclick = () => { _revertUndoWs = r.wsId || targetWsId; undoLastRevert(); };
     wrap.appendChild(u);
   }
   const all = r.entries.slice().reverse();                             // newest first
   const shown = Math.min(_histShown, all.length);
-  all.slice(0, shown).forEach((en, i) => wrap.appendChild(renderHistoryEntry(en, i < 10)));   // only the newest 10 keep a live checkpoint (pruned beyond that) → only they get a Revert button
-  if (all.length > shown) {                                            // reveal the next 10 on click, then keep scrolling
+  all.slice(0, shown).forEach((en, i) => wrap.appendChild(renderHistoryEntry(en, i < 10)));   // only the newest 10 keep a live checkpoint → only they get a Revert button
+  if (all.length > shown) {
     const more = document.createElement('button'); more.className = 'hf-expand';
     more.textContent = 'Show ' + Math.min(10, all.length - shown) + ' more';
-    more.onclick = () => { _histShown += 10; refreshHistoryFeed(); };
+    more.onclick = () => { _histShown += 10; loadHistoryInto(targetWsId, wrap); };
     wrap.appendChild(more);
   }
 }
-let _diffSig = '', _diffBusy = false;
-async function refreshDiff(opts) {
-  const body = $('diff-body'); if (!body) return;
+// ---- Project History drawer: ONE list of your projects; expand a project → its session history + diff review
+// under it. Replaces the single-active-workspace "Repo Review" with a browse-any-project view. ----
+const _phExpanded = new Set();   // project ids currently expanded in the drawer (default: the active one)
+function _phProjects() {
+  const list = (typeof workspaces !== 'undefined' ? workspaces : []).filter((w) => w && (w.kind === 'repo' || w.id === activeWsId));   // shared repos + the active project (so a local active is still reviewable)
+  list.sort((a, b) => (a.id === activeWsId ? -1 : b.id === activeWsId ? 1 : 0));   // active project first
+  return list;
+}
+function renderProjectHistory() {
+  const host = $('diff-body'); if (!host) return;
+  host.innerHTML = '';
+  // A joined live tab is not a local project — show the host's pushed feed as its own top card.
+  const at = AT();
+  if (at && at.kind === 'live') {
+    const card = _phCard('live-' + at.tabId, (at.hostName ? at.hostName + '’s session' : 'Live session') + ' · from the host', 'live', true);
+    host.appendChild(card.el);
+    if (card.expanded) loadHistoryInto(null, card.feed, at.liveHistory || []);
+  }
+  const projects = _phProjects();
+  if (!projects.length && !(at && at.kind === 'live')) { host.innerHTML = '<div class="diff-empty">No projects yet — create one from the sidebar to see its history here.</div>'; return; }
+  // Default open: the active project — or, if nothing's expanded and the active id doesn't match a listed
+  // project (e.g. drawer opened before activeWsId settled), the first project, so a card is always open.
+  if (!projects.some((w) => _phExpanded.has(w.id))) { _phExpanded.add((projects.find((w) => w.id === activeWsId) || projects[0]).id); }
+  projects.forEach((w) => {
+    const card = _phCard(w.id, w.label || w.slug || 'project', w.kind, false);
+    host.appendChild(card.el);
+    if (card.expanded) _phFillBody(w, card);
+  });
+}
+// Build one collapsible project card (header + empty body). Returns {el, feed, diff, expanded}.
+function _phCard(id, label, kind, isLive) {
+  const el = document.createElement('div'); el.className = 'ph-project'; el.dataset.ws = id;
+  const expanded = _phExpanded.has(id);
+  const head = document.createElement('button'); head.className = 'ph-head' + (expanded ? ' open' : '');
+  const car = document.createElement('span'); car.className = 'ph-caret'; car.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+  const ico = document.createElement('span'); ico.className = 'ph-ico'; ico.innerHTML = isLive ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>' : (kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
+  const nm = document.createElement('span'); nm.className = 'ph-nm'; nm.textContent = label; nm.title = label;
+  head.appendChild(car); head.appendChild(ico); head.appendChild(nm);
+  el.appendChild(head);
+  const body = document.createElement('div'); body.className = 'ph-body'; if (!expanded) body.style.display = 'none';
+  const feed = document.createElement('div'); feed.className = 'history-feed';
+  const diff = document.createElement('div'); diff.className = 'ph-diff';
+  body.appendChild(feed); body.appendChild(diff); el.appendChild(body);
+  head.onclick = () => {
+    const nowOpen = !_phExpanded.has(id);
+    if (nowOpen) _phExpanded.add(id); else _phExpanded.delete(id);
+    head.classList.toggle('open', nowOpen); body.style.display = nowOpen ? '' : 'none';
+    if (nowOpen) { _histShown = 10; if (isLive) loadHistoryInto(null, feed, (AT() && AT().liveHistory) || []); else { const w = workspaces.find((x) => x.id === id); if (w) _phFillBody(w, { feed, diff }); } }
+  };
+  return { el, head, feed, diff, expanded };
+}
+// Load a project's history feed + diff review into its card body.
+function _phFillBody(w, card) {
+  loadHistoryInto(w.id, card.feed);
+  loadDiffInto(w.id, card.diff, {});
+}
+// Live refresh (4s timer + per-prompt hook line): reload only the EXPANDED cards' bodies in place, so the
+// accordion structure + scroll survive. The old refreshHistoryFeed/refreshDiff names delegate here so every
+// existing caller keeps working.
+function refreshExpandedProjects(opts) {
+  const host = $('diff-body'); if (!host || !$('diffpanel') || !$('diffpanel').classList.contains('open')) return;
+  const at = AT();
+  host.querySelectorAll('.ph-project').forEach((el) => {
+    const feed = el.querySelector('.history-feed'), diff = el.querySelector('.ph-diff');
+    if (el.querySelector('.ph-body').style.display === 'none') return;   // collapsed → skip
+    if (String(el.dataset.ws).startsWith('live-')) { if (at && at.kind === 'live') loadHistoryInto(null, feed, at.liveHistory || []); return; }
+    const w = workspaces.find((x) => x.id === el.dataset.ws); if (!w) return;
+    loadHistoryInto(w.id, feed);
+    loadDiffInto(w.id, diff, opts || {});
+  });
+}
+function refreshHistoryFeed() { refreshExpandedProjects(); }        // compat: live feed update after a prompt/revert
+function refreshDiff(opts) { refreshExpandedProjects(opts); }      // compat: 4s quiet refresh + workspace-switch repaint
+// Load ONE project's diff review (uncommitted + untracked + recent commits) into `body`. Per-container
+// busy/sig flags (body._diffBusy / body._diffSig) so several expanded projects never clobber each other.
+async function loadDiffInto(targetWsId, body, opts) {
+  if (!body) return;
   const quiet = opts && opts.quiet;                                    // auto-refresh: don't flash "reading…" or rebuild if unchanged
-  if (quiet && _diffBusy) return;                                      // a refresh is already in flight — don't stack WSL spawns
-  if (!quiet) body.innerHTML = '<div class="diff-empty">reading changes…</div>';
-  _diffBusy = true;
-  let r = null; try { r = await claudible.diffList(); } catch {}
-  _diffBusy = false;
+  if (quiet && body._diffBusy) return;                                 // a refresh is already in flight — don't stack WSL spawns
+  if (!quiet && !body.firstChild) body.innerHTML = '<div class="diff-empty">reading changes…</div>';
+  body._diffBusy = true;
+  let r = null; try { r = await claudible.diffList(targetWsId); } catch {}
+  body._diffBusy = false;
   if (!r || !r.ok) { if (!quiet) body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
-  if (!r.repo) { _diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This project isn’t a git repo — nothing to review.<br>Diff review works in repo projects (or any folder that’s a git repo).</div>'; return; }
+  if (!r.repo) { body._diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This project isn’t a git repo — nothing to review here.</div>'; return; }
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
-  const aw = (typeof workspaces !== 'undefined') ? workspaces.find((w) => w.id === activeWsId) : null;   // which repo this review is for
+  const aw = (typeof workspaces !== 'undefined') ? (workspaces.find((w) => w.id === targetWsId) || workspaces.find((w) => w.id === activeWsId)) : null;   // which repo this review is for
   const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally
   // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
-  const sig = JSON.stringify({ ws: activeWsId, t: total, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
-  if (quiet && sig === _diffSig) return;
-  _diffSig = sig;
+  const sig = JSON.stringify({ ws: targetWsId, t: total, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
+  if (quiet && sig === body._diffSig) return;
+  body._diffSig = sig;
   if (!files.length && !untracked.length && !committed.length) {
     body.innerHTML = ''; body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits, total));
     const _e = document.createElement('div'); _e.className = 'diff-empty'; _e.textContent = 'No changes yet — nothing in the working tree or recent commits. ✨'; body.appendChild(_e); return;
@@ -2078,7 +2138,7 @@ function renderUntracked(p) {
 }
 $('diff-btn').addEventListener('click', () => openDiff(!$('diffpanel').classList.contains('open')));
 $('diff-close').addEventListener('click', () => openDiff(false));
-$('diff-refresh').addEventListener('click', refreshDiff);
+$('diff-refresh').addEventListener('click', () => renderProjectHistory());
 $('diff-scrim').addEventListener('click', () => openDiff(false));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('diffpanel').classList.contains('open')) openDiff(false); });
 

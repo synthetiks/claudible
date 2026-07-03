@@ -41,12 +41,12 @@ contextBridge.exposeInMainWorld('claudible', {
   claudeConnected: () => ipcRenderer.invoke('claude:connected'),   // bring the terminal up after connecting
   claudeState: () => ipcRenderer.invoke('claude:state'),           // cheap claude-only {installed,signedIn} for the dot/popup
   // diff review (what Claude changed in the workspace's git repo)
-  diffList: () => ipcRenderer.invoke('diff:list'),
+  diffList: (wsId) => ipcRenderer.invoke('diff:list', { wsId }),
   diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),
   diffDiscard: (relPath) => ipcRenderer.invoke('diff:discard', relPath),
   // session history (the append-only activity log behind the Repo Review feed + revert; gated by the sessionHistory setting)
   historyAppend: (prompt, session, wsId, tabId) => ipcRenderer.invoke('history:append', { prompt, session, wsId, tabId }),   // renderer sends the raw prompt + submitting tab's workspace + tabId; main stamps id/seq/author/machine and attributes co-drive by tabId
-  historyLoad: () => ipcRenderer.invoke('history:load'),
+  historyLoad: (wsId) => ipcRenderer.invoke('history:load', { wsId }),
   checkpointRevert: (id, wsId) => ipcRenderer.invoke('checkpoint:revert', { id, wsId }),   // roll the workspace repo back to a prompt's code snapshot
   checkpointUndo: (wsId) => ipcRenderer.invoke('checkpoint:undo', { wsId }),                // undo the last revert (restores the pre-revert tree)
   // workspaces (the library a session lives in: legacy / local folder / private repo)

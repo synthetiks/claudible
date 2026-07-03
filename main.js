@@ -1614,9 +1614,10 @@ ipcMain.handle('session:latest-reply', async (e, sessionId) => {
 });
 
 // ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
-ipcMain.handle('diff:list', () => new Promise((resolve) => {
+ipcMain.handle('diff:list', (e, { wsId } = {}) => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });
-  runner.runScript('diff.sh', '', { ws: activeWorkspace, timeout: 30000, maxBuffer: 32 * 1024 * 1024 }).then(({ err, stdout }) => {
+  const ws = (wsId && _wsById(wsId)) || activeWorkspace;   // Project History can review any project, not just the active one
+  runner.runScript('diff.sh', '', { ws, timeout: 30000, maxBuffer: 32 * 1024 * 1024 }).then(({ err, stdout }) => {
       let r = { ok: false, repo: false, files: [], untracked: [] };
       try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       resolve(r);
@@ -1781,10 +1782,11 @@ function _seedCkpt(ws) {
     });
   } catch {}
 }
-ipcMain.handle('history:load', () => {
+ipcMain.handle('history:load', (e, arg) => {
   try {
     if (!_histEnabled()) return { ok: true, enabled: false, entries: [] };   // off = off for reads too: don't surface entries from a previously-enabled period
-    const wsId = (activeWorkspace && activeWorkspace.id) || 'default';
+    const reqWs = arg && arg.wsId ? _wsById(arg.wsId) : null;   // Project History loads a chosen project's feed; default = active
+    const wsId = (reqWs && reqWs.id) || (activeWorkspace && activeWorkspace.id) || 'default';
     return { ok: true, enabled: true, wsId, machineId: _machineId(), entries: _histStore.load(fs, _histFile(wsId)) };   // wsId = the workspace these entries belong to, so the renderer reverts against IT; machineId lets the feed hide Revert on entries authored elsewhere (their snapshot refs don't travel)
   } catch (e) { return { ok: false, enabled: false, entries: [], error: String(e) }; }
 });

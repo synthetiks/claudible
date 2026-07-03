@@ -801,9 +801,22 @@
     .diff-body::-webkit-scrollbar,.history-feed::-webkit-scrollbar{width:7px}
     .diff-body::-webkit-scrollbar-thumb,.history-feed::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
     .diff-body::-webkit-scrollbar-thumb:hover,.history-feed::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
-    /* session-history activity feed — top of the Repo Review drawer; shown only when enabled + has entries */
-    .history-feed{flex:none;max-height:58%;overflow:auto;padding:7px 14px 12px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--hairline)}   /* LOWER section — top border is the divider; taller (58%) so it starts higher up */
+    /* session-history activity feed — now nested inside each Project History card (see .ph-*) */
+    .history-feed{display:flex;flex-direction:column;gap:6px;padding:2px 0 8px}
     .history-feed[hidden]{display:none}
+    /* Project History accordion: one card per project; expand → its history feed + diff review below */
+    .ph-project{border-bottom:1px solid var(--hairline-soft,rgba(255,255,255,.05))}
+    .ph-head{width:100%;display:flex;align-items:center;gap:8px;padding:10px 14px;background:transparent;border:none;cursor:pointer;
+      font:inherit;font-size:12.5px;color:var(--ink);text-align:left;box-shadow:none;transition:background .14s}
+    .ph-head:hover{background:rgba(255,255,255,.035)}
+    .ph-caret{flex:none;display:flex;color:var(--ink-faint);transition:transform .16s var(--ease-pop,ease)}
+    .ph-head.open .ph-caret{transform:rotate(90deg)}
+    .ph-ico{flex:none;display:flex;color:var(--ink-dim)}
+    .ph-ico svg{width:14px;height:14px}
+    .ph-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;letter-spacing:.01em}
+    .ph-body{padding:0 14px 8px}
+    .ph-diff{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--hairline-soft,rgba(255,255,255,.05));padding-top:8px;margin-top:2px}
+    .ph-empty{color:var(--ink-faint);font-size:11px;padding:6px 2px}
     .hf-lbl{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}   /* size + brightness matched to the 'repo review' drawer title */
     .hf-lbl svg{width:13px;height:13px;opacity:.85;flex:none}
     .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
@@ -987,7 +1000,7 @@
     <div class="topbtns">
       <button class="iconbtn" id="sessions-btn" title="Projects">☰</button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
-      <button class="iconbtn" id="diff-btn" title="Repo Review — which repo you're in + what Claude changed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
+      <button class="iconbtn" id="diff-btn" title="Project History — pick a project, see its session history + changes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div class="vgroup">
@@ -1109,14 +1122,13 @@
   <!-- Diff Review panel: what Claude changed in the workspace's git repo, with per-hunk / per-file revert -->
   <div class="drawer-scrim" id="diff-scrim"></div>
   <div class="diffpanel" id="diffpanel" aria-hidden="true">
-    <div class="drawer-head"><span>repo review</span>
+    <div class="drawer-head"><span>project history</span>
       <span style="margin-left:auto;display:flex;gap:4px">
         <button id="diff-refresh" title="Refresh">⟳</button>
         <button id="diff-close" title="Close">×</button>
       </span>
     </div>
     <div class="diff-body" id="diff-body"></div>
-    <div class="history-feed" id="history-feed" hidden></div>
   </div>
 
   <div class="drawer-scrim" id="drawer-scrim"></div>
