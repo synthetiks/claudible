@@ -264,8 +264,8 @@ function applyPaused(label) {
   var ov = $('paused-ov'); if (ov) ov.classList.toggle('show', !!wsPaused);
   var b = $('paused-body');
   if (b) b.textContent = (wsPaused && label)
-    ? 'The host is working in "' + label + '" (not shared). The mirror resumes when they switch back to a shared workspace.'
-    : 'The mirror resumes when they switch back to a shared workspace.';
+    ? 'The host is working in "' + label + '" (not shared). The mirror resumes when they switch back to a shared project.'
+    : 'The mirror resumes when they switch back to a shared project.';
 }
 
 // ---- read-only session browser: click through SHARED workspaces → their saved sessions → a transcript,
@@ -303,9 +303,9 @@ function browItem(title, meta, onClick) {
 function renderBrowseWs() {
   setBrowseHead();
   var b = $('browse-body'); b.innerHTML = '';
-  if (!grantedWs.length) { browseNote('brow-empty', 'No shared workspaces to browse.'); return; }
+  if (!grantedWs.length) { browseNote('brow-empty', 'No shared projects to browse.'); return; }
   grantedWs.forEach(function (w) {
-    b.appendChild(browItem(w.label, (w.kind && w.kind !== 'legacy' ? w.kind : 'workspace') + (w.live ? ' · live now' : ''),
+    b.appendChild(browItem(w.label, (w.kind && w.kind !== 'legacy' ? w.kind : 'project') + (w.live ? ' · live now' : ''),
       function () { openBrowseSessions(w); }));
   });
 }
@@ -316,7 +316,7 @@ function openBrowseSessions(w) {
 }
 function renderBrowseSessions(list) {
   var b = $('browse-body'); b.innerHTML = '';
-  if (!list.length) { browseNote('brow-empty', 'No saved sessions in this workspace yet.'); return; }
+  if (!list.length) { browseNote('brow-empty', 'No saved sessions in this project yet.'); return; }
   list.forEach(function (s) {
     b.appendChild(browItem(s.preview || '(empty session)',
       relTime(s.mtime) + (s.msgs ? (' · ' + s.msgs + ' msg' + (s.msgs === 1 ? '' : 's')) : ''),

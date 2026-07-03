@@ -64,7 +64,7 @@ function run(payload, appState) {
 {
   const r = run({ hook_event_name: 'UserPromptSubmit' }, { collabName: 'MK', workspace: 'MK-Crazy (repo)', live: { role: 'hosting', session: 'bro join', guests: 2, names: ['CrazyDev', 'Al'] } });
   ok('shows the collab display name', /User \(you are talking to\): MK/.test(r.ctx));
-  ok('shows the workspace', /Claudible workspace: MK-Crazy \(repo\)/.test(r.ctx));
+  ok('shows the project', /Claudible project: MK-Crazy \(repo\)/.test(r.ctx));
   ok('hosting state + guest count', /YOU ARE HOSTING "bro join" — 2 guests connected/.test(r.ctx));
   ok('hosting lists guest names', /CrazyDev, Al/.test(r.ctx));
 }

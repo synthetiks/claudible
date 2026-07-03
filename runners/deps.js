@@ -24,7 +24,7 @@ const APP_ROOT = path.resolve(__dirname, '..');
 // unreliable on Windows (token may live in Credential Manager) so it must never hard-block.
 const MANIFEST = [
   { id: 'node',        label: 'Node.js',         hint: 'Runs Claude Code’s hooks',          category: 'core',     required: true,  auth: false, requires: [],        restartOnInstall: false, win: { winget: 'OpenJS.NodeJS.LTS' },     posix: true },
-  { id: 'git',         label: 'Git', winLabel: 'Git for Windows', hint: 'Drives workspaces, sync & checkpoints', winHint: 'Provides the bash the scripts run on', category: 'core', required: true, auth: false, requires: [], restartOnInstall: true, win: { winget: 'Git.Git' },               posix: true },
+  { id: 'git',         label: 'Git', winLabel: 'Git for Windows', hint: 'Drives projects, sync & checkpoints', winHint: 'Provides the bash the scripts run on', category: 'core', required: true, auth: false, requires: [], restartOnInstall: true, win: { winget: 'Git.Git' },               posix: true },
   { id: 'claude',      label: 'Claude Code CLI', hint: 'The engine Claudible embeds',            category: 'core',     required: true,  auth: true,  authSoft: true, requires: ['node'], restartOnInstall: false, win: { npm: '@anthropic-ai/claude-code' }, posix: 'install-claude.sh' },
   { id: 'uv',          label: 'uv (Python)',     hint: 'Builds the local voice stack',           category: 'voice',    required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'astral-sh.uv' },          posix: true },
   { id: 'voice',       label: 'Voice models',    hint: 'Whisper + Kokoro — talk & hear',    category: 'voice',    required: false, auth: false, requires: ['uv'],    restartOnInstall: false, displayOnly: true },

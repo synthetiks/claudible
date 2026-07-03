@@ -33,7 +33,7 @@ Click **Share** and Claudible hands you a private invite link to your *live* ses
 - 🛰️ **Live agents cockpit** — watch your subagents and workflow swarms work in real time: their task, tool-by-tool activity, token burn, **which model runs each agent**, and final results.
 - 🎛️ **One-click controls** — fire `/effort`, `/compact`, `/status` & friends from buttons; no commands to memorize.
 - 🕘 **Session history + one-click Revert** — a per-prompt activity feed (who ran what, when, and what changed: "3 files (+42/−10)"), with a git-backed snapshot per turn so you can roll the code back to any of the last 10 prompts — and undo the revert. Live guests see the feed too.
-- 🗂️ **Workspaces + session sync** — organize sessions per repo, and (with `gh`) keep shared sessions in sync with collaborators.
+- 🗂️ **Projects + session sync** — organize sessions per repo, and (with `gh`) keep shared sessions in sync with collaborators.
 
 ## Prerequisites
 *(These cover the **Windows + WSL2** path — the recommended default. The native Windows, Linux, and macOS
@@ -44,7 +44,7 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 - **Node.js 22.12+** on Windows (Electron 42 requires it) — and that's the *only* Windows-side tooling: **no compiler, no Python, no Visual Studio Build Tools** (the one native module, `node-pty`, ships a ready-to-run N-API prebuilt).
 - Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 - **Optional, for remote co-work:** [`cloudflared`](https://github.com/cloudflare/cloudflared) on Windows (`winget install Cloudflare.cloudflared`, or point `CLAUDIBLE_CLOUDFLARED` at the binary). Without it, **Share** still works but the invite link is **localhost/LAN-only**.
-- **Optional, for private-repo workspaces + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
+- **Optional, for private-repo projects + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
 
 ## Install & run
 

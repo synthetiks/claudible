@@ -130,7 +130,7 @@ function main() {
   if (app.runner && FLAVORS[app.runner]) lines.push('Claudible flavor: ' + FLAVORS[app.runner]);
   if (gitEmail) lines.push('Git identity here: ' + (gitName ? clean(gitName, 60) + ' <' + clean(gitEmail, 60) + '>' : clean(gitEmail, 60)));
   if (cwd) lines.push('Working directory: ' + clean(cwd, 200));
-  if (app.workspace) lines.push('Claudible workspace: ' + clean(app.workspace, 120));
+  if (app.workspace) lines.push('Claudible project: ' + clean(app.workspace, 120));
 
   // Live-session state — the "am I hosting / joined / did it end, and who's here" half of the ask.
   // Today's main only ever writes role:'hosting' (a joined tab mirrors a PEER's session — no local Claude to

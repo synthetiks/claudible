@@ -984,7 +984,7 @@
     <img class="logo" src="../assets/logo.png" alt="Claudible logo" />
     <span class="wordmark">claudible</span>
     <div class="topbtns">
-      <button class="iconbtn" id="sessions-btn" title="Workspaces">☰</button>
+      <button class="iconbtn" id="sessions-btn" title="Projects">☰</button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
       <button class="iconbtn" id="diff-btn" title="Repo Review — which repo you're in + what Claude changed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="M6 8.4v7.2"/><circle cx="18" cy="18" r="2.4"/><path d="M18 15.6V11a4 4 0 0 0-4-4H9.5"/><path d="M12 4.5 9 7l3 2.5"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
@@ -1009,10 +1009,10 @@
     <aside class="sidebar" id="sidebar">
       <!-- WORKSPACES — the top-level: which folder/repo the sessions below live in -->
       <div class="ws-section-head">
-        <span>workspaces</span>
+        <span>projects</span>
         <span class="sh-actions">
-          <button class="ws-info" id="ws-info" title="What's a workspace?" aria-label="What's a workspace?">i</button>
-          <button class="ws-add" id="ws-add" title="New workspace">+</button>
+          <button class="ws-info" id="ws-info" title="What's a project?" aria-label="What's a project?">i</button>
+          <button class="ws-add" id="ws-add" title="New project">+</button>
           <button class="panel-close" id="sidebar-close" title="Hide panel">‹</button>
         </span>
       </div>
@@ -1021,7 +1021,7 @@
            their JS ref (#sess-list) and click handler (#new-session) resolve; renderWsChips() relocates them
            into the active workspace's .ws-children on every render. -->
       <div class="sess-list" id="sess-list"></div>
-      <button class="newsess-row" id="new-session" title="New session in this workspace">+ New Session</button>
+      <button class="newsess-row" id="new-session" title="New session in this project">+ New Session</button>
       <div class="share-dock">
         <div class="sharelbl" id="lbl-share">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
@@ -1198,7 +1198,7 @@
 
       <div class="sec">
         <div class="label">session history</div>
-        <label class="toggle" id="sesshist-toggle" title="Record an attributed activity log (who submitted which prompt, when, what changed) with per-prompt code checkpoints + one-click Revert — shown atop Repo Review. Shared with live guests while you host a shareable workspace; on by default.">
+        <label class="toggle" id="sesshist-toggle" title="Record an attributed activity log (who submitted which prompt, when, what changed) with per-prompt code checkpoints + one-click Revert — shown atop Repo Review. Shared with live guests while you host a shareable project; on by default.">
           <input type="checkbox" id="sess-history" />
           <span class="sw"></span>
           <span class="tlabel">Record activity log</span>
@@ -1289,7 +1289,7 @@
 
   <div class="approve" id="namemodal">
     <div class="box">
-      <h3>Invite to your workspace</h3>
+      <h3>Invite to your project</h3>
       <p>Pick a display name so the people you invite know it's you.</p>
       <input type="text" id="host-name-in" maxlength="40" placeholder="Your name" />
       <div class="row">
@@ -1301,19 +1301,19 @@
 
   <div class="approve" id="ws-modal">
     <div class="box">
-      <h3>New workspace</h3>
-      <p>A workspace points Claude at a project folder — it works inside those files, and you review &amp; revert its changes there. (<b>My Sessions</b> is the default, with no project folder.)</p>
+      <h3>New project</h3>
+      <p>A project points Claude at a folder — it works inside those files, and you review &amp; revert its changes there. (<b>My Sessions</b> is the default, with no project folder.)</p>
       <div class="choice-row">
         <div class="choice sel" id="ch-local" data-kind="local">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <div><div class="ct">Local workspace</div><div class="cd">Point Claude at a folder on your machine. Private to you.</div></div>
+          <div><div class="ct">Local project</div><div class="cd">Point Claude at a folder on your machine. Private to you.</div></div>
         </div>
         <div class="choice" id="ch-repo" data-kind="repo">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-          <div><div class="ct">Shared repo workspace</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team, so you can build (and go live) together.</div></div>
+          <div><div class="ct">Shared repo project</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team, so you can build (and go live) together.</div></div>
         </div>
       </div>
-      <input type="text" id="ws-name-in" maxlength="60" placeholder="Workspace name (letters, numbers, dashes)" />
+      <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dashes)" />
       <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose a folder for it (local only — else it goes in ~/.claudible)</span></label>
       <div class="ws-busy" id="ws-busy"></div>
       <div class="row">
@@ -1384,8 +1384,8 @@
       </div>
 
       <div class="wiz-step" data-step="3" style="display:none">
-        <h3>Create your workspace</h3>
-        <p>A workspace is where this project's sessions live. We'll create a local one — name it, or keep the default.</p>
+        <h3>Create your project</h3>
+        <p>A project is where its sessions live. We'll create a local one — name it, or keep the default.</p>
         <input type="text" id="wiz-ws-name" maxlength="60" placeholder="My Project" value="My Project" />
         <div class="ws-busy" id="wiz-ws-busy"></div>
         <div class="row">

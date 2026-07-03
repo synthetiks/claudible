@@ -18,8 +18,8 @@ function humanError(code) {
     exec: 'the WSL command could not run', parse: 'could not read the response',
     'bad handle': 'that live link looks invalid', 'bad url': 'that live link looks invalid',
     'bad token': 'that live link looks invalid', 'bad id': 'that item could not be found',
-    'not live': "you're not sharing a live session right now", 'bad workspace': 'that workspace is not available',
-    'bad ws': 'that workspace is not available', 'bad args': 'invalid request', 'bad slug': 'that name is not allowed',
+    'not live': "you're not sharing a live session right now", 'bad workspace': 'that project is not available',
+    'bad ws': 'that project is not available', 'bad args': 'invalid request', 'bad slug': 'that name is not allowed',
     apply: 'could not apply that change', 'stopped during start': 'sharing was stopped while it was starting',
     'push failed': 'could not reach the server — check your connection', 'pull failed': 'could not reach the server — check your connection',
     full: 'the session is full', 'not found': 'not found', unknown: 'something went wrong',
@@ -1571,7 +1571,7 @@ async function loadSkills() {
   const el = $('skills-list'); if (!el) return;
   let list = []; try { list = await claudible.skillsList(); } catch {}
   if (!Array.isArray(list) || !list.length) {
-    el.innerHTML = '<div class="ext-empty">No user/project skills found. Add one at <b>~/.claude/skills/&lt;name&gt;/SKILL.md</b> or this workspace’s <b>.claude/skills/</b>. (Bundled &amp; plugin skills aren’t listed here.)</div>';
+    el.innerHTML = '<div class="ext-empty">No user/project skills found. Add one at <b>~/.claude/skills/&lt;name&gt;/SKILL.md</b> or this project’s <b>.claude/skills/</b>. (Bundled &amp; plugin skills aren’t listed here.)</div>';
     return;
   }
   el.innerHTML = '';
@@ -1850,7 +1850,7 @@ async function revertToCheckpoint(en) {
   const busy = wsBusy(targetWs);
   const choice = await modalChoice({
     title: 'Revert code to this prompt?',
-    body: (busy ? '⚠ Claude is still working in this workspace — reverting now can clobber its in-flight edits and leave a half-written tree. It’s safest to wait for the turn to finish.\n\n' : '')
+    body: (busy ? '⚠ Claude is still working in this project — reverting now can clobber its in-flight edits and leave a half-written tree. It’s safest to wait for the turn to finish.\n\n' : '')
       + 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.',
     choices: [
       { key: 'revert', label: busy ? 'Revert anyway' : 'Revert working files', sub: 'Roll the code back to this point. An "Undo last revert" appears after.', danger: true },
@@ -1959,7 +1959,7 @@ async function refreshDiff(opts) {
   let r = null; try { r = await claudible.diffList(); } catch {}
   _diffBusy = false;
   if (!r || !r.ok) { if (!quiet) body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
-  if (!r.repo) { _diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This workspace isn’t a git repo — nothing to review.<br>Diff review works in repo workspaces (or any folder that’s a git repo).</div>'; return; }
+  if (!r.repo) { _diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This project isn’t a git repo — nothing to review.<br>Diff review works in repo projects (or any folder that’s a git repo).</div>'; return; }
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
   const aw = (typeof workspaces !== 'undefined') ? workspaces.find((w) => w.id === activeWsId) : null;   // which repo this review is for
   const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally
@@ -2006,7 +2006,7 @@ async function doDiffRevert(patch, btn, label) {
   if (wsBusy(activeWsId)) {   // reverting a hunk/file while Claude edits the same worktree races its writes — confirm first
     const go = await modalChoice({
       title: 'Claude is still working',
-      body: 'Reverting these changes now can clobber Claude’s in-flight edits in this workspace. It’s safest to wait for the turn to finish. Revert anyway?',
+      body: 'Reverting these changes now can clobber Claude’s in-flight edits in this project. It’s safest to wait for the turn to finish. Revert anyway?',
       choices: [{ key: 'go', label: 'Revert anyway', danger: true }, { key: 'cancel', label: 'Cancel' }],
     });
     if (go !== 'go') return;
@@ -2433,7 +2433,7 @@ function setLiveState(rec, state, detail) {
     connecting: 'Connecting to ' + who + '’s live session…',
     pending: 'Waiting for ' + who + ' to let you in…',
     reconnecting: 'Reconnecting…',
-    paused: who + ' stepped into a private workspace — the mirror is paused.',
+    paused: who + ' stepped into a private project — the mirror is paused.',
     denied: 'Connection declined' + (detail ? ' (' + detail + ')' : '') + '.',
     offline: 'This live session is unavailable — it may have ended.',
   })[state] || state;
@@ -2885,7 +2885,7 @@ async function openDeletedRemoteModal(s) {
   const name = sessTitle(s);
   const choice = await modalChoice({
     title: 'Session deleted on GitHub',
-    body: 'A collaborator deleted “' + name + '” from the shared workspace. Your local copy is still here — delete it too, or keep it on this machine?',
+    body: 'A collaborator deleted “' + name + '” from the shared project. Your local copy is still here — delete it too, or keep it on this machine?',
     choices: [
       { key: 'delete', label: 'Fully delete', sub: 'Remove it from this machine too. It stays deleted for everyone.', danger: true },
       { key: 'keep', label: 'Keep locally', sub: 'Keep your copy here. It won’t be re-shared, and this alert clears.' },
@@ -3220,7 +3220,7 @@ function renderWsChips() {
       const tag = document.createElement('span'); tag.textContent = 'invited';
       tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ok,#5fb487);margin-left:4px';
       chip.appendChild(tag);
-      chip.title = (w.owner ? w.owner + '/' + (w.slug || w.label) : w.label) + ' — invited shared workspace · click to choose where to save it';
+      chip.title = (w.owner ? w.owner + '/' + (w.slug || w.label) : w.label) + ' — invited shared project · click to choose where to save it';
     }
     // Right edge: a passive status dot (at-a-glance share/sync state) + a single ▾ that opens the options
     // menu. All actions (share, invite, sync, rename, delete) now live in that menu so the chip stays clean
@@ -3251,9 +3251,9 @@ function renderWsChips() {
     chip.addEventListener('pointerup', onWsPointerUp);
     chip.addEventListener('pointercancel', onWsPointerUp);
     chip.addEventListener('contextmenu', (e) => {
-      if (isLastLocal(w)) { try { toast('You need at least one local workspace'); } catch (e) {} return; }   // never delete the last local (the guaranteed home)
+      if (isLastLocal(w)) { try { toast('You need at least one local project'); } catch (e) {} return; }   // never delete the last local (the guaranteed home)
       e.preventDefault(); e.stopPropagation();
-      if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
+      if (confirm('Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo project keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
     });
     el.appendChild(chip);
     if (isWsExpanded(w.id)) {                               // expanded → nest its sessions beneath it
@@ -3286,7 +3286,7 @@ function openWsInfo() {
   if (wsInfoPop) { closeWsInfo(); return; }
   const anchor = $('ws-info'); if (!anchor) return;
   const pop = document.createElement('div'); pop.className = 'ws-info-pop';
-  pop.innerHTML = '<span class="wt"><b>What’s a workspace?</b></span>'
+  pop.innerHTML = '<span class="wt"><b>What’s a project?</b></span>'
     + '<p>A folder Claude works in — it edits those files, and you review changes there.</p>'
     + '<p><b>My Sessions</b> is the default (no project). The <b>+</b> adds one for a specific project — kept on your machine, or backed by a private GitHub repo to build with your team.</p>';
   document.body.appendChild(pop);
@@ -3338,7 +3338,7 @@ function openShareInfo() {
   pop.innerHTML = '<span class="wt"><b>Share a live link</b></span>'
     + '<p>Makes a public web link (a secure tunnel) so anyone — even without Claudible — can watch this terminal live in their browser, with chat &amp; voice.</p>'
     + '<p>You approve every viewer before they see anything, and <b>view-only</b> stops them typing.</p>'
-    + '<p>Teammates who have Claudible don’t need this — they just <b>Join</b> from the synced workspace.</p>';
+    + '<p>Teammates who have Claudible don’t need this — they just <b>Join</b> from the synced project.</p>';
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
@@ -3387,7 +3387,7 @@ async function openAcceptInviteModal(w) {
   if (acceptingWs.has(w.id)) { toast('Still adding “' + (w.label || w.slug) + '” — give it a sec…'); return; }
   const slug = w.slug || w.label || '';
   const choice = await modalChoice({
-    title: 'Add shared workspace',
+    title: 'Add shared project',
     body: (w.owner ? w.owner + '/' + slug : slug) + ' — choose where it lives on your machine. This is your local copy of a shared repo; sessions still sync with the team. (Default is recommended.)',
     choices: [
       { key: 'default', label: 'Default location', sub: '~/.claudible/repos/' + slug },
@@ -3436,27 +3436,27 @@ function wsMenuItems(chip, nm, w) {
       items.push({ icon: CLOUD_SVG, label: (st.status === 'syncing' ? 'Syncing sessions…' : 'Sync sessions now') + extra, on: true,
         hint: 'Collaborating in Claudible: teammates see your sessions and can Join live. Push & pull now.', act: () => triggerSyncNow(w) });
       items.push({ icon: CLOUD_SVG, label: 'Turn off collaboration',
-        hint: 'Stop sharing this workspace’s sessions — no more sync, and teammates can no longer Join live.', act: () => disableSync(w) });
+        hint: 'Stop sharing this project’s sessions — no more sync, and teammates can no longer Join live.', act: () => disableSync(w) });
     } else {
       items.push({ icon: CLOUD_SVG, label: 'Collaborate in Claudible…',
-        hint: 'Sync this workspace’s sessions over its GitHub repo so teammates can open, resume, AND Join your sessions live — no link needed.',
+        hint: 'Sync this project’s sessions over its GitHub repo so teammates can open, resume, AND Join your sessions live — no link needed.',
         act: () => openSyncModal(w) });
     }
   } else if (w.kind === 'local') {
     items.push({ icon: CLOUD_SVG, label: 'Sync across my devices…',
-      hint: 'Back this workspace with a private GitHub repo so it + its sessions appear on your other devices (needs GitHub connected).',
+      hint: 'Back this project with a private GitHub repo so it + its sessions appear on your other devices (needs GitHub connected).',
       act: () => upgradeWorkspace(w) });
     items.push({ icon: PERSON_ADD_SVG, label: 'Invite someone…',
-      hint: 'Share this workspace with a teammate — creates its private GitHub repo first, then adds them.',
+      hint: 'Share this project with a teammate — creates its private GitHub repo first, then adds them.',
       act: () => inviteToLocal(w) });
   }
   items.push({ sep: true });
-  items.push({ icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this workspace (local label only).', act: () => startWsEdit(chip, nm, w) });
+  items.push({ icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this project (local label only).', act: () => startWsEdit(chip, nm, w) });
   if (!isLastLocal(w)) {                                  // never offer delete on the LAST local workspace (the guaranteed home)
     items.push({
-      icon: TRASH_SVG, label: 'Delete workspace', danger: true,
-      hint: 'Move this workspace’s folder to trash (recoverable). A repo keeps its GitHub copy.',
-      act: () => { if (confirm('Delete workspace "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo workspace keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w); },
+      icon: TRASH_SVG, label: 'Delete project', danger: true,
+      hint: 'Move this project’s folder to trash (recoverable). A repo keeps its GitHub copy.',
+      act: () => { if (confirm('Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo project keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w); },
     });
   }
   return items;
@@ -3541,10 +3541,10 @@ async function toggleShared(w) {
 // Make a LOCAL workspace synced across devices (and shareable): one click backs it with a private GitHub repo
 // in place — its sessions appear on your other devices via discovery. Needs GitHub connected.
 async function upgradeWorkspace(w) {
-  if (!confirm('Sync "' + w.label + '" across your devices?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected). The workspace + its sessions then appear on your other devices, and you can invite people. Your Claude transcripts stay OUT of the repo.')) return;
+  if (!confirm('Sync "' + w.label + '" across your devices?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected). The project + its sessions then appear on your other devices, and you can invite people. Your Claude transcripts stay OUT of the repo.')) return;
   toast('Setting up sync — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
-  if (r && r.ok) { toast('Synced ✓ — this workspace now appears on your other devices'); try { await refreshWorkspaces(); } catch {} }
+  if (r && r.ok) { toast('Synced ✓ — this project now appears on your other devices'); try { await refreshWorkspaces(); } catch {} }
   else { const m = (r && r.error) || 'unknown'; toast('Could not sync: ' + m + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); }
 }
 // Inviting to a local workspace: it must become a synced repo first (collaborators need a GitHub repo), then
@@ -3616,7 +3616,7 @@ function maybeFirstRun(r) {
   if (firstRunHandled || !r || !r.firstRun) return;
   firstRunHandled = true; firstRunActive = true;
   try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch (e) {}
-  try { toast('Welcome — name your workspace and pick where to keep it'); } catch (e) {}
+  try { toast('Welcome — name your project and pick where to keep it'); } catch (e) {}
   setTimeout(() => { try { openWsModal(); } catch (e) {} }, 450);
 }
 async function refreshWorkspaces() {
@@ -3648,7 +3648,7 @@ async function switchWorkspace(id, targetSession) {
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
   let failed = false;
-  try { const r = await claudible.workspaceOpen(id, sess); if (r && r.ok === false && r.error !== 'superseded') { failed = true; toast('Could not switch workspace' + (r.error ? ': ' + humanError(r.error) : '')); } } catch (e) { failed = true; toast('Could not switch workspace'); }
+  try { const r = await claudible.workspaceOpen(id, sess); if (r && r.ok === false && r.error !== 'superseded') { failed = true; toast('Could not switch project' + (r.error ? ': ' + humanError(r.error) : '')); } } catch (e) { failed = true; toast('Could not switch project'); }
   if (!failed) refreshSessions();   // don't paint the new workspace's sessions over a switch that actually failed (frontend/backend mismatch)
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
@@ -3880,11 +3880,11 @@ window.addEventListener('keydown', (e) => {
     if ($('wiz-ws-create').disabled) return;                  // in-flight guard (Enter can bypass the disabled button)
     const b = $('wiz-ws-busy'), btn = $('wiz-ws-create');
     const name = ($('wiz-ws-name').value || '').trim() || 'My Project';
-    btn.disabled = true; b.classList.remove('err'); b.textContent = 'Creating workspace…';
+    btn.disabled = true; b.classList.remove('err'); b.textContent = 'Creating project…';
     let r; try { r = await claudible.workspaceCreate('local', name, false); } catch (e) { r = { ok: false, error: e && e.message }; }
     btn.disabled = false;
     if (r && !r.ok && /already exists/i.test(r.error || '')) { b.textContent = ''; goGh(); return; }   // a prior run made it → just continue (no dead-end)
-    if (!r || !r.ok) { b.classList.add('err'); b.textContent = (r && r.error) || 'Could not create the workspace.'; return; }
+    if (!r || !r.ok) { b.classList.add('err'); b.textContent = (r && r.error) || 'Could not create the project.'; return; }
     b.textContent = '';
     // mirror createWorkspace()'s post-create reconcile so the foreground tab points at the NEW ws (else its
     // session list / live tracking key off the old ws — a sidebar desync immediately after onboarding).
@@ -3899,7 +3899,7 @@ window.addEventListener('keydown', (e) => {
   function applyGh(s) {
     const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck');
     if (s.ghSignedIn) { msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
-    else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your workspaces across devices and invite people. In a terminal run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
+    else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your projects across devices and invite people. In a terminal run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
   }
 
   // ---- System check (step 1): detect every dependency, install the missing ones --------------------
