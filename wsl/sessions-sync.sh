@@ -439,7 +439,7 @@ case "$op" in
     ensure_worktree || fail "could not set up the sessions branch"
     git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
-    (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" node "$(dirname "$0")/sessions-sync-tool.js" title-read) || fail "title read failed"
+    (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" CL_TS=1 node "$(dirname "$0")/sessions-sync-tool.js" title-read) || fail "title read failed"
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

@@ -395,8 +395,16 @@ function titleRead() {
     }
   }
 
+  // CL_TS=1 (opt-in, set by sessions-sync.sh) emits {id:{n,ts}} instead of {id:title} — the winning
+  // timestamp lets each machine's UI apply GLOBAL newest-wins against its own local rename (without it,
+  // a machine's stale local rename shadowed a collaborator's newer one forever). Opt-in ONLY:
+  // test/port-parity.sh runs this tool without the env and must stay byte-identical.
   const titlePairs = [];
-  for (const [i, [, t]] of best) titlePairs.push([i, t]);
+  if (process.env.CL_TS === '1') {
+    for (const [i, [ts, t]] of best) titlePairs.push([i, obj([['n', t], ['ts', ts]])]);
+  } else {
+    for (const [i, [, t]] of best) titlePairs.push([i, t]);
+  }
   const result = obj([
     ['ok', true],
     ['op', 'title-list'],

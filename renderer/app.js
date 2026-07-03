@@ -73,7 +73,12 @@ const newTabId = () => 'tab-' + (++tabSeq);
 // Declared here (not in the sessions section) so the tab-strip boot below can reference them safely:
 let activeSession = null;                       // the ACTIVE tab's session id (mirrors AT().session) — drives sidebar row highlight
 let livePeers = [], livePeersSig = '', advertisedSession = null;   // collaborators live in this repo workspace + my own advertised session
-let remoteTitles = {}, titlesSig = '', lastTitlePoll = 0;   // session names shared across the workspace (id -> title), polled from the branch
+let remoteTitles = {}, titlesSig = '', lastTitlePoll = 0;   // session names shared across the project (id -> {n,ts} since the newest-wins upgrade; legacy caches may still hold bare strings), polled from the branch
+// The shared-title maps carry {n,ts} (new) or a bare string (legacy cache) — read through these everywhere.
+const titleVal = (v) => (v && typeof v === 'object') ? (v.n || '') : (v || '');
+// Branch entries stamp SECONDS (python int(time.time()) parity); local renames stamp Date.now() ms.
+// Normalize everything to ms here so newest-wins comparisons are unit-safe.
+const titleTs = (v) => { const t = (v && typeof v === 'object') ? Number(v.ts) : 0; return t > 0 ? (t < 1e12 ? t * 1000 : t) : 0; };
 let workspaces = [], activeWsId = 'legacy';     // the sidebar library = the active tab's workspace
 let sidebarReady = false;                        // set true once the sessions/workspace section has initialized (TDZ guard for the boot tab)
 function AT() { return tabs.get(activeTabId) || null; }
@@ -395,9 +400,12 @@ claudible.onStatus((s) => {
     if (t.tabId === activeTabId) activeSession = s.sessionId;
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
-      const titles = Object.assign({}, loadPrefs().sessionTitles || {}); titles[s.sessionId] = nm; savePrefs({ sessionTitles: titles });   // copy → mutable (cached map may be a frozen contextBridge object)
+      const _pp = loadPrefs();
+      const titles = Object.assign({}, _pp.sessionTitles || {}); titles[s.sessionId] = nm;
+      const tstamps = Object.assign({}, _pp.sessionTitleTs || {}); tstamps[s.sessionId] = Date.now();   // stamp the rename so global newest-wins can compare it against collaborators'
+      savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });   // copy → mutable (cached map may be a frozen contextBridge object)
       const _aw = workspaces.find((w) => w.id === activeWsId);
-      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = nm; try { claudible.titleSet(s.sessionId, nm).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo workspace → share the name with collaborators
+      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators
     }
     if (sidebarReady && t.wsId === activeWsId) refreshSessions();
   }
@@ -1887,7 +1895,7 @@ function histSessionName(id) {
     const p = loadPrefs();
     if (p.sessionTitles && p.sessionTitles[id]) return p.sessionTitles[id];
     const rc = p.remoteTitlesCache || {};
-    for (const k in rc) { if (rc[k] && rc[k][id]) return rc[k][id]; }
+    for (const k in rc) { if (rc[k] && rc[k][id]) { const v = titleVal(rc[k][id]); if (v) return v; } }
   } catch {}
   return String(id).slice(0, 8);
 }
@@ -2227,18 +2235,22 @@ let sessIndex = {};                                                             
 // Session title: prefer the workspace-shared name (so everyone in a repo workspace sees the SAME title), then a
 // local-only override (legacy/local workspaces, or before the first poll), then the transcript-derived preview.
 function sessTitle(s) {
-  // The user's OWN explicit rename (saved locally) wins in their own view — it shows instantly and STICKS even if
-  // the shared-title push to the workspace branch lags or fails. A collaborator's shared name is only a fallback
-  // for sessions this user hasn't personally named. (Before: remoteTitles shadowed the local pref, so a rename
-  // whose branch push lagged/failed silently reverted to the old shared name — "I renamed it but it didn't change".)
-  const local = (loadPrefs().sessionTitles || {})[s.id];
-  if (local) return local;
-  const shared = remoteTitles[s.id];
+  // GLOBAL NEWEST-WINS. Your own rename shows instantly (stamped with a local ts) and sticks while its branch
+  // push is in flight — but a collaborator's NEWER rename (branch entries carry the winning ts) replaces it, so
+  // two machines can never permanently disagree about a session's name. A local rename with no recorded ts
+  // (pre-upgrade) only holds until any timestamped shared name arrives.
+  const _p = loadPrefs();
+  const local = (_p.sessionTitles || {})[s.id];
+  const localTs = Number((_p.sessionTitleTs || {})[s.id]) || 0;
+  const sharedV = remoteTitles[s.id];
+  const shared = titleVal(sharedV), sharedTs = titleTs(sharedV);
+  if (local && (!shared || localTs >= sharedTs)) return local;
   if (shared) return shared;
+  if (local) return local;
   // WARM CACHE: pollTitles persists the last-known shared names per workspace. remoteTitles is empty for the first
   // ~2s after open (the branch read is async), so without this a collaborator/cross-machine rename flashes its
   // auto-preview then snaps to the real name. The cache lets that name paint instantly; the live poll reconciles it.
-  const cached = ((loadPrefs().remoteTitlesCache || {})[activeWsId] || {})[s.id];
+  const cached = titleVal(((loadPrefs().remoteTitlesCache || {})[activeWsId] || {})[s.id]);
   if (cached) return cached;
   return s.preview;
 }
@@ -2369,6 +2381,20 @@ async function pollTitles(force) {
   if (sig === titlesSig) return;
   titlesSig = sig; remoteTitles = m;
   try { const c = Object.assign({}, loadPrefs().remoteTitlesCache || {}); c[myWs] = m; savePrefs({ remoteTitlesCache: c }); } catch (e) {}   // warm cache → next open shows these shared names instantly (sessTitle reads it before pollTitles lands)
+  // GLOBAL newest-wins reconcile: a collaborator's NEWER rename (branch ts beats my local rename's ts)
+  // replaces my local override, so every machine converges on the same name — the old behavior kept each
+  // machine's own rename forever, letting two machines permanently disagree.
+  try {
+    const p = loadPrefs();
+    const lt = Object.assign({}, p.sessionTitles || {});
+    const lts = Object.assign({}, p.sessionTitleTs || {});
+    let changed = false;
+    for (const id in m) {
+      const nv = titleVal(m[id]), nts = titleTs(m[id]);
+      if (nv && lt[id] && lt[id] !== nv && (Number(lts[id]) || 0) < nts) { lt[id] = nv; lts[id] = nts; changed = true; }
+    }
+    if (changed) savePrefs({ sessionTitles: lt, sessionTitleTs: lts });
+  } catch (e) {}
   refreshSessions();
 }
 setInterval(pollTitles, 20000);
@@ -2664,15 +2690,18 @@ function startSessEdit(row, p, s) {
     try {
       if (save) {
         const t = inp.value.trim();
-        const titles = Object.assign({}, loadPrefs().sessionTitles || {});   // COPY first → mutable (loadPrefs is deep-cloned now, but never mutate the cached map in place)
-        if (t && t !== s.preview) titles[s.id] = t; else delete titles[s.id];   // blank or == auto preview → clear override
-        savePrefs({ sessionTitles: titles });
-        // In a repo workspace, publish the name so EVERY collaborator sees it (last-writer-wins on the branch).
+        const _pp = loadPrefs();
+        const titles = Object.assign({}, _pp.sessionTitles || {});   // COPY first → mutable (loadPrefs is deep-cloned now, but never mutate the cached map in place)
+        const tstamps = Object.assign({}, _pp.sessionTitleTs || {});
+        const _now = Date.now();
+        if (t && t !== s.preview) { titles[s.id] = t; tstamps[s.id] = _now; } else { delete titles[s.id]; delete tstamps[s.id]; }   // blank or == auto preview → clear override; the ts makes global newest-wins comparable
+        savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });
+        // In a repo project, publish the name so EVERY collaborator sees it (GLOBAL newest-wins by ts on the branch).
         // Optimistically reflect it locally so the row updates instantly; a forced poll reconciles after the push.
         const _aw = workspaces.find((w) => w.id === activeWsId);
         if (_aw && _aw.kind === 'repo') {
           const shared = (t && t !== s.preview) ? t : '';
-          if (shared) remoteTitles[s.id] = shared; else delete remoteTitles[s.id];
+          if (shared) remoteTitles[s.id] = { n: shared, ts: _now }; else delete remoteTitles[s.id];
           try { claudible.titleSet(s.id, shared).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
         }
         p.textContent = sessTitle(s);
@@ -3725,7 +3754,7 @@ claudible.onSyncState((s) => {
   wsSyncState[s.id] = Object.assign({}, wsSyncState[s.id], u);
   renderWsChips();
 });
-claudible.onSyncChanged((s) => { if (s && s.id === activeWsId) refreshSessions(); });
+claudible.onSyncChanged((s) => { if (s && s.id === activeWsId) { refreshSessions(); try { pollTitles(true); } catch (e) {} } });   // a pull that changed anything also refreshes shared titles immediately (renames land on the next sync, not the next 20s poll)
 claudible.onWorkspaceAdded(() => { refreshWorkspaces(); });
 $('invite-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); doInvite(); }
