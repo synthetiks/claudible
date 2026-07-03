@@ -2562,6 +2562,16 @@ claudible.onLiveStatus((p) => {
 // For a non-active tree row pass its workspace `w` so a click switches there first (else resolve/delete targets
 // the wrong workspace's PROJ). Active rows pass w=null and open the modal directly.
 function appendConflictChip(m, s, w) {
+  // WHO MADE IT — a quiet blue flair (same family as the amber "out of sync") naming the collaborator who
+  // created this session. Only foreign (synced-in) sessions carry s.author, so your own rows stay unpilled.
+  // textContent for the name: it's collaborator-controlled and must never be parsed as HTML.
+  if (s.author) {
+    const ab = document.createElement('span');
+    ab.className = 'sess-chip author'; ab.title = 'Session created by ' + s.author;
+    ab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+    ab.appendChild(document.createTextNode(String(s.author)));
+    m.appendChild(ab);
+  }
   const act = (open) => async (e) => { e.stopPropagation(); if (w && w.id !== activeWsId) await switchWorkspace(w.id, s.id); open(s); };   // AWAIT the switch so main's activeWorkspace is re-pointed BEFORE resolve/delete runs (else a fast confirm targets the old workspace's repo)
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip
     const db = document.createElement('button');

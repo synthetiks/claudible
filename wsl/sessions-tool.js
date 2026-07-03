@@ -5,8 +5,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const proj = process.argv[2];
-const wt = process.argv.length > 3 ? process.argv[3] : '';
+// --with-authors (opt-in flag set by sessions.sh) additionally stamps each FOREIGN session with the
+// collaborator who created it, derived from the sync worktree's sessions/<author>/<id>.jsonl layout.
+// Opt-in ONLY: test/port-parity.sh runs this tool WITHOUT the flag and byte-compares against the
+// original python — the unflagged output must stay identical forever.
+let _av = process.argv.slice(2);
+let WITH_AUTHORS = false;
+if (_av[0] === '--with-authors') { WITH_AUTHORS = true; _av = _av.slice(1); }
+const proj = _av[0];
+const wt = _av.length > 1 ? _av[1] : '';
 
 // --- JSON serialization that matches python json.dumps defaults --------------
 // json.dumps uses ", " / ": " separators and ensure_ascii=True (every codepoint
@@ -29,6 +36,7 @@ function dumpRec(rec) {
   parts.push(jstr('msgs') + ': ' + String(rec.msgs));
   if (rec.deletedRemote === true) parts.push(jstr('deletedRemote') + ': ' + 'true');
   if (rec.diverged === true) parts.push(jstr('diverged') + ': ' + 'true');
+  if (rec.author) parts.push(jstr('author') + ': ' + jstr(rec.author));   // only ever set in --with-authors mode — the parity (unflagged) shape is untouched
   return '{' + parts.join(', ') + '}';
 }
 function dumpArr(arr) {
@@ -126,6 +134,22 @@ function main() {
   }
   const kept = readIds(path.join(proj, '.claudible-kept'));
   const diverged = readIds(path.join(proj, '.claudible-diverged'));
+  // --with-authors: who created each session, straight from the sync worktree's per-author layout
+  // (sessions/<author>/<id>.jsonl). Only FOREIGN (collaborator-imported) ids get stamped — your own
+  // sessions carry no author so the sidebar shows a pill only for other people's work.
+  const authorOf = {};
+  let foreign = new Set();
+  if (WITH_AUTHORS && wt) {
+    foreign = readIds(path.join(proj, '.claudible-foreign'));
+    try {
+      for (const dir of fs.readdirSync(path.join(wt, 'sessions'))) {
+        if (dir.charCodeAt(0) === 0x2e || !/^[A-Za-z0-9_.-]+$/.test(dir)) continue;   // skip .tombstones/dotdirs + anything not a plausible login
+        let files = [];
+        try { files = fs.readdirSync(path.join(wt, 'sessions', dir)); } catch (e) { continue; }
+        for (const f of files) if (f.endsWith('.jsonl')) authorOf[f.slice(0, -6)] = dir;
+      }
+    } catch (e) { /* no worktree yet → no authors */ }
+  }
 
   // glob.glob(proj/*.jsonl): readdir order, hidden (leading-dot) names excluded,
   // only entries ending in .jsonl. python `*` matches names not starting with '.'.
@@ -204,6 +228,7 @@ function main() {
     };
     if (tombs.has(sid) && !kept.has(sid)) rec.deletedRemote = true;
     if (diverged.has(sid)) rec.diverged = true;
+    if (WITH_AUTHORS && foreign.has(sid) && authorOf[sid]) rec.author = String(authorOf[sid]).slice(0, 40);
     out.push(rec);
   }
   // Stable sort by (created || mtime) descending. JS sort is stable (Node >= 11).
