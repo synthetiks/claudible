@@ -382,6 +382,7 @@ function armUltracode(tabId, proc) {
 function winSend(channel, payload) { try { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); } catch {} }
 function spawnPty(tabId, cols, rows, ws, session) {
   if (!tabId) return;
+  if (liveTabs.has(tabId)) return;   // never bind a local pty to a joined live tab's id (invariant: a tabId is EITHER in ptys OR in liveTabs, never both)
   const pty = runner.ptyInfo();
   if (ptys.has(tabId) || !pty.mod) {
     if (!pty.mod) winSend('pty:data', { tabId, data: `\r\n[claudible] node-pty unavailable (${pty.err})\r\n` });
@@ -486,6 +487,7 @@ function _pushHistoryEntryToShare(wsId, entry) {
 // tab's current pty (its guarded handlers go quiet, since the map entry is deleted BEFORE the kill) and
 // respawns it with the selection. Only foreground-tab switches touch the guest mirror.
 function respawnPty(tabId, session) {
+  if (liveTabs.has(tabId)) return;                          // a joined live tab is a client WebSocket, never a local pty — never spawn/kill a pty on its id (the hijack defense, mirrors setForegroundTab's guard)
   const rec = ptys.get(tabId);
   setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
   const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;

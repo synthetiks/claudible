@@ -130,6 +130,7 @@ function sync() {
 // Auto-scroll only the active tab, and only when it was already at the bottom (don't yank the reader down).
 claudible.onPtyData((tabId, d) => {
   const t = tabs.get(tabId); if (!t) return;
+  if (t.kind === 'live') return;   // invariant: a joined mirror renders ONLY live:data; local-pty bytes here mean the hijack guard failed upstream — drop them so two streams can't interleave into one xterm
   const b = t.term.buffer.active;
   const wasAtBottom = b.viewportY >= b.baseY - 1;
   t.term.write(d, () => { if (tabId === activeTabId) { if (wasAtBottom) t.term.scrollToBottom(); updateScrollbar(); } });
@@ -146,7 +147,11 @@ const sc = $('scroll'), thumb = $('scroll-thumb');
 function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
 let altFrac = 0;                       // 0 = bottom (newest) … 1 = scrolled fully up (an estimate; Claude never reports it)
 const ALT_PAGE = 0.14;                 // estimate nudge per PageUp/PageDown
-function sendPage(dir) { sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~'); }   // PageUp (older) / PageDown (newer)
+function sendPage(dir) {   // PageUp (older) / PageDown (newer)
+  const t = tabs.get(activeTabId);
+  if (t && t.kind === 'live') return;   // a joined mirror has NO local scrollback; scroll-derived Page keys must NEVER cross live:input to the host (that scrolled the host's real terminal for everyone). Co-drive keyboard input is separate (term.onData) and still works.
+  sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~');
+}
 function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
   if (!term || !dir) return;
   const n = Math.min(6, Math.abs(dir));
@@ -156,6 +161,9 @@ function jogPages(dir) {                // wheel / gutter-click: fire pages + ad
 }
 function updateScrollbar() {
   if (!term) return;                                 // no active tab yet (pre-boot)
+  const at = tabs.get(activeTabId);
+  if (at && at.kind === 'live') { if (thumb) thumb.style.display = 'none'; return; }   // MK's choice: the gutter is INERT on a joined mirror (no local scrollback; never drives the host)
+  if (thumb && thumb.style.display === 'none') thumb.style.display = '';
   const trackH = sc.clientHeight;
   if (trackH <= 0) { thumb.style.opacity = '0'; return; }
   if (isAlt()) {                                      // full-screen app → a draggable thumb that pages Claude's view
@@ -2915,6 +2923,7 @@ async function deleteSession(id, scope) {
   setOrder(order);
   // Any tab resuming this session must switch OFF it BEFORE the file is deleted (else it holds the file open).
   for (const rec of Array.from(tabs.values())) {
+    if (rec.kind === 'live') continue;   // a joined mirror is never re-pointed by a local delete (it belongs to the peer's session)
     if (rec.wsId === activeWsId && rec.session === id) {
       const next = order[0] || 'new';
       if (rec.tabId === activeTabId) await openSession(next, next === 'new' ? '' : (sessIndex[next] && sessIndex[next].preview));
@@ -3184,6 +3193,11 @@ async function openSession(id, label) {
     }
   }
   const t = AT(); if (!t) return;
+  // A joined live mirror is IMMUTABLE — re-pointing it hijacks the peer's session: it spawns a local pty on
+  // the mirror's id (two byte streams interleave into one xterm) AND keeps routing your keystrokes + scroll to
+  // the host. So a session click while viewing a mirror opens that session in its OWN local tab. (An existing
+  // local tab for this (ws, session) was already focused + returned by the loop above.)
+  if (t.kind === 'live') { newBlankTab(activeWsId, id); return; }
   if (id !== 'new' && t.session === id && t.wsId === activeWsId) return;   // already on this one
   // NEVER kill a session that's actively running. Re-pointing the current tab respawns its pty (main's old.kill()),
   // so if this tab is BUSY (Claude is working), open the clicked session in a NEW background tab instead — the
