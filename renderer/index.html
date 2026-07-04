@@ -813,9 +813,9 @@
     .ph-head.open .ph-caret{transform:rotate(90deg)}
     .ph-ico{flex:none;display:flex;color:var(--ink-dim)}
     .ph-ico svg{width:14px;height:14px}
-    .ph-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;letter-spacing:.01em}
+    .ph-nm{flex:0 1 auto;min-width:0;max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;letter-spacing:.01em}
     .ph-body{padding:0 14px 8px}
-    .ph-diff{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--hairline-soft,rgba(255,255,255,.05));padding-top:8px;margin-top:2px}
+    .ph-diff{display:flex;flex-direction:column;gap:8px}   /* the COMMIT HISTORY .ph-sec line above it is the divider */
     .ph-empty{color:var(--ink-faint);font-size:11px;padding:6px 2px}
     .hf-lbl{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}   /* size + brightness matched to the 'repo review' drawer title */
     .hf-lbl svg{width:13px;height:13px;opacity:.85;flex:none}
@@ -843,17 +843,17 @@
     .hf-expand:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}
     .diff-sec-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 2px -2px}
-    /* Repo Review header — which repo you're in + a change summary */
-    .rr-head{display:flex;flex-direction:column;gap:5px;padding:11px 13px;border:1px solid var(--hairline-soft);border-radius:10px;background:rgba(255,255,255,.025)}
-    .rr-name{display:flex;align-items:center;gap:8px;min-width:0}
-    .rr-name .rr-ico{flex:none;color:var(--ink-dim);display:flex}
-    .rr-name .rr-ico svg{width:15px;height:15px;display:block}
-    .rr-name .rr-nm{flex:none;max-width:46%;font-size:13px;font-weight:650;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .rr-name .rr-id{flex:1;min-width:0;font-size:10.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .rr-name .rr-visit{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--hairline-soft);border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer;transition:all .14s}
-    .rr-name .rr-visit svg{width:13px;height:13px;display:block}
-    .rr-name .rr-visit:hover{color:var(--ink);border-color:rgba(255,255,255,.24);background:rgba(255,255,255,.05)}
-    .rr-sum{font-size:10.5px;color:var(--ink-dim);letter-spacing:.02em}
+    /* Project History card bar extras: repo identity + open-on-GitHub + commit count live on the MAIN BAR */
+    .ph-id{flex:0 1 auto;min-width:0;font-size:10px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ph-visit{flex:none;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;color:var(--ink-faint);cursor:pointer;transition:all .14s}
+    .ph-visit svg{width:12px;height:12px;display:block}
+    .ph-visit:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+    .ph-stats{flex:none;margin-left:auto;font-size:9.5px;letter-spacing:.04em;color:var(--ink-dim);white-space:nowrap}
+    /* section title lines inside a card — same voice as the left sidebar's section headers */
+    .ph-sec{display:flex;align-items:center;gap:6px;margin:8px 0 5px;font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    .ph-sec svg{flex:none;opacity:.8}
+    .ph-sec::after{content:'';flex:1;height:1px;background:var(--hairline-soft,rgba(255,255,255,.05));margin-left:2px}
+    .ph-sum{font-size:10.5px;color:var(--ink-dim);letter-spacing:.02em;padding:1px 0 3px}
     .diff-file{border:1px solid var(--hairline);border-radius:10px;overflow:hidden;background:#0b0d10}
     .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:#101216;border-bottom:1px solid var(--hairline)}
     .diff-path{font-size:12px;color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}

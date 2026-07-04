@@ -1760,13 +1760,9 @@ function openDiff(open) {
   if (open) { _histShown = 10; _histExpanded.clear(); _phExpanded.clear(); _revertUndoWs = null; renderProjectHistory(); _diffTimer = setInterval(() => refreshExpandedProjects({ quiet: true }), 4000); }   // build the project accordion; keep expanded cards live while open
 }
 // The Repo Review header: which repo you're looking at (name + GitHub identity / local) + a live change summary.
-function repoReviewHeader(aw, files, untracked, committed, commits, total) {
-  const h = document.createElement('div'); h.className = 'rr-head';
-  const name = document.createElement('div'); name.className = 'rr-name';
-  const ico = document.createElement('span'); ico.className = 'rr-ico'; ico.innerHTML = (aw && aw.kind === 'repo') ? WS_REPO_SVG : WS_FOLDER_SVG;
-  const nm = document.createElement('span'); nm.className = 'rr-nm'; nm.textContent = (aw && aw.label) || 'this folder'; nm.title = nm.textContent;
-  name.appendChild(ico); name.appendChild(nm);
-  let idText, url = '';
+// Resolve a repo project's GitHub identity: {idText, url}. Used by the Project History card header.
+function repoIdOf(aw) {
+  let idText = '', url = '';
   if (aw && aw.kind === 'repo') {
     if (aw.owner && aw.slug) { idText = aw.owner + '/' + aw.slug; url = 'https://github.com/' + aw.owner + '/' + aw.slug; }
     else {
@@ -1775,25 +1771,8 @@ function repoReviewHeader(aw, files, untracked, committed, commits, total) {
       if (/^https?:\/\//i.test(ru)) url = ru.replace(/\.git$/, '');
       else if (/^git@github\.com:/i.test(ru)) url = 'https://github.com/' + ru.replace(/^git@github\.com:/i, '').replace(/\.git$/, '');
     }
-  } else idText = 'local folder · private to you';
-  const id = document.createElement('span'); id.className = 'rr-id'; id.textContent = idText; id.title = idText; name.appendChild(id);
-  if (url) {                                                          // a clickable jump to the repo on GitHub (opens in the real browser)
-    const visit = document.createElement('button'); visit.className = 'rr-visit'; visit.title = 'Open ' + idText + ' on GitHub ↗'; visit.setAttribute('aria-label', 'Open this repo on GitHub');
-    visit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
-    visit.addEventListener('click', (e) => { e.stopPropagation(); try { claudible.openExternal(url); } catch (_) {} });
-    name.appendChild(visit);
   }
-  h.appendChild(name);
-  const adds = files.reduce((s, f) => s + (f.additions || 0), 0), dels = files.reduce((s, f) => s + (f.deletions || 0), 0);
-  const parts = [];
-  if (typeof total === 'number' && total > 0) parts.push(total.toLocaleString() + ' commit' + (total > 1 ? 's' : '') + ' total');
-  if (files.length) parts.push(files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed');
-  if (adds || dels) parts.push('+' + adds + ' −' + dels);
-  if (untracked.length) parts.push(untracked.length + ' new');
-  if (commits.length) parts.push(commits.length + ' this week');
-  const sum = document.createElement('div'); sum.className = 'rr-sum'; sum.textContent = parts.length ? parts.join('  ·  ') : 'working tree clean';
-  h.appendChild(sum);
-  return h;
+  return { idText, url };
 }
 // ---- Session-history activity feed (top of the Repo Review drawer) ----
 // Renders the last N prompts (who · when · what) from the main-owned log. Shows only when the
@@ -1967,13 +1946,13 @@ function renderProjectHistory() {
   // project (e.g. drawer opened before activeWsId settled), the first project, so a card is always open.
   if (!projects.some((w) => _phExpanded.has(w.id))) { _phExpanded.add((projects.find((w) => w.id === activeWsId) || projects[0]).id); }
   projects.forEach((w) => {
-    const card = _phCard(w.id, w.label || w.slug || 'project', w.kind, false);
+    const card = _phCard(w.id, w.label || w.slug || 'project', w.kind, false, w);
     host.appendChild(card.el);
     if (card.expanded) _phFillBody(w, card);
   });
 }
 // Build one collapsible project card (header + empty body). Returns {el, feed, diff, expanded}.
-function _phCard(id, label, kind, isLive) {
+function _phCard(id, label, kind, isLive, w) {
   const el = document.createElement('div'); el.className = 'ph-project'; el.dataset.ws = id;
   const expanded = _phExpanded.has(id);
   const head = document.createElement('button'); head.className = 'ph-head' + (expanded ? ' open' : '');
@@ -1981,23 +1960,42 @@ function _phCard(id, label, kind, isLive) {
   const ico = document.createElement('span'); ico.className = 'ph-ico'; ico.innerHTML = isLive ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>' : (kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);
   const nm = document.createElement('span'); nm.className = 'ph-nm'; nm.textContent = label; nm.title = label;
   head.appendChild(car); head.appendChild(ico); head.appendChild(nm);
+  // Identity + totals belong on the card's MAIN BAR, not buried under a scrolling feed: owner/slug,
+  // a click-to-open GitHub link, and the commit count (filled async once the git read returns).
+  const rid = repoIdOf(w);
+  if (rid.idText) { const idEl = document.createElement('span'); idEl.className = 'ph-id'; idEl.textContent = rid.idText; idEl.title = rid.idText; head.appendChild(idEl); }
+  if (rid.url) {
+    const visit = document.createElement('span'); visit.className = 'ph-visit'; visit.title = 'Open ' + rid.idText + ' on GitHub ↗'; visit.setAttribute('role', 'button');
+    visit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+    visit.addEventListener('click', (e) => { e.stopPropagation(); try { claudible.openExternal(rid.url); } catch (_) {} });   // span inside the head <button> (nested buttons are invalid HTML); stopPropagation keeps it from toggling
+    head.appendChild(visit);
+  }
+  const stats = document.createElement('span'); stats.className = 'ph-stats'; stats.textContent = ''; head.appendChild(stats);
   el.appendChild(head);
   const body = document.createElement('div'); body.className = 'ph-body'; if (!expanded) body.style.display = 'none';
+  const sec = (txt, svg) => { const s = document.createElement('div'); s.className = 'ph-sec'; s.innerHTML = svg + '<span>' + txt + '</span>'; return s; };
   const feed = document.createElement('div'); feed.className = 'history-feed';
   const diff = document.createElement('div'); diff.className = 'ph-diff';
-  body.appendChild(feed); body.appendChild(diff); el.appendChild(body);
+  body.appendChild(sec('session history', '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>'));
+  body.appendChild(feed);
+  if (!isLive) {   // a joined live mirror has no local git to review
+    body.appendChild(sec('commit history', '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v6"/><path d="M12 15v6"/></svg>'));
+    body.appendChild(diff);
+  }
+  el.appendChild(body);
   head.onclick = () => {
     const nowOpen = !_phExpanded.has(id);
     if (nowOpen) _phExpanded.add(id); else _phExpanded.delete(id);
     head.classList.toggle('open', nowOpen); body.style.display = nowOpen ? '' : 'none';
-    if (nowOpen) { _histShown = 10; if (isLive) loadHistoryInto(null, feed, (AT() && AT().liveHistory) || []); else { const w = workspaces.find((x) => x.id === id); if (w) _phFillBody(w, { feed, diff }); } }
+    if (nowOpen) { _histShown = 10; if (isLive) loadHistoryInto(null, feed, (AT() && AT().liveHistory) || []); else { const ww = workspaces.find((x) => x.id === id); if (ww) _phFillBody(ww, { feed, diff, stats }); } }
   };
-  return { el, head, feed, diff, expanded };
+  return { el, head, feed, diff, stats, expanded };
 }
-// Load a project's history feed + diff review into its card body.
+// Load a project's history feed + diff review into its card body; the diff read also fills the
+// header's commit-count stat.
 function _phFillBody(w, card) {
   loadHistoryInto(w.id, card.feed);
-  loadDiffInto(w.id, card.diff, {});
+  loadDiffInto(w.id, card.diff, { onMeta: (meta) => { if (card.stats) card.stats.textContent = (typeof meta.total === 'number' && meta.total > 0) ? meta.total.toLocaleString() + ' commit' + (meta.total > 1 ? 's' : '') : 'no commits yet'; } });
 }
 // Live refresh (4s timer + per-prompt hook line): reload only the EXPANDED cards' bodies in place, so the
 // accordion structure + scroll survive. The old refreshHistoryFeed/refreshDiff names delegate here so every
@@ -2006,12 +2004,12 @@ function refreshExpandedProjects(opts) {
   const host = $('diff-body'); if (!host || !$('diffpanel') || !$('diffpanel').classList.contains('open')) return;
   const at = AT();
   host.querySelectorAll('.ph-project').forEach((el) => {
-    const feed = el.querySelector('.history-feed'), diff = el.querySelector('.ph-diff');
+    const feed = el.querySelector('.history-feed'), diff = el.querySelector('.ph-diff'), stats = el.querySelector('.ph-stats');
     if (el.querySelector('.ph-body').style.display === 'none') return;   // collapsed → skip
     if (String(el.dataset.ws).startsWith('live-')) { if (at && at.kind === 'live') loadHistoryInto(null, feed, at.liveHistory || []); return; }
     const w = workspaces.find((x) => x.id === el.dataset.ws); if (!w) return;
     loadHistoryInto(w.id, feed);
-    loadDiffInto(w.id, diff, opts || {});
+    loadDiffInto(w.id, diff, Object.assign({}, opts || {}, { onMeta: (meta) => { if (stats) stats.textContent = (typeof meta.total === 'number' && meta.total > 0) ? meta.total.toLocaleString() + ' commit' + (meta.total > 1 ? 's' : '') : 'no commits yet'; } }));
   });
 }
 function refreshHistoryFeed() { refreshExpandedProjects(); }        // compat: live feed update after a prompt/revert
@@ -2027,20 +2025,28 @@ async function loadDiffInto(targetWsId, body, opts) {
   let r = null; try { r = await claudible.diffList(targetWsId); } catch {}
   body._diffBusy = false;
   if (!r || !r.ok) { if (!quiet) body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
-  if (!r.repo) { body._diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This project isn’t a git repo — nothing to review here.</div>'; return; }
+  if (!r.repo) { body._diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This project isn’t a git repo — nothing to review here.</div>'; if (opts && opts.onMeta) try { opts.onMeta({ total: null }); } catch (e) {} return; }
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
-  const aw = (typeof workspaces !== 'undefined') ? (workspaces.find((w) => w.id === targetWsId) || workspaces.find((w) => w.id === activeWsId)) : null;   // which repo this review is for
   const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally
+  if (opts && opts.onMeta) try { opts.onMeta({ total }); } catch (e) {}   // identity/totals live on the card's MAIN BAR now — hand the count up
   // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
   const sig = JSON.stringify({ ws: targetWsId, t: total, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
   if (quiet && sig === body._diffSig) return;
   body._diffSig = sig;
   if (!files.length && !untracked.length && !committed.length) {
-    body.innerHTML = ''; body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits, total));
-    const _e = document.createElement('div'); _e.className = 'diff-empty'; _e.textContent = 'No changes yet — nothing in the working tree or recent commits. ✨'; body.appendChild(_e); return;
+    body.innerHTML = '<div class="diff-empty">No changes yet — nothing in the working tree or recent commits. ✨</div>'; return;
   }
   body.innerHTML = '';
-  body.appendChild(repoReviewHeader(aw, files, untracked, committed, commits, total));   // header: which repo + change summary
+  // one-line change summary (the identity half of the old header moved to the card bar)
+  {
+    const adds = files.reduce((s, f) => s + (f.additions || 0), 0), dels = files.reduce((s, f) => s + (f.deletions || 0), 0);
+    const parts = [];
+    if (files.length) parts.push(files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed');
+    if (adds || dels) parts.push('+' + adds + ' −' + dels);
+    if (untracked.length) parts.push(untracked.length + ' new');
+    if (commits.length) parts.push(commits.length + ' commit' + (commits.length > 1 ? 's' : '') + ' this week');
+    if (parts.length) { const sum = document.createElement('div'); sum.className = 'ph-sum'; sum.textContent = parts.join('  ·  '); body.appendChild(sum); }
+  }
   if (files.length || untracked.length) {
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'uncommitted — in the working tree';
     body.appendChild(lbl);
