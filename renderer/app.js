@@ -3206,15 +3206,24 @@ async function openSession(id, label) {
     if (tabs.size < MAX_TABS) { newBlankTab(activeWsId, id); return; }
     toast('That session is still running — finish it or close a tab before switching'); return;
   }
+  // Ask main to re-point this tab's pty FIRST — main is authoritative on busy (its rec.busy comes straight
+  // from the hook poller, so it catches the race where THIS renderer's t.busy is still stale ~80-480ms after
+  // a submit). Only mutate the tab's view AFTER a confirmed open, so a refusal leaves the running session
+  // completely intact.
+  let r = null; try { r = await claudible.sessionOpen(t.tabId, id); } catch {}
+  if (r && r.ok === false) {   // main refused: this pty is genuinely mid-turn → open the click in a NEW tab, leave this one running + on screen
+    if (tabs.size < MAX_TABS) newBlankTab(activeWsId, id);
+    else toast('That session is still running — finish it or close a tab before switching');
+    return;
+  }
   t.session = id; t.wsId = activeWsId; t.pendingTitle = null;   // re-pointing to another session drops any name typed for a not-yet-resolved new session (else it leaks onto THIS one)
   t.label = (id === 'new') ? 'New session' : (label || 'Session');
   t.curSessionLabel = (id === 'new') ? 'New session' : (label || '');      // mirrored to guests
   activeSession = (id === 'new') ? null : id;
   updateAdvertise();                                  // if I'm sharing in a repo workspace, advertise the now-active session
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
-  t.term.reset();                                     // clear this tab's view
+  t.term.reset();                                     // clear this tab's view (the new pty repaints it)
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
-  try { await claudible.sessionOpen(t.tabId, id); } catch {}   // re-point this tab's pty
   renderTabStrip();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
@@ -3756,6 +3765,11 @@ async function switchWorkspace(id, targetSession) {
     setActiveTab(local.tabId); t = local;
   }
   if (!t) return;
+  if (t.busy) {   // switching workspace mid-turn must NOT kill the running Claude — open the target in a NEW tab, leave this one working in the background (main's workspace:open would otherwise respawn+kill the fg pty)
+    if (tabs.size < MAX_TABS) newBlankTab(id, targetSession || 'new');
+    else toast('That session is still running — finish it or close a tab before switching');
+    return;
+  }
   const sess = targetSession || '';                 // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
   activeWsId = id; t.wsId = id; t.session = sess; t.pendingTitle = null; t.label = (sess === 'new') ? 'New session' : '';   // switching ws drops a stale pending name (typed for a new session in the OLD ws) so it can't be published onto a session in the NEW ws
   setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)

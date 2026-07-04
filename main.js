@@ -486,9 +486,13 @@ function _pushHistoryEntryToShare(wsId, entry) {
 // Switch a tab's terminal to a chosen session ('new' | <session-id> | '' = resume latest). Kills that
 // tab's current pty (its guarded handlers go quiet, since the map entry is deleted BEFORE the kill) and
 // respawns it with the selection. Only foreground-tab switches touch the guest mirror.
-function respawnPty(tabId, session) {
-  if (liveTabs.has(tabId)) return;                          // a joined live tab is a client WebSocket, never a local pty — never spawn/kill a pty on its id (the hijack defense, mirrors setForegroundTab's guard)
+function respawnPty(tabId, session, opts) {
+  if (liveTabs.has(tabId)) return false;                    // a joined live tab is a client WebSocket, never a local pty — never spawn/kill a pty on its id (the hijack defense, mirrors setForegroundTab's guard)
   const rec = ptys.get(tabId);
+  // BUSY GUARD (opt-in): main's rec.busy is authoritative (set by the hook poller), so a user session-switch
+  // never kills a mid-turn Claude even when the renderer's own busy flag is still stale from the poll latency.
+  // The caller opens the target session in a NEW background tab instead, leaving this one running.
+  if (opts && opts.guardBusy && rec && rec.busy) return false;
   setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
   const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
   if (tabId === fgTabId) {
@@ -504,6 +508,7 @@ function respawnPty(tabId, session) {
   hookState.delete(tabId); lastStatusByTab.delete(tabId);
   spawnPty(tabId, cols, rows, ws, session);
   if (tabId === fgTabId) syncShare();                       // refresh the granted library (live flag) for guests
+  return true;
 }
 // Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points
 // the single guest mirror at this tab and keeps the global active-workspace notion in lockstep with it.
@@ -820,7 +825,7 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
     try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
   });
 }));
-ipcMain.handle('session:open', (e, { tabId, id }) => { openGen++; respawnPty(tabId, id); return { ok: true }; });   // re-point an existing tab at 'new' | <session-id>. openGen++ supersedes any in-flight workspace:open clone — without it, a slow clone's continuation would respawn the tab AFTER this click and silently stomp the session the user just chose.
+ipcMain.handle('session:open', (e, { tabId, id }) => { openGen++; const ok = respawnPty(tabId, id, { guardBusy: true }); return { ok }; });   // re-point an existing tab at 'new' | <session-id>. guardBusy: main refuses to kill a mid-turn Claude (ok:false → the renderer opens the target in a new tab, leaving this one running). openGen++ supersedes any in-flight workspace:open clone so its continuation can't respawn the tab AFTER this click.
 // Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
 // switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.
 ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
