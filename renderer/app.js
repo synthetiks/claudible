@@ -95,16 +95,17 @@ function makeTab(tabId, wsId, session, opts) {
   t.loadAddon(f); t.open(container);
   if (kind === 'live') {
     // A joined mirror shows the host's foreground screen. SCROLL must stay local to the guest and
-    // NEVER reach the host. In the alt buffer (a full-screen TUI like Claude Code) xterm converts
-    // wheel into arrow/scroll keys and would send them over live:input — scrolling the host's real
-    // terminal for everyone. Cancel wheel handling there (return false = "don't process"); in the
-    // normal buffer we return true so the guest can still scroll xterm's own local scrollback,
-    // which is independent of the host and emits nothing.
-    t.attachCustomWheelEventHandler(() => t.buffer.active.type !== 'alternate');
+    // NEVER reach the host. Two paths turn a wheel into host-bound bytes, and both are cancelled
+    // (return false = "xterm, don't process"): the alt buffer (xterm converts wheel into arrow/scroll
+    // keys) and mouse-tracking mode (the mirrored TUI — vim, htop; Claude itself disables tracking —
+    // asked for mouse reports, so xterm would emit \x1b[<64;… wheel sequences). Only in a plain
+    // normal-buffer shell does wheel scroll xterm's own local scrollback, which emits nothing.
+    t.attachCustomWheelEventHandler(() => t.buffer.active.type !== 'alternate' && t.modes.mouseTrackingMode === 'none');
     t.onData((d) => {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
       if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal too
-      claudible.liveInput(tabId, d);                    // co-drive: real keystrokes → the peer's terminal
+      d = d.replace(/\x1b\[<(?:6[4-9]|7\d);\d+;\d+[Mm]/g, '');   // belt-and-braces: strip SGR WHEEL reports (buttons 64–79) — clicks still co-drive a mouse-enabled TUI
+      if (d) claudible.liveInput(tabId, d);             // co-drive: real keystrokes → the peer's terminal
     });
   } else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
