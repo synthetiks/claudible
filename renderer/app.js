@@ -362,12 +362,18 @@ function parseTokCount(str) {
   return v;
 }
 // Tracker accumulators are PER TAB (on each tab's record): the #trk-* DOM always projects the ACTIVE tab,
-// and only the active tab's tracker is mirrored to guests — so two concurrent sessions never cross-count.
-// Mirror the active tab's tracker (and which session is live) to any shared guests. Guests render verbatim.
-function pushTracker() {
-  const t = AT(); if (!t) return;
+// but what guests see is the MIRRORED tab's tracker — while hosting, main pins the mirror to the shared tab
+// (share:pinned) and that session keeps running (guests may be co-driving it) while the host works elsewhere.
+// So the payload is built from the tab RECORD, never the DOM (the DOM shows whatever the host is browsing),
+// and main drops any push whose tabId isn't the mirrored tab — a stray push can never leak another session.
+let sharedTabIdR = null;   // the tab main has pinned the live mirror to (null = not hosting)
+if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); });
+function mirrorTabR() { return (sharedTabIdR != null && tabs.get(sharedTabIdR)) || AT(); }
+function pushTracker(t) {
+  t = t || mirrorTabR(); if (!t) return;
   if (t.kind === 'live') return;   // viewing a peer's session — never mirror THEIR tracker to YOUR guests
-  try { claudible.shareTracker({ ctxPct: t.curCtxPct, cost: $('trk-cost').textContent, tokens: $('trk-tokens').textContent, session: t.curSessionLabel, sessionId: (t.session && t.session !== 'new') ? t.session : '' }); } catch {}   // sessionId lets a guest detect "host moved to a different session than I joined"
+  const cost = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
+  try { claudible.shareTracker({ tabId: t.tabId, ctxPct: t.curCtxPct, cost, tokens: fmtK((t.sessTok || 0) + (t.agentTok || 0)), session: t.curSessionLabel, sessionId: (t.session && t.session !== 'new') ? t.session : '' }); } catch {}   // sessionId lets a guest detect "host moved to a different session than I joined"
 }
 // Light the first N of the context gauge's segments to mirror pct (N proportional, min 1 once > 0).
 function paintCtxSegs(pct) {
@@ -402,7 +408,8 @@ function repaintTracker(t) {
 function resetStats(t) {
   t = t || AT(); if (!t) return;
   t.baseCost = null; t.sessTok = 0; t.agentTok = 0; t.lastUsageKey = null; t.lastCostUsd = null; t.curCtxPct = null;
-  if (t.tabId === activeTabId) { repaintTracker(t); pushTracker(); }
+  if (t.tabId === activeTabId) repaintTracker(t);
+  if (t.tabId === activeTabId || t.tabId === sharedTabIdR) pushTracker(t);   // the shared tab mirrors even while backgrounded
 }
 // First-run voice setup (packaged native Windows only) → a quiet, persistent status-bar CHIP (#sb-voice), not a
 // toast: a multi-minute model download must not auto-vanish or read as a freeze. Phases: start/done/error.
@@ -453,7 +460,8 @@ claudible.onStatus((s) => {
     if (t.lastUsageKey !== null) t.sessTok += (s.newTok || 0);
     t.lastUsageKey = s.usageKey;
   }
-  if (t.tabId === activeTabId) { repaintTracker(t); pushTracker(); }   // only the foreground tab paints + mirrors
+  if (t.tabId === activeTabId) repaintTracker(t);                      // only the foreground tab paints the DOM gauges
+  if (t.tabId === activeTabId || t.tabId === sharedTabIdR) pushTracker(t);   // ...but the SHARED tab keeps mirroring to guests even while backgrounded (main drops non-mirrored pushes)
 });
 
 // ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Left-Ctrl push-to-talk hold) ----------
@@ -2802,7 +2810,7 @@ function startSessEdit(row, p, s) {
         p.textContent = sessTitle(s);
         // keep ANY open tab on this session in sync so the command center + guest tracker also show the new name
         for (const r of tabs.values()) { if (r.session === s.id) { r.label = p.textContent; r.curSessionLabel = p.textContent; } }
-        if (AT() && s.id === activeSession) pushTracker();           // mirror the new title to guests
+        pushTracker();           // mirror the (possibly renamed live-session) title to guests — no-arg targets the mirrored tab, so a backgrounded shared session's rename still lands
       }
     } catch (e) { console.error('[rename] save failed', e); }
     finally {                                                        // cleanup ALWAYS runs — a throw above can never strand the input again

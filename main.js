@@ -38,6 +38,17 @@ const ptys = new Map();
 let fgTabId = null;
 const tabIntent = new Map();   // tabId -> { ws, session } recorded by tab:open, consumed by the next pty:start
 function fgRec() { return ptys.get(fgTabId) || null; }
+// While a live session runs, the mirror is PINNED to the tab that was foreground when the share started.
+// fgTabId keeps tracking the host's focus for host-local concerns (sidebar clicks, agents view, prompt
+// attribution) — but everything guests can see or drive gates on the PIN, so the host can open and work in
+// any other session without a byte of it reaching a guest, while the shared session keeps streaming.
+let sharedTabId = null;
+function mirrorTabId() { return sharedTabId || fgTabId; }   // pinned while sharing; follows focus otherwise (keeps the replay ring warm pre-share)
+function mirrorWs() {
+  if (!sharedTabId) return activeWorkspace;                 // not pinned → the mirror follows the foreground, whose ws IS activeWorkspace
+  const r = ptys.get(sharedTabId); if (r && r.ws) return r.ws;
+  const it = tabIntent.get(sharedTabId); return (it && it.ws) || null;   // respawn gap; unknown reads as private → mirror pauses (privacy-first)
+}
 // Native live-join: a JOINED peer session is NOT a local pty — it's a CLIENT WebSocket (held in main because the
 // renderer's CSP forbids a wss:// socket) that mirrors a peer's terminal into a cockpit tab. Kept entirely
 // separate from `ptys`/`fgTabId` so watching/co-driving a peer NEVER touches the user's own outgoing share.
@@ -79,20 +90,20 @@ const share = createShareServer({
   // typist CHANGES or every 5s during a burst (keeps typedBy.ts fresh for the hook's 20s window without a
   // per-keystroke fs write); any HOST keystroke clears it (pty:input below), so "fresh typedBy" ⇒ guest-driven.
   onInput: (d, who) => {
-    const t = ptys.get(fgTabId);
+    const t = ptys.get(mirrorTabId());                       // guests ALWAYS drive the SHARED tab — never whatever the host happens to be focused on
     if (!t) return;
     if (who && who.name) {
       const prev = t.lastInputBy;
       t.lastInputBy = { name: who.name, ts: Date.now() };
       if (!prev || prev.name !== who.name || (t.lastInputBy.ts - (t.typistWrittenTs || 0)) > 5000) {
         t.typistWrittenTs = t.lastInputBy.ts;
-        try { _writeContext(fgTabId); } catch {}
+        try { _writeContext(mirrorTabId()); } catch {}
       }
     }
     try { t.proc.write(d); } catch {}
   },
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
-  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(fgTabId); } catch {} },   // presence lights; refresh the host tab's injected context so the model sees who's here
+  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(mirrorTabId()); } catch {} },   // presence lights; refresh the HOSTING tab's injected context so the model sees who's here
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
   onApprovalCancel: (id) => { try { win && win.webContents.send('share:approval-cancel', id); } catch {} },
   onChat: (m) => { try { win && win.webContents.send('share:chat', m); } catch {} },   // guest → host chat
@@ -101,9 +112,9 @@ const share = createShareServer({
     const ws = registry.workspaces.find((w) => w.id === id && w.shared);
     if (!ws) return;                                                   // only granted workspaces are switchable
     openGen++;                                                         // supersede any in-flight workspace:open clone
-    const rec = fgRec(); if (rec) rec.ws = ws;                         // re-point the shared (foreground) tab at that ws
+    const rec = ptys.get(mirrorTabId()); if (rec) rec.ws = ws;         // re-point the SHARED tab at that ws (the guest is switching the live session, not the host's focus)
     activeWorkspace = ws; registry.activeId = id; saveRegistry();
-    respawnPty(fgTabId, '');                                           // resume the most-recent conversation in that cwd
+    respawnPty(mirrorTabId(), '');                                     // resume the most-recent conversation in that cwd
     try { win && win.webContents.send('workspace:active-changed', id); } catch {}
   },
   // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
@@ -420,13 +431,14 @@ function spawnPty(tabId, cols, rows, ws, session) {
     _seedCkpt(ws);                                        // repo ws + history on → snapshot now so even the FIRST prompt gets a Revert target
     if (registry.effort === 'ultracode') armUltracode(tabId, proc);   // switch the new session into ultracode mode once it settles
     if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
-    if (tabId === fgTabId) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the foreground tab drives the guest mirror
+    if (share.status().running && !sharedTabId) { sharedTabId = tabId; try { winSend('share:pinned', { tabId }); } catch {} }   // share started before any pty existed → the first tab becomes the shared one
+    if (tabId === mirrorTabId()) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the mirrored (shared-or-foreground) tab drives the guest mirror
     // Handlers are guarded by `ptys.get(tabId)?.proc === proc` so a soon-to-die OLD pty (during a session
     // switch on this tab) can't stomp the NEW one's stream — the map entry is replaced/deleted before kill.
     proc.onData(d => {
       if (ptys.get(tabId)?.proc !== proc) return;
       winSend('pty:data', { tabId, data: d });
-      if (tabId === fgTabId) share.broadcast(d);           // tee ONLY the foreground stream to guests
+      if (tabId === mirrorTabId()) share.broadcast(d);     // tee ONLY the mirrored tab's stream to guests — pinned while sharing, so the host's other tabs never leak
       const r = ptys.get(tabId);
       if (r) { r.lastData = Date.now(); r.sawData = true; }   // feed the ultracode settle-detector (and prove claude rendered)
       if (r && !r.trustDone && /trust this folder/i.test(d)) { r.trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
@@ -443,7 +455,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
         winSend('pty:data', { tabId, data: '[claudible] Claude Code isn’t connected — click the Claude button to set it up.\r\n' });
         try { win && win.webContents.send('claude:needed'); } catch {}
       }
-      if (tabId === fgTabId) { share.broadcast(msg); share.resetRing(); }
+      if (tabId === mirrorTabId()) { share.broadcast(msg); share.resetRing(); }
       setGenBusy(tabId, false); ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId);
       schedulePush(rws);                                   // session ended → flush its workspace's transcripts to collaborators
     });
@@ -455,14 +467,15 @@ function spawnPty(tabId, cols, rows, ws, session) {
 function isShareable(ws) { return !!(ws && (ws.shared || ws.syncSessions)); }
 // The granted workspace library a guest is allowed to see (paths/urls stripped); marks which is live.
 function grantedList() {
+  const lw = mirrorWs();                                   // "live" = the SHARED tab's workspace while pinned, not wherever the host is browsing
   return registry.workspaces.filter((w) => w.shared)
-    .map((w) => ({ id: w.id, label: w.label, kind: w.kind, live: w.id === registry.activeId }));
+    .map((w) => ({ id: w.id, label: w.label, kind: w.kind, live: !!lw && w.id === lw.id }));
 }
 // Push the current grant state to guests: pause the mirror when the live workspace isn't streamable,
 // and refresh the visible library. No-op when not sharing.
 function syncShare() {
   if (!share.status().running) return;
-  try { share.setPaused(!isShareable(activeWorkspace)); } catch {}
+  try { share.setPaused(!isShareable(mirrorWs())); } catch {}   // pause tracks the SHARED tab's workspace, so the host focusing a private tab can't pause (or unpause) the mirror
   try { share.setWorkspaces(grantedList()); } catch {}
   try { _pushHistoryToShare(); } catch {}                  // guests' Session-History feed follows the live workspace (share start / foreground / ws switches all route through here)
 }
@@ -472,14 +485,14 @@ function syncShare() {
 // clears its cache while paused (same privacy rule as scrollback/status).
 function _pushHistoryToShare() {
   if (!share.status().running) return;
-  const ws = activeWorkspace;
+  const ws = mirrorWs();                                   // guests' history feed follows the SHARED tab's workspace, not the host's browsing
   if (ws && ws.id && isShareable(ws) && _histEnabled()) share.pushHistory(_histStore.load(fs, _histFile(ws.id)));
   else share.pushHistory([]);
 }
 function _pushHistoryEntryToShare(wsId, entry) {
   try {
     if (!share.status().running || !entry) return;
-    const ws = activeWorkspace;
+    const ws = mirrorWs();
     if (ws && ws.id === wsId && isShareable(ws) && _histEnabled()) share.pushHistoryEntry(entry);
   } catch {}
 }
@@ -495,7 +508,7 @@ function respawnPty(tabId, session, opts) {
   if (opts && opts.guardBusy && rec && rec.busy) return false;
   setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
   const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
-  if (tabId === fgTabId) {
+  if (tabId === mirrorTabId()) {
     // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
     try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {}
   }
@@ -507,7 +520,7 @@ function respawnPty(tabId, session, opts) {
   // safe (the new file starts empty — nothing to replay) and required (stale offsets belong to the old gen's file).
   hookState.delete(tabId); lastStatusByTab.delete(tabId);
   spawnPty(tabId, cols, rows, ws, session);
-  if (tabId === fgTabId) syncShare();                       // refresh the granted library (live flag) for guests
+  if (tabId === mirrorTabId()) syncShare();                 // refresh the granted library (live flag) for guests
   return true;
 }
 // Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points
@@ -520,16 +533,22 @@ function setForegroundTab(tabId) {
   const ws = (rec && rec.ws) || (intent && intent.ws) || null;   // resolve THIS tab's workspace even before its pty spawns, so activeWorkspace never desyncs from fgTabId (H1)
   if (ws && registry.activeId !== ws.id) { activeWorkspace = ws; registry.activeId = ws.id; saveRegistry(); }
   else if (ws) activeWorkspace = ws;
-  try { share.resetRing(); share.resetStatus(); } catch {}                        // drop the previous tab's replay/tracker
-  // Only (re)evaluate the mirror pause when we actually KNOW this tab's workspace — pausing on an unknown ws would
-  // wrongly treat it as private and wipe the ring. If the pty hasn't spawned yet, spawnPty wires the mirror on spawn.
-  if (ws) { try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {} }
-  if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
-  syncShare();
-  // Foreground changed → guest input now targets a different pty; any pending typist tag belonged to the
-  // OLD foreground's in-flight typing and must not attribute a prompt submitted after the switch.
-  try { for (const r of ptys.values()) { r.lastInputBy = null; r.typistWrittenTs = 0; } } catch {}
-  _writeAllContexts();                                    // foreground changed → which tab is "hosting" changed; refresh every tab's context
+  // While a live session is PINNED, the host switching focus is a purely local act: the mirror, its ring, its
+  // pause state, its size, and guest input routing all stay welded to sharedTabId. Touching any of it here is
+  // exactly the "guests watch me everywhere" leak. Un-pinned (share off), the plumbing follows focus so the
+  // replay ring is warm for whichever tab a future share starts on.
+  if (!sharedTabId) {
+    try { share.resetRing(); share.resetStatus(); } catch {}                        // drop the previous tab's replay/tracker
+    // Only (re)evaluate the mirror pause when we actually KNOW this tab's workspace — pausing on an unknown ws would
+    // wrongly treat it as private and wipe the ring. If the pty hasn't spawned yet, spawnPty wires the mirror on spawn.
+    if (ws) { try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {} }
+    if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
+    syncShare();
+    // Foreground changed → guest input now targets a different pty; any pending typist tag belonged to the
+    // OLD foreground's in-flight typing and must not attribute a prompt submitted after the switch.
+    try { for (const r of ptys.values()) { r.lastInputBy = null; r.typistWrittenTs = 0; } } catch {}
+  }
+  _writeAllContexts();                                    // foreground (and maybe active workspace) changed → refresh every tab's context
 }
 ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
   const intent = tabIntent.get(tabId); tabIntent.delete(tabId);
@@ -548,7 +567,7 @@ ipcMain.on('pty:resize', (e, { tabId, cols, rows }) => {
   const t = ptys.get(tabId); if (!t) return;
   t.cols = cols || t.cols; t.rows = rows || t.rows;
   try { t.proc.resize(t.cols, t.rows); } catch {}
-  if (tabId === fgTabId) share.setSize(t.cols, t.rows);    // keep guests' xterm matched to the FOREGROUND pty size
+  if (tabId === mirrorTabId()) share.setSize(t.cols, t.rows);   // keep guests' xterm matched to the MIRRORED pty size
 });
 ipcMain.on('pty:foreground', (e, { tabId }) => setForegroundTab(tabId));
 // Record a new tab's intended workspace + session BEFORE its pty:start, so spawnPty binds it correctly.
@@ -565,6 +584,9 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   if (rec) { try { rec.proc.kill(); } catch {} }
   if (rec) _killSessionTree(rec.runtimeId);                            // reap the WSL-side tree too (ConPTY kill stops at the Windows boundary)
   liveDisconnect(tabId);                                               // also drop a joined live socket if this was a live tab
+  // The SHARED tab closed mid-share: keep the pin pointing at the (now dead) id — NEVER fall back to the host's
+  // private foreground. The mirror pauses; guests keep chat/voice until the host ends the live session.
+  if (sharedTabId === tabId) { try { share.setPaused(true); } catch {} }
   if (fgTabId === tabId) fgTabId = ptys.keys().next().value || null;   // renderer will foreground the next tab explicitly
   return { ok: true };
 });
@@ -692,7 +714,9 @@ ipcMain.handle('share:start', (e, opts) => {
   shareStartInFlight = (async () => {
     try {
       const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
-      const fr0 = fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
+      sharedTabId = fgTabId;                              // PIN: the tab being viewed at start IS the live session; the host is free to roam afterwards
+      try { winSend('share:pinned', { tabId: sharedTabId }); } catch {}   // renderer mirrors THIS tab's tracker to guests from now on
+      const fr0 = ptys.get(sharedTabId) || fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
       syncShare();                                        // tell guests the granted library + pause if the live ws is private
       let base = `http://127.0.0.1:${port}`, remote = false, note = null;
       try {
@@ -736,8 +760,10 @@ ipcMain.handle('share:stop', async () => {
   stopAdvertiseHeartbeat();                              // no longer hosting → stop re-stamping presence
   if (wasAdvertising) runPresence('presence-clear', () => {}, advWs);   // pull the stale live/<login>.json off the advertised repo's branch now
   share.stop();
+  sharedTabId = null;                                    // UN-PIN: no live session → the idle mirror plumbing follows focus again
+  try { winSend('share:pinned', { tabId: null }); } catch {}
   _lastRoster = [];
-  _writeAllContexts();                                   // sharing ended → the fg tab's context drops the "hosting" block (back to solo)
+  _writeAllContexts();                                   // sharing ended → the hosting tab's context drops the "hosting" block (back to solo)
   return { ok: true };
 });
 ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time link (re-invite)
@@ -1286,7 +1312,12 @@ ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
     });
 }));
-ipcMain.on('share:tracker', (e, s) => { try { share.broadcastStatus(s); } catch {} });   // mirror tracker to guests
+ipcMain.on('share:tracker', (e, s) => {   // mirror tracker to guests — but ONLY the mirrored tab's (drop pushes for tabs the host is merely browsing)
+  try {
+    if (s && s.tabId != null && String(s.tabId) !== String(mirrorTabId())) return;
+    share.broadcastStatus(s);
+  } catch {}
+});
 ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } catch {} });   // host → guests chat
 
 // ---- session tracker: poll EACH live tab's runtime/tabs/<tab>/status.json (Windows FS, native read) ----
@@ -1298,7 +1329,7 @@ const appIntervals = [];   // long-lived poller intervals — cleared on window-
 // >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
 // session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.
 function pollContextHeartbeat() {
-  appIntervals.push(setInterval(() => { try { if (ptys.has(fgTabId)) _writeContext(fgTabId); } catch {} }, 5 * 60 * 1000));
+  appIntervals.push(setInterval(() => { try { if (ptys.has(mirrorTabId())) _writeContext(mirrorTabId()); } catch {} }, 5 * 60 * 1000));   // keep the HOSTING tab's "YOU ARE HOSTING" line alive, wherever the host is focused
 }
 function pollStatus() {
   appIntervals.push(setInterval(() => {
@@ -1686,7 +1717,7 @@ let _lastRoster = [];                                     // cache the host rost
 // When hosting stops, this returns null → the model correctly reads "solo" from the absence of a live line.
 function _liveStateFor(tabId) {
   try {
-    if (tabId === fgTabId && share.status && share.status().running) {   // the shared (foreground) tab while sharing → I'm HOSTING
+    if (tabId === mirrorTabId() && share.status && share.status().running) {   // the SHARED (pinned) tab while sharing → I'm HOSTING; the host's other tabs stay solo
       const st = share.status();
       const names = _lastRoster.filter((g) => g && g.state !== 'gone' && !g.host).map((g) => g.name).filter(Boolean);
       return { role: 'hosting', session: advertisedSid || '', guests: st.guests || names.length || 0, names };
