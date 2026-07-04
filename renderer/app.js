@@ -93,8 +93,20 @@ function makeTab(tabId, wsId, session, opts) {
   const t = new Terminal(TERM_OPTS);
   const f = new FitAddon.FitAddon();
   t.loadAddon(f); t.open(container);
-  if (kind === 'live') t.onData((d) => { const r = tabs.get(tabId); if (r && !r.liveReadOnly) claudible.liveInput(tabId, d); });   // co-drive: keystrokes → the peer's terminal
-  else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
+  if (kind === 'live') {
+    // A joined mirror shows the host's foreground screen. SCROLL must stay local to the guest and
+    // NEVER reach the host. In the alt buffer (a full-screen TUI like Claude Code) xterm converts
+    // wheel into arrow/scroll keys and would send them over live:input — scrolling the host's real
+    // terminal for everyone. Cancel wheel handling there (return false = "don't process"); in the
+    // normal buffer we return true so the guest can still scroll xterm's own local scrollback,
+    // which is independent of the host and emits nothing.
+    t.attachCustomWheelEventHandler(() => t.buffer.active.type !== 'alternate');
+    t.onData((d) => {
+      const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
+      if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal too
+      claudible.liveInput(tabId, d);                    // co-drive: real keystrokes → the peer's terminal
+    });
+  } else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
   const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0,
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, curCtxPct: null, curSessionLabel: '',
