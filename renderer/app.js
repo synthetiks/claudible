@@ -96,7 +96,7 @@ function makeTab(tabId, wsId, session, opts) {
   if (kind === 'live') t.onData((d) => { const r = tabs.get(tabId); if (r && !r.liveReadOnly) claudible.liveInput(tabId, d); });   // co-drive: keystrokes → the peer's terminal
   else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
-  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '',
+  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0,
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, curCtxPct: null, curSessionLabel: '',
     agents: new Map(), workflows: [], agentTok: 0,
     liveReadOnly: false, hostCols: 120, hostRows: 32, liveState: '', liveCost: null, liveTokens: null, hostName: '' };
@@ -115,14 +115,20 @@ function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
   if (t.kind === 'live') { fitLiveTab(t); return; }            // a live tab is a fixed-grid remote mirror — never start/resize a local pty
   try {
-    t.fit.fit();
-    if (t.term.cols < 2 || t.term.rows < 2) return;            // not laid out yet → don't start/resize at 0×0
+    // Compute the fitted size ONCE. The old path called fit() (which resized the term to R rows) and then
+    // resized AGAIN to R-1 — two alt-buffer reflows on EVERY sync, i.e. the flicker on every tab switch.
+    // proposeDimensions measures without resizing, so we resize exactly once, and only when it actually changed.
+    const d = t.fit.proposeDimensions();
+    if (!d || !(d.cols >= 2) || !(d.rows >= 2)) return;        // not laid out yet → don't start/resize at 0×0
+    const cols = d.cols;
     // Leave ~1 row of breathing room at the bottom: Claude's TUI anchors its input box, the
     // bypass-permissions banner and the status/“working… esc to interrupt” line to the last rows —
     // running them flush to the pane edge clips them. One reserved row keeps those always visible.
-    if (t.term.rows > 6) t.term.resize(t.term.cols, t.term.rows - 1);
-    if (!t.started) { t.started = true; claudible.tabOpen(t.tabId, t.wsId, t.session); claudible.ptyStart(t.tabId, t.term.cols, t.term.rows); } // spawn at the EXACT fitted size
-    else claudible.ptyResize(t.tabId, t.term.cols, t.term.rows);
+    const rows = d.rows > 6 ? d.rows - 1 : d.rows;
+    const changed = (t.term.cols !== cols || t.term.rows !== rows);
+    if (changed) t.term.resize(cols, rows);
+    if (!t.started) { t.started = true; claudible.tabOpen(t.tabId, t.wsId, t.session); claudible.ptyStart(t.tabId, cols, rows); } // spawn at the EXACT fitted size
+    else if (changed) claudible.ptyResize(t.tabId, cols, rows);   // a pure tab-switch (no size change) is now a no-op resize → one clean repaint, no redundant pty:resize IPC
     updateScrollbar();
   } catch {}
 }
@@ -145,7 +151,8 @@ const sc = $('scroll'), thumb = $('scroll-thumb');
 // ESTIMATE (altFrac) so the thumb moves as you scroll and rests at the bottom, where Claude shows the newest
 // output. A normal-buffer shell still gets real xterm scrollback below.
 function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
-let altFrac = 0;                       // 0 = bottom (newest) … 1 = scrolled fully up (an estimate; Claude never reports it)
+// altFrac (the scroll-position estimate) is now PER-TAB (rec.altFrac) — it used to be one module-global that
+// bled between tabs (switching left the thumb where another tab's scroll had put it, firing spurious pages).
 const ALT_PAGE = 0.14;                 // estimate nudge per PageUp/PageDown
 function sendPage(dir) {   // PageUp (older) / PageDown (newer)
   const t = tabs.get(activeTabId);
@@ -153,10 +160,11 @@ function sendPage(dir) {   // PageUp (older) / PageDown (newer)
   sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~');
 }
 function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
-  if (!term || !dir) return;
+  const at = tabs.get(activeTabId);
+  if (!at || at.kind === 'live' || !dir) return;   // a joined mirror's gutter is inert (sendPage also guards)
   const n = Math.min(6, Math.abs(dir));
   for (let i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
-  altFrac = Math.max(0, Math.min(1, altFrac + (dir < 0 ? 1 : -1) * ALT_PAGE * n));
+  at.altFrac = Math.max(0, Math.min(1, (at.altFrac || 0) + (dir < 0 ? 1 : -1) * ALT_PAGE * n));   // per-tab estimate — no longer a shared global that bleeds between tabs
   updateScrollbar();
 }
 function updateScrollbar() {
@@ -169,7 +177,7 @@ function updateScrollbar() {
   if (isAlt()) {                                      // full-screen app → a draggable thumb that pages Claude's view
     const thumbH = Math.max(40, trackH * 0.20);
     thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
-    if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (1 - altFrac)) + 'px)';   // 0=bottom
+    if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (1 - (at.altFrac || 0))) + 'px)';   // 0=bottom · per-tab estimate
     return;
   }
   const b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
@@ -196,7 +204,7 @@ window.addEventListener('pointermove', (e) => {
   const top = Math.max(0, Math.min(trackH - thumbH, e.clientY - sc.getBoundingClientRect().top - grabDY));
   if (isAlt()) {                                      // full-screen: thumb follows the cursor; fire a Page key per ~24px
     thumb.style.transform = 'translateY(' + top + 'px)';
-    altFrac = (trackH - thumbH) > 0 ? 1 - (top / (trackH - thumbH)) : 0;   // estimate = where the thumb now sits
+    const _at = tabs.get(activeTabId); if (_at) _at.altFrac = (trackH - thumbH) > 0 ? 1 - (top / (trackH - thumbH)) : 0;   // per-tab estimate = where the thumb now sits
     const dy = e.clientY - jogLastY;
     if (Math.abs(dy) >= 24) { sendPage(dy < 0 ? -1 : 1); jogLastY = e.clientY; }
     return;
@@ -227,6 +235,7 @@ function renderTabStrip() {
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
 function setActiveTab(tabId) {
   const rec = tabs.get(tabId); if (!rec) return;
+  if (dragging) { dragging = false; thumb.classList.remove('drag'); }   // a scroll-thumb drag must not straddle a tab switch (its window-level pointermove would page the newly-active tab)
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
   term = rec.term; fit = rec.fit;
@@ -3222,7 +3231,7 @@ async function openSession(id, label) {
   activeSession = (id === 'new') ? null : id;
   updateAdvertise();                                  // if I'm sharing in a repo workspace, advertise the now-active session
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
-  t.term.reset();                                     // clear this tab's view (the new pty repaints it)
+  t.term.reset(); t.altFrac = 0;                       // clear this tab's view (the new pty repaints it) + reset its scroll estimate
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
   renderTabStrip();
   setTimeout(() => { if (term) term.focus(); }, 150);
