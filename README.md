@@ -152,7 +152,7 @@ A signed **`.dmg`** is the planned release artifact (`npm run dist:mac`).
 > 🧪 **Newer path — runtime smoke test pending** (needs a Mac to build/sign + verify voice).
 </details>
 
-Full steps + troubleshooting: **[SETUP.md](SETUP.md)**.
+Full steps + troubleshooting for the Windows + WSL2 path: **[SETUP.md](SETUP.md)**. (Linux/macOS: the steps above are the complete guide.)
 
 ## Configuration
 | Env var | Default | Meaning |

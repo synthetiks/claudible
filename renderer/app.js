@@ -2971,17 +2971,33 @@ const deletingIds = new Set();                                                  
 async function deleteSession(id, scope) {
   if (deletingIds.has(id)) return;
   deletingIds.add(id);
+  // Any tab resuming this session must switch OFF it BEFORE the file is deleted (else it holds the file
+  // open). If an owning tab is BUSY, the switch is refused (never kill a mid-turn Claude) — so the delete
+  // itself must ABORT: proceeding would trash the transcript out from under the still-running pty (audit
+  // finding). The order list is only persisted once every owning tab has actually left the session.
+  const abort = () => {
+    deletingIds.delete(id);
+    toast('That session is still running — stop it before deleting');
+    refreshSessions();
+  };
   const order = getOrder().filter((x) => x !== id);
-  setOrder(order);
-  // Any tab resuming this session must switch OFF it BEFORE the file is deleted (else it holds the file open).
+  const next = order[0] || 'new';
   for (const rec of Array.from(tabs.values())) {
     if (rec.kind === 'live') continue;   // a joined mirror is never re-pointed by a local delete (it belongs to the peer's session)
     if (rec.wsId === activeWsId && rec.session === id) {
-      const next = order[0] || 'new';
-      if (rec.tabId === activeTabId) await openSession(next, next === 'new' ? '' : (sessIndex[next] && sessIndex[next].preview));
-      else { rec.session = next; rec.label = ''; try { await claudible.sessionOpen(rec.tabId, next); } catch {} }
+      if (rec.busy) return abort();      // fast path — no point even attempting the switch
+      if (rec.tabId === activeTabId) {
+        await openSession(next, next === 'new' ? '' : (sessIndex[next] && sessIndex[next].preview));
+        const still = tabs.get(rec.tabId);
+        if (still && still.session === id) return abort();   // busy race: main refused the re-point (openSession left this tab untouched)
+      } else {
+        let sw = null; try { sw = await claudible.sessionOpen(rec.tabId, next); } catch {}
+        if (!sw || sw.ok === false) return abort();           // main's authoritative busy guard said no — the pty is mid-turn on this session
+        rec.session = next; rec.label = '';                   // rebind the record only AFTER a confirmed switch
+      }
     }
   }
+  setOrder(order);
   let r = null; try { r = await claudible.sessionDelete(id, scope || 'local'); } catch {} finally { deletingIds.delete(id); }
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions(); renderTabStrip();
@@ -3906,12 +3922,20 @@ $('invite-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); doInvite(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeInviteModal(); }
 });
-// A guest switched the live workspace (they clicked a granted chip) → reflect it in the host UI.
-claudible.onWorkspaceActiveChanged((id) => {
-  if (id === activeWsId) return;
-  const t = AT();
-  activeWsId = id; activeSession = null; lastTitlePoll = 0; titlesSig = '';
-  if (t) { t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t); }   // main re-pointed the foreground tab
+// The live workspace changed under main's control (a guest clicked a granted chip, or a workspace was
+// deleted). The payload names the tab main ACTUALLY re-pointed — with the mirror pinned, that can be a
+// BACKGROUND shared tab while the host views something else entirely, so resetting AT() here wiped an
+// unrelated private tab's terminal/record (audit finding). Reset only the named tab.
+claudible.onWorkspaceActiveChanged((p) => {
+  const id = p && typeof p === 'object' ? p.id : p;
+  const tabId = p && typeof p === 'object' ? p.tabId : null;
+  if (id == null || id === activeWsId) return;
+  const t = (tabId != null && tabs.get(tabId)) || null;
+  activeWsId = id; lastTitlePoll = 0; titlesSig = '';
+  if (t) {
+    t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t);
+    if (t.tabId === activeTabId) activeSession = null;   // the re-pointed tab is the one on screen → its highlight resets too
+  }
   refreshWorkspaces(); refreshSessions(); renderTabStrip();
   try { if ($('diffpanel') && $('diffpanel').classList.contains('open')) { refreshHistoryFeed(); refreshDiff(); } } catch {}   // Repo Review open → keep its feed + diff on the workspace we just switched to (don't let it show the old ws)
 });

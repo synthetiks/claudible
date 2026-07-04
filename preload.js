@@ -70,7 +70,7 @@ contextBridge.exposeInMainWorld('claudible', {
   pluginsList: () => ipcRenderer.invoke('plugins:list'),
   pluginsAvailable: () => ipcRenderer.invoke('plugins:available'),
   pluginsToggle: (key, enable) => ipcRenderer.invoke('plugins:toggle', { key, enable }),
-  onWorkspaceActiveChanged: (cb) => ipcRenderer.on('workspace:active-changed', (_e, id) => cb(id)),
+  onWorkspaceActiveChanged: (cb) => ipcRenderer.on('workspace:active-changed', (_e, p) => cb(p)),   // { id, tabId } — tabId = the tab main actually re-pointed
   // shared-session sync (repo workspaces): same sessions across collaborators, over the repo's git
   syncSetEnabled: (id, enabled) => ipcRenderer.invoke('session:syncSetEnabled', { id, enabled }),
   syncNow: (id) => ipcRenderer.invoke('session:syncNow', id),

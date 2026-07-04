@@ -123,7 +123,7 @@ const share = createShareServer({
     const rec = ptys.get(mirrorTabId()); if (rec) rec.ws = ws;         // re-point the SHARED tab at that ws (the guest is switching the live session, not the host's focus)
     activeWorkspace = ws; registry.activeId = id; saveRegistry();
     respawnPty(mirrorTabId(), '');                                     // resume the most-recent conversation in that cwd
-    try { win && win.webContents.send('workspace:active-changed', id); } catch {}
+    try { win && win.webContents.send('workspace:active-changed', { id, tabId: mirrorTabId() }); } catch {}   // tabId = the tab whose pty was ACTUALLY re-pointed (the pinned shared tab) — the renderer must reset THAT record, never whatever the host is viewing
   },
   // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
   // that workspace's conversations and (separately) reads one transcript for display. Only SHARED workspaces
@@ -1122,14 +1122,22 @@ ipcMain.handle('workspace:open', async (e, id, session) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return { ok: false, error: 'unknown workspace' };
   const myGen = ++openGen;                                         // a later open must win over a slow clone
+  const targetTab = fgTabId;                                       // the tab this open was FOR — resolved NOW, not after a minutes-long clone
   if (ws.kind === 'repo' && ws.needsClone) {                       // invited workspace, not cloned yet → fetch it first
     const c = await ensureClone(ws);
     if (!c.ok) return { ok: false, error: c.error || 'clone failed' };
   }
   if (myGen !== openGen) return { ok: false, error: 'superseded' };   // a newer open started during our clone → stand down
+  // A plain tab-focus change doesn't bump openGen, so check it explicitly: if the user foregrounded a DIFFERENT
+  // tab while the clone ran, this stale continuation must not kill that tab and rebind it (audit finding).
+  if (fgTabId !== targetTab) return { ok: false, error: 'superseded' };
   activeWorkspace = ws; registry.activeId = id; saveRegistry();
-  const fr = fgRec(); if (fr) fr.ws = ws;                          // re-point the foreground tab at the new workspace (other tabs keep running)
-  respawnPty(fgTabId, session || '');                             // a session id → open it DIRECTLY (one respawn); '' = resume most-recent in that cwd
+  const fr = ptys.get(targetTab); const prevWs = fr && fr.ws;
+  if (fr) fr.ws = ws;                                              // re-point the target tab at the new workspace (other tabs keep running)
+  // guardBusy: the user may have submitted a prompt on this tab DURING the clone — never kill a mid-turn
+  // Claude. On refusal the workspace still switches (sidebar follows); the running session keeps its ws truthful.
+  const respawned = respawnPty(targetTab, session || '', { guardBusy: true });   // a session id → open it DIRECTLY (one respawn); '' = resume most-recent in that cwd
+  if (!respawned && fr) fr.ws = prevWs;
   pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
   if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
   return { ok: true };
@@ -1160,6 +1168,7 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
 });
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
 ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
+  const targetTab = fgTabId;                                       // the tab this create was FOR (see attach() below)
   const kind = (payload && payload.kind === 'repo') ? 'repo' : 'local';
   const name = String((payload && payload.name) || '').trim();
   const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
@@ -1178,8 +1187,15 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
           const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
             repoUrl: repoUrl || undefined, owner: owner || undefined, path: wsPath || undefined, createdAt: Date.now() };
           registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
-          const fr = fgRec(); if (fr) fr.ws = ws;                       // re-point the foreground tab at the new workspace
-          respawnPty(fgTabId, fresh ? 'new' : '');
+          // The create script can run for minutes (repo = network clone+push). Only re-point/respawn the tab
+          // this create was FOR, and only if the user hasn't foregrounded another tab since — and never kill
+          // a turn they started while waiting (same stale-continuation class as workspace:open, audit finding).
+          if (fgTabId === targetTab) {
+            const fr = ptys.get(targetTab); const prevWs = fr && fr.ws;
+            if (fr) fr.ws = ws;
+            const respawned = respawnPty(targetTab, fresh ? 'new' : '', { guardBusy: true });
+            if (!respawned && fr) fr.ws = prevWs;
+          }
           resolve({ ok: true, workspace: ws });
         };
         if (r.ok) return attach(r.repoUrl, r.owner, true, r.path);
@@ -1237,7 +1253,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
   saveRegistry(); syncShare();
-  if (fgWasHere) { try { respawnPty(fgTabId, ''); } catch {} try { win && win.webContents.send('workspace:active-changed', registry.activeId); } catch {} }
+  if (fgWasHere) { try { respawnPty(fgTabId, ''); } catch {} try { win && win.webContents.send('workspace:active-changed', { id: registry.activeId, tabId: fgTabId }); } catch {} }   // here the re-pointed tab IS the foreground one
   const finish = () => resolve({ ok: true, activeId: registry.activeId });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (APPDIR_WSL && slug && (ws.kind === 'local' || ws.kind === 'repo')) {
@@ -1874,15 +1890,15 @@ ipcMain.handle('history:append', (e, payload) => {
     // and the session guard keeps a background tab's prompt from being credited to a foreground guest.
     let author = _identity.resolveAuthor({ username: s.collabName, fallback: 'host' });
     try {
-      // Credit a co-driving guest only when the MIRRORED tab (the only one a guest's input reaches, via onInput →
-      // ptys.get(mirrorTabId())) is the tab that submitted THIS prompt. While a live session is pinned, that's the
-      // SHARED tab even if the host is focused elsewhere — gating on fgTabId here mis-credited the HOST for a
-      // guest's prompt whenever the host was working in another tab. Match on tabId — the old `fr.session ===
-      // payload.session` check silently failed because a pty record's `.session` is only set at spawn (stays ''
-      // for a new session) while the renderer submits the real UUID, so it never matched.
-      const fr = ptys.get(mirrorTabId());
-      const submittedByFg = payload && payload.tabId != null && String(payload.tabId) === String(mirrorTabId());
-      if (fr && submittedByFg && fr.lastInputBy && (Date.now() - fr.lastInputBy.ts) < 15000) {
+      // Credit a co-driving guest from the SUBMITTING tab's OWN record. lastInputBy can only ever exist on a
+      // tab guests actually typed into (onInput writes it exclusively to the mirrored tab, and any host
+      // keystroke on that same tab clears it), so the record itself is the evidence — no comparison against
+      // the CURRENT mirror needed. The old mirrorTabId() gate flipped to the host's foreground the instant
+      // share:stop un-pinned, silently mis-crediting the HOST for a guest prompt still in flight at
+      // end-of-session (audit finding). Recency + one-shot consume unchanged.
+      let fr = (payload && payload.tabId != null) ? ptys.get(payload.tabId) : null;
+      if (!fr && payload && payload.tabId != null) { for (const [k, v] of ptys) { if (String(k) === String(payload.tabId)) { fr = v; break; } } }   // type-safe fallback (IPC ids are same-typed today; keep the delete-path parity)
+      if (fr && fr.lastInputBy && (Date.now() - fr.lastInputBy.ts) < 15000) {
         author = _identity.resolveAuthor({ username: fr.lastInputBy.name, fallback: author });
         fr.lastInputBy = null;
       }

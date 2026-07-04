@@ -43,6 +43,13 @@ var term = new Terminal({
            selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
 });
 term.open($('terminal'));
+// SCROLL must stay local and NEVER reach the host (same rule as the cockpit's joined tab, 3a4ee10 +
+// 71065b1). Two paths turn a wheel into host-bound bytes, and both are cancelled (return false =
+// "xterm, don't process"): the alt buffer (xterm converts wheel into arrow-key bytes) and mouse-tracking
+// mode (a mirrored TUI like vim/htop asked for mouse reports, so xterm would emit \x1b[<64;… wheel
+// sequences even in the normal buffer). Only in a plain normal-buffer shell does wheel scroll THIS
+// viewer's own local scrollback, which emits nothing.
+term.attachCustomWheelEventHandler(function () { return term.buffer.active.type !== 'alternate' && term.modes.mouseTrackingMode === 'none'; });
 
 // custom scroll gutter (ported from the cockpit) — drives the terminal's scrollback so no native
 // scrollbar sits over the text. Desktop/tablet only (CSS hides it on phones, where touch scrolls).
@@ -563,6 +570,9 @@ function reconnect(label) { setStatus(label, 'bad'); retry = Math.min(retry + 1,
 
 term.onData(function (d) {
   if (readOnly || denied || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal (matches the cockpit's joined-tab guard)
+  d = d.replace(/\x1b\[<(?:6[4-9]|7\d);\d+;\d+[Mm]/g, '');   // belt-and-braces: strip SGR WHEEL reports (buttons 64–79) — clicks still co-drive a mouse-enabled TUI (matches 71065b1)
+  if (!d) return;
   ws.send(JSON.stringify({ type: 'input', data: d }));
 });
 
