@@ -224,6 +224,13 @@
       background:rgba(5,6,8,.82);backdrop-filter:blur(3px)}
     .paused-ov.show{display:flex}
     .paused-ov .card h2{color:var(--amber)}
+    /* "who's typing" pill — floats on the terminal's corner, names whoever's keystrokes are landing in the
+       mirror (host or another guest — never you; the server skips the sender). Blue = identity, as in the cockpit. */
+    .typist-chip{position:absolute;top:8px;right:16px;z-index:4;padding:3px 10px;border-radius:999px;
+      font-size:10px;font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.14);
+      opacity:0;transition:opacity .18s ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:45%;
+      overflow:hidden;text-overflow:ellipsis}
+    .typist-chip.show{opacity:1}
     /* overlay shown while waiting for host approval / when denied */
     .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
       background:rgba(5,6,8,.78);backdrop-filter:blur(2px);z-index:5}
@@ -285,6 +292,7 @@
   <div class="main">
     <div class="wrap">
       <div id="terminal"></div>
+      <div class="typist-chip" id="typist-chip"></div>
       <div class="gutter" id="gutter"><div class="gthumb" id="gthumb"></div></div>
       <div class="paused-ov" id="paused-ov">
         <div class="card">

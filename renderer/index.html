@@ -246,6 +246,13 @@
       backdrop-filter:blur(2px);z-index:5;pointer-events:none}
     .live-ov.show{display:flex}
     .live-ov.bad{color:#e0a0a0}
+    /* "who's typing" pill — floats on a live-shared terminal's corner, names the current typist. Identity is
+       BLUE across the app (matches .sess-chip.author); pointer-events:none so it never blocks a click/selection. */
+    .typist-chip{position:absolute;top:6px;right:18px;z-index:6;padding:3px 10px;border-radius:999px;
+      font-size:10px;font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.12);
+      opacity:0;transition:opacity .18s ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:40%;
+      overflow:hidden;text-overflow:ellipsis}
+    .typist-chip.show{opacity:1}
     /* a joined peer's session, pinned atop the sidebar list */
     .sess-joined-live{border-left:2px solid var(--ok,#5fb487)}
     .sess-joined-live .sess-prev{color:#cfe8da}

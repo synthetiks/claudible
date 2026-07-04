@@ -260,6 +260,16 @@ function switchWorkspaceReq(id, live) {
   if (readOnly || live) return;                                // can't switch when view-only or already there
   if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'switch', id: id })); } catch (e) {} }
 }
+// "who's typing" pill — names whoever's keystrokes are landing in the mirror (host or another guest; the
+// server never echoes your own). Senders throttle to 1/s, so decay locally ~3s after the last ping.
+var typistTimer = null;
+function showTypist(name) {
+  var chip = $('typist-chip'); if (!chip || !name) return;
+  chip.textContent = '✎ ' + String(name).slice(0, 40);   // textContent — names are collaborator-supplied
+  chip.classList.add('show');
+  if (typistTimer) clearTimeout(typistTimer);
+  typistTimer = setTimeout(function () { chip.classList.remove('show'); }, 3000);
+}
 function applyPaused(label) {
   var ov = $('paused-ov'); if (ov) ov.classList.toggle('show', !!wsPaused);
   var b = $('paused-body');
@@ -519,6 +529,8 @@ function connect() {
       } else if (msg.type === 'workspaces') {
         grantedWs = Array.isArray(msg.list) ? msg.list : [];
         renderGuestWs();
+      } else if (msg.type === 'typist') {
+        showTypist(msg.name);                                 // host or another guest is typing (the server never echoes your own)
       } else if (msg.type === 'paused') {
         wsPaused = !!msg.paused;
         applyPaused(msg.label);

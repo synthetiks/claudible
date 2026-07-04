@@ -177,6 +177,20 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     if (payloadObj.role !== 'host') { try { onChat && onChat(payloadObj); } catch {} }
   }
   function systemChat(text) { relayChat({ type: 'chat', role: 'system', text }, null); }
+  // "who's typing" — a tiny throttled signal so every viewer can label the keystrokes they see land in the
+  // mirror. Sent immediately when the typist CHANGES, else at most 1/s during a burst; renderers decay the
+  // chip locally (~3s), so no stop event is needed. Never sent while paused (same privacy rule as the mirror),
+  // and never echoed to the typist's own socket (you know you're typing).
+  let typName = '', typTs = 0;
+  function typistPing(name, exceptWs) {
+    if (paused || !name) return;
+    const now = Date.now();
+    if (name === typName && (now - typTs) < 1000) return;
+    typName = name; typTs = now;
+    const s = JSON.stringify({ type: 'typist', name });
+    for (const ws of clients) { if (ws !== exceptWs && ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  }
+  function broadcastTypist(name) { typistPing(cleanName(name, hostName), null); }   // the HOST is typing → tell every guest
 
   // Is this display name already in use by someone present? Checks the host, every live client, AND anyone still
   // inside their reconnect grace window (a briefly-dropped guest whose name is theirs to return to). Case-insensitive.
@@ -265,6 +279,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (readOnly || paused) return;   // paused = host on a private/non-granted workspace; never inject into it
         try { onInput && onInput(msg.data, { pid: ws._pid, name: ws._name }); } catch {}   // pass the typist's identity so session-history can attribute the prompt to the guest, not the host
+        typistPing(ws._name, ws);         // label this guest's keystrokes for every OTHER viewer (the host UI learns via onInput)
         return;
       }
       // ---- voice room (allowed even for VIEW-ONLY guests — talking is not terminal control) ----
@@ -520,7 +535,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
 module.exports = { createShareServer, uniqueName, cleanName };

@@ -375,6 +375,28 @@ function pushTracker(t) {
   const cost = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
   try { claudible.shareTracker({ tabId: t.tabId, ctxPct: t.curCtxPct, cost, tokens: fmtK((t.sessTok || 0) + (t.agentTok || 0)), session: t.curSessionLabel, sessionId: (t.session && t.session !== 'new') ? t.session : '' }); } catch {}   // sessionId lets a guest detect "host moved to a different session than I joined"
 }
+// "who's typing" chip — a small pill floating over a live-shared terminal naming whoever's keystrokes are
+// landing in it right now. Purely visual (never injects bytes into the pty — a click-to-sign design would
+// misfire into menus/permission dialogs): the host sees co-driving guests, a joined viewer sees the host and
+// other guests. Senders throttle to 1/s, so the chip decays locally ~3s after the last ping.
+function showTypist(rec, name) {
+  if (!rec || !name) return;
+  let chip = rec._typChip;
+  if (!chip || !chip.isConnected) { chip = document.createElement('div'); chip.className = 'typist-chip'; rec.container.appendChild(chip); rec._typChip = chip; }
+  chip.textContent = '✎ ' + name;                            // textContent — names are collaborator-supplied
+  chip.classList.add('show');
+  clearTimeout(rec._typT);
+  rec._typT = setTimeout(() => { try { chip.classList.remove('show'); } catch {} }, 3000);
+}
+if (claudible.onShareTypist) claudible.onShareTypist((p) => {   // a guest typing into MY hosted session → chip on the SHARED (pinned) tab
+  const r = (sharedTabIdR != null) ? tabs.get(sharedTabIdR) : null;
+  if (r && p && p.name) showTypist(r, String(p.name).slice(0, 40));
+});
+if (claudible.onLiveTypist) claudible.onLiveTypist((p) => {     // someone typing in a session I JOINED → chip on that live tab (my own keys never echo back — the server excludes the sender)
+  const r = tabs.get(p && p.tabId); if (!r) return;
+  const nm = String((p && p.name) || '').slice(0, 40);
+  if (nm) showTypist(r, nm);
+});
 // Light the first N of the context gauge's segments to mirror pct (N proportional, min 1 once > 0).
 function paintCtxSegs(pct) {
   const wrap = $('trk-ctxsegs'); if (!wrap) return;

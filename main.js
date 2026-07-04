@@ -43,6 +43,8 @@ function fgRec() { return ptys.get(fgTabId) || null; }
 // attribution) — but everything guests can see or drive gates on the PIN, so the host can open and work in
 // any other session without a byte of it reaching a guest, while the shared session keeps streaming.
 let sharedTabId = null;
+const _typUi = { name: '', ts: 0 };   // throttle for the host cockpit's "guest is typing" chip (share:typist)
+let _typHostTs = 0;                   // throttle for telling guests "the host is typing" (share.broadcastTypist)
 function mirrorTabId() { return sharedTabId || fgTabId; }   // pinned while sharing; follows focus otherwise (keeps the replay ring warm pre-share)
 function mirrorWs() {
   if (!sharedTabId) return activeWorkspace;                 // not pinned → the mirror follows the foreground, whose ws IS activeWorkspace
@@ -98,6 +100,12 @@ const share = createShareServer({
       if (!prev || prev.name !== who.name || (t.lastInputBy.ts - (t.typistWrittenTs || 0)) > 5000) {
         t.typistWrittenTs = t.lastInputBy.ts;
         try { _writeContext(mirrorTabId()); } catch {}
+      }
+      // typist chip for the HOST's own cockpit (guests get theirs from the server's typistPing) — 1/s throttle,
+      // immediate on typist change; the renderer decays the chip so no stop event is needed.
+      if (who.name !== _typUi.name || (t.lastInputBy.ts - _typUi.ts) > 1000) {
+        _typUi.name = who.name; _typUi.ts = t.lastInputBy.ts;
+        try { winSend('share:typist', { name: who.name }); } catch {}
       }
     }
     try { t.proc.write(d); } catch {}
@@ -561,6 +569,15 @@ ipcMain.on('pty:input', (e, { tabId, data }) => {
   // A HOST keystroke ends any pending guest attribution: last typist wins. One context write per
   // guest→host transition (t.lastInputBy is only ever set while a guest was typing), so this stays cold.
   if (t.lastInputBy) { t.lastInputBy = null; t.typistWrittenTs = 0; try { _writeContext(tabId); } catch {} }
+  // The host typing into the SHARED session → label those keystrokes for guests (their typist chip).
+  // Only the mirrored tab — typing in a private tab emits nothing (matches the byte-mirror privacy rule).
+  if (tabId === mirrorTabId()) {
+    const now = Date.now();
+    if (now - _typHostTs > 1000) {
+      _typHostTs = now;
+      try { const st = share.status(); if (st.running) share.broadcastTypist(st.hostName); } catch {}
+    }
+  }
   try { t.proc.write(data); } catch {}
 });
 ipcMain.on('pty:resize', (e, { tabId, cols, rows }) => {
@@ -625,6 +642,7 @@ function openLiveSocket(tabId) {
       case 'paused': liveSend(tabId, 'live:paused', { paused: !!m.paused }); break;
       case 'chat': liveSend(tabId, 'live:chat', { role: m.role, name: m.name, text: m.text }); break;
       case 'roster': liveSend(tabId, 'live:roster', { list: Array.isArray(m.list) ? m.list : [] }); break;
+      case 'typist': liveSend(tabId, 'live:typist', { name: String(m.name || '').slice(0, 40) }); break;   // someone (host or another guest) is typing in the session we joined
       case 'voice-members': liveSend(tabId, 'live:voice-members', { members: Array.isArray(m.members) ? m.members : [] }); break;
       case 'audio': liveSend(tabId, 'live:audio', { from: m.from, data: m.data, sr: m.sr }); break;
       case 'pending': liveSend(tabId, 'live:state', { state: 'pending' }); break;
@@ -1856,12 +1874,14 @@ ipcMain.handle('history:append', (e, payload) => {
     // and the session guard keeps a background tab's prompt from being credited to a foreground guest.
     let author = _identity.resolveAuthor({ username: s.collabName, fallback: 'host' });
     try {
-      // Credit a co-driving guest only when the FOREGROUND tab (the only one a guest's input reaches, via onInput →
-      // ptys.get(fgTabId)) is the tab that submitted THIS prompt. Match on tabId — the old `fr.session === payload.session`
-      // check silently failed because a pty record's `.session` is only set at spawn (stays '' for a new session) while
-      // the renderer submits the real UUID, so it never matched and every guest prompt fell through to the host.
-      const fr = ptys.get(fgTabId);
-      const submittedByFg = payload && payload.tabId != null && String(payload.tabId) === String(fgTabId);
+      // Credit a co-driving guest only when the MIRRORED tab (the only one a guest's input reaches, via onInput →
+      // ptys.get(mirrorTabId())) is the tab that submitted THIS prompt. While a live session is pinned, that's the
+      // SHARED tab even if the host is focused elsewhere — gating on fgTabId here mis-credited the HOST for a
+      // guest's prompt whenever the host was working in another tab. Match on tabId — the old `fr.session ===
+      // payload.session` check silently failed because a pty record's `.session` is only set at spawn (stays ''
+      // for a new session) while the renderer submits the real UUID, so it never matched.
+      const fr = ptys.get(mirrorTabId());
+      const submittedByFg = payload && payload.tabId != null && String(payload.tabId) === String(mirrorTabId());
       if (fr && submittedByFg && fr.lastInputBy && (Date.now() - fr.lastInputBy.ts) < 15000) {
         author = _identity.resolveAuthor({ username: fr.lastInputBy.name, fallback: author });
         fr.lastInputBy = null;
