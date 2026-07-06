@@ -31,6 +31,16 @@ if mv -f "$src" "$trash/$id.$ts.jsonl" 2>/dev/null; then
   for sc in "$PROJ/.claudible-kept" "$PROJ/.claudible-diverged"; do
     [ -e "$sc" ] && { { grep -vxF -- "$id" "$sc" 2>/dev/null || true; } > "$sc.tmp"; mv -f "$sc.tmp" "$sc" 2>/dev/null; }
   done
+  # LOCAL delete marker ("id size-at-delete", one line each, per machine — never synced): on a sync-enabled
+  # workspace the shared branch still holds a copy of this transcript (a local-scope delete doesn't propagate
+  # removals), so without this the very next pull re-imported it — "deleted sessions come back". Sync's import
+  # skips a marked id unless the remote copy has GROWN past this size (a collaborator kept the session going —
+  # real new activity SHOULD return, and returning clears the marker).
+  sz="$(wc -c < "$trash/$id.$ts.jsonl" 2>/dev/null || echo 0)"
+  dl="$PROJ/.claudible-deleted"
+  { grep -v "^$id " "$dl" 2>/dev/null || true; } > "$dl.tmp"
+  printf '%s %s\n' "$id" "$sz" >> "$dl.tmp"
+  mv -f "$dl.tmp" "$dl" 2>/dev/null
   printf '{"ok":true}'
 else
   printf '{"ok":false,"error":"move failed"}'

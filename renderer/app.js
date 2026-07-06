@@ -3961,15 +3961,19 @@ $('invite-name-in').addEventListener('keydown', (e) => {
 claudible.onWorkspaceActiveChanged((p) => {
   const id = p && typeof p === 'object' ? p.id : p;
   const tabId = p && typeof p === 'object' ? p.tabId : null;
-  if (id == null || id === activeWsId) return;
+  const global = !(p && typeof p === 'object') || p.global !== false;   // global:false = a guest switched the (backgrounded) shared tab — reset THAT tab's record, but the host's sidebar scope stays put
+  if (id == null) return;
   const t = (tabId != null && tabs.get(tabId)) || null;
-  activeWsId = id; lastTitlePoll = 0; titlesSig = '';
-  if (t) {
+  const tabNeeds = !!(t && (t.wsId !== id || t.session || t.label));    // the re-pointed tab's record is stale vs its fresh pty
+  const globalNeeds = global && id !== activeWsId;
+  if (!tabNeeds && !globalNeeds) return;                                // duplicate event → nothing to do
+  if (globalNeeds) { activeWsId = id; lastTitlePoll = 0; titlesSig = ''; }
+  if (tabNeeds) {
     t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t);
     if (t.tabId === activeTabId) activeSession = null;   // the re-pointed tab is the one on screen → its highlight resets too
   }
   refreshWorkspaces(); refreshSessions(); renderTabStrip();
-  try { if ($('diffpanel') && $('diffpanel').classList.contains('open')) { refreshHistoryFeed(); refreshDiff(); } } catch {}   // Repo Review open → keep its feed + diff on the workspace we just switched to (don't let it show the old ws)
+  try { if (globalNeeds && $('diffpanel') && $('diffpanel').classList.contains('open')) { refreshHistoryFeed(); refreshDiff(); } } catch {}   // Repo Review open → keep its feed + diff on the workspace we just switched to (don't let it show the old ws)
 });
 
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));

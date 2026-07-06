@@ -120,10 +120,17 @@ const share = createShareServer({
     const ws = registry.workspaces.find((w) => w.id === id && w.shared);
     if (!ws) return;                                                   // only granted workspaces are switchable
     openGen++;                                                         // supersede any in-flight workspace:open clone
-    const rec = ptys.get(mirrorTabId()); if (rec) rec.ws = ws;         // re-point the SHARED tab at that ws (the guest is switching the live session, not the host's focus)
-    activeWorkspace = ws; registry.activeId = id; saveRegistry();
-    respawnPty(mirrorTabId(), '');                                     // resume the most-recent conversation in that cwd
-    try { win && win.webContents.send('workspace:active-changed', { id, tabId: mirrorTabId() }); } catch {}   // tabId = the tab whose pty was ACTUALLY re-pointed (the pinned shared tab) — the renderer must reset THAT record, never whatever the host is viewing
+    const target = mirrorTabId();
+    const rec = ptys.get(target); if (rec) rec.ws = ws;                // re-point the SHARED tab at that ws (the guest is switching the live session, not the host's focus)
+    // Touch the GLOBAL active workspace only when the shared tab IS the host's foreground tab. When the host is
+    // working in a private tab, a guest's click used to clobber activeWorkspace/registry.activeId anyway —
+    // silently re-scoping the host's sidebar session list (and everything else keyed to the active ws) to a
+    // workspace the host never switched to. setForegroundTab reconciles the globals whenever the host actually
+    // returns to the shared tab.
+    const hostIsHere = target === fgTabId;
+    if (hostIsHere) { activeWorkspace = ws; registry.activeId = id; saveRegistry(); }
+    respawnPty(target, '');                                            // resume the most-recent conversation in that cwd
+    try { win && win.webContents.send('workspace:active-changed', { id, tabId: target, global: hostIsHere }); } catch {}   // tabId = the tab whose pty was ACTUALLY re-pointed (the pinned shared tab); global:false = reset that tab's record but leave the host's sidebar scope alone
   },
   // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
   // that workspace's conversations and (separately) reads one transcript for display. Only SHARED workspaces
@@ -937,7 +944,19 @@ function setGenBusy(tabId, v) {
   const rec = ptys.get(tabId); if (!rec) return;
   rec.busy = v;
   if (rec.busyTimer) { clearTimeout(rec.busyTimer); rec.busyTimer = null; }
-  if (v) rec.busyTimer = setTimeout(() => { rec.busy = false; rec.busyTimer = null; schedulePush(rec.ws); }, 1800000); // self-heal a missed Stop after 30min; the export <2s age skip still guards torn writes
+  if (!v) return;
+  // Self-heal a missed Stop — but only once the pty has actually gone QUIET. The old blind 30-minute timer
+  // cleared rec.busy mid-turn on any legitimately long run (a big agent swarm, a slow migration), silently
+  // disarming every busy-guard (delete/switch/sync) exactly when it mattered most. Now: first check at 30min,
+  // and while output is still flowing (rec.lastData, fed by proc.onData) re-check every 5min instead of
+  // clearing — a wedged tab with a dead Claude clears within ~30–35min, a live 3-hour turn stays protected.
+  const heal = () => {
+    rec.busyTimer = null;
+    if (ptys.get(tabId) !== rec || !rec.busy) return;                     // tab respawned/closed or the turn ended properly
+    if (Date.now() - (rec.lastData || 0) < 180000) { rec.busyTimer = setTimeout(heal, 300000); return; }   // pty spoke within 3min → still a real turn
+    rec.busy = false; schedulePush(rec.ws);
+  };
+  rec.busyTimer = setTimeout(heal, 1800000);
 }
 // Is any tab bound to this workspace mid-turn? Auto-sync waits until a ws is fully quiesced before pushing.
 function wsHasBusyTab(wsId) { for (const r of ptys.values()) if (r.ws && r.ws.id === wsId && r.busy) return true; return false; }

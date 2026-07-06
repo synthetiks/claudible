@@ -210,12 +210,25 @@ import_sessions() {
   [ -d "$WT/sessions" ] || return 0
   # _divset seeds the run-scoped guard read by clear_diverged_run: an id added here (a fork flagged, or a kept-local
   # ack) can no longer be cleared by a later author dir THIS pass, so a fork is flagged no matter the glob order.
-  local f id dest dsz _divset=" "
+  local f id dest dsz _divset=" " _dl _dsz
   for f in "$WT"/sessions/*/*.jsonl; do
     [ -e "$f" ] || continue
     id="$(basename "$f" .jsonl)"
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac  # reject leading/trailing-dash ids (argv tricks)
     tombstoned "$id" && continue                                    # deleted everywhere → never re-import
+    # LOCAL delete marker (written by delete-session.sh): this machine deliberately trashed the transcript, so
+    # the branch's identical copy must NOT resurrect it on the next pull. Only a remote copy that has GROWN
+    # past the recorded size (a collaborator kept the session going) returns — and clears the marker.
+    if [ -e "$PROJ/.claudible-deleted" ]; then
+      _dl="$(grep -m1 "^$id " "$PROJ/.claudible-deleted" 2>/dev/null)"
+      if [ -n "$_dl" ]; then
+        _dsz="${_dl#* }"
+        case "$_dsz" in '' | *[!0-9]*) _dsz=0 ;; esac
+        if [ "$(wc -c < "$f")" -le "$_dsz" ]; then continue; fi
+        { grep -v "^$id " "$PROJ/.claudible-deleted" 2>/dev/null || true; } > "$PROJ/.claudible-deleted.tmp"
+        mv -f "$PROJ/.claudible-deleted.tmp" "$PROJ/.claudible-deleted" 2>/dev/null
+      fi
+    fi
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
     grep -aq '"type":"user"' "$f" 2>/dev/null || continue            # never import a promptless stub (defense against collaborators on builds that still export them)
     dest="$PROJ/$id.jsonl"
