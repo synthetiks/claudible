@@ -3622,15 +3622,25 @@ async function openAcceptInviteModal(w) {
   else if (!r || r.error !== 'cancelled') toast('Could not add: ' + humanError(r && r.error));
 }
 async function deleteWorkspace(w) {
+  const busyToast = () => toast('A session in this project is still running — stop it before deleting');
+  if (wsBusy(w.id)) { busyToast(); return; }               // fast local check; main re-checks against its authoritative rec.busy
   let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
   if (r && r.ok) {
     if (r.activeId) activeWsId = r.activeId;
-    // A background tab may still name the just-deleted workspace; main already repointed its pty to the
-    // fallback, but the renderer tab record's wsId would otherwise let a later setActiveTab set activeWsId
-    // to a workspace that no longer exists (blank chips + empty sessions header). Repoint those tabs too.
-    for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }
-    await refreshWorkspaces(); refreshSessions();
-  } else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
+    // main repointed + respawned EVERY tab that lived in the deleted workspace and tells us exactly which
+    // (moved) — reset those records so their terminal/session/label state matches their fresh pty, instead of
+    // guessing from registry.activeId (which can differ from the fallback main actually used for background tabs).
+    for (const m of (r.moved || [])) {
+      const rec = tabs.get(m.tabId); if (!rec) continue;
+      rec.wsId = m.wsId; rec.session = ''; rec.label = ''; rec.curSessionLabel = '';
+      try { rec.term.reset(); } catch {}
+      resetStats(rec);
+      if (rec.tabId === activeTabId) activeSession = null;
+    }
+    for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }   // belt: any record main didn't know (e.g. a tab with no pty yet) must not keep naming a dead ws
+    await refreshWorkspaces(); refreshSessions(); renderTabStrip();
+  } else if (r && r.error === 'busy') { busyToast(); }     // a turn started between the local check and main's authoritative one
+  else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
 }
 // ---- workspace options (▾) menu: every per-workspace action lives here so the chip stays a clean name ----
 function wsMenuItems(chip, nm, w) {

@@ -1051,6 +1051,7 @@ function discoverWorkspaces() {
           if (!slug || !owner) continue;
           const wid = `repo-${slug}`;
           if (registry.workspaces.some((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner))) continue;   // already known (incl. an upgraded-in-place ws: it's kind 'repo' with owner set, so this catches it without hiding a different owner's same-slug invite)
+          if ((registry.dismissedRepos || []).includes(owner + '/' + slug)) continue;   // the user DELETED this repo workspace here — discovery must not resurrect it as a fresh invite every launch (deliberately re-adding it clears the tombstone)
           const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoUrl: (item && item.repoUrl) || undefined, createdAt: Date.now(), needsClone: true };
           registry.workspaces.push(ws); added.push(ws);
         }
@@ -1191,6 +1192,9 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
           openGen++;                                                     // supersede any in-flight workspace:open clone
           const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
             repoUrl: repoUrl || undefined, owner: owner || undefined, path: wsPath || undefined, createdAt: Date.now() };
+          if (kind === 'repo' && owner && Array.isArray(registry.dismissedRepos)) {   // deliberately (re-)adding a repo clears its delete-tombstone so discovery works normally again
+            registry.dismissedRepos = registry.dismissedRepos.filter((k) => k !== owner + '/' + slug);
+          }
           registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
           // The create script can run for minutes (repo = network clone+push). Only re-point/respawn the tab
           // this create was FOR, and only if the user hasn't foregrounded another tab since — and never kill
@@ -1249,17 +1253,27 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   if (!ws) return resolve({ ok: false, error: 'unknown workspace' });
   if (ws.kind === 'local' && registry.workspaces.filter((w) => w.kind === 'local').length <= 1)
     return resolve({ ok: false, error: 'You need at least one local workspace — create another first.' });
+  // BUSY GUARD: main's rec.busy is authoritative (hook poller). Deleting a workspace respawns every tab bound
+  // to it — doing that under a mid-turn Claude kills the turn and trashes the directory it's writing into.
+  // Same contract as session delete: refuse, let the renderer toast, user stops the turn first.
+  for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id && rec.busy) return resolve({ ok: false, error: 'busy' }); }
   const fallback = registry.workspaces.find((w) => w.kind === 'local' && w.id !== id) || registry.workspaces.find((w) => w.id !== id) || registry.workspaces[0];
   openGen++;   // supersede any in-flight workspace:open clone for the workspace being deleted (mirrors create/switch)
-  const fgWasHere = !!(fgRec() && fgRec().ws && fgRec().ws.id === id);
-  for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id) rec.ws = fallback; }   // repoint any tab inside it
+  const moved = [];   // EVERY tab that lived here gets repointed AND respawned — not just the foreground one. A background tab left un-respawned kept its Claude silently running inside the trashed directory while sync/checkpoint bookkeeping targeted the fallback ws.
+  for (const [tid, rec] of ptys) { if (rec.ws && rec.ws.id === id) { rec.ws = fallback; moved.push(tid); } }
   const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
   _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id);               // drop the deleted ws's leftover per-workspace state
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
+  // TOMBSTONE a deleted repo workspace (per-machine, in the registry): discoverWorkspaces would otherwise
+  // re-register it as a fresh invite on the very next launch — 'deleted workspaces come back' — because the
+  // GitHub repo (intentionally) still exists. Deliberately re-adding it (workspace:create / re-clone) clears it.
+  if (ws.kind === 'repo' && ws.owner && ws.slug) {
+    registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ws.owner + '/' + ws.slug]));
+  }
   saveRegistry(); syncShare();
-  if (fgWasHere) { try { respawnPty(fgTabId, ''); } catch {} try { win && win.webContents.send('workspace:active-changed', { id: registry.activeId, tabId: fgTabId }); } catch {} }   // here the re-pointed tab IS the foreground one
-  const finish = () => resolve({ ok: true, activeId: registry.activeId });
+  for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
+  const finish = () => resolve({ ok: true, activeId: registry.activeId, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (APPDIR_WSL && slug && (ws.kind === 'local' || ws.kind === 'repo')) {
     runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(() => finish());
