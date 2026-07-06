@@ -297,7 +297,13 @@ function closeTab(tabId) {
   try { rec.term.dispose(); } catch {}
   try { rec.container.remove(); } catch {}
   tabs.delete(tabId);
-  if (activeTabId === tabId) setActiveTab(tabs.keys().next().value);   // setActiveTab → refreshSessions (covers ✕ on the tab you're viewing)
+  if (activeTabId === tabId) {   // ✕ on the tab you're viewing → land on a REAL local session when one exists, not whatever
+    // happens to be first in Map order (which could be another joined mirror or a still-resolving tab — landing
+    // there leaves the sidebar with no truthful highlight). setActiveTab → refreshSessions either way.
+    const vals = Array.from(tabs.values());
+    const next = vals.find((r) => r.kind !== 'live' && r.session && r.session !== 'new') || vals.find((r) => r.kind !== 'live') || vals[0];
+    setActiveTab(next.tabId);
+  }
   else { renderTabStrip(); if (sidebarReady) refreshSessions(); }      // ✕ on a BACKGROUND tab (e.g. a joined live row you're not viewing) must still refresh the sidebar: drop its row + bring back any saved row it was deduping
 }
 
@@ -2975,6 +2981,7 @@ function onSessPointerUp() {
   if (d.moved) {
     const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-live)')).map((r) => r.dataset.id);
     setOrder(order);                                                               // manual order persists (per workspace)
+    refreshSessions();                                                             // reconcile: refreshes skipped DURING the drag (the sdrag guard) catch up now
   } else {
     openSession(d.id, d.label);                                                    // plain click → open
   }
@@ -3113,6 +3120,7 @@ async function openDivergedInfo(s) {
 let _sessSig = '';
 async function refreshSessions() {
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;              // a rename input is focused → defer the whole refresh so a background poll can't wipe the in-progress edit; commit() re-runs refreshSessions when done
+  if (sdrag && sdrag.moved) return;                                                // a row drag is in progress → defer: a mid-drag rebuild would orphan the dragged row's DOM node and reinsert a stale (pre-refresh) element into the fresh list; onSessPointerUp re-runs refreshSessions
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
   if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
@@ -3148,8 +3156,11 @@ async function refreshSessions() {
   // Default highlight must match what session.sh `--continue` resumes — the most-recent conversation
   // (max mtime) — not the top of the stable saved order.
   // Pick a default highlight only when the active tab isn't itself on a brand-new session (don't hijack the
-  // highlight to a saved row while the user is sitting in a fresh "New session").
-  if (!activeSession && list.length && !(AT() && AT().session === 'new')) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
+  // highlight to a saved row while the user is sitting in a fresh "New session") — and NEVER while a joined
+  // live tab is on screen: it has no local session id (permanently ''), so this guess used to paint the orange
+  // you-are-here highlight on whatever unrelated old session had the newest file mtime (the "'bro join' shows
+  // as selected" bug). A joined tab's own pinned row already carries the active highlight via dataset.tab.
+  if (!activeSession && list.length && !(AT() && (AT().session === 'new' || AT().kind === 'live'))) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
   const act = sessIndex[activeSession];
   const at = AT();
   if (at && act && !at.curSessionLabel) { at.curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
@@ -3383,7 +3394,6 @@ function reconcileWsChips(el) {
     const wantExpanded = isWsExpanded(w.id), wantActive = w.id === activeWsId;
     chip.classList.toggle('active', wantActive);
     chip.classList.toggle('expanded', wantExpanded);
-    chip.classList.toggle('shared', !!w.shared);
     const cv = chip.querySelector('.ws-caret'); if (cv) cv.title = wantExpanded ? 'Collapse' : 'Expand';
     let kids = chip.nextElementSibling;
     if (kids && !kids.classList.contains('ws-children')) kids = null;
@@ -3411,7 +3421,7 @@ function renderWsChips() {
   el.innerHTML = '';
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
-    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (isWsExpanded(w.id) ? ' expanded' : '') + (w.shared ? ' shared' : '');
+    chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (isWsExpanded(w.id) ? ' expanded' : '');   // (the old ' shared' class lost its CSS in the redesign — the .ws-dot.live indicator carries screen-share state now)
     chip.title = w.kind === 'legacy' ? 'Default space — quick chats, not tied to a project folder'
       : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — shared GitHub repo; sessions sync with your team')
       : (w.label + ' — a project folder on your machine (private to you)');
