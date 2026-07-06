@@ -93,14 +93,21 @@ function makeTab(tabId, wsId, session, opts) {
   const t = new Terminal(TERM_OPTS);
   const f = new FitAddon.FitAddon();
   t.loadAddon(f); t.open(container);
+  // SCROLL PRIVACY — both directions. A wheel gesture must never become session-visible bytes on a live-shared
+  // screen. Two paths turn a wheel into pty-bound bytes, and both are cancelled (return false = "xterm, don't
+  // process"): the alt buffer (xterm converts wheel into arrow/scroll keys) and mouse-tracking mode (the TUI —
+  // vim, htop — asked for mouse reports, so xterm would emit \x1b[<64;… wheel sequences). Guarded tabs:
+  //   · a joined mirror (kind 'live') — a guest's wheel must never co-drive the host's terminal;
+  //   · the HOST's own tab while it is the pinned shared one — the host's wheel would page the TUI and every
+  //     guest would watch the screen jump (the "MK can still see me scrolling" bug). Checked per-event, so the
+  //     same tab regains stock wheel behavior the moment the share ends.
+  // A plain private local tab keeps stock behavior; in a normal-buffer shell the wheel only moves xterm's own
+  // local scrollback, which emits nothing either way.
+  t.attachCustomWheelEventHandler(() => {
+    const guarded = kind === 'live' || (sharedTabIdR != null && sharedTabIdR === tabId);
+    return guarded ? (t.buffer.active.type !== 'alternate' && t.modes.mouseTrackingMode === 'none') : true;
+  });
   if (kind === 'live') {
-    // A joined mirror shows the host's foreground screen. SCROLL must stay local to the guest and
-    // NEVER reach the host. Two paths turn a wheel into host-bound bytes, and both are cancelled
-    // (return false = "xterm, don't process"): the alt buffer (xterm converts wheel into arrow/scroll
-    // keys) and mouse-tracking mode (the mirrored TUI — vim, htop; Claude itself disables tracking —
-    // asked for mouse reports, so xterm would emit \x1b[<64;… wheel sequences). Only in a plain
-    // normal-buffer shell does wheel scroll xterm's own local scrollback, which emits nothing.
-    t.attachCustomWheelEventHandler(() => t.buffer.active.type !== 'alternate' && t.modes.mouseTrackingMode === 'none');
     t.onData((d) => {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
       if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal too
@@ -167,14 +174,19 @@ function isAlt() { return !!(term && term.buffer.active && term.buffer.active.ty
 // altFrac (the scroll-position estimate) is now PER-TAB (rec.altFrac) — it used to be one module-global that
 // bled between tabs (switching left the thumb where another tab's scroll had put it, firing spurious pages).
 const ALT_PAGE = 0.14;                 // estimate nudge per PageUp/PageDown
+// Is this tab currently the pinned live-shared one? Its gutter/wheel paging would page the TUI on every
+// guest's screen — scroll intent stays LOCAL-ONLY while sharing. (Explicit PageUp/PageDown keypresses still
+// page: that's a deliberate, typist-chip-attributed action, same as typing.)
+function isSharedNow(t) { return !!(t && sharedTabIdR != null && t.tabId === sharedTabIdR); }
 function sendPage(dir) {   // PageUp (older) / PageDown (newer)
   const t = tabs.get(activeTabId);
   if (t && t.kind === 'live') return;   // a joined mirror has NO local scrollback; scroll-derived Page keys must NEVER cross live:input to the host (that scrolled the host's real terminal for everyone). Co-drive keyboard input is separate (term.onData) and still works.
+  if (isSharedNow(t)) return;           // host side of the same rule: gutter/wheel paging on the SHARED tab would scroll the mirror for every guest
   sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~');
 }
 function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
   const at = tabs.get(activeTabId);
-  if (!at || at.kind === 'live' || !dir) return;   // a joined mirror's gutter is inert (sendPage also guards)
+  if (!at || at.kind === 'live' || isSharedNow(at) || !dir) return;   // a joined mirror's gutter is inert; so is the host's own SHARED tab (sendPage also guards)
   const n = Math.min(6, Math.abs(dir));
   for (let i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
   at.altFrac = Math.max(0, Math.min(1, (at.altFrac || 0) + (dir < 0 ? 1 : -1) * ALT_PAGE * n));   // per-tab estimate — no longer a shared global that bleeds between tabs
@@ -183,7 +195,7 @@ function jogPages(dir) {                // wheel / gutter-click: fire pages + ad
 function updateScrollbar() {
   if (!term) return;                                 // no active tab yet (pre-boot)
   const at = tabs.get(activeTabId);
-  if (at && at.kind === 'live') { if (thumb) thumb.style.display = 'none'; return; }   // MK's choice: the gutter is INERT on a joined mirror (no local scrollback; never drives the host)
+  if (at && (at.kind === 'live' || (isSharedNow(at) && isAlt()))) { if (thumb) thumb.style.display = 'none'; return; }   // MK's choice: the gutter is INERT on a joined mirror (no local scrollback; never drives the host) — and on the host's own SHARED tab while a full-screen app runs (paging it would scroll every guest's mirror; the hidden thumb signals "no paging while live"). Normal-buffer scrollback stays draggable while sharing: it's xterm-local and emits nothing.
   if (thumb && thumb.style.display === 'none') thumb.style.display = '';
   const trackH = sc.clientHeight;
   if (trackH <= 0) { thumb.style.opacity = '0'; return; }
