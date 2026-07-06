@@ -668,8 +668,13 @@ function openLiveSocket(tabId) {
       default: break;   // workspaces / ws-sessions / ws-transcript / rtc: unused by the native joined tab
     }
   });
-  sock.on('close', () => {
+  sock.on('close', (code) => {
     r.ws = null; if (r.closed) return;
+    if (code === 4001) {   // superseded: this tab's resume token reconnected on a NEWER socket (another join of the same session) — that one owns the identity now; retrying would evict it back and flap between the two
+      r.closed = true; liveTabs.delete(tabId);
+      liveSend(tabId, 'live:state', { state: 'offline' });
+      return;
+    }
     // A close with NO hello this attempt = we were not admitted. If we were presenting a resume token (?r=), it's
     // probably stale (host restarted / revoked it) — after 2 such failures, DROP it so the next dial uses the link
     // token (?t=) and re-requests approval, instead of looping forever on a dead resume token.

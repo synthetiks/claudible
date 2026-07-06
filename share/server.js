@@ -207,6 +207,22 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     // Look up the returning guest's grace-window record FIRST — it's the SERVER's record of the exact name they
     // dropped under, and the roster identity below is resolved from it (not the client's ?n=).
     const back = (mode === 'resume' && resumeTok) ? pendingDrops.get(resumeTok) : null;
+    // SUPERSEDE: a resume presenting a token that a STILL-REGISTERED socket owns is the same guest coming back
+    // before the heartbeat noticed the old socket died (laptop sleep / WiFi blip — no FIN ever arrives, so
+    // drop() hasn't run and there's no grace record yet). That zombie was holding the guest's name, which used
+    // to force uniqueName below to mint "name (2)" for their own reconnect — the roster-ghost bug. Instead:
+    // adopt the zombie's name (the server's OWN record, never the raw ?n=), carry its voice membership over,
+    // and close it with 4001 so a genuinely-live duplicate (a copied tab) shows "continued elsewhere" instead
+    // of fighting back with retries. Its drop() then goes silent (_superseded) — no announce, no grace record.
+    let ghost = null, ghostVoice = false;
+    if (mode === 'resume' && resumeTok && !back) {
+      for (const c of clients) { if (c !== ws && c._resume === resumeTok) { ghost = c; break; } }
+      if (ghost) {
+        ghost._superseded = true;
+        if (voiceGuests.delete(ghost._pid)) ghostVoice = true;
+        try { ghost.close(4001, 'superseded'); } catch {}
+      }
+    }
     // A FRESH joiner gets a roster-unique name here — inside admit's single synchronous critical section, BEFORE
     // clients.add below, so no two joins racing through the approval queue can slip identical names past (and the
     // check never matches the joiner against itself). A RESUME returns to its RESERVED name (back.name), NOT the
@@ -214,8 +230,9 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     // name), and for a hostile guest it's attacker-controlled — trusting it would revert a suffixed guest to a
     // colliding name AND orphan its un-kickable "Guest (2)" roster entry. hello.you (below) echoes the name back.
     if (mode === 'link') name = uniqueName(name, nameTaken);
+    else if (ghost) name = ghost._name;        // reclaiming their own zombie's identity — exact same roster key, no "(2)"
     else if (back && back.name) name = back.name;
-    else name = uniqueName(name, nameTaken);   // resume with NO grace record (multi-tab / token reuse) → still keep the roster unique rather than trusting the raw ?n=
+    else name = uniqueName(name, nameTaken);   // resume with NO grace record and NO superseded socket → still keep the roster unique rather than trusting the raw ?n=
     ws._name = name;
     if (mode === 'link') { const tok = newToken(); resumeTokens.set(tok, ws._ip || ''); ws._resume = tok; }
     else {
@@ -232,9 +249,10 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     ws._pid = 'g' + (++pidSeq); byPid.set(ws._pid, ws);   // stable peer-id for voice signaling
     // Returning from a transient drop within the grace window → cancel the pending "left" and restore voice.
     if (back) { clearTimeout(back.timer); pendingDrops.delete(resumeTok); if (back.wasVoice) voiceGuests.add(ws._pid); }
+    if (ghostVoice) voiceGuests.add(ws._pid);              // superseded socket was in voice → the successor stays in
     ws._presence = 'active'; roster.set(name, 'active');
     notifyGuests(); notifyRoster();
-    if (back && back.wasVoice) broadcastVoice();           // re-list them as a voice member under the new pid
+    if ((back && back.wasVoice) || ghostVoice) broadcastVoice();   // re-list them as a voice member under the new pid
     try {
       ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused, pid: ws._pid, voice: voiceMembers() }));
       // Never replay status/scrollback/history while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
@@ -301,6 +319,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       byPid.delete(ws._pid);
       const wasVoice = voiceGuests.delete(ws._pid);
       notifyGuests();
+      if (ws._superseded) return;   // identity already transferred to the successor socket (see SUPERSEDE above) — no announce, no grace record, and the roster entry now belongs to the successor
       const tok = ws._resume, who = ws._name;
       if (tok && !ws._kicked) {
         // Don't cry "left" the instant the socket closes — a backgrounded tab / locked phone reconnects with this

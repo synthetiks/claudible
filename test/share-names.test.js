@@ -100,12 +100,16 @@ function joinAndHello(port, cred) {
     eq('resume restores the RESERVED suffixed name, not the stale ?n=', b2.you, 'Guest (2)');
     ok('guest A is unaffected by B reconnecting', a.you === 'Guest');
 
-    // A resume with a valid token but NO grace record (a 2nd socket reusing a still-live token, e.g. a duplicated
-    // tab) must NOT trust the raw ?n= — it still gets uniquified so it can't collide with the tab holding the name.
-    const a3 = await joinAndHello(port, `r=${encodeURIComponent(a.resume)}&n=Guest`);   // A never dropped → no pendingDrop
-    ok('resume without a grace record is still uniquified (not the raw ?n=)', a3.you !== 'Guest' && /^Guest \(\d+\)$/.test(a3.you));
+    // A resume with a valid token but NO grace record, while a socket holding that SAME token is still registered:
+    // that's the same guest coming back before the heartbeat reaped their silently-dead socket (laptop sleep — the
+    // "mk (2)" roster-ghost bug). The old socket is SUPERSEDED (closed 4001, silent drop) and the newcomer reclaims
+    // the exact name — which still comes from the SERVER's record (ghost._name), never the raw ?n= (spoof-proof).
+    const aClosed = new Promise((res) => a.ws.on('close', (code) => res(code)));
+    const a3 = await joinAndHello(port, `r=${encodeURIComponent(a.resume)}&n=SPOOF`);   // A never dropped → no pendingDrop; hostile ?n= must be ignored
+    eq('resume over a zombie socket reclaims the SAME name (no "(2)" ghost)', a3.you, 'Guest');
+    eq('the superseded socket is closed with 4001 (so a live duplicate stands down instead of flapping)', await aClosed, 4001);
 
-    try { a.ws.close(); c.ws.close(); b2.ws.close(); a3.ws.close(); } catch {}
+    try { c.ws.close(); b2.ws.close(); a3.ws.close(); } catch {}
   } catch (e) {
     fail++; console.error('  FAIL integration threw: ' + (e && e.message));
   } finally {

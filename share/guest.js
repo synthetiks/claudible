@@ -554,7 +554,12 @@ function connect() {
       term.write(new Uint8Array(ev.data));   // raw terminal output
     }
   };
-  ws.onclose = function () {
+  ws.onclose = function (ev) {
+    if (ev && ev.code === 4001) {                        // superseded: our own resume token reconnected on another socket (new tab / woken device) — that one owns the identity now; retrying from here would just evict it back and flap
+      setStatus('continued elsewhere', 'bad');
+      showOverlay(true, 'Session continued elsewhere', 'You reconnected from another tab or device, so this view stepped aside. Close it — or reload here to take over again.', true);
+      return;
+    }
     if (denied) return;                                  // host rejected → do not hammer them with retries
     if (gotHello) { reconnect('reconnecting…'); return; }        // we were in; transient drop → resume
     if (!opened && !resume) {                            // upgrade refused on the LINK → it's used/invalid
