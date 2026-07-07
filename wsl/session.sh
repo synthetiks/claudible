@@ -38,6 +38,18 @@ CONTEXT="$RT/context.json"   # app→Claude identity/live-state (main writes it;
 # tab's output to its own files based on that tab's Claude process env (env inheritance is verified).
 export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS" CLAUDIBLE_CONTEXT="$CONTEXT"
 
+# SPACEBAR / "can't type into a resumed session" fix. Claude Code 2.1.x (gate tengu_gleaming_fair) shows a
+# BLOCKING "resume from summary?" selection modal when you resume a session older than
+# CLAUDE_CODE_RESUME_THRESHOLD_MINUTES (default 70) AND above CLAUDE_CODE_RESUME_TOKEN_THRESHOLD (default
+# 100k). That modal is a 1/2/3 list that SWALLOWS every ordinary keystroke — space included — until you
+# arrow/number+Enter or Esc. In the embedded terminal a user just sees "I open a big/old session and my
+# typing (spaces) does nothing", while a brand-new session (0 tokens/0 age → no modal) types fine. Co-workers
+# who reopen large shared sessions hit it constantly. Claudible already keeps full context by choice
+# (autoCompactEnabled:false), so we push both thresholds out of reach → resumed sessions land straight in the
+# composer, exactly like a new one. Respect an explicit user override if one is already set.
+export CLAUDE_CODE_RESUME_THRESHOLD_MINUTES="${CLAUDE_CODE_RESUME_THRESHOLD_MINUTES:-2000000000}"
+export CLAUDE_CODE_RESUME_TOKEN_THRESHOLD="${CLAUDE_CODE_RESUME_TOKEN_THRESHOLD:-2000000000}"
+
 mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
 # Our pid + kernel start-time, so killtree.sh can reap this generation's whole tree (ConPTY kills never reach
 # the WSL side). Start-time (field 22 of /proc/self/stat; field 20 after stripping "pid (comm) ") makes the

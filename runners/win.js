@@ -314,6 +314,22 @@ function detectDeps() {
   });
 }
 
+// The env for a spawned claude.exe — a PURE function (exported) so the spacebar guard can never be silently
+// dropped by a refactor. SPACEBAR / "can't type into a resumed session" fix (parity with wsl/session.sh):
+// Claude Code 2.1.x shows a BLOCKING "resume from summary?" 1/2/3 modal when resuming a session past
+// CLAUDE_CODE_RESUME_THRESHOLD_MINUTES (default 70) AND CLAUDE_CODE_RESUME_TOKEN_THRESHOLD (default 100k).
+// That modal swallows every ordinary keystroke — space included — so a big/old resumed session looks like
+// "typing does nothing", while a new one works. Claudible already keeps full context (autoCompactEnabled:false),
+// so push both thresholds out of reach → resumed sessions open straight into the composer. Layering: our
+// defaults first, then base (real env) OVERRIDES them so an explicit user setting wins, then CLAUDIBLE_TAB is
+// always this tab's runtime id.
+function spawnEnv(runtimeId, base) {
+  return Object.assign({
+    CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '2000000000',
+    CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '2000000000',
+  }, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
+}
+
 // 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
 // the Windows claude with WINDOWS-path args. ConPTY hosts a native console app fine (it hosts cmd/pwsh).
 function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
@@ -338,7 +354,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const isCmd = /\.cmd$|\.bat$/i.test(claude) || claude === 'claude';
   const file = isCmd ? (process.env.COMSPEC || 'cmd.exe') : claude;
   const args = isCmd ? ['/c', claude, ...argv] : argv;
-  const env = Object.assign({}, process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
+  const env = spawnEnv(runtimeId);
   const proc = pty.mod.spawn(file, args, { name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: sdir, env });
   // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —
   // main injects the same line into the terminal when it sees this flag). Never weakens the guard: argv above
@@ -400,5 +416,5 @@ module.exports = {
   startVoiceServices, voiceHealth,
   installHooks, setup,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT },
 };

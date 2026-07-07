@@ -91,6 +91,22 @@ eq('contextPath → UserPromptSubmit has telemetry + context (2 hooks)', sc.hook
 eq('contextPath → telemetry hook still first', sc.hooks.UserPromptSubmit[0].hooks[0].command, s.hooks.Stop[0].hooks[0].command);
 ok('contextPath settings still valid JSON', (() => { try { JSON.parse(JSON.stringify(sc)); return true; } catch { return false; } })());
 
+// ---- spawnEnv (the SPACEBAR fix: suppress Claude's blocking "resume from summary?" modal that swallows
+//      every keystroke — space included — on big/old resumed sessions; parity with wsl/session.sh) ----
+const { spawnEnv } = win._internals;
+const be = { PATH: '/x', HOME: 'C:\\Users\\X' };   // a fixed base env so the assertions don't depend on process.env
+const e1 = spawnEnv('tab-7', be);
+eq('spawnEnv sets the resume MINUTES threshold out of reach', e1.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES, '2000000000');
+eq('spawnEnv sets the resume TOKEN threshold out of reach', e1.CLAUDE_CODE_RESUME_TOKEN_THRESHOLD, '2000000000');
+ok('spawnEnv thresholds parse to a real number far past any real session (~3805 yrs / 2B tok)',
+  Number(e1.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES) > 1e9 && Number(e1.CLAUDE_CODE_RESUME_TOKEN_THRESHOLD) > 1e9);
+eq('spawnEnv still passes the base env through', e1.PATH, '/x');
+eq('spawnEnv always stamps this tab’s CLAUDIBLE_TAB', e1.CLAUDIBLE_TAB, 'tab-7');
+eq('spawnEnv missing runtimeId -> default tab', spawnEnv('', be).CLAUDIBLE_TAB, 'default');
+// an explicit user override in the real env WINS (we only supply a default) — never fight a deliberate setting
+eq('spawnEnv honors a user override of the threshold',
+  spawnEnv('t', { CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '5' }).CLAUDE_CODE_RESUME_THRESHOLD_MINUTES, '5');
+
 // ---- dependency detection (buildDepReport — the self-bootstrap provisioner's pure core) ----
 const { buildDepReport, semverGte, pickRunnable } = win._internals;
 

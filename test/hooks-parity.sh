@@ -80,6 +80,16 @@ hk_case "agent event"  '{"hook_event_name":"PostToolUse","tool_name":"Agent","to
 hk_case "trailing nl"  '{"hook_event_name":"UserPromptSubmit"}
 '
 
+echo "== spacebar fix: resume-threshold parity (session.sh export ⇄ win.js spawnEnv) =="
+# Both launch paths MUST push Claude Code's "resume from summary?" thresholds out of reach — that modal
+# swallows every keystroke (space included) on a big/old resumed session. session.sh exports the vars
+# (covers WSL + posix); win.js injects them for the Windows-native spawn. Guard the SOURCE of both so a
+# refactor can't silently drop one and quietly bring the spacebar bug back.
+for v in CLAUDE_CODE_RESUME_THRESHOLD_MINUTES CLAUDE_CODE_RESUME_TOKEN_THRESHOLD; do
+  if grep -q "export $v=" "$ROOT/wsl/session.sh"; then echo "  ok   [resume-guard] session.sh exports $v"; else echo "  FAIL [resume-guard] session.sh missing export of $v"; fail=1; fi
+  if grep -q "$v" "$ROOT/runners/win.js"; then echo "  ok   [resume-guard] win.js sets $v"; else echo "  FAIL [resume-guard] win.js missing $v"; fail=1; fi
+done
+
 echo
 [ "$fail" = 0 ] && echo "hooks-parity: ALL PASS" || echo "hooks-parity: FAILURES ABOVE"
 exit "$fail"
