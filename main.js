@@ -629,7 +629,7 @@ function openLiveSocket(tabId) {
   const r = liveTabs.get(tabId); if (!r || r.closed) return;
   const cred = r.resume ? ('r=' + encodeURIComponent(r.resume)) : ('t=' + encodeURIComponent(r.token));
   const wsUrl = r.url.replace(/^http/i, 'ws') + '/?' + cred + (r.name ? '&n=' + encodeURIComponent(r.name) : '');
-  let sock; try { sock = new LiveSocket(wsUrl); } catch (err) { return liveSend(tabId, 'live:state', { state: 'offline' }); }
+  let sock; try { sock = new LiveSocket(wsUrl, { maxPayload: 512 * 1024 }); } catch (err) { return liveSend(tabId, 'live:state', { state: 'offline' }); }   // cap incoming frames: a hostile advertised session could otherwise flood ~100MB frames (ws default) and freeze the joiner's whole app
   r.ws = sock; sock.binaryType = 'nodebuffer';
   let gotHello = false;
   sock.on('open', () => { r.retry = 0; liveSend(tabId, 'live:state', { state: 'connecting' }); });
@@ -1736,14 +1736,15 @@ ipcMain.handle('diff:list', (e, { wsId } = {}) => new Promise((resolve) => {
 // Reverse-apply a hunk/file patch, or discard an untracked file. The patch text / target path is written to
 // an APP-controlled temp file and only its path is passed to bash (never the repo data) — no injection.
 let diffActionSeq = 0;
-function diffAction(mode, payload) {
+function diffAction(mode, payload, wsId) {
   return new Promise((resolve) => {
     try {
       if (!APPDIR_WSL || typeof payload !== 'string' || !payload) return resolve({ ok: false, error: 'bad args' });
+      const ws = (wsId && _wsById(wsId)) || activeWorkspace;   // mutate the CARD's project, not whatever's active — Project History can review any repo (mirrors diff:list + checkpoint:revert). Falls back to active for a legacy call with no wsId.
       const name = `diffaction-${process.pid}-${++diffActionSeq}.tmp`;   // unique per action → concurrent revert/discard never read each other's payload (M1)
       const tmp = path.join(RT, name);
       fs.writeFileSync(tmp, payload, 'utf8');
-      runner.runScript('diff-apply.sh', `${mode} '${RT_GUEST}/${name}'`, { ws: activeWorkspace, timeout: 20000 }).then(({ err, stdout }) => {
+      runner.runScript('diff-apply.sh', `${mode} '${RT_GUEST}/${name}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
           try { fs.unlinkSync(tmp); } catch {}   // clean up the temp patch file
           let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
           resolve(r);
@@ -1751,8 +1752,9 @@ function diffAction(mode, payload) {
     } catch (err) { console.error('[claudible] diffAction:', err && err.message); resolve({ ok: false, error: 'apply' }); }
   });
 }
-ipcMain.handle('diff:revert', (e, patch) => diffAction('apply-reverse', patch));
-ipcMain.handle('diff:discard', (e, relPath) => diffAction('discard', relPath));
+// Payload is {patch|relPath, wsId}; tolerate a bare string (a not-yet-reloaded renderer) → falls back to active ws.
+ipcMain.handle('diff:revert', (e, a) => diffAction('apply-reverse', typeof a === 'string' ? a : (a && a.patch), a && a.wsId));
+ipcMain.handle('diff:discard', (e, a) => diffAction('discard', typeof a === 'string' ? a : (a && a.relPath), a && a.wsId));
 
 // ---- Session history: the append-only activity log behind the Repo Review feed + revert ----
 // Gated on the sessionHistory setting (default ON since 61edcf1). The MAIN process stamps id/seq/author/machine

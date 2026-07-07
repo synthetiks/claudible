@@ -42,8 +42,8 @@ contextBridge.exposeInMainWorld('claudible', {
   claudeState: () => ipcRenderer.invoke('claude:state'),           // cheap claude-only {installed,signedIn} for the dot/popup
   // diff review (what Claude changed in the workspace's git repo)
   diffList: (wsId) => ipcRenderer.invoke('diff:list', { wsId }),
-  diffRevert: (patch) => ipcRenderer.invoke('diff:revert', patch),
-  diffDiscard: (relPath) => ipcRenderer.invoke('diff:discard', relPath),
+  diffRevert: (patch, wsId) => ipcRenderer.invoke('diff:revert', { patch, wsId }),      // wsId = the project whose card this button lives on (Project History reviews many at once) — main must mutate THAT repo, not whatever's active
+  diffDiscard: (relPath, wsId) => ipcRenderer.invoke('diff:discard', { relPath, wsId }),
   // session history (the append-only activity log behind the Repo Review feed + revert; gated by the sessionHistory setting)
   historyAppend: (prompt, session, wsId, tabId) => ipcRenderer.invoke('history:append', { prompt, session, wsId, tabId }),   // renderer sends the raw prompt + submitting tab's workspace + tabId; main stamps id/seq/author/machine and attributes co-drive by tabId
   historyLoad: (wsId) => ipcRenderer.invoke('history:load', { wsId }),

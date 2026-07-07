@@ -2144,11 +2144,11 @@ async function loadDiffInto(targetWsId, body, opts) {
   if (files.length || untracked.length) {
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'uncommitted — in the working tree';
     body.appendChild(lbl);
-    files.forEach((f) => body.appendChild(renderDiffFile(f, false)));
+    files.forEach((f) => body.appendChild(renderDiffFile(f, false, targetWsId)));
     if (untracked.length) {
       const ul = document.createElement('div'); ul.className = 'diff-sec-lbl'; ul.textContent = 'new files (untracked)';
       body.appendChild(ul);
-      untracked.forEach((p) => body.appendChild(renderUntracked(p)));
+      untracked.forEach((p) => body.appendChild(renderUntracked(p, targetWsId)));
     }
   }
   if (committed.length) {                                              // work Claude already committed — visible, review-only
@@ -2156,7 +2156,7 @@ async function loadDiffInto(targetWsId, body, opts) {
     lbl.textContent = 'recent · this week' + (commits.length ? ' · ' + commits.length + ' commit' + (commits.length > 1 ? 's' : '') : '') + ' · review only';
     body.appendChild(lbl);
     if (commits.length) body.appendChild(renderCommitList(commits));
-    committed.forEach((f) => body.appendChild(renderDiffFile(f, true)));
+    committed.forEach((f) => body.appendChild(renderDiffFile(f, true, targetWsId)));
   }
 }
 function renderCommitList(commits) {
@@ -2170,8 +2170,8 @@ function renderCommitList(commits) {
   });
   return box;
 }
-async function doDiffRevert(patch, btn, label) {
-  if (wsBusy(activeWsId)) {   // reverting a hunk/file while Claude edits the same worktree races its writes — confirm first
+async function doDiffRevert(patch, btn, label, wsId) {
+  if (wsBusy(wsId || activeWsId)) {   // reverting a hunk/file while Claude edits the SAME project's worktree races its writes — confirm first (guard the CARD's project, not whatever's active)
     const go = await modalChoice({
       title: 'Claude is still working',
       body: 'Reverting these changes now can clobber Claude’s in-flight edits in this project. It’s safest to wait for the turn to finish. Revert anyway?',
@@ -2180,11 +2180,11 @@ async function doDiffRevert(patch, btn, label) {
     if (go !== 'go') return;
   }
   btn.disabled = true;
-  let r = null; try { r = await claudible.diffRevert(patch); } catch {}
+  let r = null; try { r = await claudible.diffRevert(patch, wsId); } catch {}
   if (r && r.ok) { toast(label || 'Reverted'); refreshDiff(); }
   else { btn.disabled = false; toast('Revert failed' + (r && r.error ? ': ' + humanError(r.error) : '')); }
 }
-function renderDiffFile(f, readOnly) {
+function renderDiffFile(f, readOnly, wsId) {
   const card = document.createElement('div'); card.className = 'diff-file' + (readOnly ? ' committed' : '');
   const head = document.createElement('div'); head.className = 'diff-file-head';
   const nm = document.createElement('span'); nm.className = 'diff-path'; nm.textContent = f.path; nm.title = f.path;
@@ -2196,7 +2196,7 @@ function renderDiffFile(f, readOnly) {
   if (!readOnly && !f.binary && f.filePatch) {
     const rb = document.createElement('button'); rb.className = 'diff-revert-file'; rb.textContent = 'Revert file';
     rb.title = 'Undo all of Claude’s changes to this file';
-    rb.addEventListener('click', () => doDiffRevert(f.filePatch, rb, 'Reverted ' + f.path));
+    rb.addEventListener('click', () => doDiffRevert(f.filePatch, rb, 'Reverted ' + f.path, wsId));
     head.appendChild(rb);
   }
   card.appendChild(head);
@@ -2209,7 +2209,7 @@ function renderDiffFile(f, readOnly) {
     if (!readOnly) {
       const rv = document.createElement('button'); rv.className = 'diff-revert-hunk'; rv.textContent = 'Revert';
       rv.title = 'Undo just this hunk';
-      rv.addEventListener('click', () => doDiffRevert(h.patch, rv, 'Reverted hunk'));
+      rv.addEventListener('click', () => doDiffRevert(h.patch, rv, 'Reverted hunk', wsId));
       hh.appendChild(rv);
     }
     hk.appendChild(hh);
@@ -2224,14 +2224,14 @@ function renderDiffFile(f, readOnly) {
   });
   return card;
 }
-function renderUntracked(p) {
+function renderUntracked(p, wsId) {
   const row = document.createElement('div'); row.className = 'diff-file';
   const head = document.createElement('div'); head.className = 'diff-file-head';
   const nm = document.createElement('span'); nm.className = 'diff-path'; nm.textContent = p; nm.title = p;
   const tag = document.createElement('span'); tag.className = 'diff-counts'; const t = document.createElement('i'); t.className = 'add'; t.textContent = 'new'; tag.appendChild(t);
   const db = document.createElement('button'); db.className = 'diff-revert-file'; db.textContent = 'Discard'; db.title = 'Delete this new file';
   db.addEventListener('click', async () => {
-    db.disabled = true; let r = null; try { r = await claudible.diffDiscard(p); } catch {}
+    db.disabled = true; let r = null; try { r = await claudible.diffDiscard(p, wsId); } catch {}
     if (r && r.ok) { toast('Discarded ' + p); refreshDiff(); } else { db.disabled = false; toast('Discard failed' + (r && r.error ? ': ' + humanError(r.error) : '')); }
   });
   head.appendChild(nm); head.appendChild(tag); head.appendChild(db); row.appendChild(head); return row;

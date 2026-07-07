@@ -36,6 +36,8 @@ const GUEST_HTML = path.join(__dirname, 'guest.html');
 const RING_CAP = 256 * 1024;
 const APPROVAL_TIMEOUT = 90000;
 const MAX_GUESTS = 8;            // cap concurrent viewers (the host typically invites a few)
+const MAX_PENDING = 16;          // cap UNAPPROVED sockets in the lobby: MAX_GUESTS only bounds ADMITTED clients, so without this a link holder could open unlimited pending sockets (connection amplification) — each held for the full APPROVAL_TIMEOUT
+const MAX_WS_PAYLOAD = 512 * 1024;   // hard per-frame cap on the guest-facing server AND the live-join client. ws defaults to 100 MiB, reassembled BEFORE app code runs — an unapproved link holder (or a hostile advertised session) could flood ~100MB frames and block/OOM the whole Electron main loop. 512KB clears the largest legit frame (audio ≤128KB, chat 2000 chars, keystrokes tiny) with headroom.
 const MAX_AUDIO_B64 = 128 * 1024;   // reject an oversized relayed voice frame. Real frames are ~40ms blocks (a few KB base64; ~44KB at the 16384-sample ceiling), so 128KB is generous headroom while bounding a hostile/oversized frame on the internet-facing relay
 const NAME_MAX = 40;
 const newToken = () => crypto.randomBytes(16).toString('hex');
@@ -372,6 +374,11 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       return;
     }
     if (!requireApproval) return admit(ws, 'link', name);
+    if (pending.size >= MAX_PENDING) {   // lobby full of unapproved sockets → refuse rather than let an attacker hold unlimited pending slots
+      try { ws.send(JSON.stringify({ type: 'denied', reason: 'busy' })); } catch {}
+      try { ws.close(); } catch {}
+      return;
+    }
     const id = String(++pendingSeq);
     try { ws.send(JSON.stringify({ type: 'pending' })); } catch {}
     const finish = (ok) => {
@@ -406,7 +413,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       res.writeHead(404); res.end('not found');
     });
     const { WebSocketServer } = require('ws');   // lazy: only when a share actually starts (keeps the module loadable without node_modules — see top-of-file note)
-    wss = new WebSocketServer({ noServer: true });
+    wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });   // bound every incoming frame — the default 100 MiB is a main-loop-freeze DoS on an internet-facing socket
     server.on('upgrade', (req, socket, head) => {
       const mode = wsAuth(req.url);
       if (!mode) { socket.destroy(); return; }
