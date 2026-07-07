@@ -49,7 +49,7 @@ if ! listening "$KOKORO_PORT"; then
       env MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 USE_GPU=false USE_ONNX=false \
         PYTHONPATH="$VOICE/kokoro:$VOICE/kokoro/api" $ESPEAK_ENV \
         nohup uv run --no-sync uvicorn api.src.main:app --host "${CLAUDIBLE_BIND_HOST:-0.0.0.0}" --port "$KOKORO_PORT" \
-        >"$LOG/kokoro.out" 2>&1 & )
+        >"$LOG/kokoro.out" 2>&1 </dev/null & )   # </dev/null: an inherited console stdin keeps wsl.exe alive after this script exits — the Windows launcher would hang forever on the very first boot (daemon holds the pseudo-console)
     if wait_listen "$KOKORO_PORT" 90; then echo "[claudible] kokoro up :$KOKORO_PORT"; else echo "[claudible] kokoro not up yet (still loading the model?) — check $LOG/kokoro.out"; fi
   else echo "[claudible] kokoro not installed at $VOICE/kokoro — run: npm run setup"; fi
 else echo "[claudible] kokoro already up :$KOKORO_PORT"; fi
@@ -70,7 +70,7 @@ if ! listening "$WHISPER_PORT"; then
     ( cd "$VOICE/whisper" && \
       nohup "$WHISPER_BIN" --host "${CLAUDIBLE_BIND_HOST:-0.0.0.0}" --port "$WHISPER_PORT" -m models/ggml-base.bin \
         --inference-path /v1/audio/transcriptions --convert \
-        >"$LOG/whisper.out" 2>&1 & )
+        >"$LOG/whisper.out" 2>&1 </dev/null & )   # </dev/null: same console-detach as kokoro above
     if wait_listen "$WHISPER_PORT" 20; then echo "[claudible] whisper up :$WHISPER_PORT"; else echo "[claudible] whisper FAILED to bind — see $LOG/whisper.out"; fi
   else echo "[claudible] whisper not installed at $VOICE/whisper — run setup."; fi
 else echo "[claudible] whisper already up :$WHISPER_PORT"; fi
