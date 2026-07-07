@@ -193,12 +193,7 @@
     .vm.speaking{color:var(--ink);border-color:var(--ok)}
     .vm.speaking .vmdot{background:#5fb487;box-shadow:0 0 8px 0 #5fb487}
     .vm.self{border-color:rgba(255,255,255,.22)}
-    /* per-peer WebRTC connection state (diagnostic): amber=connecting, green=connected, red=failed */
-    .vm.c-connecting,.vm.c-new,.vm.c-checking{border-color:rgba(224,169,59,.5);color:var(--amber)}
-    .vm.c-connecting .vmdot,.vm.c-new .vmdot,.vm.c-checking .vmdot{background:var(--amber)}
-    .vm.c-connected .vmdot{background:var(--ok)}
-    .vm.c-failed,.vm.c-disconnected,.vm.c-closed{border-color:rgba(229,86,75,.6);color:var(--live)}
-    .vm.c-failed .vmdot,.vm.c-disconnected .vmdot,.vm.c-closed .vmdot{background:var(--live)}
+    .vm.c-connected .vmdot{background:var(--ok)}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
     /* read-only browse panel: workspaces → sessions → transcript, all without touching the live terminal */
     .browse{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg);z-index:8}
     .browse.show{display:flex}

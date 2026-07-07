@@ -30,11 +30,22 @@ case "$dep" in
   gh)          have gh && ok;   pkg gh         || err "could not install gh (see https://cli.github.com)"; have gh && ok || err "gh still missing" ;;
   cloudflared)
     have cloudflared && ok
-    pkg cloudflared && { have cloudflared && ok; }   # apt on stock WSL usually lacks cloudflared → fall back to Cloudflare's official static binary
+    pkg cloudflared && { have cloudflared && ok; }   # brew (macOS) / apt (rare on stock WSL) → else fall back to Cloudflare's official release below
     arch="$(uname -m)"; case "$arch" in x86_64|amd64) a=amd64 ;; aarch64|arm64) a=arm64 ;; armv7l) a=arm ;; *) a=amd64 ;; esac
-    tmp="$(mktemp)"
-    if curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$a" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-      chmod +x "$tmp"; sudo mv "$tmp" /usr/local/bin/cloudflared 2>/dev/null || { mkdir -p "$HOME/.local/bin"; mv "$tmp" "$HOME/.local/bin/cloudflared"; }
+    if [ "$(uname -s)" = "Darwin" ]; then
+      # macOS ships a .tgz, NOT a bare binary — downloading cloudflared-linux here would drop a Linux ELF that
+      # `have` still finds on PATH (so `ok` would falsely report success while `cloudflared` never runs). Pull the
+      # darwin tarball and extract its binary instead.
+      tgz="$(mktemp)"; ex="$(mktemp -d)"
+      if curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-$a.tgz" -o "$tgz" 2>/dev/null && [ -s "$tgz" ] && tar -xzf "$tgz" -C "$ex" 2>/dev/null && [ -f "$ex/cloudflared" ]; then
+        chmod +x "$ex/cloudflared"; sudo mv "$ex/cloudflared" /usr/local/bin/cloudflared 2>/dev/null || { mkdir -p "$HOME/.local/bin"; mv "$ex/cloudflared" "$HOME/.local/bin/cloudflared"; }
+      fi
+      rm -f "$tgz" 2>/dev/null; rm -rf "$ex" 2>/dev/null
+    else
+      tmp="$(mktemp)"
+      if curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$a" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+        chmod +x "$tmp"; sudo mv "$tmp" /usr/local/bin/cloudflared 2>/dev/null || { mkdir -p "$HOME/.local/bin"; mv "$tmp" "$HOME/.local/bin/cloudflared"; }
+      fi
     fi
     have cloudflared && ok || err "could not install cloudflared (https://developers.cloudflare.com/cloudflared/)"
     ;;

@@ -1842,11 +1842,17 @@ function _snapshotOnStop(tabId) {
     if (!_histEnabled()) return;                                     // feature off → never touch the repo
     const rec = ptys.get(tabId); const ws = rec && rec.ws;
     if (!ws || !ws.id || (ws.kind && ws.kind !== 'repo')) return;    // only repo workspaces have git to snapshot
-    // The entry this turn belongs to = the NEWEST entry at Stop-fire time, captured SYNCHRONOUSLY: if the user
-    // submits the next prompt before the async snapshot lands, a new entry appends after this — stamping "what
-    // changed" by id keeps the stats on the turn that actually made them.
+    // The entry this turn belongs to, captured SYNCHRONOUSLY at Stop-fire time. Match on THIS tab's session,
+    // newest-first — two tabs in one repo workspace share the ws's single history log, so blindly taking the
+    // last row would stamp tab A's "N files (+x/-y)" onto tab B's just-appended entry (audit finding). A
+    // brand-new session (no id yet) has no match → fall back to the newest row (single-session case, unchanged).
     let turnEntry = null;
-    try { const log = _histStore.load(fs, _histFile(ws.id)); turnEntry = log.length ? log[log.length - 1] : null; } catch {}
+    try {
+      const log = _histStore.load(fs, _histFile(ws.id));
+      const sess = rec && rec.session ? String(rec.session) : '';
+      if (sess) { for (let i = log.length - 1; i >= 0; i--) { if (String(log[i].session || '') === sess) { turnEntry = log[i]; break; } } }
+      if (!turnEntry) turnEntry = log.length ? log[log.length - 1] : null;
+    } catch {}
     // Invalidate the pending ref SYNCHRONOUSLY, before the async snapshot runs. history:append reads _pendingCkpt at
     // the NEXT UserPromptSubmit; if the user fires that before this snapshot resolves, they now get NO checkpoint
     // (null → no Revert button) instead of the PREVIOUS turn's ref — which would silently over-revert past a whole

@@ -736,12 +736,7 @@
     .hvm .d{width:6px;height:6px;border-radius:50%;background:#3a3f47;transition:.12s}
     .hvm.speaking{color:var(--ink);border-color:#5fb487}
     .hvm.speaking .d{background:#5fb487;box-shadow:0 0 7px 0 #5fb487}
-    /* per-peer WebRTC state (diagnostic) */
-    .hvm.c-connecting,.hvm.c-new,.hvm.c-checking{border-color:rgba(224,169,59,.5);color:#e0a93b}
-    .hvm.c-connecting .d,.hvm.c-new .d,.hvm.c-checking .d{background:#e0a93b}
-    .hvm.c-connected .d{background:#5fb487}
-    .hvm.c-failed,.hvm.c-disconnected,.hvm.c-closed{border-color:rgba(229,86,75,.6);color:#e5564b}
-    .hvm.c-failed .d,.hvm.c-disconnected .d,.hvm.c-closed .d{background:#e5564b}
+    .hvm.c-connected .d{background:#5fb487}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
     .share-btn{width:100%}
     .share-reset{width:100%;padding:7px;font-size:10.5px;letter-spacing:.04em;color:var(--ink-dim);
       background:none;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:color .15s,border-color .15s}
@@ -824,8 +819,6 @@
     .ph-body{padding:0 14px 8px}
     .ph-diff{display:flex;flex-direction:column;gap:8px}   /* the COMMIT HISTORY .ph-sec line above it is the divider */
     .ph-empty{color:var(--ink-faint);font-size:11px;padding:6px 2px}
-    .hf-lbl{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}   /* size + brightness matched to the 'repo review' drawer title */
-    .hf-lbl svg{width:13px;height:13px;opacity:.85;flex:none}
     .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
     .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:10.5px;line-height:1.4;padding-right:42px}   /* Name / Time / User on one line; right pad clears the hover expand + copy buttons */
     .hf-pair{white-space:nowrap}
