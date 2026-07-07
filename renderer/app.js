@@ -1607,7 +1607,7 @@ async function doStartSharing() {
   shareOut.className = 'out live';
 }
 $('name-start').addEventListener('click', doStartSharing);
-$('host-name-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doStartSharing(); } });
+$('host-name-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doStartSharing(); } else if (e.key === 'Escape') { e.preventDefault(); $('namemodal').classList.remove('show'); } });   // Esc cancels, matching ws-modal/invite-modal
 $('name-cancel').addEventListener('click', () => $('namemodal').classList.remove('show'));
 // click the link to copy it (clipboard handled in main, so it works regardless of web perms)
 shareLink.addEventListener('click', () => {
@@ -3907,6 +3907,8 @@ function selectWsKind(kind) {
   wsChoiceKind = kind;
   $('ch-local').classList.toggle('sel', kind === 'local');
   $('ch-repo').classList.toggle('sel', kind === 'repo');
+  $('ch-local').setAttribute('aria-checked', kind === 'local' ? 'true' : 'false');   // keep the radio state screen-reader-truthful
+  $('ch-repo').setAttribute('aria-checked', kind === 'repo' ? 'true' : 'false');
   const pr = $('ws-pick-row'); if (pr) pr.style.display = (kind === 'local') ? '' : 'none';   // custom folder is local-only
 }
 function openWsModal() {
@@ -3945,6 +3947,12 @@ async function createWorkspace() {
 $('ws-add').addEventListener('click', openWsModal);
 $('ch-local').addEventListener('click', () => selectWsKind('local'));
 $('ch-repo').addEventListener('click', () => selectWsKind('repo'));
+// keyboard access for the radio-style picker: Enter/Space selects; ←/→ move between the two (standard radiogroup keys)
+['ch-local', 'ch-repo'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectWsKind($(id).dataset.kind); }
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); selectWsKind('repo'); $('ch-repo').focus(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); selectWsKind('local'); $('ch-local').focus(); }
+}));
 $('ws-create').addEventListener('click', createWorkspace);
 $('ws-cancel').addEventListener('click', closeWsModal);
 $('ws-name-in').addEventListener('keydown', (e) => {
@@ -3955,6 +3963,7 @@ $('invite-go').addEventListener('click', doInvite);
 $('invite-cancel').addEventListener('click', closeInviteModal);
 $('sync-go').addEventListener('click', confirmSync);
 $('sync-cancel').addEventListener('click', closeSyncModal);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('sync-modal').classList.contains('show')) { e.preventDefault(); closeSyncModal(); } });   // Esc closes the sync modal, matching its siblings
 // live sync state from main → repaint the cloud button; refresh the switcher when sessions changed
 claudible.onSyncState((s) => {
   if (!s || !s.id) return;

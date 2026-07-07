@@ -1,16 +1,15 @@
-# Claudible launcher - bring up the local voice services in WSL, then open the cockpit.
+# Claudible launcher — open the cockpit. The app itself brings up the local voice services.
 $ErrorActionPreference = "SilentlyContinue"
 $app = Split-Path -Parent $PSScriptRoot           # repo root (this script lives in <repo>\launch)
-# forward slashes: single backslashes get stripped crossing into WSL, so a raw C:\... reaches wslpath mangled
-$appWsl = (wsl.exe wslpath -u ($app -replace '\\','/')).Trim()   # e.g. /mnt/c/Users/you/claudible
 
-# 1. kick the WSL voice services (Kokoro + Whisper) in the BACKGROUND — never gate the app on them.
-#    A synchronous wsl.exe call here used to hang the whole launcher on first boot: the freshly-spawned
-#    daemons held the WSL pseudo-console open, wsl.exe never returned, and the user stared at a dead
-#    PowerShell window until Ctrl+C. Fire-and-forget + the app's own voice health-poll = cockpit opens
-#    instantly, voice dots go green whenever the services finish warming up.
-Start-Process -FilePath "wsl.exe" -ArgumentList '-e','bash','-lc',"bash '$appWsl/wsl/services.sh' >/dev/null 2>&1" -WindowStyle Hidden
+# Voice services (Kokoro + Whisper) are NOT started here on purpose. main.js starts them on every launch
+# (did-finish-load -> runner.startVoiceServices -> wsl/services.sh), so a second launch-side invocation only
+# created a cold-boot RACE: both callers saw the port unbound and each spawned their own uvicorn/whisper,
+# doubling the ~327MB Kokoro/torch load mid-boot-storm (one dies on EADDRINUSE, the winner can miss its
+# readiness window). Letting the app be the single owner removes the race — and makes the old first-boot
+# PowerShell hang structurally impossible, since nothing blocking runs here at all. services.sh stays
+# idempotent + detaches its daemons (</dev/null) so the app's own async call never hangs either.
 
-# 2. launch the Electron cockpit (detached so it lives independently of this script)
+# Launch the Electron cockpit (detached so it lives independently of this script).
 Set-Location $app
 Start-Process -FilePath "cmd.exe" -ArgumentList '/c','npm','start' -WorkingDirectory $app -WindowStyle Hidden
