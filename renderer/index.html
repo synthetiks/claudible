@@ -260,8 +260,10 @@
     /* top tab strip retired — concurrent sessions now live in the left sidebar; kept hidden so old refs are harmless */
     .tabstrip{display:none;align-items:center;gap:6px;flex:none;height:32px;padding:0 2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
     .tabstrip::-webkit-scrollbar{height:0}
-    /* sidebar rows already open in a tab get a subtle left accent */
-    .sess.open-in-tab{border-left:2px solid var(--live)}
+    /* sidebar rows already open in a tab get a subtle left accent — NEUTRAL steel ("still open in the
+       background"), never var(--live): the red rail was the pre-redesign SELECTED look and reads as a stale
+       selection on a row you've switched away from. Red is reserved for .busy rows (rule further down). */
+    .sess.open-in-tab{border-left:2px solid var(--steel)}
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
@@ -535,13 +537,17 @@
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
     .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
-    /* live (unsaved) session rows: a blue dotted accent so they read as "running, not yet saved" */
-    .sess.sess-live{border-left-color:#6aa6e0}    /* live/unsaved → blue left accent bar (was a dashed card border) */
-    .sess.sess-live .sess-meta{color:#6aa6e0}
+    /* draft (unsaved) session rows: an amber accent so they read as "not yet saved" — deliberately NOT the
+       word/blue of anything "live": LIVE is the collab-share state (green, .sess-live-row family) and this
+       indicator masquerading as "live" made brand-new sessions look shared for their first turn */
+    .sess.sess-draft{border-left-color:var(--warn)}    /* draft/unsaved → amber left accent bar */
+    .sess.sess-draft .sess-meta{color:var(--warn)}
     .sess-livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#6aa6e0;
       margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px #6aa6e0}
-    .sess.busy .sess-livedot{animation:ws-sync-pulse 1s ease-in-out infinite}
-    .sess.busy.open-in-tab,.sess.busy.sess-live{border-left-color:var(--live)}
+    .sess-draftdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);
+      margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px var(--warn)}
+    .sess.busy .sess-livedot,.sess.busy .sess-draftdot{animation:ws-sync-pulse 1s ease-in-out infinite}
+    .sess.busy.open-in-tab,.sess.busy.sess-draft{border-left-color:var(--live)}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */

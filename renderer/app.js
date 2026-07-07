@@ -940,9 +940,9 @@ claudible.onHookLine((tabId, line) => {
     }
   } else if (o.hook_event_name === 'Stop') {
     t.busy = false; markTabBusy(t.tabId, false);
-    // A turn just finished: if this tab is still showing a "live · unsaved" row, its transcript now exists on
-    // disk, so refresh the sidebar to collapse that live row into its proper saved session row.
-    if (sidebarReady && t.wsId === activeWsId && sessListEl && sessListEl.querySelector('.sess.sess-live[data-tab="' + t.tabId + '"]')) refreshSessions();
+    // A turn just finished: if this tab is still showing a "draft · unsaved" row, its transcript now exists on
+    // disk, so refresh the sidebar to collapse that draft row into its proper saved session row.
+    if (sidebarReady && t.wsId === activeWsId && sessListEl && sessListEl.querySelector('.sess.sess-draft[data-tab="' + t.tabId + '"]')) refreshSessions();
     if (o.last_assistant_message) {
       if (tabId === activeTabId) {   // only the FOREGROUND tab speaks / fills the Speak box, so background turns never talk over it
         const reply = stripForSpeech(o.last_assistant_message);
@@ -2404,7 +2404,10 @@ function relTime(sec) {
   if (d < 60) return 'just now';
   if (d < 3600) return Math.floor(d / 60) + 'm ago';
   if (d < 86400) return Math.floor(d / 3600) + 'h ago';
-  return Math.floor(d / 86400) + 'd ago';
+  if (d < 86400 * 7) return Math.floor(d / 86400) + 'd ago';
+  if (d < 86400 * 30) return Math.floor(d / (86400 * 7)) + 'w ago';
+  if (d < 86400 * 365) return Math.floor(d / (86400 * 30)) + 'mo ago';
+  return Math.floor(d / (86400 * 365)) + 'y ago';   // no more "968d ago" on ancient sessions
 }
 // Render order is a STABLE saved list (in prefs), not live mtime — so clicking/resuming a session (which
 // bumps its .jsonl mtime) never reshuffles the list. New/unseen sessions are inserted at top, newest-first
@@ -3041,7 +3044,7 @@ function onSessPointerDown(e, row, s) {
 function onSessPointerMove(e) {
   if (!sdrag) return;
   if (!sdrag.moved) { if (Math.abs(e.clientY - sdrag.startY) < 5) return; sdrag.moved = true; sdrag.row.classList.add('dragging'); }
-  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-live)')).filter((r) => r !== sdrag.row);
+  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft)')).filter((r) => r !== sdrag.row);
   let before = null;
   for (let i = 0; i < rows.length; i++) { const r = rows[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { before = rows[i]; break; } }
   if (before) sessListEl.insertBefore(sdrag.row, before); else sessListEl.appendChild(sdrag.row);
@@ -3056,7 +3059,7 @@ function onSessPointerUp() {
   try { d.row.releasePointerCapture(d.pid); } catch {}
   d.row.classList.remove('dragging');
   if (d.moved) {
-    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-live)')).map((r) => r.dataset.id);
+    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft)')).map((r) => r.dataset.id);
     setOrder(order);                                                               // manual order persists (per workspace)
     refreshSessions();                                                             // reconcile: refreshes skipped DURING the drag (the sdrag guard) catch up now
   } else {
@@ -3282,20 +3285,22 @@ async function refreshSessions() {
   ordered.forEach((s) => { if (shown.has(s.id)) return; shown.add(s.id); sessListEl.appendChild(renderSessionRow(s)); });
   liveTabs.forEach((rec) => { if (rec.session) shown.add(rec.session); sessListEl.appendChild(renderLiveTabRow(rec)); });   // live, not-yet-saved local tabs
   livePeers.forEach((p) => { if (shown.has(p.session)) return; shown.add(p.session); sessListEl.appendChild(renderLivePeerRow(p)); });   // a collaborator live in a session not already shown (folds in the old _localIds check)
-  const activeLive = sessListEl.querySelector('.sess.sess-live.active');             // a just-created session sits at the bottom → bring it into view
+  const activeLive = sessListEl.querySelector('.sess.sess-draft.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
   updateCollab();                                                                   // synced repo session → tunnel up so a peer can Join live (no bottom-left indicator)
   pollTitles();                                                                     // refresh workspace-shared names (throttled inside)
 }
-// A live, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
+// A running, not-yet-saved session (a tab with no transcript on disk yet) rendered as a sidebar row: click to
 // switch to it; the ▾ menu renames or CLOSES it (nothing to delete on disk). Mirrors a saved row's look.
+// Labeled "draft" (amber), NEVER "live" (blue/green) — "live" is the collab-share vocabulary, and a new
+// session flashing "live" for its first turn read as a phantom live-share.
 function renderLiveTabRow(rec) {
   const row = document.createElement('div');
-  row.className = 'sess sess-live' + (rec.tabId === activeTabId ? ' active' : '') + (rec.busy ? ' busy' : '');
+  row.className = 'sess sess-draft' + (rec.tabId === activeTabId ? ' active' : '') + (rec.busy ? ' busy' : '');
   row.dataset.tab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = rec.label || 'New session';
   const m = document.createElement('div'); m.className = 'sess-meta';
-  m.innerHTML = '<span class="sess-livedot"></span>' + (rec.busy ? 'working…' : 'live · unsaved');
+  m.innerHTML = '<span class="sess-draftdot"></span>' + (rec.busy ? 'working…' : 'draft · unsaved');
   row.appendChild(p); row.appendChild(m);
   const mb = document.createElement('button');
   mb.className = 'sess-menu-btn'; mb.title = 'Session options'; mb.setAttribute('aria-label', 'Session options');
@@ -3343,13 +3348,13 @@ function startLiveRename(row, p, rec) {
 // Cheap in-place busy toggle on a tab's sidebar row (no disk re-read): live row by tab id, or saved row by session id.
 function markTabBusy(tabId, busy) {
   const rec = tabs.get(tabId); if (!rec || !sessListEl) return;
-  let row = sessListEl.querySelector('.sess.sess-live[data-tab="' + tabId + '"]');
+  let row = sessListEl.querySelector('.sess.sess-draft[data-tab="' + tabId + '"]');
   if (!row && rec.session && rec.session !== 'new') row = sessListEl.querySelector('.sess[data-id="' + rec.session + '"]');
   if (!row) return;
   row.classList.toggle('busy', !!busy);
-  if (row.classList.contains('sess-live')) {
+  if (row.classList.contains('sess-draft')) {
     const meta = row.querySelector('.sess-meta');
-    if (meta) meta.innerHTML = '<span class="sess-livedot"></span>' + (busy ? 'working…' : 'live · unsaved');
+    if (meta) meta.innerHTML = '<span class="sess-draftdot"></span>' + (busy ? 'working…' : 'draft · unsaved');
   }
 }
 // The sidebar is DOCKED (a left column of .body) — toggling .with-sessions slides the layout, it
