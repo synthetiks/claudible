@@ -497,8 +497,8 @@ claudible.onStatus((s) => {
       const titles = Object.assign({}, _pp.sessionTitles || {}); titles[s.sessionId] = nm;
       const tstamps = Object.assign({}, _pp.sessionTitleTs || {}); tstamps[s.sessionId] = Date.now();   // stamp the rename so global newest-wins can compare it against collaborators'
       savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });   // copy → mutable (cached map may be a frozen contextBridge object)
-      const _aw = workspaces.find((w) => w.id === activeWsId);
-      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators
+      const _aw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace, not the sidebar's — a background tab resolving while you view another ws must gate + publish against ITS OWN repo
+      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators
     }
     if (sidebarReady && t.wsId === activeWsId) refreshSessions();
   }
@@ -2394,7 +2394,7 @@ const OPTIONS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
 // Session title: prefer the workspace-shared name (so everyone in a repo workspace sees the SAME title), then a
 // local-only override (legacy/local workspaces, or before the first poll), then the transcript-derived preview.
-function sessTitle(s) {
+function sessTitle(s, wsId) {   // wsId: the row's workspace when it ISN'T the active one (the expanded tree) — the shared-name cache is keyed per workspace
   // GLOBAL NEWEST-WINS. Your own rename shows instantly (stamped with a local ts) and sticks while its branch
   // push is in flight — but a collaborator's NEWER rename (branch entries carry the winning ts) replaces it, so
   // two machines can never permanently disagree about a session's name. A local rename with no recorded ts
@@ -2410,7 +2410,7 @@ function sessTitle(s) {
   // WARM CACHE: pollTitles persists the last-known shared names per workspace. remoteTitles is empty for the first
   // ~2s after open (the branch read is async), so without this a collaborator/cross-machine rename flashes its
   // auto-preview then snaps to the real name. The cache lets that name paint instantly; the live poll reconciles it.
-  const cached = titleVal(((loadPrefs().remoteTitlesCache || {})[activeWsId] || {})[s.id]);
+  const cached = titleVal(((loadPrefs().remoteTitlesCache || {})[wsId || activeWsId] || {})[s.id]);
   if (cached) return cached;
   return s.preview;
 }
@@ -2534,7 +2534,7 @@ async function pollTitles(force) {
   const now = Date.now();
   if (!force && now - lastTitlePoll < 15000) return;
   lastTitlePoll = now;
-  let m = {}; try { m = await claudible.titleList(); } catch (e) {}
+  let m = {}; try { m = await claudible.titleList(myWs); } catch (e) {}            // explicit ws: while a joined live tab is on screen main's active ws is a DIFFERENT (often non-repo) ws — the ambient read returned {} and wiped this repo's warm name cache
   if (myWs !== activeWsId) return;                                                 // switched workspaces during the async read → this result is stale
   if (!m || typeof m !== 'object') m = {};
   const sig = JSON.stringify(Object.entries(m).sort());
@@ -2862,7 +2862,7 @@ function startSessEdit(row, p, s) {
         if (_aw && _aw.kind === 'repo') {
           const shared = (t && t !== s.preview) ? t : '';
           if (shared) remoteTitles[s.id] = { n: shared, ts: _now }; else delete remoteTitles[s.id];
-          try { claudible.titleSet(s.id, shared).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
+          try { claudible.titleSet(s.id, shared, activeWsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}   // the renamed row lives under the SIDEBAR's active ws — main's can differ while a joined live tab is on screen
         }
         p.textContent = sessTitle(s);
         // keep ANY open tab on this session in sync so the command center + guest tracker also show the new name
@@ -2885,14 +2885,14 @@ function startSessEdit(row, p, s) {
 // Mirrors the workspace ▾ menu (same .ws-menu look) and, like the workspace delete, confirms via the native
 // dialog — so there's no inline confirm strip to overflow the narrow row.
 function doExportSession(s) {
-  claudible.exportSession(s.id).then((r) => {
+  claudible.exportSession(s.id, activeWsId).then((r) => {   // the row's workspace — main's active ws can differ while a joined live tab is on screen
     if (r && r.saved) toast('Replay saved · ' + r.saved.replace(/^.*[\\/]/, ''));
     else if (r && r.canceled) { /* user dismissed the save dialog */ }
     else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
   }).catch(() => toast('Export failed'));
 }
 function doExportSessionText(s) {
-  claudible.exportSessionText(s.id).then((r) => {
+  claudible.exportSessionText(s.id, activeWsId).then((r) => {
     if (r && r.saved) toast('Saved · ' + r.saved.replace(/^.*[\\/]/, ''));
     else if (r && r.canceled) { /* user dismissed the save dialog */ }
     else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
@@ -3006,6 +3006,7 @@ const deletingIds = new Set();                                                  
 async function deleteSession(id, scope) {
   if (deletingIds.has(id)) return;
   deletingIds.add(id);
+  const myWs = activeWsId;   // the deleted row's workspace, captured NOW — the awaits below (and a joined live tab being on screen) can leave main's active ws pointing elsewhere
   // Any tab resuming this session must switch OFF it BEFORE the file is deleted (else it holds the file
   // open). If an owning tab is BUSY, the switch is refused (never kill a mid-turn Claude) — so the delete
   // itself must ABORT: proceeding would trash the transcript out from under the still-running pty (audit
@@ -3033,7 +3034,7 @@ async function deleteSession(id, scope) {
     }
   }
   setOrder(order);
-  let r = null; try { r = await claudible.sessionDelete(id, scope || 'local'); } catch {} finally { deletingIds.delete(id); }
+  let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs); } catch {} finally { deletingIds.delete(id); }
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions(); renderTabStrip();
 }
@@ -3099,6 +3100,7 @@ function modalPrompt({ title, body, placeholder, value, ok }) {
 }
 // A collaborator deleted this session on GitHub — let the user fully delete their local copy or keep it.
 async function openDeletedRemoteModal(s) {
+  const myWs = activeWsId;   // the row's workspace, captured before the modal await (the user could switch mid-modal)
   const name = sessTitle(s);
   const choice = await modalChoice({
     title: 'Session deleted on GitHub',
@@ -3110,11 +3112,12 @@ async function openDeletedRemoteModal(s) {
     ],
   });
   if (choice === 'delete') await deleteSession(s.id, 'local');       // already tombstoned on the branch → just trash the local copy
-  else if (choice === 'keep') { try { await claudible.sessionKeep(s.id); } catch (e) {} refreshSessions(); }
+  else if (choice === 'keep') { try { await claudible.sessionKeep(s.id, myWs); } catch (e) {} refreshSessions(); }
 }
 // Same session continued on both machines (a true fork). Let the user RESOLVE it, not just read an FYI:
 // 'remote' takes the shared copy (safe import_file path), 'local' keeps mine + acks so sync stops re-flagging.
 async function openDivergedInfo(s) {
+  const myWs = activeWsId;   // the row's workspace, captured before the modal await (the user could switch mid-modal)
   const name = sessTitle(s);
   const choice = await modalChoice({
     title: 'This session is out of sync',
@@ -3127,7 +3130,7 @@ async function openDivergedInfo(s) {
   });
   if (choice !== 'remote' && choice !== 'local') return;
   try {
-    const r = await claudible.resolveDiverged(s.id, choice);
+    const r = await claudible.resolveDiverged(s.id, choice, myWs);
     if (r && r.ok) toast(choice === 'remote' ? 'Took the shared version' : 'Keeping your version');
     else toast('Could not resolve' + (r && r.error ? ': ' + humanError(r.error) : ''));
   } catch (e) { toast('Could not resolve'); }
@@ -3140,7 +3143,11 @@ async function refreshSessions() {
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
   if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
-  let list = []; try { list = await claudible.sessionList(); } catch {}
+  // Fetch by EXPLICIT workspace id — never "whatever main's active workspace is". The two can differ (a joined
+  // live tab moves the sidebar's scope here but deliberately never re-points main), and the ambient fetch painted
+  // + cached the OTHER workspace's sessions under this header (the "my local project shows the other repo's
+  // sessions" bug, and its poisoned-cache flip-flop on every switch).
+  let list = []; try { list = await claudible.sessionListWs(myWs); } catch {}
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;               // a rename opened DURING the await — bail so the rebuild below can't wipe the in-flight edit (the top-of-fn guard only covers renames that existed before the await)
   if (!Array.isArray(list)) list = [];
@@ -3152,7 +3159,7 @@ async function refreshSessions() {
     const liveSessions = new Set(Array.from(tabs.values()).map((r) => r.session).filter(Boolean));
     list = list.filter((s) => (s.msgs || 0) > 0 || liveSessions.has(s.id));
   }
-  _wsSessCache.set(activeWsId, { list, ts: Date.now() });                           // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash)
+  _wsSessCache.set(myWs, { list, ts: Date.now() });                                 // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash) — keyed by the SAME id the fetch was scoped to, so it can never hold another workspace's rows
   const savedIds = new Set(list.map((s) => s.id));
   // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row — but ONLY for a session
   // the USER explicitly created new: either still pending an id ('new') or born-new and not yet saved (bornNew,
@@ -3360,7 +3367,7 @@ const _wsSessCache = new Map();   // wsId -> { list, ts } — avoid refetching a
 const _wsSessFetching = new Set();   // wsIds with a fetch in flight — dedupe concurrent fetches across rapid re-renders
 function renderWsSessionRow(w, s) {
   const row = document.createElement('div'); row.className = 'sess'; row.setAttribute('role', 'button'); row.tabIndex = 0;
-  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s); p.title = p.textContent;
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s, w.id); p.title = p.textContent;   // shared names from THIS row's workspace cache, not the active one's
   const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.mtime); m.appendChild(mt);
   row.appendChild(p); row.appendChild(m);
   appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
@@ -3865,7 +3872,17 @@ function maybeFirstRun(r) {
 }
 async function refreshWorkspaces() {
   let r = null; try { r = await claudible.workspaceList(); } catch {}
-  if (r && Array.isArray(r.workspaces)) { workspaces = r.workspaces; if (r.activeId) activeWsId = r.activeId; }
+  if (r && Array.isArray(r.workspaces)) {
+    workspaces = r.workspaces;
+    // Adopt main's activeId only when it doesn't fight the tab the user is LOOKING at. The active tab's ws is
+    // the richer truth: a joined live tab's ws is invisible to main (it never re-points activeWorkspace), and a
+    // just-switched tab is ahead of main's registry for one IPC beat — snapping to registry.activeId in either
+    // case silently re-nested the sidebar's session list under the WRONG workspace header (part of the
+    // "projects show each other's sessions" bug). Boot (unbound tab) and create/delete (tab already re-pointed
+    // to the same id) still adopt as before.
+    const tabWs = AT() && AT().wsId;
+    if (r.activeId && (!tabWs || tabWs === r.activeId)) activeWsId = r.activeId;
+  }
   const at = AT(); if (at && !at.wsId) at.wsId = activeWsId;   // bind the boot tab to the real active workspace
   renderWsChips();
   maybeFirstRun(r);

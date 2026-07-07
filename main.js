@@ -851,28 +851,19 @@ ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = a
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
 // Shared session names: publish my rename to meta/<login>.json on the branch; read the merged (last-writer-wins)
 // map back. The name goes out-of-band as base64 so arbitrary text can never break the shell command.
-ipcMain.handle('title:set', (e, { id, name }) => new Promise((resolve) => {
+ipcMain.handle('title:set', (e, { id, name, wsId }) => new Promise((resolve) => {
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!sid) return resolve({ ok: false });
   const b64 = Buffer.from(String(name == null ? '' : name)).toString('base64');
-  runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }));
+  runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }), _wsById(wsId) || activeWorkspace);   // the RENAMED row's workspace — while a joined live tab is on screen, activeWorkspace is a different ws and the title would publish to the wrong repo's branch
 }));
-ipcMain.handle('title:list', () => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {})); }));
+ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {}), _wsById(wsId) || activeWorkspace); }));   // titles for the workspace the SIDEBAR shows, not whatever main is on
 
 // ---- sessions (list / switch) ----
-function listSessions() {
-  return new Promise((resolve) => {
-    if (!APPDIR_WSL) return resolve([]);
-    runner.runScript('sessions.sh', '', { ws: activeWorkspace, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
-        if (err) { console.error('[claudible] sessions.sh:', err.message); return resolve([]); }
-        try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
-      });
-  });
-}
-ipcMain.handle('session:list', () => listSessions());
-// List ANY workspace's sessions WITHOUT activating it — for the multi-expand sidebar tree. sessions.sh is already
-// workspace-parameterized (runScript's { ws } sets that workspace's env for this call only; activeWorkspace is
-// untouched), so this just points the same reader at a different workspace.
+// There is deliberately NO ambient "list the active workspace" handler: the renderer's active workspace and
+// main's can differ (a joined live tab moves the sidebar's scope but never main's), so every list names its
+// workspace. sessions.sh is workspace-parameterized (runScript's { ws } sets that workspace's env for this
+// call only; activeWorkspace is untouched).
 ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === wsId);
   if (!APPDIR_WSL || !ws) return resolve([]);
@@ -887,14 +878,15 @@ ipcMain.handle('session:open', (e, { tabId, id }) => { openGen++; const ok = res
 ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
   const id = (typeof arg === 'string') ? arg : (arg && arg.id);
   const scope = (arg && arg.scope) || 'local';                              // 'local' (trash here) | 'everywhere' (also off GitHub)
+  const ws = _wsById(arg && arg.wsId) || activeWorkspace;                   // the ROW's workspace (sidebar scope), not main's — they differ while a joined live tab is on screen
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  runner.runScript('delete-session.sh', `'${sid}'`, { ws: activeWorkspace }).then(({ err, stdout }) => {
+  runner.runScript('delete-session.sh', `'${sid}'`, { ws }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let local = {}; try { local = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
       // also tombstone it on the shared sessions branch so a sync can never bring it back (for anyone)
-      runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws: activeWorkspace, timeout: 45000 }).then(({ err: err2, stdout: out2 }) => {
+      runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws, timeout: 45000 }).then(({ err: err2, stdout: out2 }) => {
           if (err2) { console.error('[claudible] delete-session everywhere:', err2.message); return resolve({ ok: false, error: 'sync-exec', localDone: true }); }
           let r = {}; try { r = JSON.parse((out2 || '').trim() || '{}'); } catch {}
           resolve(r.ok ? { ok: true, everywhere: true } : { ok: false, error: (r.error || 'sync failed'), localDone: true });
@@ -907,7 +899,7 @@ ipcMain.handle('session:keep', (e, arg) => new Promise((resolve) => {
   const id = (typeof arg === 'string') ? arg : (arg && arg.id);
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  runner.runScript('session-keep.sh', `'${sid}'`, { ws: activeWorkspace }).then(({ err, stdout }) => {
+  runner.runScript('session-keep.sh', `'${sid}'`, { ws: _wsById(arg && arg.wsId) || activeWorkspace }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session-keep:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       resolve(r.ok ? r : { ok: false, error: (r.error || 'keep failed') });
@@ -920,7 +912,7 @@ ipcMain.handle('session:resolveDiverged', (e, arg) => new Promise((resolve) => {
   const strategy = (arg && arg.strategy === 'local') ? 'local' : 'remote';
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {
+  runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: _wsById(arg && arg.wsId) || activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session:resolveDiverged:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       resolve(r.ok ? r : { ok: false, error: (r.error || 'resolve failed') });
@@ -1551,9 +1543,10 @@ ipcMain.handle('clip:read', () => { try { return clipboard.readText(); } catch {
 // Export a saved session as a SELF-CONTAINED, shareable HTML replay (no server, works offline). Reads the
 // transcript for the active workspace's session via transcript.sh, renders it, and lets the user pick where
 // to save. Text is embedded as JSON and rendered client-side via textContent → no injection from transcript.
-ipcMain.handle('session:export', async (e, sessionId) => {
+ipcMain.handle('session:export', async (e, arg) => {
   try {
-    const ws = activeWorkspace;
+    const sessionId = (arg && typeof arg === 'object') ? arg.id : arg;   // legacy bare-id calls still work
+    const ws = _wsById(arg && arg.wsId) || activeWorkspace;              // the ROW's workspace — main's active ws differs while a joined live tab is on screen
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!sid || !APPDIR_WSL) return { error: 'no session' };
     const messages = await new Promise((resolve) => {
@@ -1577,9 +1570,10 @@ ipcMain.handle('session:export', async (e, sessionId) => {
 
 // Save a session's transcript as a plain Markdown (.md/.txt) document — same transcript source as the HTML
 // replay (transcript.sh), rendered as readable markdown. No server, no HTML; just the conversation.
-ipcMain.handle('session:export-text', async (e, sessionId) => {
+ipcMain.handle('session:export-text', async (e, arg) => {
   try {
-    const ws = activeWorkspace;
+    const sessionId = (arg && typeof arg === 'object') ? arg.id : arg;   // legacy bare-id calls still work
+    const ws = _wsById(arg && arg.wsId) || activeWorkspace;              // the ROW's workspace — main's active ws differs while a joined live tab is on screen
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!sid || !APPDIR_WSL) return { error: 'no session' };
     const messages = await new Promise((resolve) => {

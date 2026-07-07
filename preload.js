@@ -17,14 +17,15 @@ contextBridge.exposeInMainWorld('claudible', {
   tabOpen: (tabId, wsId, session) => ipcRenderer.invoke('tab:open', { tabId, wsId, session }),
   tabClose: (tabId) => ipcRenderer.invoke('tab:close', { tabId }),
   tabForeground: (tabId) => ipcRenderer.send('pty:foreground', { tabId }),
-  // sessions (switcher)
-  sessionList: () => ipcRenderer.invoke('session:list'),
+  // sessions (switcher) — every call names its workspace explicitly: main's activeWorkspace and the sidebar's
+  // notion of "active" can legitimately differ (a joined live tab moves the sidebar but never main), so an
+  // ambient call would read/mutate whatever workspace MAIN happens to be on, not the one the row is under.
   sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
-  sessionDelete: (id, scope) => ipcRenderer.invoke('session:delete', { id, scope }),
-  sessionKeep: (id) => ipcRenderer.invoke('session:keep', { id }),   // "keep locally" a session deleted on GitHub
-  resolveDiverged: (id, strategy) => ipcRenderer.invoke('session:resolveDiverged', { id, strategy }),   // out-of-sync fork → 'remote' (take theirs) | 'local' (keep mine)
-  exportSession: (id) => ipcRenderer.invoke('session:export', id),   // → shareable self-contained HTML replay
-  exportSessionText: (id) => ipcRenderer.invoke('session:export-text', id),   // → plain Markdown (.md/.txt) transcript
+  sessionDelete: (id, scope, wsId) => ipcRenderer.invoke('session:delete', { id, scope, wsId }),
+  sessionKeep: (id, wsId) => ipcRenderer.invoke('session:keep', { id, wsId }),   // "keep locally" a session deleted on GitHub
+  resolveDiverged: (id, strategy, wsId) => ipcRenderer.invoke('session:resolveDiverged', { id, strategy, wsId }),   // out-of-sync fork → 'remote' (take theirs) | 'local' (keep mine)
+  exportSession: (id, wsId) => ipcRenderer.invoke('session:export', { id, wsId }),   // → shareable self-contained HTML replay
+  exportSessionText: (id, wsId) => ipcRenderer.invoke('session:export-text', { id, wsId }),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: () => ipcRenderer.invoke('claude:version'),   // the embedded Claude Code CLI version (for the status bar)
   appVersion: () => ipcRenderer.invoke('app:version'),   // Claudible's own version (package.json) for the status-bar badge
   latestReply: (id) => ipcRenderer.invoke('session:latest-reply', id),   // a session's last assistant reply (for manual Speak / re-listen)
@@ -134,8 +135,8 @@ contextBridge.exposeInMainWorld('claudible', {
   onLiveState: (cb) => ipcRenderer.on('live:state', (_e, p) => cb(p)),
   onLiveHistory: (cb) => ipcRenderer.on('live:history', (_e, p) => cb(p)),   // the host's Session-History feed for a joined tab (view-only)
   // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
-  titleSet: (id, name) => ipcRenderer.invoke('title:set', { id, name }),
-  titleList: () => ipcRenderer.invoke('title:list'),
+  titleSet: (id, name, wsId) => ipcRenderer.invoke('title:set', { id, name, wsId }),
+  titleList: (wsId) => ipcRenderer.invoke('title:list', wsId),
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   // clipboard (handled in main so it works regardless of web clipboard permissions)
