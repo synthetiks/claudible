@@ -34,6 +34,7 @@ function dumpRec(rec) {
   parts.push(jstr('created') + ': ' + String(rec.created));
   parts.push(jstr('preview') + ': ' + jstr(rec.preview));
   parts.push(jstr('msgs') + ': ' + String(rec.msgs));
+  if (rec.used != null) parts.push(jstr('used') + ': ' + String(rec.used));   // --with-authors only (like `author`) — the parity (unflagged) shape is untouched
   if (rec.deletedRemote === true) parts.push(jstr('deletedRemote') + ': ' + 'true');
   if (rec.diverged === true) parts.push(jstr('diverged') + ': ' + 'true');
   if (rec.author) parts.push(jstr('author') + ': ' + jstr(rec.author));   // only ever set in --with-authors mode — the parity (unflagged) shape is untouched
@@ -175,6 +176,7 @@ function main() {
     let preview = '';
     let msgs = 0;
     let created = 0;
+    let lastTs = 0;   // newest content timestamp — the "last real conversation activity" clock (see `used` below)
     try {
       const content = fs.readFileSync(f, 'utf8');
       for (const rawLine of content.split('\n')) {
@@ -187,9 +189,13 @@ function main() {
           continue;
         }
         if (o === null || typeof o !== 'object') continue; // o.get(...) needs a dict
-        if (!created) {
+        {
           const ts = o.timestamp;
-          if (typeof ts === 'string') created = parseTs(ts);
+          if (typeof ts === 'string') {
+            const t = parseTs(ts);
+            if (!created) created = t;
+            if (t > lastTs) lastTs = t;
+          }
         }
         if (o.type === 'user' && isPlainDict(o.message)) {
           const c = o.message.content;
@@ -226,6 +232,20 @@ function main() {
       preview: preview || '(empty session)',
       msgs: msgs
     };
+    // `used` = when this session was genuinely LAST TOUCHED, for display/ordering: the newest of
+    //   · the newest content timestamp (fs mtime is useless for collaborator imports — they're deliberately
+    //     aged to 2000-01-01 so the auto-resume heuristic can never pick a foreign transcript; content
+    //     timestamps are the real activity clock and max() lets them win over the sentinel),
+    //   · the activation stamp session.sh drops in .claudible-used/<id> when it actually resumes the
+    //     session (opening a conversation to READ it appends nothing to the .jsonl — without the stamp its
+    //     row sits at "9d ago" forever no matter how often it's opened),
+    //   · the fs mtime (still the freshest signal for a local file mid-write).
+    // Emitted only in --with-authors mode, like `author`: the unflagged (parity-oracle) shape is untouched.
+    if (WITH_AUTHORS) {
+      let act = 0;
+      try { act = Math.trunc(fs.statSync(path.join(proj, '.claudible-used', sid)).mtimeMs / 1000); } catch (e) {}
+      rec.used = Math.max(lastTs, act, mtime);
+    }
     if (tombs.has(sid) && !kept.has(sid)) rec.deletedRemote = true;
     if (diverged.has(sid)) rec.diverged = true;
     if (WITH_AUTHORS && foreign.has(sid) && authorOf[sid]) rec.author = String(authorOf[sid]).slice(0, 40);

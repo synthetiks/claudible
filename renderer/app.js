@@ -1328,12 +1328,13 @@ function youName() {
 }
 // The "who's here" members for the ACTIVE context: your guests (host-share), or — on a joined tab — the host plus
 // every other participant from that session's roster (you're rendered separately as the "you" chip).
+const nameEqCI = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();   // the server dedups names case-INSENSITIVELY (its nameTaken/eqCI) — every renderer-side name comparison must match, or "crazydev" vs "CrazyDev" renders twice
 function activeRosterMembers() {
   const t = AT();
   if (t && t.kind === 'live') {
     const me = t.liveYou || collabName() || 'Guest', out = [];   // dedup against the name the host's server actually registered us under (its hello.you — disambiguated if our name collided) so we never list ourselves twice
     if (t.hostName) out.push({ name: t.hostName, state: 'active', host: true });
-    (t.roster || []).forEach((g) => { if (g.name !== me) out.push(g); });
+    (t.roster || []).forEach((g) => { if (!nameEqCI(g.name, me)) out.push(g); });
     return out;
   }
   return lastRoster;
@@ -1357,12 +1358,14 @@ function renderRoster(roster) {
   const hosting = amHostingLive();
   updateSessionCtrlBtn();                                            // host: "End Session" · joiner: "Leave Session" (mutually exclusive)
   const you = document.createElement('span'); you.className = 'rmember you';
+  you.dataset.name = youName();                                       // voice-state projection matches pills by this (textContent also holds the ✕ kick glyph)
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
   you.appendChild(document.createTextNode(youName()));
   el.appendChild(you);
   activeRosterMembers().forEach((g) => {
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
     const m = document.createElement('span'); m.className = 'rmember' + (g.state === 'gone' ? ' gone' : '');
+    m.dataset.name = g.name;
     m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab'));
     const d = document.createElement('span'); d.className = 'rdot ' + cls;
     m.appendChild(d); m.appendChild(document.createTextNode(g.name));
@@ -1374,6 +1377,7 @@ function renderRoster(roster) {
     }
     el.appendChild(m);
   });
+  applyVoiceMarks();                                                  // project in-call state onto these fresh pills (one pill per person — never a second row for voice)
   computeRosterOverflow();                                            // fold members past the strip's width into a "+N" pop-down
 }
 // Measure the roster strip and MOVE any chips that overflow its width into the "+N" pop-down (move, not clone, so
@@ -1498,7 +1502,16 @@ function paintVoiceUi(st, room) {
   if (mute) { mute.style.display = joined ? '' : 'none'; mute.textContent = (st && st.muted) ? 'Unmute' : 'Mute'; mute.classList.toggle('muted', !!(st && st.muted)); }
   if (box) {
     box.innerHTML = '';
-    ((st && st.members) || []).forEach((m) => {
+    // ONE pill per person in the chat panel: a voice member whose name already has a roster pill above gets
+    // their in-call state PROJECTED onto that pill (mic mark + speaking pulse, via applyVoiceMarks) instead of
+    // a second, identical-looking name row — the "I see two CrazyDevs" bug was the roster strip + this voice
+    // strip both rendering the same person. Only voice members with NO roster pill (edge: a caller the roster
+    // doesn't know) still get their own .hvm pill here.
+    _voiceMembers = joined ? (((st && st.members) || []).map((m) => ({ id: m.id, name: m.name, self: !!m.self, speaking: !!m.speaking, conn: m.conn }))) : [];
+    _voiceRoom = room;
+    const pilled = new Set([...document.querySelectorAll('#chat-roster .rmember, #roster-pop .rmember')].map((n) => String(n.dataset.name || '').toLowerCase()).filter(Boolean));
+    _voiceMembers.forEach((m) => {
+      if (pilled.has(String(m.name || '').toLowerCase())) return;      // already a roster pill → decorated there, no duplicate row
       const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '') + (m.conn ? ' c-' + m.conn : '');
       const d = document.createElement('span'); d.className = 'd';
       let label = m.name;
@@ -1512,7 +1525,30 @@ function paintVoiceUi(st, room) {
       }
       el.appendChild(d); el.appendChild(nm); box.appendChild(el);
     });
+    { const vr = $('voicerow'); if (vr) vr.style.display = (joined && box.childElementCount) ? '' : 'none'; }   // everyone deduped into the roster → no empty second strip
+    applyVoiceMarks();
   }
+}
+// Project voice-call state onto the roster pills: mic mark while in the call, pulse while speaking, and the
+// same right-click volume control the .hvm pill offered. Re-applied by renderRoster (fresh pills) and by every
+// paintVoiceUi (fresh state) — whichever painted last, the marks land.
+let _voiceMembers = [], _voiceRoom = null;
+function applyVoiceMarks() {
+  const pills = document.querySelectorAll('#chat-roster .rmember, #roster-pop .rmember');
+  pills.forEach((pill) => {
+    const m = _voiceMembers.find((v) => nameEqCI(v.name, pill.dataset.name));
+    pill.classList.toggle('invoice', !!m);
+    pill.classList.toggle('speaking', !!(m && m.speaking));
+    if (m && !m.self && !pill._voiceVolBound) {                       // volume affordance parity with the old .hvm pill
+      pill._voiceVolBound = true;
+      pill.style.cursor = 'context-menu';
+      pill.addEventListener('contextmenu', (ev) => {
+        const cur = _voiceMembers.find((v) => nameEqCI(v.name, pill.dataset.name));
+        if (!cur || cur.self) return;                                  // left the call (or is me) → stock context menu
+        ev.preventDefault(); openVolumePopover(pill, cur.id, cur.name, _voiceRoom);
+      });
+    }
+  });
 }
 function voiceRoom() { const t = AT(); return (t && t.kind === 'live') ? liveVoice : hostVoice; }   // which room the UI is bound to now
 let hostVoiceState = null, liveVoiceState = null;
@@ -2411,6 +2447,17 @@ function sessTitle(s, wsId) {   // wsId: the row's workspace when it ISN'T the a
   return s.preview;
 }
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
+// A session someone DELIBERATELY NAMED is never stub-noise, even before its first real prompt: the picker's
+// promptless-stub filter exists to bury accidental fork artifacts, and hiding a just-created, just-named
+// session reads as "my new session didn't sync" to the collaborator. Checks my local rename, the live shared
+// map, and the per-workspace warm cache (wsId: the row's workspace when it isn't the active one).
+function hasExplicitTitle(id, wsId) {
+  if (!id) return false;
+  const p = loadPrefs();
+  if ((p.sessionTitles || {})[id]) return true;
+  if (titleVal(remoteTitles[id])) return true;
+  return !!titleVal(((p.remoteTitlesCache || {})[wsId || activeWsId] || {})[id]);
+}
 // ---- Live sessions: advertise the session I'm hosting; discover + join a collaborator's, natively ----
 // Explicit opt-in: I only host (advertise) a session after I pick "Share live" on it — NOT automatically just
 // because sync is on. sharedSessionId is the one session I've chosen to share (null = not sharing). It resets on
@@ -2792,7 +2839,7 @@ function renderSessionRow(s) {
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
   const m = document.createElement('div'); m.className = 'sess-meta';
   const mt = document.createElement('span'); mt.className = 'sess-meta-t';
-  mt.textContent = relTime(s.mtime);   // last-active time only — msg count dropped to cut clutter
+  mt.textContent = relTime(s.used || s.mtime);   // last-USED time (newest content ts / activation stamp) — raw file mtime lies for collaborator imports (security-aged to 2000) and never moves when a session is merely opened to read
   m.appendChild(mt);
   // live indicator — inline at the right of the meta line (normal flow, so it can never overflow the row)
   if (isSharingSession(s.id)) {
@@ -3171,7 +3218,7 @@ async function refreshSessions() {
   // message; a live tab currently sitting on one keeps it reachable via the liveSessions carve-out.
   {
     const liveSessions = new Set(Array.from(tabs.values()).map((r) => r.session).filter(Boolean));
-    list = list.filter((s) => (s.msgs || 0) > 0 || liveSessions.has(s.id));
+    list = list.filter((s) => (s.msgs || 0) > 0 || liveSessions.has(s.id) || hasExplicitTitle(s.id));   // a NAMED session always shows — naming is deliberate, stub-hiding is for accidental fork artifacts (the "my new session zzz never appeared for him" bug: it synced fine, this filter ate it)
   }
   _wsSessCache.set(myWs, { list, ts: Date.now() });                                 // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash) — keyed by the SAME id the fetch was scoped to, so it can never hold another workspace's rows
   const savedIds = new Set(list.map((s) => s.id));
@@ -3382,7 +3429,12 @@ const _wsSessFetching = new Set();   // wsIds with a fetch in flight — dedupe 
 function renderWsSessionRow(w, s) {
   const row = document.createElement('div'); row.className = 'sess'; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s, w.id); p.title = p.textContent;   // shared names from THIS row's workspace cache, not the active one's
-  const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.mtime); m.appendChild(mt);
+  const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.used || s.mtime); m.appendChild(mt);   // last-USED (see renderSessionRow) — file mtime is security-aged for imports
+  // live indicator — parity with the active list (this row generation predated the redesign and never got it,
+  // which read as "the old deprecated style"): a collaborator live on this session shows the same green bar +
+  // Join badge here as it would in the active workspace's list.
+  const _lp = livePeers.find((x) => x.session === s.id);
+  if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s, w.id))); }
   row.appendChild(p); row.appendChild(m);
   appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
   const go = () => { switchWorkspace(w.id, s.id); };   // switch to that workspace AND open the specific session in one shot (single respawn, no flicker)
@@ -3393,7 +3445,9 @@ function renderWsSessionRow(w, s) {
 function renderWsNonActiveSessions(w, kids) {                          // a saved-sessions list for a NON-active expanded workspace
   const fill = (list) => {
     Array.from(kids.querySelectorAll('.sess,.sess-empty,.newsess-row')).forEach((n) => n.remove());
-    const ordered = (list || []).slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).slice(0, 60);
+    const ordered = (list || []).slice()
+      .filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id))   // same stub rule as the active list: promptless fork artifacts stay hidden, but a session someone NAMED is deliberate and always shows
+      .sort((a, b) => ((b.used || b.mtime || 0) - (a.used || a.mtime || 0))).slice(0, 60);
     if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
     // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).
@@ -3907,7 +3961,7 @@ async function switchWorkspace(id, targetSession) {
   if (id === activeWsId) { if (targetSession) openSession(targetSession); return; }   // already here → just open the session (no full switch, no flicker)
   let t = AT();
   if (t && t.kind === 'live') {                     // viewing a peer's session — a workspace switch applies to YOUR own tab, never the live mirror
-    const local = [...tabs.values()].find((r) => r.kind !== 'live');
+    const local = [...tabs.values()].find((r) => r.kind !== 'live' && r.wsId === id) || [...tabs.values()].find((r) => r.kind !== 'live');   // prefer a tab ALREADY in the target workspace — grabbing the first non-live tab re-pointed an unrelated tab (stranding ITS workspace expanded-but-inactive, whose sessions then repaint via the thin tree rows = "the old style")
     if (!local) { toast('Open one of your own sessions first'); return; }
     setActiveTab(local.tabId); t = local;
   }
@@ -3924,7 +3978,7 @@ async function switchWorkspace(id, targetSession) {
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   sessListEl.innerHTML = ''; _sessSig = '';        // drop the OLD workspace's session rows immediately so they don't flash under the NEW workspace before refreshSessions lands
   const _pf = _wsSessCache.get(id);                // …and immediately PRE-FILL the new ws's rows from cache (warm if it was expanded before) so the list shows correct content instantly, not an empty gap until the live fetch lands
-  if (_pf && Array.isArray(_pf.list) && _pf.list.length) { _pf.list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).forEach((s) => { sessIndex[s.id] = s; sessListEl.appendChild(renderSessionRow(s)); }); }
+  if (_pf && Array.isArray(_pf.list) && _pf.list.length) { _pf.list.slice().sort((a, b) => ((b.used || b.mtime || 0) - (a.used || a.mtime || 0))).forEach((s) => { sessIndex[s.id] = s; sessListEl.appendChild(renderSessionRow(s)); }); }
   renderWsChips(); renderTabStrip();
   t.term.reset(); resetStats(t);                   // clear the foreground tab's view; main respawns its pty in the new cwd
   let failed = false;

@@ -200,7 +200,16 @@ esac
 #  • exit-code: claude dying to a SIGNAL (rc >= 128) means WE were killed, not refused — checked at both
 #    fallback sites. A genuine refusal exits with a normal code and still gets the fresh-session fallback.
 trap 'exit 0' HUP TERM
+mark_used() {   # stamp "this session was ACTIVATED now" — sessions-tool folds the stamp's mtime into `used`,
+  # the sidebar's last-used clock. Opening a conversation to READ it appends nothing to the .jsonl, and a
+  # foreign import's file mtime is deliberately aged to 2000 — this sidecar is the only activation signal we
+  # control. A separate dir (never the transcript itself!) so the aged-mtime auto-resume guard stays intact.
+  case "$1" in '' | *[!A-Za-z0-9-]*) return 0 ;; esac
+  { mkdir -p "$PROJ/.claudible-used" && touch "$PROJ/.claudible-used/$1"; } 2>/dev/null
+  return 0
+}
 resume_one() {   # $1 = session id — trusted (own) launches in PERM mode; foreign ALWAYS sandboxed (prompts)
+  mark_used "$1"
   if is_foreign "$1"; then
     echo "[claudible] opening a collaborator's session — Claude will ask before running tools."
     claude --resume "$1" "${EFF[@]}"
@@ -241,6 +250,7 @@ while IFS= read -r f; do
   LATEST="$cand"; break
 done < <(ls -1t "$PROJ"/*.jsonl 2>/dev/null)
 if [ -n "$LATEST" ]; then
+  mark_used "$LATEST"
   START=$(date +%s)
   claude "${PERM[@]}" --resume "$LATEST" "${EFF[@]}"; RC=$?
   [ $(( $(date +%s) - START )) -ge 4 ] && exit 0   # resumed and used, then quit normally — done

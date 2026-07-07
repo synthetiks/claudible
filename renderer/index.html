@@ -898,6 +898,11 @@
     .roster-pop .rmember{font-size:10px}
     .rmember{flex:none;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
     .rmember.you{color:var(--ink-dim)}
+    /* in a voice call → the person's ONE roster pill carries the mic state (never a second pill in the voice
+       strip below — that duplicate row was the "two CrazyDevs" report). Pulses subtly while they speak. */
+    .rmember.invoice::after{content:'🎙';font-size:9px;margin-left:2px;opacity:.7;filter:grayscale(35%);transition:opacity .18s,filter .18s}
+    .rmember.invoice.speaking{color:var(--ink)}
+    .rmember.invoice.speaking::after{opacity:1;filter:none;text-shadow:0 0 7px rgba(95,180,135,.9)}
     /* host live-controls: a small "End live" in the chat head + a per-guest ✕ revealed on hover */
     .chat-term{flex:none;width:auto;font:inherit;font-size:11px;font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background .14s,color .14s}   /* width:auto overrides button{width:100%}; sized to MATCH .hv-btn (same height/min-width/radius) so End/Leave and Join voice read as one control family */
     .chat-term:hover{background:rgba(229,86,75,.26);color:#ff9b91}
