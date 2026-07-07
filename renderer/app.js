@@ -93,33 +93,30 @@ function makeTab(tabId, wsId, session, opts) {
   const t = new Terminal(TERM_OPTS);
   const f = new FitAddon.FitAddon();
   t.loadAddon(f); t.open(container);
-  // SCROLL PRIVACY — both directions. A wheel gesture must never become session-visible bytes on a live-shared
-  // screen. Two paths turn a wheel into pty-bound bytes, and both are cancelled (return false = "xterm, don't
-  // process"): the alt buffer (xterm converts wheel into arrow/scroll keys) and mouse-tracking mode (the TUI —
-  // vim, htop, and Claude Code itself: alt buffer + mouse reports, MEASURED — so xterm would emit \x1b[<64;…
-  // wheel sequences). Guarded tabs:
-  //   · a joined mirror (kind 'live') — a guest's wheel must never co-drive the host's terminal;
-  //   · the HOST's own tab while it is the pinned shared one AND someone is actually WATCHING (guestCount>0).
-  //     With zero guests connected there is nobody to leak to, so the host keeps stock scrolling — blocking it
-  //     then just breaks scrolling for no one's benefit (the "now I can't scroll at all" report). The moment a
-  //     guest connects the wheel goes quiet (privacy) and a one-time toast points at PageUp/PageDown, which
-  //     still pages deliberately — visible to guests and typist-chip-attributed, like typing.
-  // Checked per-event, so the same tab regains stock wheel behavior the moment the share ends or empties.
-  // A plain private local tab keeps stock behavior; in a normal-buffer shell the wheel only moves xterm's own
-  // local scrollback, which emits nothing either way.
-  t.attachCustomWheelEventHandler(() => {
-    const watched = sharedTabIdR != null && sharedTabIdR === tabId && guestCount > 0;
-    const guarded = kind === 'live' || watched;
-    const pass = guarded ? (t.buffer.active.type !== 'alternate' && t.modes.mouseTrackingMode === 'none') : true;
-    if (!pass && watched) scrollHintOnce();
-    return pass;
+  // SHARED SCROLL (deliberate, chosen over per-viewer isolation): a live session's screen is ONE view — the
+  // full-screen TUI keeps its scroll state in the host's pty, so anyone scrolling repaints it for everyone,
+  // exactly like typing. Stock xterm wheel everywhere: in the TUI (alt buffer + mouse reports) the wheel
+  // becomes scroll bytes that page the SHARED view; in a normal-buffer shell it moves this viewer's own local
+  // scrollback (emits nothing). A read-only viewer's wheel bytes are refused at the input chokepoints below,
+  // same as their keystrokes — look, don't drive.
+  // The handler always returns true (stock processing) — it only keeps the gutter's position ESTIMATE
+  // (rec.altFrac) tracking this viewer's own wheel in a full-screen app, where xterm has no scrollback for the
+  // thumb to map (a wheel report scrolls a few lines ≈ a third of a Page key's nudge). Skipped for a read-only
+  // viewer, whose wheel bytes are refused — their estimate must not move for scrolls that never happen.
+  t.attachCustomWheelEventHandler((ev) => {
+    if (ev && t.buffer.active && t.buffer.active.type === 'alternate') {
+      const r = tabs.get(tabId);
+      if (r && canPageShared(r)) {
+        r.altFrac = Math.max(0, Math.min(1, (r.altFrac || 0) + (ev.deltaY < 0 ? 1 : -1) * (ALT_PAGE / 3)));
+        if (tabId === activeTabId) updateScrollbar();
+      }
+    }
+    return true;
   });
   if (kind === 'live') {
     t.onData((d) => {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
-      if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal too
-      d = d.replace(/\x1b\[<(?:6[4-9]|7\d);\d+;\d+[Mm]/g, '');   // belt-and-braces: strip SGR WHEEL reports (buttons 64–79) — clicks still co-drive a mouse-enabled TUI
-      if (d) claudible.liveInput(tabId, d);             // co-drive: real keystrokes → the peer's terminal
+      if (d) claudible.liveInput(tabId, d);             // co-drive: keystrokes AND scroll bytes → the peer's terminal (shared view, shared scroll)
     });
   } else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
@@ -181,28 +178,20 @@ function isAlt() { return !!(term && term.buffer.active && term.buffer.active.ty
 // altFrac (the scroll-position estimate) is now PER-TAB (rec.altFrac) — it used to be one module-global that
 // bled between tabs (switching left the thumb where another tab's scroll had put it, firing spurious pages).
 const ALT_PAGE = 0.14;                 // estimate nudge per PageUp/PageDown
-// Is this tab currently the pinned live-shared one WITH someone actually watching? Its gutter/wheel paging
-// would page the TUI on every guest's screen — scroll intent stays LOCAL-ONLY while guests are connected.
-// Zero guests = nobody to leak to = stock scrolling stays (a share link merely being up must not break the
-// host's own scroll). Explicit PageUp/PageDown keypresses always page: deliberate, typist-chip-attributed.
-function isSharedNow(t) { return !!(t && sharedTabIdR != null && t.tabId === sharedTabIdR && guestCount > 0); }
-// One-time (per share) nudge when the wheel goes quiet because guests are watching — so blocked scroll reads
-// as a deliberate privacy feature with an escape hatch, not a bug.
-let _scrollHintShown = false;
-function scrollHintOnce() {
-  if (_scrollHintShown) return;
-  _scrollHintShown = true;
-  toast('Scrolling pauses while guests are watching — PageUp/PageDown still pages (they’ll see it)');
-}
+// SHARED SCROLL: a live session's screen is one view for everyone — gutter paging on a shared or joined tab
+// drives the SAME TUI every viewer is watching, exactly like typing does. (This replaced the earlier
+// isolation/inert guards by explicit choice: simple model, no special cases.) sendPage routes through
+// sendInput, so on a joined mirror the Page keys ride live:input to the host. The ONE viewer who can't
+// drive it is a READ-ONLY guest — their bytes are refused at sendInput, so their gutter must stay inert
+// too (adversarial-review find: a moving thumb over refused pages is false feedback, and the altFrac
+// estimate would drift with no way back).
+function canPageShared(r) { return !(r && r.kind === 'live' && r.liveReadOnly); }
 function sendPage(dir) {   // PageUp (older) / PageDown (newer)
-  const t = tabs.get(activeTabId);
-  if (t && t.kind === 'live') return;   // a joined mirror has NO local scrollback; scroll-derived Page keys must NEVER cross live:input to the host (that scrolled the host's real terminal for everyone). Co-drive keyboard input is separate (term.onData) and still works.
-  if (isSharedNow(t)) return;           // host side of the same rule: gutter/wheel paging on the SHARED tab would scroll the mirror for every guest
   sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~');
 }
 function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
   const at = tabs.get(activeTabId);
-  if (!at || at.kind === 'live' || isSharedNow(at) || !dir) return;   // a joined mirror's gutter is inert; so is the host's own SHARED tab (sendPage also guards)
+  if (!at || !dir || !canPageShared(at)) return;
   const n = Math.min(6, Math.abs(dir));
   for (let i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
   at.altFrac = Math.max(0, Math.min(1, (at.altFrac || 0) + (dir < 0 ? 1 : -1) * ALT_PAGE * n));   // per-tab estimate — no longer a shared global that bleeds between tabs
@@ -211,7 +200,7 @@ function jogPages(dir) {                // wheel / gutter-click: fire pages + ad
 function updateScrollbar() {
   if (!term) return;                                 // no active tab yet (pre-boot)
   const at = tabs.get(activeTabId);
-  if (at && (at.kind === 'live' || (isSharedNow(at) && isAlt()))) { if (thumb) thumb.style.display = 'none'; return; }   // MK's choice: the gutter is INERT on a joined mirror (no local scrollback; never drives the host) — and on the host's own SHARED tab while a full-screen app runs (paging it would scroll every guest's mirror; the hidden thumb signals "no paging while live"). Normal-buffer scrollback stays draggable while sharing: it's xterm-local and emits nothing.
+  if (isAlt() && at && !canPageShared(at)) { if (thumb) thumb.style.display = 'none'; return; }   // read-only viewer + full-screen TUI: there is NOTHING the thumb could honestly do (paging is refused) → hide it. Normal-buffer scrollback below stays draggable — that's local.
   if (thumb && thumb.style.display === 'none') thumb.style.display = '';
   const trackH = sc.clientHeight;
   if (trackH <= 0) { thumb.style.opacity = '0'; return; }
@@ -244,8 +233,10 @@ window.addEventListener('pointermove', (e) => {
   const trackH = sc.clientHeight, thumbH = thumb.offsetHeight;
   const top = Math.max(0, Math.min(trackH - thumbH, e.clientY - sc.getBoundingClientRect().top - grabDY));
   if (isAlt()) {                                      // full-screen: thumb follows the cursor; fire a Page key per ~24px
+    const _at = tabs.get(activeTabId);
+    if (!canPageShared(_at)) return;                  // read-only viewer: the page would be refused — don't move the thumb/estimate either (no false feedback)
     thumb.style.transform = 'translateY(' + top + 'px)';
-    const _at = tabs.get(activeTabId); if (_at) _at.altFrac = (trackH - thumbH) > 0 ? 1 - (top / (trackH - thumbH)) : 0;   // per-tab estimate = where the thumb now sits
+    if (_at) _at.altFrac = (trackH - thumbH) > 0 ? 1 - (top / (trackH - thumbH)) : 0;   // per-tab estimate = where the thumb now sits
     const dy = e.clientY - jogLastY;
     if (Math.abs(dy) >= 24) { sendPage(dy < 0 ? -1 : 1); jogLastY = e.clientY; }
     return;
@@ -402,7 +393,7 @@ function parseTokCount(str) {
 // So the payload is built from the tab RECORD, never the DOM (the DOM shows whatever the host is browsing),
 // and main drops any push whose tabId isn't the mirrored tab — a stray push can never leak another session.
 let sharedTabIdR = null;   // the tab main has pinned the live mirror to (null = not hosting)
-if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; _scrollHintShown = false; pushTracker(); });   // fresh share → the scroll-pause hint may show once again
+if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); });
 function mirrorTabR() { return (sharedTabIdR != null && tabs.get(sharedTabIdR)) || AT(); }
 function pushTracker(t) {
   t = t || mirrorTabR(); if (!t) return;
