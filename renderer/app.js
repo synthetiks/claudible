@@ -107,23 +107,17 @@ function makeTab(tabId, wsId, session, opts) {
   // Checked per-event, so the same tab regains stock wheel behavior the moment the share ends or empties.
   // A plain private local tab keeps stock behavior; in a normal-buffer shell the wheel only moves xterm's own
   // local scrollback, which emits nothing either way.
-  t.attachCustomWheelEventHandler((ev) => {
+  t.attachCustomWheelEventHandler(() => {
     const watched = sharedTabIdR != null && sharedTabIdR === tabId && guestCount > 0;
     const guarded = kind === 'live' || watched;
     const pass = guarded ? (t.buffer.active.type !== 'alternate' && t.modes.mouseTrackingMode === 'none') : true;
-    // Blocked wheel-UP is scroll-back intent — serve it OUTSIDE the byte mirror: open the per-viewer
-    // scrollback overlay (the transcript, scrolled locally) instead of eating the gesture. The TUI's own
-    // scroll lives in the host's pty, so over a byte mirror it is inherently shared — this is the one way
-    // everyone gets to read back INDEPENDENTLY. Blocked wheel-down just hints once (nothing below "now").
-    if (!pass && ev && ev.deltaY < 0) openScrollback(tabId);
-    else if (!pass && watched) scrollHintOnce();
+    if (!pass && watched) scrollHintOnce();
     return pass;
   });
   if (kind === 'live') {
     t.onData((d) => {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
-      if (d === '\x1b[5~') { openScrollback(tabId); return; }   // PageUp on a mirror = scroll-back intent → the per-viewer overlay (never the host's terminal)
-      if (d === '\x1b[6~') return;   // PageDown is scroll intent too, never typed text — keep it off the host's terminal
+      if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal too
       d = d.replace(/\x1b\[<(?:6[4-9]|7\d);\d+;\d+[Mm]/g, '');   // belt-and-braces: strip SGR WHEEL reports (buttons 64–79) — clicks still co-drive a mouse-enabled TUI
       if (d) claudible.liveInput(tabId, d);             // co-drive: real keystrokes → the peer's terminal
     });
@@ -198,7 +192,7 @@ let _scrollHintShown = false;
 function scrollHintOnce() {
   if (_scrollHintShown) return;
   _scrollHintShown = true;
-  toast('Live view stays pinned while guests watch — scroll UP to read history privately; PageUp/PageDown still pages for everyone');
+  toast('Scrolling pauses while guests are watching — PageUp/PageDown still pages (they’ll see it)');
 }
 function sendPage(dir) {   // PageUp (older) / PageDown (newer)
   const t = tabs.get(activeTabId);
@@ -208,8 +202,7 @@ function sendPage(dir) {   // PageUp (older) / PageDown (newer)
 }
 function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
   const at = tabs.get(activeTabId);
-  if (!at || !dir) return;
-  if (at.kind === 'live' || isSharedNow(at)) { openScrollback(activeTabId); return; }   // gutter scroll intent on a mirror / watched shared tab → the per-viewer scrollback overlay (paging the TUI would scroll EVERYONE)
+  if (!at || at.kind === 'live' || isSharedNow(at) || !dir) return;   // a joined mirror's gutter is inert; so is the host's own SHARED tab (sendPage also guards)
   const n = Math.min(6, Math.abs(dir));
   for (let i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
   at.altFrac = Math.max(0, Math.min(1, (at.altFrac || 0) + (dir < 0 ? 1 : -1) * ALT_PAGE * n));   // per-tab estimate — no longer a shared global that bleeds between tabs
@@ -266,64 +259,6 @@ sc.addEventListener('pointerdown', (e) => {           // click the gutter: page 
   scrollToFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
 });
 sc.addEventListener('wheel', (e) => { if (isAlt()) { jogPages(e.deltaY < 0 ? -1 : 1); e.preventDefault(); } }, { passive: false });
-
-// ---------- per-viewer scrollback overlay: "scroll independently" on live-shared screens ----------
-// The full-screen TUI keeps ONE scroll state, and it lives in the host's pty — over a byte mirror, paging it
-// repaints every viewer's screen at once. So independent scrolling can't come from the byte stream; it comes
-// from the session TRANSCRIPT, rendered in this overlay and scrolled locally. A joined tab fetches it over the
-// live socket (the HOST resolves which session — ids are never named client-side); the host's own shared tab
-// reads its transcript over IPC. While open it refollows the conversation (refetch on a timer, server-throttled),
-// staying pinned to the newest message only if the reader is already at the bottom — never yanking them down.
-const hoEl = $('histover'), hoBody = $('ho-body');
-let hoFor = null, hoTimer = null, hoSig = '', hoLoading = false;
-function hoNote(text) { hoBody.innerHTML = ''; const d = document.createElement('div'); d.className = 'ho-note'; d.textContent = text; hoBody.appendChild(d); }
-function hoAtBottom() { return hoBody.scrollTop + hoBody.clientHeight >= hoBody.scrollHeight - 40; }
-function renderScrollback(msgs) {
-  hoLoading = false;
-  const rec = tabs.get(hoFor);
-  if (!Array.isArray(msgs) || !msgs.length) { if (!hoBody.querySelector('.ho-msg')) hoNote('No history to read yet — this conversation is just getting started.'); return; }
-  const sig = msgs.length + '·' + ((msgs[msgs.length - 1] || {}).text || '').slice(-80);
-  if (sig === hoSig && hoBody.querySelector('.ho-msg')) return;                     // unchanged → don't disturb the reader's scroll position
-  hoSig = sig;
-  const pinned = hoAtBottom() || !hoBody.querySelector('.ho-msg');                  // first paint counts as pinned
-  const keepTop = hoBody.scrollTop;
-  hoBody.innerHTML = '';
-  const youLabel = (rec && rec.kind === 'live') ? (rec.hostName || 'user') : 'you';   // transcripts don't attribute typists (host + guests co-drive the same prompts)
-  msgs.forEach((mm) => {
-    const d = document.createElement('div'); d.className = 'ho-msg ' + (mm.role === 'you' ? 'you' : 'claude');
-    const w = document.createElement('span'); w.className = 'hw'; w.textContent = (mm.role === 'you') ? youLabel : 'claude';
-    const b = document.createElement('div'); b.textContent = mm.text || '';          // textContent — transcript text must never become markup
-    d.appendChild(w); d.appendChild(b); hoBody.appendChild(d);
-  });
-  if (pinned) hoBody.scrollTop = hoBody.scrollHeight; else hoBody.scrollTop = keepTop;
-}
-function fetchScrollback() {
-  const rec = tabs.get(hoFor); if (!rec) return;
-  if (rec.kind === 'live') { try { claudible.liveTranscriptReq(hoFor); } catch {} return; }   // reply lands in onLiveTranscript below
-  if (!rec.session || rec.session === 'new') { hoLoading = false; hoNote('No history to read yet — this conversation is just getting started.'); return; }
-  const forTab = hoFor;
-  claudible.sessionTranscript(rec.session, rec.wsId).then((msgs) => { if (hoFor === forTab) renderScrollback(msgs); }).catch(() => { hoLoading = false; });
-}
-function openScrollback(tabId) {
-  const rec = tabs.get(tabId); if (!rec) return;
-  if (hoFor === tabId && !hoEl.hidden) return;                                      // already reading this tab
-  hoFor = tabId; hoSig = ''; hoLoading = true;
-  hoEl.hidden = false;
-  hoNote('Loading history…');
-  fetchScrollback();
-  if (hoTimer) clearInterval(hoTimer);
-  hoTimer = setInterval(fetchScrollback, 6000);                                     // refollow while open (the share server additionally throttles per guest)
-}
-function closeScrollback() {
-  if (hoEl.hidden) return;
-  hoEl.hidden = true; hoFor = null; hoSig = ''; hoLoading = false; hoBody.innerHTML = '';
-  if (hoTimer) { clearInterval(hoTimer); hoTimer = null; }
-  setTimeout(() => { if (term) term.focus(); }, 0);                                  // hand focus back to the live terminal
-}
-$('ho-x').addEventListener('click', closeScrollback);
-$('ho-live').addEventListener('click', closeScrollback);
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hoEl.hidden) { e.preventDefault(); e.stopPropagation(); closeScrollback(); } }, true);   // capture: Esc closes the overlay and never reaches the terminal beneath
-claudible.onLiveTranscript((p) => { if (p && p.tabId === hoFor && !hoEl.hidden) renderScrollback(Array.isArray(p.msgs) ? p.msgs : []); });
 // ---------- concurrent sessions ----------
 // Each tab is still one live session/pty running in the background; the active tab is the visible terminal.
 // There is NO top tab strip anymore — every live session is shown as a row in the LEFT SIDEBAR instead
@@ -342,7 +277,6 @@ function renderTabStrip() {
 function setActiveTab(tabId) {
   const rec = tabs.get(tabId); if (!rec) return;
   if (dragging) { dragging = false; thumb.classList.remove('drag'); }   // a scroll-thumb drag must not straddle a tab switch (its window-level pointermove would page the newly-active tab)
-  if (hoFor && hoFor !== tabId) closeScrollback();   // the scrollback overlay reads ONE tab's session — never carry it across a switch
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
   term = rec.term; fit = rec.fit;
@@ -373,7 +307,6 @@ function newBlankTab(wsId, session, name) {
 }
 function closeTab(tabId) {
   const rec = tabs.get(tabId); if (!rec || tabs.size <= 1) return;   // never close the last tab
-  if (hoFor === tabId) closeScrollback();                            // the overlay's tab is going away
   if (tabId === liveVoiceTabId) { try { liveVoice.leave(); } catch {} liveVoiceTabId = null; }   // leaving a joined session drops its voice
   if (rec.kind === 'live') { try { claudible.liveDisconnect(tabId); } catch {} }   // leaving a JOINED peer session: tear down the client WebSocket too (was leaking)
   try { claudible.tabClose(tabId); } catch {}

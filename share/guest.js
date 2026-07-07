@@ -49,15 +49,7 @@ term.open($('terminal'));
 // mode (a mirrored TUI like vim/htop asked for mouse reports, so xterm would emit \x1b[<64;… wheel
 // sequences even in the normal buffer). Only in a plain normal-buffer shell does wheel scroll THIS
 // viewer's own local scrollback, which emits nothing.
-// Blocked wheel-UP is scroll-back intent — serve it OUTSIDE the byte mirror: open the per-viewer history
-// overlay (the session transcript, scrolled locally) so every viewer reads at their own pace while the live
-// mirror streams on. The TUI's scroll state lives in the host's pty, so over a byte mirror it is inherently
-// shared — this overlay is what makes "scroll independently" possible at all.
-term.attachCustomWheelEventHandler(function (ev) {
-  var pass = term.buffer.active.type !== 'alternate' && term.modes.mouseTrackingMode === 'none';
-  if (!pass && ev && ev.deltaY < 0) openHist();
-  return pass;
-});
+term.attachCustomWheelEventHandler(function () { return term.buffer.active.type !== 'alternate' && term.modes.mouseTrackingMode === 'none'; });
 
 // custom scroll gutter (ported from the cockpit) — drives the terminal's scrollback so no native
 // scrollbar sits over the text. Desktop/tablet only (CSS hides it on phones, where touch scrolls).
@@ -371,50 +363,6 @@ $('browse-open').addEventListener('click', openBrowse);
 $('browse-x').addEventListener('click', closeBrowse);
 $('browse-back').addEventListener('click', browseBack);
 
-// ---- per-viewer scrollback overlay: read the LIVE session's history at your own pace ----
-// Fetched via 'live-transcript': the HOST resolves which session is mirrored (we name nothing) and the server
-// throttles per guest. While open it refollows the conversation on a timer, staying pinned to the newest
-// message only if the reader is already at the bottom — never yanking them down mid-read.
-var histEl = $('histov'), histBody = $('ho-body');
-var histOpen = false, histTimer = null, histSig = '';
-function histNote(text) { histBody.innerHTML = ''; var d = document.createElement('div'); d.className = 'ho-note'; d.textContent = text; histBody.appendChild(d); }
-function histAtBottom() { return histBody.scrollTop + histBody.clientHeight >= histBody.scrollHeight - 40; }
-function renderHist(msgs) {
-  if (!Array.isArray(msgs) || !msgs.length) { if (!histBody.querySelector('.ho-msg')) histNote('No history to read yet — this conversation is just getting started.'); return; }
-  var sig = msgs.length + '·' + String((msgs[msgs.length - 1] || {}).text || '').slice(-80);
-  if (sig === histSig && histBody.querySelector('.ho-msg')) return;               // unchanged → don't disturb the reader's scroll position
-  histSig = sig;
-  var pinned = histAtBottom() || !histBody.querySelector('.ho-msg');              // first paint counts as pinned
-  var keepTop = histBody.scrollTop;
-  histBody.innerHTML = '';
-  msgs.forEach(function (mm) {
-    var d = document.createElement('div'); d.className = 'ho-msg ' + (mm.role === 'you' ? 'you' : 'claude');
-    var w = document.createElement('span'); w.className = 'hw'; w.textContent = (mm.role === 'you') ? (hostName || 'host') : 'claude';
-    var b = document.createElement('div'); b.textContent = mm.text || '';         // textContent — transcript text must never become markup
-    d.appendChild(w); d.appendChild(b); histBody.appendChild(d);
-  });
-  if (pinned) histBody.scrollTop = histBody.scrollHeight; else histBody.scrollTop = keepTop;
-}
-function fetchHist() { browseSend({ type: 'live-transcript' }); }
-function openHist() {
-  if (histOpen) return;
-  histOpen = true; histSig = '';
-  histEl.hidden = false;
-  histNote('Loading history…');
-  fetchHist();
-  if (histTimer) clearInterval(histTimer);
-  histTimer = setInterval(fetchHist, 6000);                                       // refollow while open (server-throttled per guest)
-}
-function closeHist() {
-  if (!histOpen) return;
-  histOpen = false; histEl.hidden = true; histSig = ''; histBody.innerHTML = '';
-  if (histTimer) { clearInterval(histTimer); histTimer = null; }
-  try { term.focus(); } catch (e) {}
-}
-$('ho-x').addEventListener('click', closeHist);
-$('ho-live').addEventListener('click', closeHist);
-window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && histOpen) { e.preventDefault(); e.stopPropagation(); closeHist(); } }, true);   // capture: Esc closes the overlay and never reaches the host's terminal
-
 // ---- voice room: peer-to-peer audio with the host & other viewers (signaling relayed over our WS) ----
 // floating per-person VOLUME control — right-click (or long-press on touch) a voice member to set how loud YOU
 // hear them (0–200%). Local to this viewer; never changes what anyone else hears. Survives a rejoin.
@@ -597,8 +545,6 @@ function connect() {
         if (browseView === 'sessions' && msg.wsId === browseWsId) { lastSessions = Array.isArray(msg.list) ? msg.list : []; renderBrowseSessions(lastSessions); }
       } else if (msg.type === 'ws-transcript') {
         if (browseView === 'transcript' && msg.wsId === browseWsId && msg.sessionId === browseSessionId) renderTranscript(Array.isArray(msg.msgs) ? msg.msgs : []);
-      } else if (msg.type === 'live-transcript') {
-        if (histOpen) renderHist(Array.isArray(msg.msgs) ? msg.msgs : []);
       } else if (msg.type === 'voice-members') {
         voice.setMembers(msg.members || []);
       } else if (msg.type === 'audio') {
@@ -629,8 +575,7 @@ function reconnect(label) { setStatus(label, 'bad'); retry = Math.min(retry + 1,
 
 term.onData(function (d) {
   if (readOnly || denied || !ws || ws.readyState !== WebSocket.OPEN) return;
-  if (d === '\x1b[5~') { openHist(); return; }      // PageUp = scroll-back intent → the per-viewer history overlay (never the host's terminal)
-  if (d === '\x1b[6~') return;                      // PageDown is scroll intent too, never typed text — keep it off the host's terminal (matches the cockpit's joined-tab guard)
+  if (d === '\x1b[5~' || d === '\x1b[6~') return;   // PageUp/PageDown are scroll intent, never typed text — keep them off the host's terminal (matches the cockpit's joined-tab guard)
   d = d.replace(/\x1b\[<(?:6[4-9]|7\d);\d+;\d+[Mm]/g, '');   // belt-and-braces: strip SGR WHEEL reports (buttons 64–79) — clicks still co-drive a mouse-enabled TUI (matches 71065b1)
   if (!d) return;
   ws.send(JSON.stringify({ type: 'input', data: d }));

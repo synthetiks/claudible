@@ -85,7 +85,7 @@ function uniqueName(base, isTaken, max) {
 
 // onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onLiveTranscript, onVoiceMembers, onAudio } = {}) {
+function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onVoiceMembers, onAudio } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let heartbeatTimer = null;   // ~30s WS ping/pong — catches SILENT disconnects (a network drop with no clean 'close')
   let linkToken = null, hostName = 'Host';
@@ -294,18 +294,6 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       if (msg.type === 'ws-transcript' && typeof msg.id === 'string' && typeof msg.sid === 'string') {
         if (!workspaces.some((w) => w.id === msg.id)) return;          // gate to granted workspaces (transcripts can be sensitive)
         try { onBrowseTranscript && onBrowseTranscript(msg.id, msg.sid, sendBack); } catch {}
-        return;
-      }
-      // The LIVE session's transcript, for the per-viewer scrollback overlay ("scroll independently"). The
-      // guest names NOTHING — the host resolves which session is currently mirrored and re-checks that its
-      // workspace is shareable, so this can never read beyond what the byte mirror already shows. Same
-      // read-only/paused allowance as ws-transcript (saved text, never the live terminal). Throttled per
-      // guest: transcript reads run a script over the whole .jsonl.
-      if (msg.type === 'live-transcript') {
-        const now = Date.now();
-        if (ws._ltTs && now - ws._ltTs < 1500) return;
-        ws._ltTs = now;
-        try { onLiveTranscript && onLiveTranscript(sendBack); } catch {}
         return;
       }
       if (msg.type === 'input' && typeof msg.data === 'string') {
