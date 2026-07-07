@@ -831,7 +831,15 @@ function startAdvertiseHeartbeat(sid, ws) {
   advertiseTimer = setInterval(() => {
     const st = share.status();
     if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
-    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, () => {}, advertisedWs);
+    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+      // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
+      // sleep past the 5-min TTL, network outage). ONE host per session — stand down instead of stamping a
+      // duplicate, and tell the renderer so the UI stops saying "sharing" (it clears sharedSessionId + toasts).
+      if (r && r.error === 'already-live') {
+        stopAdvertiseHeartbeat();
+        try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
+      }
+    }, advertisedWs);
   }, 120000);
   if (advertiseTimer.unref) advertiseTimer.unref();
 }
@@ -845,7 +853,11 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   // isn't up yet, arm the heartbeat anyway so presence is pushed the instant a real *.trycloudflare.com URL appears,
   // and tell the caller so the host can be warned their share isn't remotely reachable.
   if (!isTunnelUrl(shareBaseUrl)) { startAdvertiseHeartbeat(sid, ws); return resolve({ ok: false, error: 'tunnel-down' }); }
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => { startAdvertiseHeartbeat(sid, ws); resolve(r || { ok: false }); }, ws);
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+    if (r && r.error === 'already-live') return resolve(r);   // a collaborator already hosts this session — do NOT arm the heartbeat (it would keep re-contesting the claim every 2 min); the renderer un-shares + points the user at Join
+    startAdvertiseHeartbeat(sid, ws);
+    resolve(r || { ok: false });
+  }, ws);
 }));
 ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = advertisedWs; stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true }), ws); }));   // clear on the ws we advertised on, not the (possibly-switched) active one
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));

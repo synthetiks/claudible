@@ -389,11 +389,44 @@ case "$op" in
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
     pull_branch || fail "pull failed"
+    # ONE live host per session: if another collaborator already holds a FRESH claim on this session, refuse
+    # instead of publishing a second advertisement (two hosts on one session = two divergent "live" copies and
+    # an ambiguous Join target). The tool prints a complete refusal line when blocked, nothing when free — and
+    # never self-refuses (my own fresh claim = the ~2-min heartbeat re-stamping). Re-checked after every
+    # push-retry pull below: per-author files merge cleanly, so a simultaneous rival claim arrives via THAT
+    # pull — the tool's deterministic tie-break (earlier ts, then login) makes exactly one of us yield.
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+    live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$(dirname "$0")/sessions-sync-tool.js" live-holder 2>/dev/null); }
+    refuse="$(live_refuse)"
+    if [ -n "$refuse" ]; then
+      # Yield cleanly: if OUR OWN (losing) claim for this same session is already on the branch — a lost push
+      # race being re-checked by the heartbeat, or a legacy double-share — retract it now, so peers converge on
+      # ONE live host immediately instead of showing two until the loser's stale claim ages past the TTL.
+      if [ -e "$WT/live/$author.json" ] && grep -q "\"session\":\"$psid\"" "$WT/live/$author.json" 2>/dev/null; then
+        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
+        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
+        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+      fi
+      emit "$refuse"; exit 0
+    fi
     mkdir -p "$WT/live" 2>/dev/null
     printf '{"login":"%s","session":"%s","url":"%s","token":"%s","name":"%s","ts":%s}\n' "$author" "$psid" "$purl" "$ptok" "$pname" "$(date +%s)" > "$WT/live/$author.json"
     gitwt add -A -- "live/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence $author" >/dev/null 2>&1
-    pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    pushed=0
+    for i in 1 2 3; do
+      gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }
+      pull_branch || break
+      refuse="$(live_refuse)"
+      if [ -n "$refuse" ]; then
+        # A rival won the race while we were pushing: RETRACT the claim we already committed (it merged in
+        # alongside theirs — leaving it would advertise a second host) and tell the renderer who holds it.
+        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
+        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
+        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+        emit "$refuse"; exit 0
+      fi
+    done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-set\"}" || emit "{\"ok\":false,\"op\":\"presence-set\",\"error\":\"push failed\"}"
     ;;
   presence-clear)

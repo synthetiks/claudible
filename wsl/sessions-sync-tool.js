@@ -436,6 +436,51 @@ function presenceFilter() {
   });
 }
 
+// subcommand "live-holder": env CL_DIR (the worktree's live/ dir), CL_SID (session being claimed),
+// CL_ME (my author login). ONE live host per session: decides whether presence-set may claim CL_SID.
+// Prints a COMPLETE presence-set refusal line ({"ok":false,...,"error":"already-live","by":...}) when
+// another author holds a FRESH claim on the session and I don't win it — or prints NOTHING when the
+// claim may proceed. Rules:
+//   · my own fresh claim on the session → proceed (the ~2-min heartbeat re-stamps; never self-refuse)
+//   · another author's claim is fresh (ts within LIVE_TTL, same 300s the renderer's Join badge uses;
+//     a crashed host goes stale and stops blocking) → refuse…
+//   · …UNLESS my own fresh claim ALSO exists (the post-write push-retry re-check: both of us pushed in
+//     the same race window — per-author files merge cleanly, so git ordering alone can't arbitrate) and
+//     I WIN the deterministic tie-break: earlier ts first (first click wins), login ascending on a tie.
+//     Exactly one side wins on identical inputs, so one host yields instead of both (or neither).
+// Corrupt/unparseable peer files are ignored (like presence-filter) — junk must never lock a session.
+const LIVE_TTL = 300;
+function liveHolder() {
+  const dir = process.env.CL_DIR || '';
+  const sid = process.env.CL_SID || '';
+  const me = process.env.CL_ME || '';
+  if (!dir || !sid) return;
+  const now = Math.floor(Date.now() / 1000);
+  const claims = [];
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (e) { return; }          // no live/ dir → nobody holds anything
+  for (const f of names) {
+    if (!/^[^/\\]+\.json$/.test(f)) continue;
+    let o;
+    try { o = JSON.parse(fs.readFileSync(dir + '/' + f, 'utf8')); } catch (e) { continue; }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+    const login = String(o.login || f.replace(/\.json$/, ''));
+    const ts = Number(o.ts) || 0;
+    if (String(o.session || '') !== sid) continue;
+    if (now - ts >= LIVE_TTL) continue;                               // stale claim (crashed/sleeping host) never blocks
+    claims.push({ login, ts, name: String(o.name || '') });
+  }
+  const mine = claims.find((c) => c.login === me);
+  const theirs = claims.filter((c) => c.login !== me);
+  if (!theirs.length) return;                                         // free (or only me) → proceed
+  if (mine) {                                                         // race: both fresh → deterministic winner
+    const rival = theirs.slice().sort((a, b) => (a.ts - b.ts) || (a.login < b.login ? -1 : 1))[0];
+    if (mine.ts < rival.ts || (mine.ts === rival.ts && mine.login < rival.login)) return;   // I was first → proceed
+  }
+  const holder = theirs.slice().sort((a, b) => (a.ts - b.ts) || (a.login < b.login ? -1 : 1))[0];
+  process.stdout.write(JSON.stringify({ ok: false, op: 'presence-set', error: 'already-live', by: holder.name || holder.login, login: holder.login }) + '\n');
+}
+
 const sub = process.argv[2];
 if (sub === 'title-write') {
   titleWrite();
@@ -443,6 +488,8 @@ if (sub === 'title-write') {
   titleRead();
 } else if (sub === 'presence-filter') {
   presenceFilter();
+} else if (sub === 'live-holder') {
+  liveHolder();
 } else {
   process.stderr.write('unknown subcommand\n');
   process.exit(1);

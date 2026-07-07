@@ -1437,6 +1437,11 @@ claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped m
   toast('Live link dropped — the tunnel went down. Toggle Share Live off then on for a fresh link.');
   renderLiveBar(); refreshChatPanel();
 });
+if (claudible.onAdvertiseLost) claudible.onAdvertiseLost((p) => {   // the presence heartbeat lost the one-host-per-session claim (our presence went stale — sleep/outage — and a collaborator went live on the same session) → stop claiming to share
+  sharedSessionId = null; advertisedSession = null;
+  updateCollab(); updateAdvertise(); refreshSessions();
+  toast(((p && p.by) || 'A collaborator') + ' went live on this session while you were away — you’re no longer sharing it. Use Join to hop into theirs.');
+});
 
 // floating per-person VOLUME control — right-click a voice member to set how loud YOU hear them (listener-side,
 // 0–200%). Local only; never changes what anyone else hears. Persists across rejoin via the voice room's volume map.
@@ -2423,7 +2428,19 @@ function updateAdvertise() {
   // instead of silently publishing an unreachable handle). The main-process heartbeat self-heals once it connects.
   try {
     claudible.liveAdvertise(want, collabName())
-      .then((r) => { if (r && r.error === 'tunnel-down') toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.'); })
+      .then((r) => {
+        if (r && r.error === 'already-live') {
+          // The authoritative claim check refused: a collaborator beat us to hosting this exact session (the
+          // race the ~10s presence poll can miss). Roll the share back completely — keeping sharedSessionId
+          // would leave the UI saying "sharing" while nothing is advertised.
+          if (sharedSessionId === want) sharedSessionId = null;
+          advertisedSession = null;
+          updateCollab(); refreshSessions();
+          toast((r.by || 'A collaborator') + ' went live on this session first — use Join to hop in instead');
+          return;
+        }
+        if (r && r.error === 'tunnel-down') toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.');
+      })
       .catch(() => {});
   } catch (e) {}
 }
@@ -2468,6 +2485,12 @@ function toggleShareSession(s) {
     updateCollab(); updateAdvertise(); refreshSessions();
     toast('Stopped sharing this session');
   } else {
+    // ONE live host per session: if a collaborator is already live on this session (their fresh presence is
+    // what draws the green Join badge on this very row), a second "Share live" would advertise a rival host —
+    // two divergent "live" copies and an ambiguous Join target. Refuse up front; the presence script re-checks
+    // authoritatively at claim time for the race this ~10s poll can miss.
+    const holder = livePeers.find((p) => p && p.session === s.id);
+    if (holder) { toast((holder.name || holder.login || 'A collaborator') + ' is already live on this session — use Join to hop in instead'); return; }
     sharedSessionId = s.id;
     if (activeSession !== s.id) openSession(s.id, sessTitle(s));   // must be the running session to stream it live
     updateCollab(); updateAdvertise(); refreshSessions();
