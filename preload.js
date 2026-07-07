@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('claudible', {
   sessionDelete: (id, scope, wsId) => ipcRenderer.invoke('session:delete', { id, scope, wsId }),
   sessionKeep: (id, wsId) => ipcRenderer.invoke('session:keep', { id, wsId }),   // "keep locally" a session deleted on GitHub
   resolveDiverged: (id, strategy, wsId) => ipcRenderer.invoke('session:resolveDiverged', { id, strategy, wsId }),   // out-of-sync fork → 'remote' (take theirs) | 'local' (keep mine)
+  sessionTranscript: (id, wsId) => ipcRenderer.invoke('session:transcript', { id, wsId }),   // last ~150 messages, for the scrollback overlay (host reading its own session)
   exportSession: (id, wsId) => ipcRenderer.invoke('session:export', { id, wsId }),   // → shareable self-contained HTML replay
   exportSessionText: (id, wsId) => ipcRenderer.invoke('session:export-text', { id, wsId }),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: () => ipcRenderer.invoke('claude:version'),   // the embedded Claude Code CLI version (for the status bar)
@@ -134,6 +135,8 @@ contextBridge.exposeInMainWorld('claudible', {
   onLiveAudio: (cb) => ipcRenderer.on('live:audio', (_e, p) => cb(p)),
   onLiveState: (cb) => ipcRenderer.on('live:state', (_e, p) => cb(p)),
   onLiveHistory: (cb) => ipcRenderer.on('live:history', (_e, p) => cb(p)),   // the host's Session-History feed for a joined tab (view-only)
+  liveTranscriptReq: (tabId) => ipcRenderer.send('live:transcript-req', { tabId }),   // scrollback overlay: request the mirrored session's transcript over the joined tab's socket
+  onLiveTranscript: (cb) => ipcRenderer.on('live:transcript', (_e, p) => cb(p)),
   // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
   titleSet: (id, name, wsId) => ipcRenderer.invoke('title:set', { id, name, wsId }),
   titleList: (wsId) => ipcRenderer.invoke('title:list', wsId),

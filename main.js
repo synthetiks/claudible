@@ -152,6 +152,19 @@ const share = createShareServer({
         reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
       });
   },
+  // The MIRRORED session's transcript for a guest's scrollback overlay. WE resolve which session (the pinned
+  // shared tab's — guests never name ids on this path) and re-check its workspace is shareable, so it can only
+  // ever read the conversation the byte mirror already shows. Capped: this feeds a reading pane, not an export.
+  onLiveTranscript: (reply) => {
+    const rec = ptys.get(mirrorTabId());
+    const ws = rec && rec.ws;
+    const sid = String((rec && rec.session) || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!rec || !ws || !isShareable(ws) || !sid || sid === 'new' || !APPDIR_WSL) return reply({ type: 'live-transcript', sessionId: '', msgs: [] });
+    runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
+        let msgs = []; try { msgs = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+        reply({ type: 'live-transcript', sessionId: sid, msgs: Array.isArray(msgs) ? msgs.slice(-150) : [] });
+      });
+  },
   // Voice room (WebRTC) — the server is signaling-only; audio is peer-to-peer. Bridge the host cockpit's
   // voice membership + audio frames go back to the cockpit renderer (over IPC).
   onVoiceMembers: (members) => { try { win && win.webContents.send('share:voice-members', members); } catch {} },
@@ -672,6 +685,13 @@ function openLiveSocket(tabId) {
         }
         break;
       }
+      // The mirrored session's transcript for this joined tab's scrollback overlay. Normalized like 'history':
+      // the remote stream is untrusted, so clamp roles/text before the renderer ever sees them.
+      case 'live-transcript': {
+        const msgs = Array.isArray(m.msgs) ? m.msgs.slice(-150).map((x) => ({ role: (x && x.role === 'you') ? 'you' : 'claude', text: String((x && x.text) || '').slice(0, 20000) })) : [];
+        liveSend(tabId, 'live:transcript', { sessionId: String(m.sessionId || '').slice(0, 64), msgs });
+        break;
+      }
       default: break;   // workspaces / ws-sessions / ws-transcript / rtc: unused by the native joined tab
     }
   });
@@ -728,6 +748,7 @@ ipcMain.handle('live:disconnect', (e, { tabId } = {}) => { liveDisconnect(tabId)
 ipcMain.on('live:input', (e, { tabId, data } = {}) => liveForward(tabId, 'input', { data: String(data == null ? '' : data) }));   // a keystroke → the peer's foreground pty
 ipcMain.on('live:chat-send', (e, { tabId, text } = {}) => liveForward(tabId, 'chat', { text: String(text == null ? '' : text).slice(0, 2000) }));
 ipcMain.on('live:voice', (e, { tabId, join } = {}) => liveForward(tabId, join ? 'voice-join' : 'voice-leave', {}));
+ipcMain.on('live:transcript-req', (e, { tabId } = {}) => liveForward(tabId, 'live-transcript', {}));   // scrollback overlay: ask the host for the mirrored session's transcript (host resolves WHICH — we name nothing)
 ipcMain.on('live:audio-send', (e, { tabId, data, sr } = {}) => liveForward(tabId, 'audio', { data, sr }));
 
 // ---- live terminal sharing (local server + cloudflared tunnel) ----
@@ -1543,6 +1564,17 @@ ipcMain.handle('clip:read', () => { try { return clipboard.readText(); } catch {
 // Export a saved session as a SELF-CONTAINED, shareable HTML replay (no server, works offline). Reads the
 // transcript for the active workspace's session via transcript.sh, renders it, and lets the user pick where
 // to save. Text is embedded as JSON and rendered client-side via textContent → no injection from transcript.
+// The scrollback overlay's local data path (the HOST reading its own session while guests watch): last ~150
+// messages of one session's transcript. Same reader the share's live-transcript path uses, minus the socket.
+ipcMain.handle('session:transcript', (e, arg) => new Promise((resolve) => {
+  const sid = String((arg && arg.id) || '').replace(/[^A-Za-z0-9-]/g, '');
+  const ws = _wsById(arg && arg.wsId) || activeWorkspace;
+  if (!sid || !APPDIR_WSL) return resolve([]);
+  runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
+    let msgs = []; try { msgs = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+    resolve(Array.isArray(msgs) ? msgs.slice(-150) : []);
+  });
+}));
 ipcMain.handle('session:export', async (e, arg) => {
   try {
     const sessionId = (arg && typeof arg === 'object') ? arg.id : arg;   // legacy bare-id calls still work

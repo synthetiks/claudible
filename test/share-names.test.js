@@ -110,6 +110,31 @@ function joinAndHello(port, cred) {
     eq('the superseded socket is closed with 4001 (so a live duplicate stands down instead of flapping)', await aClosed, 4001);
 
     try { c.ws.close(); b2.ws.close(); a3.ws.close(); } catch {}
+
+    // ---- live-transcript (per-viewer scrollback overlay): served, host-resolved, per-guest throttled ----
+    // The guest names NOTHING (no ids in the request) — the onLiveTranscript hook decides which session; and a
+    // second request inside the 1.5s window must be dropped (transcript reads run a script over the whole .jsonl).
+    let ltCalls = 0;
+    const srv2 = createShareServer({ onLiveTranscript: (reply) => { ltCalls++; reply({ type: 'live-transcript', sessionId: 'sid-1', msgs: [{ role: 'you', text: 'hi' }, { role: 'claude', text: 'hello' }] }); } });
+    try {
+      const st2 = await srv2.start({ requireApproval: false, name: 'Host' });
+      const g = await joinAndHello(st2.port, `t=${st2.token}&n=Reader`);
+      const nextLT = () => new Promise((res) => {
+        const h = (data) => { let m = null; try { m = JSON.parse(data.toString()); } catch { return; } if (m && m.type === 'live-transcript') { g.ws.off('message', h); res(m); } };
+        g.ws.on('message', h);
+      });
+      const p1 = nextLT();
+      g.ws.send(JSON.stringify({ type: 'live-transcript' }));
+      const r1 = await p1;
+      eq('live-transcript: replies with the host-resolved session', r1.sessionId, 'sid-1');
+      eq('live-transcript: carries the messages', r1.msgs.length, 2);
+      g.ws.send(JSON.stringify({ type: 'live-transcript' }));                     // immediate repeat → inside the throttle window
+      await new Promise((res) => setTimeout(res, 300));
+      eq('live-transcript: per-guest throttle drops an immediate repeat', ltCalls, 1);
+      try { g.ws.close(); } catch {}
+    } finally {
+      try { srv2.stop(); } catch {}
+    }
   } catch (e) {
     fail++; console.error('  FAIL integration threw: ' + (e && e.message));
   } finally {
