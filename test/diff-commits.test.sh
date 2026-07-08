@@ -35,9 +35,13 @@ field() { CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$1" bash "$DIFF_SH" 2>/dev/n
   });' "$2"; }
 ok() { if [ "$1" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL $3: expected [$2] got [$1]"; fi; }
 
+# A fixture's branch name must NOT depend on the machine: git falls back to `master` when init.defaultBranch is
+# unset (every CI runner), and to `main` on a configured dev box. `symbolic-ref HEAD` on an unborn repo pins it on
+# ANY git version — `git init -b` would need >= 2.28. The product is branch-agnostic; the assertions below aren't.
+gitinit() { git init -q ${2:+--bare} "$1"; git -C "$1" symbolic-ref HEAD refs/heads/main; }
 newrepo() {   # echoes a fresh repo dir with an initial commit
   local d; d="$(mktemp -d)"
-  git -C "$d" init -q
+  gitinit "$d"
   git -C "$d" config user.email t@t; git -C "$d" config user.name T
   git -C "$d" config commit.gpgsign false
   echo root > "$d/root.txt"; git -C "$d" add -A; git -C "$d" commit -qm "root commit"
@@ -71,7 +75,7 @@ rm -rf "$D"
 
 # --- 4. whole history inside the window: the oldest commit must NOT be dropped ---
 D="$(mktemp -d)"
-git -C "$D" init -q; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
+gitinit "$D"; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
 echo a > "$D/a.txt"; git -C "$D" add -A; git -C "$D" commit -qm "first"
 echo b >> "$D/a.txt"; git -C "$D" commit -qam "second"
 r="$(probe "$D")"; ok "$(echo "$r" | cut -d' ' -f1-2)" "2 2" "young repo keeps its oldest commit"
@@ -79,7 +83,7 @@ rm -rf "$D"
 
 # --- 5. exactly one commit ever (the root) — the old `ccount > 1` guard hid it ---
 D="$(mktemp -d)"
-git -C "$D" init -q; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
+gitinit "$D"; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
 echo only > "$D/a.txt"; git -C "$D" add -A; git -C "$D" commit -qm "the only commit"
 r="$(probe "$D")"; ok "$(echo "$r" | cut -d' ' -f1-2)" "1 1" "a lone root commit is listed"
 rm -rf "$D"
@@ -91,7 +95,7 @@ rm -rf "$D"
 #        NB: `git log/rev-list --since` filters on the COMMITTER date, not the author date — so the fixture must
 #        backdate BOTH (a `--date=` amend moves only the author date, leaving the commit "today" to --since).
 D="$(mktemp -d)"
-git -C "$D" init -q; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
+gitinit "$D"; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
 echo old > "$D/a.txt"; git -C "$D" add -A
 # an ABSOLUTE date (git rejects "30 days ago" for GIT_*_DATE); comfortably outside any 7-day window
 GIT_AUTHOR_DATE="2020-01-01T00:00:00" GIT_COMMITTER_DATE="2020-01-01T00:00:00" git -C "$D" commit -qm "an old commit"
@@ -106,7 +110,7 @@ rm -rf "$D"
 
 # --- 6b. the latest-window is capped at 20 and its diff base is the OLDEST LISTED commit's parent, not the root ---
 D="$(mktemp -d)"
-git -C "$D" init -q; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
+gitinit "$D"; git -C "$D" config user.email t@t; git -C "$D" config user.name T; git -C "$D" config commit.gpgsign false
 for i in $(seq 1 25); do
   echo "line $i" >> "$D/a.txt"; git -C "$D" add -A
   GIT_AUTHOR_DATE="2020-01-01T00:00:00" GIT_COMMITTER_DATE="2020-01-01T00:00:00" git -C "$D" commit -qm "old $i"
@@ -158,7 +162,7 @@ ok "$meta" "true true true true" "each commit carries hash, subject, author, ISO
 # the displayed date must be the COMMITTER date — the same clock `--since` filtered on. An amended/rebased commit
 # would otherwise be listed under "last 7 days" while showing an author date from months ago.
 D2="$(mktemp -d)"
-git -C "$D2" init -q; git -C "$D2" config user.email t@t; git -C "$D2" config user.name T; git -C "$D2" config commit.gpgsign false
+gitinit "$D2"; git -C "$D2" config user.email t@t; git -C "$D2" config user.name T; git -C "$D2" config commit.gpgsign false
 echo a > "$D2/a.txt"; git -C "$D2" add -A
 GIT_AUTHOR_DATE="2020-03-04T00:00:00" git -C "$D2" commit -qm "old author date, committed today"
 today="$(date +%Y-%m-%d)"
@@ -174,14 +178,14 @@ rm -rf "$D"
 #    API — it can still see the commits GitHub has never been told about. Every assert below is about not lying:
 #    a commit is only ever marked "not on GitHub" when there is a real upstream to have missed it.
 # ===========================================================================================================
-withupstream() {   # echoes "<workdir> <baredir>" — a repo cloned from a local bare, tracking origin/<default>
+withupstream() {   # echoes "<tmpdir>" containing work/ (branch main) and bare.git, with work tracking origin/main
   local d b; d="$(mktemp -d)"; b="$d/bare.git"
-  git init -q --bare "$b"
-  git init -q "$d/work"
+  gitinit "$b" bare
+  gitinit "$d/work"
   git -C "$d/work" config user.email t@t; git -C "$d/work" config user.name T; git -C "$d/work" config commit.gpgsign false
   echo one > "$d/work/a.txt"; git -C "$d/work" add -A; git -C "$d/work" commit -qm "pushed commit"
   git -C "$d/work" remote add origin "$b"
-  git -C "$d/work" push -q -u origin HEAD 2>/dev/null
+  git -C "$d/work" push -q -u origin main
   printf '%s' "$d"
 }
 
@@ -210,8 +214,8 @@ rm -rf "$D"
 D="$(withupstream)"; W="$D/work"
 git clone -q "$D/bare.git" "$D/other"
 git -C "$D/other" config user.email t@t; git -C "$D/other" config user.name T; git -C "$D/other" config commit.gpgsign false
-echo remote >> "$D/other/a.txt"; git -C "$D/other" commit -qam "someone else pushed this"; git -C "$D/other" push -q origin HEAD
-git -C "$W" fetch -q origin main 2>/dev/null || git -C "$W" fetch -q origin master
+echo remote >> "$D/other/a.txt"; git -C "$D/other" commit -qam "someone else pushed this"; git -C "$D/other" push -q origin main
+git -C "$W" fetch -q origin main
 ok "$(field "$W" 'j.behind')" "1" "a commit pushed by someone else → behind=1"
 ok "$(field "$W" 'j.ahead')" "0" "…with nothing of our own to push"
 rm -rf "$D"
@@ -246,7 +250,7 @@ rm -rf "$D"
 
 # --- 9g. an UNBORN HEAD (git init, nothing committed). `git rev-list --count HEAD` FATALS here — it does not
 #         print 0 — so the `|| echo 0` fallbacks are what keep this a clean, empty read instead of a crash.
-D="$(mktemp -d)"; git -C "$D" init -q
+D="$(mktemp -d)"; gitinit "$D"
 r="$(probe "$D")"; ok "$r" "0 0 0 none" "a repo with no commits at all: no window, no commits, no crash"
 ok "$(field "$D" 'j.total')" "0" "…and a zero lifetime tally"
 rm -rf "$D"
