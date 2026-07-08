@@ -2,6 +2,36 @@
 
 All notable changes to Claudible are documented here.
 
+## [0.8.0] — unreleased
+
+A hardening pass: no new features, a lot of quietly-wrong things made right. Every change ships with an executable test, and the whole tree now has an ESLint + shellcheck gate, a real-Electron boot smoke test, and a per-OS packaging check running in CI on every push.
+
+### Your sessions were running the fallback hooks (the big one)
+- Claudible runs its scripts in a non-interactive login shell, where **nvm's `node` is not on `PATH`** — and four scripts that call `node` weren't compensating for it. On a machine whose Node came from nvm, that meant: every session silently staged the **degraded bash hooks instead of the Node ones**; **"Export conversation" wrote an empty file**; and the System Check reported **Node.js as "missing" and Claude as "not signed in"** — on a machine that had both. All fixed; a build-time check now fails if any script calls `node` without resolving it first.
+- The System Check now reports an installed-but-**outdated** Node as outdated, instead of hiding it as "missing".
+
+### Security
+- **A repository you *adopt* can no longer run commands on your machine.** A hostile `.git/config` in a folder you open — via keys like `core.sshCommand`, `core.fsmonitor` (which fires on the every-4-seconds Project History diff) or an `ext::` remote — was arbitrary code execution just from opening the project card. Every git call Claudible makes now neutralizes the command-executing config keys.
+- **A folder whose name contains a quote, a backslash or a control character is refused with a clear message** instead of half-creating the workspace and then failing to record it (which left the folder on disk, owned by nothing). Legitimate unusual paths — spaces, unicode, `$`, `;` — keep working.
+
+### Your data survives a crash and tells the truth on failure
+- **`settings.json` is now written atomically.** It holds every session title, your collaborator name, the permission mode and the effort level; a crash mid-write used to leave a torn file that reads back as *empty* — a silent first-run. Same tmp-and-rename the workspace registry already used.
+- **The trash is bounded.** Deleting a project moves the whole folder to `~/.claudible/trash`, which nothing ever emptied. It's now swept (30-day age + 2 GB cap, oldest first).
+- **Deleting a project that fails to move now says so** instead of reporting success and orphaning the folder — and deleting a session no longer forgets its custom name when the delete didn't actually happen.
+- **Script failures are surfaced, not disguised as empty results.** A checkpoint, diff, transcript-export or session-list script that crashes used to look like "nothing here"; it now reports the failure, and every script call has a timeout so a hang can't wedge the UI.
+- **Reverting a change while a turn is finishing can no longer corrupt a checkpoint.** Worktree writes (checkpoint snapshot/restore, diff revert/discard) are serialized per project, so a Stop-time snapshot can't capture a half-reverted tree.
+
+### Multiplayer & voice
+- **Per-person voice volume survives a reconnect.** The level you set for someone was silently reset by any WiFi blip, because their voice identity was re-minted on every reconnect; it's now stable across a resume.
+- **The voice roster no longer shows someone twice** during a reconnect.
+- **Guest capacity, chat history and the presence roster no longer grow without bound** on a long-lived public link.
+- Clearer error messages throughout: an out-of-sync project mid-sync no longer tells you to "wait for the turn to finish", and raw internal error codes no longer leak into the UI.
+
+### Under the hood
+- New: ESLint + shellcheck gates, a static wiring contract (proves the DOM/IPC/script seams still line up), a real-Electron boot smoke test (catches a renderer crash before you open the app), and `electron-builder --dir` on Windows/Linux/macOS — all in CI.
+- Removed dead code (a retired tab strip and its 11 call sites, unused runner methods) and de-duplicated the workspace-directory resolution that had been copy-pasted across twelve shell scripts into one.
+- The whole suite passes under a clean git config, and every fix in this release is covered by a test that fails when the fix is reverted.
+
 ## [0.7.0] — 2026-07-03
 
 ### Session history grew up — and is now ON by default
