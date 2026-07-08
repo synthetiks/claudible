@@ -35,18 +35,39 @@ if (process.env.CLAUDIBLE_E2E !== '1') {
 }
 
 // ---- isolation, established BEFORE anything is spawned -----------------------------------------------------
+// The app's registry lives at `runner.runtimeDir()/workspaces.json`, and runtimeDir() is `APP_ROOT/runtime` on the
+// wsl AND posix runners — they deliberately IGNORE $CLAUDIBLE_RUNTIME, because wsl/session.sh hardcodes
+// RT="$APPDIR/runtime" and main must read where the script writes. (Only win.js honors the env var; a packaged
+// Windows install has a read-only APP_ROOT.) So $CLAUDIBLE_RUNTIME cannot isolate this on Linux/WSL — the app
+// would write straight into the developer's live runtime/. That is not a hypothetical: it is what happened.
+//
+// The only isolation that actually holds is to make APP_ROOT itself disposable. Copy the app into the sandbox and
+// run Electron from there; node_modules is symlinked (it's ~300MB and read-only for our purposes).
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'claudible-e2e-'));
+const APP = path.join(SANDBOX, 'app');
 const HOME = path.join(SANDBOX, 'home');
-const RUNTIME = path.join(SANDBOX, 'runtime');
 const USERDATA = path.join(SANDBOX, 'userdata');
-[HOME, RUNTIME, USERDATA].forEach((d) => fs.mkdirSync(d, { recursive: true }));
+[APP, HOME, USERDATA].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 
-// Hard guard: if these don't resolve inside SANDBOX, we would be pointing the app at the developer's real state.
+// Everything the app loads at runtime (mirrors electron-builder's `files` list, minus docs/tests).
+for (const entry of ['main.js', 'preload.js', 'package.json', 'lib', 'renderer', 'hooks', 'runners', 'wsl', 'share', 'assets']) {
+  const src = path.join(ROOT, entry);
+  if (fs.existsSync(src)) fs.cpSync(src, path.join(APP, entry), { recursive: true });
+}
+try { fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(APP, 'node_modules'), 'junction'); }
+catch { fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(APP, 'node_modules')); }
+
+// Hard guard: nothing may resolve outside the sandbox. If we can't PROVE isolation, we launch nothing.
 const inside = (p) => path.resolve(p).startsWith(path.resolve(SANDBOX) + path.sep);
-if (!inside(HOME) || !inside(RUNTIME) || !inside(USERDATA)) {
-  console.error('e2e-boot: REFUSING to launch — sandbox paths are not isolated.');
+if (!inside(APP) || !inside(HOME) || !inside(USERDATA) || !fs.existsSync(path.join(APP, 'main.js'))) {
+  console.error('e2e-boot: REFUSING to launch — sandbox is not isolated.');
   process.exit(1);
 }
+// Snapshot the REAL runtime dir so we can prove afterwards that the app never touched it.
+const REAL_RUNTIME = path.join(ROOT, 'runtime');
+const realRuntimeBefore = fs.existsSync(REAL_RUNTIME)
+  ? fs.readdirSync(REAL_RUNTIME).sort().join(',') + '|' + String(fs.statSync(REAL_RUNTIME).mtimeMs)
+  : '(absent)';
 
 const electronBin = (() => {
   try { return require(path.join(ROOT, 'node_modules/electron')); } catch { return null; }
@@ -67,12 +88,12 @@ process.on('SIGINT', () => { cleanup(); process.exit(130); });
 
 // ---- launch ------------------------------------------------------------------------------------------------
 child = cp.spawn(electronBin, ['.', `--remote-debugging-port=${PORT}`, `--user-data-dir=${USERDATA}`, '--no-sandbox'], {
-  cwd: ROOT,
+  cwd: APP,                                 // APP_ROOT — and therefore runtimeDir() — is the sandbox copy
   env: {
     ...process.env,
-    HOME,                                   // isolated: loadRegistry/settings/~/.claudible all resolve here
+    HOME,                                   // isolated: ~/.claudible, ~/.claude
     USERPROFILE: HOME,                      // Windows equivalent
-    CLAUDIBLE_RUNTIME: RUNTIME,             // runtimeDir() — never the live runtime/
+    CLAUDIBLE_RUNTIME: path.join(APP, 'runtime'),   // only the win runner reads this; harmless (and correct) elsewhere
     CLAUDIBLE_E2E: '1',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },
@@ -158,8 +179,15 @@ async function findPage(deadline) {
   const wsList = await evaluate('window.claudible.workspaceList().then(r => JSON.stringify(r))');
   ok('workspace:list round-trips and returns a registry', typeof wsList === 'string' && wsList.includes('workspaces'));
 
-  // Isolation actually held: the app wrote its registry into the sandbox, not the repo's runtime/.
-  ok('the app wrote its registry INSIDE the sandbox (isolation held)', fs.existsSync(path.join(RUNTIME, 'workspaces.json')));
+  // Isolation is ASSERTED, not assumed — both directions.
+  ok('the app wrote its registry inside the sandbox app copy', fs.existsSync(path.join(APP, 'runtime', 'workspaces.json')));
+  const realRuntimeAfter = fs.existsSync(REAL_RUNTIME)
+    ? fs.readdirSync(REAL_RUNTIME).sort().join(',') + '|' + String(fs.statSync(REAL_RUNTIME).mtimeMs)
+    : '(absent)';
+  ok("the repo's own runtime/ was never touched", realRuntimeAfter === realRuntimeBefore);
+  if (realRuntimeAfter !== realRuntimeBefore) {
+    console.error(`      before: ${realRuntimeBefore}\n      after:  ${realRuntimeAfter}`);
+  }
 
   if (consoleErrors.length) {
     console.log(`  note: ${consoleErrors.length} console.error during boot (not gated; a pty/claude is absent in CI):`);

@@ -44,6 +44,10 @@ function toHostPath(guestPath) {
 // channel (main reads/writes the relocated dir while session.sh's hooks write the app dir → dead
 // telemetry, a second settings.json, an unread context.json). Only the win runner — whose hook paths
 // are baked from THIS function, keeping writer and reader coherent — honors the relocation.
+// DELIBERATELY ignores $CLAUDIBLE_RUNTIME (unlike win.js, whose packaged APP_ROOT is read-only). wsl/session.sh
+// hardcodes RT="$APPDIR/runtime/tabs/$TAB", so main MUST read where the script writes — honoring the env var here
+// would silently split the writer and the reader. Consequence worth knowing: $CLAUDIBLE_RUNTIME cannot be used to
+// point this runner at a scratch directory. To isolate the app (a test, a sandbox), copy APP_ROOT itself.
 function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 
 // --- Claude Code session bootstrap (was main.js:103-122) -----------------------------------------

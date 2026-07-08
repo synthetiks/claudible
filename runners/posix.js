@@ -22,6 +22,9 @@ function toGuestPath(p) { return String(p == null ? '' : p); }
 function toHostPath(p) { return String(p == null ? '' : p); }
 // session.sh ALWAYS derives runtime from $APPDIR (the root isn't threaded into bash), so CLAUDIBLE_RUNTIME
 // is deliberately ignored — honoring it would split main's reads from the hooks' writes (see wsl.js).
+// Same contract as wsl.js: $CLAUDIBLE_RUNTIME is DELIBERATELY ignored (session.sh hardcodes $APPDIR/runtime, so
+// writer and reader must agree). Only win.js honors it. Isolating this runner means copying APP_ROOT, not setting
+// an env var — see the header of test/e2e-boot.test.js, which learned that the hard way.
 function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 
 // buildBoot via the shared pure builder (appdir = the native app root).
