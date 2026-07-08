@@ -521,30 +521,48 @@ function respawnPty(tabId, session, opts) {
   // never kills a mid-turn Claude even when the renderer's own busy flag is still stale from the poll latency.
   // The caller opens the target session in a NEW background tab instead, leaving this one running.
   if (opts && opts.guardBusy && rec && rec.busy) return false;
-  setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
-  const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
-  // PRIVACY GUARD — the SHARED tab is being re-pointed at a DIFFERENT session. The old pause check below is
-  // workspace-granular (isShareable(ws)), so recycling the pinned tab onto another session INSIDE the same
-  // shared workspace used to leave the mirror live: spawnPty re-registers `tabId === mirrorTabId()` and tees
-  // the new session's bytes straight to guests who joined a different conversation. Pause BEFORE the new pty
-  // exists and wipe the replay ring, so not one foreign byte can reach them. (A post-sync reload respawns the
-  // SAME session — `same` is true there, so a legitimate reload never pauses.) The renderer avoids this path
-  // entirely now (it opens the click in a new tab); this is the defense-in-depth backstop.
+  // THE LIVE SESSION IS NOT COLLATERAL. The pinned tab (sharedTabId) IS the conversation guests are watching.
+  // Re-pointing it at a different session respawns its pty — `old.kill()` below — so the shared conversation
+  // simply ENDS. The previous guard paused the mirror first (no foreign bytes leaked, which was its job) and
+  // then killed the session anyway: guests kept a socket to a frozen, dead terminal. Indistinguishable from
+  // "the host ended the live session", which is exactly what the host did not do.
+  //
+  // So: REFUSE. A live session ends when the host ends it — never as a side effect of the host navigating.
+  // Callers open the destination somewhere else (the renderer opens a new tab; workspace:open leaves the tab
+  // where it is). Every caller already treats `false` as "the tab kept its session".
+  //
   // opts.trustedReroute: the caller IS the share's own machinery (a guest switching to another GRANTED
   // workspace, or Claude restarting on the SAME conversation for a re-login). Those legitimately pass
   // session:'' and must not be mistaken for the host re-pointing the mirror at a private conversation.
+  // opts.endShare: the shared tab's own workspace is being deleted. The share genuinely cannot survive that,
+  // so the reroute proceeds — with the mirror paused and its ring wiped first, and the renderer told to end
+  // the share for real (workspace:delete sends share:force-end).
   const trusted = !!(opts && opts.trustedReroute);
+  const endShare = !!(opts && opts.endShare);
   const sharing = (() => { try { return !!share.status().running; } catch { return false; } })();
-  const sessionMoved = !trusted && sharing && sharedTabId && tabId === sharedTabId && rec && rec.session !== (session || '');
-  if (sessionMoved) {
-    try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
-    try { winSend('share:session-moved', { tabId, from: rec.session || '', to: session || '' }); } catch {}
-    console.log('[claudible] shared tab re-pointed off its session — mirror paused (guests frozen, no leak)');
+  const onPinned = sharing && !!sharedTabId && tabId === sharedTabId;
+  // A post-sync reload respawns the SAME session, so it is never a "move" and never blocked.
+  const movesShared = !trusted && onPinned && !!rec && rec.session !== (session || '');
+  // Refuse BEFORE setGenBusy: this tab keeps running its turn, so its sync gate must stay closed. (Same reason
+  // the busy guard above returns before it.)
+  if (movesShared && !endShare) {
+    try { winSend('share:reroute-refused', { tabId, from: rec.session || '', to: session || '' }); } catch {}
+    console.log('[claudible] refused to re-point the live-shared tab off its session — the share stays alive');
+    return false;
   }
+  setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
+  const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
+  // The share is being torn down along with its workspace (the only reroute of the pinned tab we allow). Freeze the
+  // mirror before the new pty can emit a byte, and keep it frozen: both the workspace-granular pause below and
+  // syncShare() re-derive from the FALLBACK workspace, which would happily UN-pause and stream a project the guests
+  // were never granted. Keyed on the PINNED tab, not on movesShared — a manual web-share pins whatever tab was in
+  // the foreground, and that tab's session can be '' (resume-latest), which makes movesShared false.
+  const freezeMirror = onPinned && endShare;
+  if (freezeMirror) { try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {} }
   if (tabId === mirrorTabId()) {
     // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
-    // (A sessionMoved pause above is authoritative — never un-pause it here on the way back in.)
-    try { if (share.status().running && !sessionMoved) share.setPaused(!isShareable(ws)); } catch {}
+    // (The freeze above is authoritative — never un-pause it here on the way back in.)
+    try { if (share.status().running && !freezeMirror) share.setPaused(!isShareable(ws)); } catch {}
   }
   const old = rec && rec.proc;
   if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // a pending post-sync reload for the OLD generation dies with it (the new pty re-reads the transcript anyway)
@@ -555,10 +573,9 @@ function respawnPty(tabId, session, opts) {
   // safe (the new file starts empty — nothing to replay) and required (stale offsets belong to the old gen's file).
   hookState.delete(tabId); lastStatusByTab.delete(tabId);
   spawnPty(tabId, cols, rows, ws, session);
-  // syncShare re-derives pause from isShareable(mirrorWs()) — which would UNPAUSE the sessionMoved guard above
-  // (same workspace ⇒ still shareable). Skip it in that case: the mirror must stay frozen until the host
-  // explicitly ends or re-starts the share.
-  if (tabId === mirrorTabId() && !sessionMoved) syncShare();   // refresh the granted library (live flag) for guests
+  // syncShare re-derives pause from isShareable(mirrorWs()) — which would UNPAUSE the freeze above. Skip it there:
+  // the mirror stays frozen until the renderer's share:force-end drops the tunnel for real.
+  if (tabId === mirrorTabId() && !freezeMirror) syncShare();   // refresh the granted library (live flag) for guests
   return true;
 }
 // Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points
@@ -633,9 +650,14 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   if (rec) { try { rec.proc.kill(); } catch {} }
   if (rec) _killSessionTree(rec.runtimeId);                            // reap the WSL-side tree too (ConPTY kill stops at the Windows boundary)
   liveDisconnect(tabId);                                               // also drop a joined live socket if this was a live tab
-  // The SHARED tab closed mid-share: keep the pin pointing at the (now dead) id — NEVER fall back to the host's
-  // private foreground. The mirror pauses; guests keep chat/voice until the host ends the live session.
-  if (sharedTabId === tabId) { try { share.setPaused(true); } catch {} }
+  // The SHARED tab closed mid-share. This is the OTHER way a live pty dies — respawnPty's refusal can't see it,
+  // because closing a tab doesn't respawn anything. Pausing alone left a zombie: the tunnel up, the host's UI still
+  // claiming "live", and guests staring at a frozen mirror of a process that no longer exists. Keep the pin on the
+  // dead id (never fall back to the host's private foreground) and tell the renderer to end the share for real.
+  if (sharedTabId === tabId) {
+    try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    try { winSend('share:force-end', { reason: 'tab-closed' }); } catch {}
+  }
   if (fgTabId === tabId) fgTabId = ptys.keys().next().value || null;   // renderer will foreground the next tab explicitly
   return { ok: true };
 });
@@ -909,7 +931,13 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
     try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
   });
 }));
-ipcMain.handle('session:open', (e, { tabId, id }) => { openGen++; const ok = respawnPty(tabId, id, { guardBusy: true }); return { ok }; });   // re-point an existing tab at 'new' | <session-id>. guardBusy: main refuses to kill a mid-turn Claude (ok:false → the renderer opens the target in a new tab, leaving this one running). openGen++ supersedes any in-flight workspace:open clone so its continuation can't respawn the tab AFTER this click.
+// Re-point an existing tab at 'new' | <session-id>. guardBusy: main refuses to kill a mid-turn Claude (ok:false → the
+// renderer opens the target in a new tab, leaving this one running). openGen++ supersedes any in-flight workspace:open
+// clone so its continuation can't respawn the tab AFTER this click. endShare: deleteSession is moving the pinned tab
+// off the very session it's about to trash — the one session-level reroute the share cannot survive (the tunnel is
+// already being torn down renderer-side). Without it, the refusal below would abort the delete with a misleading
+// "that session is still running".
+ipcMain.handle('session:open', (e, { tabId, id, endShare }) => { openGen++; const ok = respawnPty(tabId, id, { guardBusy: true, endShare: !!endShare }); return { ok }; });
 // Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
 // switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.
 ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
@@ -944,11 +972,28 @@ ipcMain.handle('session:keep', (e, arg) => new Promise((resolve) => {
 }));
 // Resolve an "out of sync" (forked) session — 'remote' = take the shared copy (collaborator's, via the safe
 // import_file path), 'local' = keep mine (clears the flag + acks it so a background sync stops re-nagging).
+// The session the live mirror is welded to — the conversation guests are actually watching. Derived from the
+// PINNED tab (not the advertised id alone), so a manual web-share with no `sharedSessionId` is covered too.
+function liveSessionId() {
+  if (!sharedTabId) return '';
+  try { if (!share.status().running) return ''; } catch { return ''; }
+  const r = ptys.get(sharedTabId);
+  return (r && r.session) || '';
+}
 ipcMain.handle('session:resolveDiverged', (e, arg) => new Promise((resolve) => {
   const id = (typeof arg === 'string') ? arg : (arg && arg.id);
   const strategy = (arg && arg.strategy === 'local') ? 'local' : 'remote';
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
+  // `resolve remote` REPLACES the transcript on disk (sessions-sync.sh reuses import_file). Two states make that
+  // destructive rather than helpful, and the UI hiding a button is not a guard — refuse at the call site:
+  //   * the session is LIVE — its Claude is appending to that very file, and guests are watching it stream
+  //   * a tab on it is MID-TURN — same file, same problem (mirrors session-delete's busy contract)
+  // 'local' only clears a flag, so it stays allowed throughout.
+  if (strategy === 'remote') {
+    if (sid === liveSessionId()) return resolve({ ok: false, error: 'live' });
+    for (const rec of ptys.values()) if (rec.session === sid && rec.busy) return resolve({ ok: false, error: 'busy' });
+  }
   const rws = _wsById(arg && arg.wsId) || activeWorkspace;
   runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: rws, timeout: 45000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session:resolveDiverged:', err.message); return resolve({ ok: false, error: 'exec' }); }
@@ -1237,7 +1282,10 @@ ipcMain.handle('workspace:open', async (e, id, session) => {
   if (!respawned && fr) fr.ws = prevWs;
   pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
   if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
-  return { ok: true };
+  // keptTab: main declined to re-point this tab — it's mid-turn, or it's the live-shared one. The workspace still
+  // switches (the sidebar follows), but the tab keeps running what it was running. The renderer says so out loud
+  // rather than painting a tab that claims to be somewhere its pty isn't.
+  return { ok: true, keptTab: !respawned };
 });
 // Accept an invited repo workspace, letting the user choose WHERE it clones. useDefault → the script's
 // ~/.claudible/repos/<slug>; otherwise a native folder picker, cloning into <chosen>/<slug>. Stamps ws.path so
@@ -1290,13 +1338,18 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
           // The create script can run for minutes (repo = network clone+push). Only re-point/respawn the tab
           // this create was FOR, and only if the user hasn't foregrounded another tab since — and never kill
           // a turn they started while waiting (same stale-continuation class as workspace:open, audit finding).
-          if (fgTabId === targetTab) {
+          // superseded: the user foregrounded a DIFFERENT tab while this create ran (a repo clone can take minutes).
+          // Distinct from keptTab: nothing was refused and nothing moved, so the renderer must not repaint whatever
+          // tab happens to be active now. Conflating the two let a slow create seize an unrelated running tab.
+          let keptTab = false, superseded = fgTabId !== targetTab;
+          if (!superseded) {
             const fr = ptys.get(targetTab); const prevWs = fr && fr.ws;
             if (fr) fr.ws = ws;
             const respawned = respawnPty(targetTab, fresh ? 'new' : '', { guardBusy: true });
             if (!respawned && fr) fr.ws = prevWs;
+            keptTab = !respawned;   // mid-turn, or the live-shared tab → the renderer opens the new project beside it
           }
-          resolve({ ok: true, workspace: ws });
+          resolve({ ok: true, workspace: ws, keptTab, superseded });
         };
         if (r.ok) return attach(r.repoUrl, r.owner, true, r.path);
         // The dir already exists on disk but isn't in our registry (registry wiped, or a prior create
@@ -1344,8 +1397,7 @@ ipcMain.handle('workspace:adopt', (e, payload) => new Promise((resolve) => {
         const same = registry.workspaces.find((w) => w.path === r.path);
         if (same) {
           registry.activeId = same.id; activeWorkspace = same; saveRegistry();
-          openWorkspaceInTab(same, targetTab);
-          return resolve({ ok: true, workspace: same, already: true });
+          return resolve(Object.assign({ ok: true, workspace: same, already: true }, openWorkspaceInTab(same, targetTab)));
         }
         const base = String(payload && payload.name || r.name || '').trim().toLowerCase()
           .replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'project';
@@ -1358,20 +1410,25 @@ ipcMain.handle('workspace:adopt', (e, payload) => new Promise((resolve) => {
           kind: 'local', slug, adopted: true, path: r.path,
           repoId: m ? `${m[1]}/${m[2]}` : undefined, createdAt: Date.now() };
         registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
-        openWorkspaceInTab(ws, targetTab);
-        resolve({ ok: true, workspace: ws, repo: !!r.repo, claudeTracked: !!r.claudeTracked, excluded: !!r.excluded });
+        resolve(Object.assign({ ok: true, workspace: ws, repo: !!r.repo, claudeTracked: !!r.claudeTracked, excluded: !!r.excluded },
+          openWorkspaceInTab(ws, targetTab)));
       });
     }).catch(() => resolve({ ok: false, error: 'folder pick failed' }));
 }));
 // Point the tab this action was FOR at `ws` and start a fresh conversation there — but only if the user hasn't
-// foregrounded a different tab meanwhile, and never over a mid-turn Claude (same contract as workspace:create).
+// foregrounded a different tab meanwhile, and never over a mid-turn Claude OR the live-shared tab (same contract
+// as workspace:create).
+//   keptTab    — the tab is still running what it was; the renderer opens the new project in a tab of its own.
+//   superseded — the user is looking at a different tab now; the renderer must repaint NOTHING (the folder picker
+//                and adopt script can take a while, and `AT()` is no longer the tab this action was for).
 function openWorkspaceInTab(ws, targetTab) {
   openGen++;                                                       // supersede any in-flight workspace:open clone
-  if (fgTabId !== targetTab) return;
+  if (fgTabId !== targetTab) return { keptTab: false, superseded: true };
   const fr = ptys.get(targetTab); const prevWs = fr && fr.ws;
   if (fr) fr.ws = ws;
   const respawned = respawnPty(targetTab, 'new', { guardBusy: true });
   if (!respawned && fr) fr.ws = prevWs;
+  return { keptTab: !respawned, superseded: false };
 }
 // Grant / revoke a workspace to guests (default-deny). Updates the live share immediately.
 ipcMain.handle('workspace:setShared', (e, payload) => {
@@ -1425,8 +1482,25 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   if (ws.kind === 'repo' && ws.owner && ws.slug) {
     registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ws.owner + '/' + ws.slug]));
   }
-  saveRegistry(); syncShare();
-  for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
+  saveRegistry();
+  // Deleting the workspace the LIVE session runs in is the one navigation a share cannot survive: its folder is
+  // about to be trashed, so its pty must be re-pointed. Say so honestly instead of leaving guests on a frozen
+  // mirror — endShare lets respawnPty through (pausing + wiping the ring first) and the renderer tears the
+  // tunnel down for real. Every other caller is refused outright. (deleteSession does the same for a session.)
+  const sharedHere = sharedTabId != null && moved.includes(sharedTabId);
+  if (sharedHere) {
+    // Pause HERE, not only inside respawnPty's movesShared branch: a manual web-share pins whatever tab was in
+    // the foreground, and that tab's session may be '' (resume-latest, never resolved) — which makes movesShared
+    // false. And syncShare() must NOT run: every tab bound to this workspace already points at `fallback`, so it
+    // would re-derive the pause from a project the guests were never granted and cheerfully un-freeze the mirror.
+    // (Nothing can interleave before the freeze today — JS is single-threaded and there's no await — but the
+    // ordering must not depend on that.) The renderer's force-end drops the tunnel a beat later.
+    try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    try { winSend('share:force-end', { reason: 'workspace-deleted' }); } catch {}
+  } else {
+    syncShare();   // refresh the granted library for guests (the deleted ws drops out of grantedList)
+  }
+  for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true, endShare: tid === sharedTabId }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
   const finish = () => resolve({ ok: true, activeId: registry.activeId, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   // ADOPTED workspaces point at a folder the USER already owned — Claudible never created it, so removing the

@@ -113,22 +113,42 @@ ok('app.js: sharedWsId is cleared everywhere sharedSessionId is',
   (APP.match(/sharedSessionId = null/g) || []).length === (APP.match(/sharedWsId = null/g) || []).length);
 
 // ---- 5. source guards: privacy + tab semantics ----
-ok('main.js: respawnPty pauses the mirror when the pinned tab leaves its session',
-  /const sessionMoved = !trusted && sharing && sharedTabId && tabId === sharedTabId && rec && rec\.session !== \(session \|\| ''\);/.test(MAIN));
-// The pause must NOT fire for the share's own machinery: a guest switching to another GRANTED workspace, and a
+// `movesShared` (was `sessionMoved`): the pinned tab is being re-pointed off the conversation guests are watching.
+// It used to only PAUSE the mirror — and then kill the pty anyway. It now REFUSES, except for endShare (below).
+ok('main.js: respawnPty detects the pinned tab leaving its session',
+  /const onPinned = sharing && !!sharedTabId && tabId === sharedTabId;/.test(MAIN)
+  && /const movesShared = !trusted && onPinned && !!rec && rec\.session !== \(session \|\| ''\);/.test(MAIN));
+// The guard must NOT fire for the share's own machinery: a guest switching to another GRANTED workspace, and a
 // Claude re-login restart, both legitimately pass session:'' on the pinned tab.
 ok('main.js: a guest switching granted workspaces is a trusted reroute (never freezes the room)',
   /respawnPty\(target, '', \{ trustedReroute: true \}\)/.test(MAIN));
 ok('main.js: restarting Claude for re-login is a trusted reroute',
   /respawnPty\(fgTabId, '', \{ trustedReroute: true \}\)/.test(MAIN));
-ok('main.js: the "moved" toast only fires while a share is actually running',
+ok('main.js: the guard only engages while a share is actually running',
   /const sharing = \(\(\) => \{ try \{ return !!share\.status\(\)\.running; \} catch \{ return false; \} \}\)\(\);/.test(MAIN));
-ok('main.js: the sessionMoved pause wipes the replay ring (no stale bytes for the next joiner)',
-  /if \(sessionMoved\)[\s\S]{0,240}?share\.setPaused\(true\); share\.resetRing\(\);/.test(MAIN));
-ok('main.js: syncShare cannot un-pause a sessionMoved mirror',
-  /if \(tabId === mirrorTabId\(\) && !sessionMoved\) syncShare\(\);/.test(MAIN));
-ok('main.js: the workspace-granular pause never overrides the sessionMoved pause',
-  /share\.status\(\)\.running && !sessionMoved/.test(MAIN));
+// The one allowed reroute of the pinned tab (its workspace was deleted) freezes the mirror and keeps it frozen.
+// freezeMirror is keyed on the PINNED tab, not on movesShared: a web-share pins whatever tab was foreground, and
+// that tab's session can be '' — which makes movesShared false and would let syncShare stream the fallback project.
+ok('main.js: the teardown freeze wipes the replay ring (no stale bytes for the next joiner)',
+  /const freezeMirror = onPinned && endShare;\s*\n\s*if \(freezeMirror\) \{ try \{ share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);/.test(MAIN));
+ok('main.js: syncShare cannot un-freeze the mirror',
+  /if \(tabId === mirrorTabId\(\) && !freezeMirror\) syncShare\(\);/.test(MAIN));
+ok('main.js: the workspace-granular pause never overrides the freeze',
+  /share\.status\(\)\.running && !freezeMirror/.test(MAIN));
+ok('main.js: workspace:delete freezes before the respawn (covers a web-share pinned to a session-less tab)',
+  /if \(sharedHere\) \{[\s\S]{0,700}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,200}?winSend\('share:force-end'/.test(MAIN));
+// …and syncShare() must NOT run in that branch: every tab already points at `fallback`, so it would re-derive the
+// pause from a workspace the guests were never granted and un-freeze the mirror it just froze.
+ok('main.js: workspace:delete skips syncShare when the shared tab is one of the moved ones',
+  /\} else \{\s*\n\s*syncShare\(\);   \/\/ refresh the granted library for guests/.test(MAIN));
+// Closing the shared tab is the OTHER way a live pty dies — respawnPty never sees it. Pausing alone left a zombie:
+// tunnel up, host UI saying "live", guests frozen on a dead process.
+ok('main.js: closing the shared tab ends the share for real, not just pauses it',
+  /if \(sharedTabId === tabId\) \{[\s\S]{0,300}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,120}?winSend\('share:force-end', \{ reason: 'tab-closed' \}\)/.test(MAIN));
+ok('app.js: …and the host is asked first (the Command Center ✕ had no confirm at all)',
+  /if \(tabId === sharedTabIdR && !confirm\(/.test(APP));
+ok('main.js: the dead share:session-moved channel is gone (nothing moves the pinned tab any more)',
+  !/share:session-moved/.test(MAIN) && !/onShareSessionMoved/.test(APP));
 // pendingTitle gets PERSISTED as the session's title once the id resolves; a resume that falls back to a fresh
 // conversation would then be stamped with the clicked session's name. Assert no ASSIGNMENT inside the helper
 // (the word appears in its explanatory comment, so match `pendingTitle =`, and strip comments first).
@@ -158,7 +178,7 @@ ok('app.js: markTabAttention can find a row inside an expanded project tree',
 ok('app.js: clearTabAttention clears the DOM class unconditionally (refreshSessions can bail mid-rename/drag)',
   /function clearTabAttention\(tabId\) \{\s*\n\s*const rec = tabs\.get\(tabId\); if \(!rec\) return;/.test(APP));
 ok('app.js: deleteSession re-points IN PLACE (never opens a new tab off a doomed session)',
-  /openSession\(next,[^\n]*\{ inPlace: true \}\)/.test(APP));
+  /openSession\(next,[^\n]*\{ inPlace: true[,}]/.test(APP));
 ok('app.js: cross-project session clicks clone an invited repo before spawning a pty',
   /function openWsSessionInTab[\s\S]{0,600}?needsClone\) \{ openAcceptInviteModal\(w\); return; \}/.test(APP));
 ok('app.js: a background tab finishing its turn raises the sidebar pulse',
@@ -174,6 +194,201 @@ ok('app.js: the live bar only paints on the shared tab (or a joined mirror)',
 // Deleting the shared session must end the share, not leave a frozen tunnel pinned to a dead conversation.
 ok('app.js: deleting the shared session ends the share first',
   /if \(sharedSessionId === id\) \{\s*\n\s*sharedSessionId = null; sharedWsId = null;/.test(APP));
+
+// ===========================================================================================================
+// 3. THE LIVE SESSION IS NOT COLLATERAL — the class of navigation this spec originally missed.
+//
+// 2e2192a keyed the tunnel on the SHARED session, so `shareStop()` stopped firing on a sidebar click. But the
+// tunnel staying up is not the same as the session staying alive: `respawnPty` KILLS the tab's pty. Its old
+// guard paused the mirror (no foreign bytes leaked — that part worked) and then killed the conversation guests
+// were watching anyway. `share.status().running` never flipped, and yet the live session was over.
+//
+// Only `openSession` avoided re-pointing the pinned tab. `switchWorkspace` — clicking a PROJECT chip, or an
+// "out of sync" chip on another project's row (its handler switches workspace first) — went straight through.
+// So did `workspace:create` and `workspace:adopt`. Modelled below against both the old and new predicates.
+// ===========================================================================================================
+// main.js respawnPty: does this call destroy the conversation guests are watching?
+const killsLiveSession = (s) => {
+  const trusted = !!s.trustedReroute, endShare = !!s.endShare;
+  const movesShared = !trusted && s.sharing && !!s.sharedTabId && s.tabId === s.sharedTabId && !!s.rec && s.rec.session !== (s.session || '');
+  if (movesShared && !endShare) return false;   // NEW: refused → the pty is never killed
+  return true;                                  // the pty is killed and respawned
+};
+// the OLD predicate, for the record: it only ever paused, then killed regardless
+const killsLiveSessionOld = () => true;
+
+const shared = { tabId: 'T1', sharedTabId: 'T1', sharing: true, rec: { session: 'S1' } };
+ok('respawn: re-pointing the pinned tab at another session is REFUSED',
+  !killsLiveSession(Object.assign({}, shared, { session: 'S2' })));
+ok('respawn: …and passing session:"" (workspace:open, create, adopt) is refused too',
+  !killsLiveSession(Object.assign({}, shared, { session: '' })));
+ok('respawn: …and session:"new" (workspace:create / adopt) is refused too',
+  !killsLiveSession(Object.assign({}, shared, { session: 'new' })));
+ok('respawn: the OLD code killed the live session in every one of those cases (the bug)',
+  killsLiveSessionOld() && killsLiveSessionOld() && killsLiveSessionOld());
+ok('respawn: a post-sync reload of the SAME session still respawns (never blocked)',
+  killsLiveSession(Object.assign({}, shared, { session: 'S1' })));
+ok('respawn: a guest switching granted workspaces is trusted and still respawns',
+  killsLiveSession(Object.assign({}, shared, { session: '', trustedReroute: true })));
+ok('respawn: deleting the live session\'s own workspace may proceed (endShare)',
+  killsLiveSession(Object.assign({}, shared, { session: '', endShare: true })));
+ok('respawn: an UNSHARED tab is untouched by any of this',
+  killsLiveSession({ tabId: 'T2', sharedTabId: 'T1', sharing: true, rec: { session: 'S2' }, session: 'S3' }));
+ok('respawn: not sharing at all → ordinary respawn',
+  killsLiveSession({ tabId: 'T1', sharedTabId: null, sharing: false, rec: { session: 'S1' }, session: 'S2' }));
+
+// renderer switchWorkspace: does a project click recycle the tab (killing what runs in it)?
+const recyclesTab = (t, sharedTabIdR) => !(t.busy || t.tabId === sharedTabIdR);
+ok('switchWorkspace: the live-shared tab is never recycled (opens a new tab instead)',
+  !recyclesTab({ tabId: 'T1', busy: false }, 'T1'));
+ok('switchWorkspace: a busy tab is still never recycled', !recyclesTab({ tabId: 'T2', busy: true }, 'T1'));
+ok('switchWorkspace: an idle, unshared tab is recycled as before', recyclesTab({ tabId: 'T2', busy: false }, 'T1'));
+ok('switchWorkspace: the OLD predicate recycled the shared tab (the bug)',
+  ((t) => !t.busy)({ tabId: 'T1', busy: false }));
+
+// The "out of sync" chip must not show on a LIVE session: `resolve remote` REPLACES the .jsonl that the host's
+// Claude is appending to right now, and everyone in a live session is watching one pty byte-for-byte anyway.
+const DEAD = new Set(['offline', 'denied']);
+const sessionIsLive = (id, s) => !!id && (s.sharedSessionId === id
+  || s.joined.some((r) => r.peer && r.peer.session === id && !DEAD.has(r.liveState))
+  || s.livePeers.some((p) => p.session === id));
+{
+  const st = {
+    sharedSessionId: 'MINE',
+    joined: [{ peer: { session: 'JOINED' }, liveState: 'connected' }, { peer: { session: 'DEAD' }, liveState: 'offline' }],
+    livePeers: [{ session: 'THEIRS' }],
+  };
+  ok('chip: hidden on the session I host', sessionIsLive('MINE', st));
+  ok('chip: hidden on a session I joined', sessionIsLive('JOINED', st));
+  ok('chip: hidden on a session a collaborator hosts', sessionIsLive('THEIRS', st));
+  ok('chip: still shown on an ordinary diverged session', !sessionIsLive('QUIET', st));
+  ok('chip: an empty id is never "live"', !sessionIsLive('', st));
+  // A joined tab whose host ended their session lingers (reconcileJoinedTabs only auto-closes it while you're
+  // viewing ITS project — see peerWsId). Keying liveness on the tab merely EXISTING hid that session's chip forever.
+  ok('chip: a DEAD joined tab does not keep its session "live"', !sessionIsLive('DEAD', st));
+  ok('chip: a reconnecting one still counts as live (transient)',
+    sessionIsLive('BLIP', { sharedSessionId: null, joined: [{ peer: { session: 'BLIP' }, liveState: 'reconnecting' }], livePeers: [] }));
+}
+
+// deleteSession must prove the delete can succeed BEFORE tearing down the share. It used to clear sharedSessionId
+// and drop the tunnel first, then hit the busy check and abort: guests disconnected, nothing deleted, and the
+// "live session ended" toast overwritten by "that session is still running" (toast reuses one element).
+const deleteSessionOrder = (owners, wasSharedTab) => {
+  if (owners.some((r) => r.busy)) return { aborted: true, shareEnded: false };   // pre-flight, before any teardown
+  const ordered = owners.filter((r) => r.tabId !== wasSharedTab).concat(owners.filter((r) => r.tabId === wasSharedTab));
+  for (const rec of ordered) { if (rec.busy) return { aborted: true, shareEnded: false }; }
+  return { aborted: false, shareEnded: wasSharedTab != null };
+};
+ok('delete: a busy owning tab aborts WITHOUT ending the share',
+  (() => { const r = deleteSessionOrder([{ tabId: 'T1', busy: true }], 'T1'); return r.aborted && !r.shareEnded; })());
+ok('delete: …even when a DIFFERENT tab is the busy one',
+  (() => { const r = deleteSessionOrder([{ tabId: 'T2', busy: true }, { tabId: 'T1', busy: false }], 'T1'); return r.aborted && !r.shareEnded; })());
+ok('delete: a clean delete ends the share', deleteSessionOrder([{ tabId: 'T1', busy: false }], 'T1').shareEnded);
+ok('delete: deleting an unshared session never touches the share',
+  !deleteSessionOrder([{ tabId: 'T2', busy: false }], null).shareEnded);
+ok('delete: the SHARED tab is re-pointed last (so every abort leaves the live session intact)',
+  (() => {
+    const owners = [{ tabId: 'T1' }, { tabId: 'T2' }, { tabId: 'T3' }];   // T1 is the shared one, and it is FIRST here
+    const ordered = owners.filter((r) => r.tabId !== 'T1').concat(owners.filter((r) => r.tabId === 'T1'));
+    return ordered[ordered.length - 1].tabId === 'T1';
+  })());
+
+// ---- grep guards: pin all of the above to the real source ----
+ok('main.js: respawnPty REFUSES the reroute instead of pausing-then-killing',
+  /if \(movesShared && !endShare\) \{[\s\S]{0,300}?return false;/.test(MAIN));
+{
+  // …and it refuses BEFORE setGenBusy: the tab keeps running its turn, so its sync gate must stay closed.
+  // Scope both searches to respawnPty's body — `setGenBusy(tabId, false)` also appears in earlier functions.
+  const body = MAIN.indexOf('function respawnPty');
+  ok('main.js: …and refuses BEFORE setGenBusy clears the running tab\'s sync gate',
+    body > -1 && MAIN.indexOf('if (movesShared && !endShare)', body) < MAIN.indexOf('setGenBusy(tabId, false);', body));
+}
+// endShare reaches respawnPty from EXACTLY TWO places, and both are structural destruction of the shared thing:
+// its workspace is deleted, or the session itself is. Matched on the CALL, not on the `opts.endShare:` line of prose
+// that explains it (a doc comment satisfying a guard is how a guard rots — it happened twice while writing this).
+ok('main.js: only a workspace/session deletion may end the share, and only for the pinned tab',
+  (MAIN.match(/respawnPty\([^)]*endShare/g) || []).length === 2
+  && /respawnPty\(tid, '', \{ guardBusy: true, endShare: tid === sharedTabId \}\)/.test(MAIN)          // workspace:delete
+  && /respawnPty\(tabId, id, \{ guardBusy: true, endShare: !!endShare \}\)/.test(MAIN));               // session:open, only when deleteSession says so
+ok('app.js: deleting the SHARED session re-points its pinned tab with endShare (else the delete self-aborts)',
+  /const wasSharedTab = \(sharedSessionId === id\) \? sharedTabIdR : null;/.test(APP)
+  && /\{ inPlace: true, endShare: rec\.tabId === wasSharedTab \}/.test(APP)
+  && /claudible\.sessionOpen\(rec\.tabId, next, rec\.tabId === wasSharedTab\)/.test(APP));
+{
+  // …and it captures the pinned tab BEFORE clearing sharedSessionId (after, `sharedTabIdR` is still set but the
+  // guard `sharedSessionId === id` is not — the flag would silently never be passed). Search FORWARD from the
+  // capture: `sharedSessionId = null` appears in four other functions, and indexOf would find endLiveNow's first.
+  const iCapture = APP.indexOf('const wasSharedTab = (sharedSessionId === id)');
+  const iClear = iCapture > -1 ? APP.indexOf('sharedSessionId = null; sharedWsId = null;', iCapture) : -1;
+  ok('app.js: …and captures the pinned tab BEFORE clearing sharedSessionId', iCapture > -1 && iClear > iCapture);
+}
+ok('app.js: an ordinary session click never passes endShare',
+  /claudible\.sessionOpen\(t\.tabId, id, opts && opts\.endShare\)/.test(APP));
+ok('main.js: …and tells the renderer to tear the tunnel down for real', /winSend\('share:force-end'/.test(MAIN));
+ok('main.js: workspace:open reports a tab it declined to re-point', /return \{ ok: true, keptTab: !respawned \};/.test(MAIN));
+// keptTab ("we refused") and superseded ("you're looking at another tab now") must never be conflated: a repo clone
+// runs for minutes and a folder picker for as long as the user stares at it. Collapsing them let a slow create seize
+// whatever tab was active on resolve, clear its terminal, and relabel it "New session".
+ok('main.js: workspace:create distinguishes a refused re-point from a superseded one',
+  /let keptTab = false, superseded = fgTabId !== targetTab;/.test(MAIN)
+  && /resolve\(\{ ok: true, workspace: ws, keptTab, superseded \}\)/.test(MAIN));
+ok('main.js: openWorkspaceInTab (adopt) does too',
+  /if \(fgTabId !== targetTab\) return \{ keptTab: false, superseded: true \};/.test(MAIN)
+  && /return \{ keptTab: !respawned, superseded: false \};/.test(MAIN));
+ok('app.js: createWorkspace repaints NOTHING when superseded',
+  /if \(r\.superseded \|\| r\.keptTab\) \{[\s\S]{0,300}?if \(r\.keptTab\) \{/.test(APP));
+// switchWorkspace mutates the tab record optimistically (that's what makes the switch flicker-free). On a refusal
+// the pty never moved, so the record has to go back — a tab claiming a workspace its process isn't in orphans the
+// sidebar highlight forever. And its terminal must not be cleared for a switch that never happened.
+ok('app.js: switchWorkspace rolls the tab record back when main keeps the tab',
+  /const prev = \{ wsId: t\.wsId, session: t\.session, label: t\.label, curSessionLabel: t\.curSessionLabel, pendingTitle: t\.pendingTitle \};/.test(APP)
+  && /if \(kept\) \{[\s\S]{0,400}?Object\.assign\(t, prev\);[\s\S]{0,200}?newBlankTab\(id, sess \|\| 'new'\)/.test(APP));
+ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty',
+  /if \(!failed\) \{ t\.term\.reset\(\); resetStats\(t\); \}/.test(APP)
+  && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('if (!failed) { t.term.reset(); resetStats(t); }'));
+ok('main.js: resolveDiverged refuses to overwrite a LIVE session\'s transcript',
+  /if \(sid === liveSessionId\(\)\) return resolve\(\{ ok: false, error: 'live' \}\);/.test(MAIN));
+ok('main.js: …and a mid-turn one', /rec\.session === sid && rec\.busy\) return resolve\(\{ ok: false, error: 'busy' \}\)/.test(MAIN));
+ok('main.js: liveSessionId comes from the PINNED tab (covers a web-share with no sharedSessionId)',
+  /function liveSessionId\(\)[\s\S]{0,260}?ptys\.get\(sharedTabId\)/.test(MAIN));
+ok('app.js: switchWorkspace never recycles the live-shared tab',
+  /if \(t\.busy \|\| t\.tabId === sharedTabIdR\) \{/.test(APP));
+ok('app.js: createWorkspace/adopt open a new tab when main kept the current one',
+  /if \(r\.keptTab\) \{[\s\S]{0,600}?newBlankTab\(newWsId, 'new'\)/.test(APP));
+ok('app.js: the share ends in exactly one place, called only by End Session + force-end',
+  /function endLiveNow\(msg\)/.test(APP)
+  && (APP.match(/endLiveNow\(/g) || []).length === 3);   // definition + terminateLive + onShareForceEnd
+ok('app.js: a host browsing elsewhere still sees their live session is running',
+  /bar\.classList\.add\('elsewhere'\)/.test(APP) && /live-jump/.test(APP));
+ok('app.js: the out-of-sync chip is suppressed on a live session',
+  /\} else if \(s\.diverged && !sessionIsLive\(s\.id\)\) \{/.test(APP));
+ok('app.js: sessionIsLive covers hosted, joined, and peer-hosted sessions — and ignores dead joined tabs',
+  /function sessionIsLive\(id\)[\s\S]{0,200}?sharedSessionId === id[\s\S]{0,700}?r\.peer\.session === id && !LIVE_DEAD\.has\(r\.liveState\)[\s\S]{0,200}?livePeers\.some/.test(APP)
+  && /const LIVE_DEAD = new Set\(\['offline', 'denied'\]\);/.test(APP));
+// The share is torn down only after every owning tab is confirmed off the doomed session.
+ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
+  APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1
+  && APP.indexOf('if (owners.some((r) => r.busy)) return abort();') < APP.indexOf('// Every owning tab is off the doomed session'));
+ok('app.js: …and re-points the SHARED tab last, so no abort can strand guests',
+  /const ordered = owners\.filter\(\(r\) => r\.tabId !== wasSharedTab\)\.concat\(owners\.filter\(\(r\) => r\.tabId === wasSharedTab\)\);/.test(APP));
+ok('app.js: …ending the share only once nothing can abort',
+  /nothing can abort from here[\s\S]{0,200}?if \(sharedSessionId === id\) \{\s*\n\s*sharedSessionId = null; sharedWsId = null;/.test(APP));
+
+// A JOINER clicking away must not lose their live tab either. `livePeers` is polled from the ACTIVE project's
+// presence branch only, so while its owner browses another project the host is simply invisible to it — never
+// "gone". Auto-leave has to be scoped to the workspace the peer was discovered on.
+const autoLeaves = (rec, activeWsId, pollOk) => !!(pollOk && rec.peerWsId === activeWsId && ['offline', 'reconnecting'].includes(rec.liveState));
+ok('joined: a reconnecting tab whose host really vanished is auto-left',
+  autoLeaves({ peerWsId: 'wsA', liveState: 'reconnecting' }, 'wsA', true));
+ok('joined: …but NOT while its owner is browsing another project (the peer list never saw that host)',
+  !autoLeaves({ peerWsId: 'wsA', liveState: 'reconnecting' }, 'wsB', true));
+ok('joined: …nor on a failed poll', !autoLeaves({ peerWsId: 'wsA', liveState: 'offline' }, 'wsA', false));
+ok('joined: a healthy connected tab is never auto-left',
+  !autoLeaves({ peerWsId: 'wsA', liveState: 'connected' }, 'wsA', true));
+ok('app.js: the joined tab records the workspace its host was discovered on',
+  /rec\.peerWsId = activeWsId;/.test(APP));
+ok('app.js: …and auto-leave is scoped to it',
+  /pollOk && rec\.peerWsId === activeWsId && LIVE_RECONNECTABLE\.has\(rec\.liveState\)/.test(APP));
 
 console.log(`\ntabs-share: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

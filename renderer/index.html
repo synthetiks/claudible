@@ -723,6 +723,11 @@
     .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#5fb487);box-shadow:0 0 8px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
     @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.62}}   /* gentler breathe, not a hard blink */
     .livebar .live-txt{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ok,#5fb487);flex:none}
+    /* the host is browsing another session while their live one keeps running — a quiet reminder + a way back */
+    .livebar.elsewhere{background:rgba(95,180,135,.045);border-bottom-color:rgba(95,180,135,.12)}
+    .livebar.elsewhere .live-dot{animation:none;opacity:.75}
+    .live-jump{background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:11px;color:var(--ink-dim,#8b929c);text-align:left}
+    .live-jump:hover{color:var(--ok,#5fb487);text-decoration:underline}
     .live-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px;color:var(--ink-dim);min-width:0}
     .live-member{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.05);white-space:nowrap}   /* quiet filled pill — no stroke */
     .live-member.you{background:rgba(95,180,135,.14)}   /* distinguish "you" with a soft green FILL now that the pill has no stroke (border-color alone was inert without a border) */

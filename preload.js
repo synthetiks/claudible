@@ -20,7 +20,9 @@ contextBridge.exposeInMainWorld('claudible', {
   // sessions (switcher) — every call names its workspace explicitly: main's activeWorkspace and the sidebar's
   // notion of "active" can legitimately differ (a joined live tab moves the sidebar but never main), so an
   // ambient call would read/mutate whatever workspace MAIN happens to be on, not the one the row is under.
-  sessionOpen: (tabId, id) => ipcRenderer.invoke('session:open', { tabId, id }),
+  // endShare: this tab is the LIVE-SHARED one and the session it holds is being deleted. Main freezes the mirror
+  // and allows the re-point — every other attempt to move the pinned tab off its session is refused outright.
+  sessionOpen: (tabId, id, endShare) => ipcRenderer.invoke('session:open', { tabId, id, endShare: !!endShare }),
   sessionDelete: (id, scope, wsId) => ipcRenderer.invoke('session:delete', { id, scope, wsId }),
   sessionKeep: (id, wsId) => ipcRenderer.invoke('session:keep', { id, wsId }),   // "keep locally" a session deleted on GitHub
   resolveDiverged: (id, strategy, wsId) => ipcRenderer.invoke('session:resolveDiverged', { id, strategy, wsId }),   // out-of-sync fork → 'remote' (take theirs) | 'local' (keep mine)
@@ -104,7 +106,8 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),
   onShareGuests: (cb) => ipcRenderer.on('share:guests', (_e, n) => cb(n)),
   onSharePinned: (cb) => ipcRenderer.on('share:pinned', (_e, p) => cb(p)),   // { tabId } the live mirror is pinned to (null = share ended)
-  onShareSessionMoved: (cb) => ipcRenderer.on('share:session-moved', (_e, p) => cb(p)),   // the shared tab was re-pointed off its session → mirror auto-paused
+  onShareRerouteRefused: (cb) => ipcRenderer.on('share:reroute-refused', (_e, p) => cb(p)),   // main protected the live session: the pinned tab was NOT moved off it
+  onShareForceEnd: (cb) => ipcRenderer.on('share:force-end', (_e, p) => cb(p)),   // the live session's workspace was deleted → the share cannot survive; tear the tunnel down
   onShareTypist: (cb) => ipcRenderer.on('share:typist', (_e, p) => cb(p)),   // { name } a guest is typing into the session I host
   onLiveTypist: (cb) => ipcRenderer.on('live:typist', (_e, p) => cb(p)),     // { tabId, name } someone is typing in a session I joined
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
