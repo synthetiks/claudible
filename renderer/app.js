@@ -505,7 +505,7 @@ claudible.onStatus((s) => {
       const _pp = loadPrefs();
       const titles = Object.assign({}, _pp.sessionTitles || {}); titles[s.sessionId] = nm;
       const tstamps = Object.assign({}, _pp.sessionTitleTs || {}); tstamps[s.sessionId] = Date.now();   // stamp the rename so global newest-wins can compare it against collaborators'
-      savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });   // copy → mutable (cached map may be a frozen contextBridge object)
+      saveSessionTitles(titles, tstamps);   // copy → mutable (cached map may be a frozen contextBridge object); bounded + evictable
       const _aw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace, not the sidebar's — a background tab resolving while you view another ws must gate + publish against ITS OWN repo
       if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators
     }
@@ -2502,6 +2502,40 @@ function savePrefs(patch) {
   try { if (window.claudible && claudible.settingsSave) claudible.settingsSave(p); } catch {}   // durable, synchronous file write
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch {}                            // legacy mirror
 }
+// ---- bounded, evictable title prefs -------------------------------------------------------------------------
+// `sessionTitles` / `sessionTitleTs` are PERSISTED to settings.json and nothing ever removed a key: not on session
+// delete, not on workspace delete. Every session ever renamed — locally or by a collaborator's newest-wins
+// reconcile — left a permanent entry. Two mechanisms, because either alone is insufficient:
+//   * evict explicitly when the session it names is deleted (correctness — the id can never come back), and
+//   * cap the map by recency, so an install that renames sessions for years still has a bounded settings.json.
+// sessionTitleTs already carries the ms timestamp the cap needs, so "recency" is exact, not a guess.
+const MAX_TITLE_PREFS = 500;
+function saveSessionTitles(titles, tstamps) {
+  const ids = Object.keys(titles);
+  if (ids.length > MAX_TITLE_PREFS) {
+    ids.sort((a, b) => (Number(tstamps[b]) || 0) - (Number(tstamps[a]) || 0));   // newest first
+    for (const id of ids.slice(MAX_TITLE_PREFS)) { delete titles[id]; delete tstamps[id]; }
+  }
+  savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });
+}
+// A deleted session's id can never recur — drop its name so settings.json doesn't carry it forever.
+function forgetSessionTitle(id) {
+  const p = loadPrefs();
+  const lt = Object.assign({}, p.sessionTitles || {}), lts = Object.assign({}, p.sessionTitleTs || {});
+  if (!(id in lt) && !(id in lts)) return;
+  delete lt[id]; delete lts[id];
+  savePrefs({ sessionTitles: lt, sessionTitleTs: lts });
+}
+// A deleted workspace's warm caches are dead weight — and `_wsSessCache` would even serve STALE rows to a
+// workspace later re-created with the same id.
+function forgetWorkspaceCaches(wsId) {
+  try { _wsSessCache.delete(wsId); } catch {}
+  const p = loadPrefs();
+  const c = p.remoteTitlesCache || {};
+  if (!(wsId in c)) return;
+  const next = Object.assign({}, c); delete next[wsId];
+  savePrefs({ remoteTitlesCache: next });
+}
 (function applyPrefs() {
   const p = loadPrefs();
   applyTheme(p.theme);   // re-tint the UI + terminal to the saved theme (Dark when unset)
@@ -2804,7 +2838,7 @@ async function pollTitles(force) {
       const nv = titleVal(m[id]), nts = titleTs(m[id]);
       if (nv && lt[id] && lt[id] !== nv && (Number(lts[id]) || 0) < nts) { lt[id] = nv; lts[id] = nts; changed = true; }
     }
-    if (changed) savePrefs({ sessionTitles: lt, sessionTitleTs: lts });
+    if (changed) saveSessionTitles(lt, lts);
     // INVERSE reconcile — self-healing publish. If MY rename is strictly NEWER than what the branch holds
     // (its title-set push failed, or happened offline), re-publish it so collaborators converge on it instead
     // of silently keeping the stale shared name forever. Guards: only ids that belong to THIS workspace's
@@ -3131,7 +3165,7 @@ function startSessEdit(row, p, s) {
         const tstamps = Object.assign({}, _pp.sessionTitleTs || {});
         const _now = Date.now();
         if (t && t !== s.preview) { titles[s.id] = t; tstamps[s.id] = _now; } else { delete titles[s.id]; delete tstamps[s.id]; }   // blank or == auto preview → clear override; the ts makes global newest-wins comparable
-        savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });
+        saveSessionTitles(titles, tstamps);
         // In a repo project, publish the name so EVERY collaborator sees it (GLOBAL newest-wins by ts on the branch).
         // Optimistically reflect it locally so the row updates instantly; a forced poll reconciles after the push.
         const _aw = workspaces.find((w) => w.id === activeWsId);
@@ -3339,6 +3373,7 @@ async function deleteSession(id, scope) {
   }
   setOrder(order);
   let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs); } catch {} finally { deletingIds.delete(id); }
+  forgetSessionTitle(id);   // the id can never recur — don't carry its name in settings.json forever
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions(); renderTabStrip();
 }
@@ -4049,6 +4084,7 @@ async function deleteWorkspace(w) {
       if (rec.tabId === activeTabId) activeSession = null;
     }
     for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }   // belt: any record main didn't know (e.g. a tab with no pty yet) must not keep naming a dead ws
+    forgetWorkspaceCaches(w.id);   // its warm caches are dead weight — and _wsSessCache would serve STALE rows to a ws later re-created with this id
     await refreshWorkspaces(); refreshSessions(); renderTabStrip();
     // The registry entry is gone either way — but if the FOLDER couldn't be moved to trash (locked file, no
     // permission, disk full) it's still on disk, owned by nothing. Main used to discard that result entirely and

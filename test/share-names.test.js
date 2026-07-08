@@ -114,6 +114,32 @@ function joinAndHello(port, cred) {
     fail++; console.error('  FAIL integration threw: ' + (e && e.message));
   } finally {
     try { srv.stop(); } catch {}
+  }
+
+  // ---- Part C: the roster is BOUNDED -------------------------------------------------------------------------
+  // Every distinct display name that ever joined left a permanent 'gone' tombstone: the Map had no `delete` at all,
+  // only the wholesale clear() in stop()/regenerateLink(). And notifyRoster re-broadcasts the WHOLE list to every
+  // client on every change, so the per-message payload grew with it too — a long-lived public link with drive-by
+  // joiners grew both without limit. Kicking marks 'gone' immediately (no grace window), so this drives it fast.
+  const srv2 = createShareServer({ onRoster: (list) => { latest = list; } });
+  let latest = [];
+  try {
+    const st2 = await srv2.start({ requireApproval: false, name: 'Host' });
+    const N = 45;   // > ROSTER_MAX (32)
+    for (let i = 0; i < N; i++) {
+      const g = await joinAndHello(st2.port, `t=${st2.token}&n=G${i}`);
+      const closed = new Promise((res) => g.ws.on('close', res));
+      srv2.kickGuest(`G${i}`);          // → 'gone' immediately
+      await closed;
+    }
+    ok(`the roster stays bounded after ${N} distinct guests came and went`, latest.length <= 32);
+    ok('…the most recent departure is still listed', latest.some((m) => m.name === `G${N - 1}`));
+    ok('…and the oldest tombstone was evicted', !latest.some((m) => m.name === 'G0'));
+    ok('…every retained entry is a real roster row', latest.every((m) => m && typeof m.name === 'string' && typeof m.state === 'string'));
+  } catch (e) {
+    fail++; console.error('  FAIL roster-bound threw: ' + (e && e.message));
+  } finally {
+    try { srv2.stop(); } catch {}
     done();
   }
 })();

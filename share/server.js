@@ -40,6 +40,7 @@ const MAX_PENDING = 16;          // cap UNAPPROVED sockets in the lobby: MAX_GUE
 const MAX_WS_PAYLOAD = 512 * 1024;   // hard per-frame cap on the guest-facing server AND the live-join client. ws defaults to 100 MiB, reassembled BEFORE app code runs — an unapproved link holder (or a hostile advertised session) could flood ~100MB frames and block/OOM the whole Electron main loop. 512KB clears the largest legit frame (audio ≤128KB, chat 2000 chars, keystrokes tiny) with headroom.
 const MAX_AUDIO_B64 = 128 * 1024;   // reject an oversized relayed voice frame. Real frames are ~40ms blocks (a few KB base64; ~44KB at the 16384-sample ceiling), so 128KB is generous headroom while bounding a hostile/oversized frame on the internet-facing relay
 const NAME_MAX = 40;
+const ROSTER_MAX = 32;           // MAX_GUESTS(8) live + up to 24 'left' tombstones. Beyond that, the oldest tombstone is evicted (see trimRoster) — the Map had no delete at all and grew one entry per distinct name, forever.
 const newToken = () => crypto.randomBytes(16).toString('hex');
 
 function serveFile(res, file, type) {
@@ -134,7 +135,22 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // presence roster — name -> 'active'(green) | 'idle'(amber/AFK) | 'gone'(red, closed tab). 'gone' is kept so the
   // host can see who left; a resume reconnect flips it back to active.
   const roster = new Map();
+  // Mark a departed guest. delete+set moves them to the END of the Map's insertion order, so eviction below is
+  // genuinely oldest-tombstone-first even for a name that joined long ago and only just left.
+  const markGone = (name) => { roster.delete(name); roster.set(name, 'gone'); };
+  // BOUND THE ROSTER. Every distinct display name that ever joined left a permanent 'gone' tombstone — the Map had
+  // no `delete` anywhere except the wholesale clear() in stop()/regenerateLink(). And notifyRoster re-broadcasts the
+  // WHOLE list to every client on every change, so the per-message payload grew with it. A long-lived public link
+  // with drive-by joiners grew both without limit. Only tombstones are ever evicted; live guests are untouchable.
+  const trimRoster = () => {
+    if (roster.size <= ROSTER_MAX) return;
+    for (const [name, state] of roster) {          // Map iterates in insertion order → oldest first
+      if (roster.size <= ROSTER_MAX) break;
+      if (state === 'gone') roster.delete(name);
+    }
+  };
   const notifyRoster = () => {
+    trimRoster();
     const list = Array.from(roster, ([name, state]) => ({ name, state }));
     try { onRoster && onRoster(list); } catch {}                                  // → host UI
     const s = JSON.stringify({ type: 'roster', list });                           // → every guest too, so a native joiner can show "who's here"
@@ -332,7 +348,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         const timer = setTimeout(() => {
           pendingDrops.delete(tok);
           resumeTokens.delete(tok);                       // truly left → kill the silent-reconnect token (no indefinite, approval-free rejoin)
-          roster.set(who, 'gone'); notifyRoster();
+          markGone(who); notifyRoster();
           systemChat(who + ' disconnected');
           if (wasVoice) broadcastVoice();
         }, REJOIN_GRACE);
@@ -340,7 +356,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         pendingDrops.set(tok, { timer, wasVoice, name: who });
       } else {
         if (ws._kicked && tok) resumeTokens.delete(tok);   // kick → kill the resume token so they can't silently rejoin
-        roster.set(who, 'gone'); notifyRoster();
+        markGone(who); notifyRoster();
         systemChat(who + (ws._kicked ? ' was removed by the host' : ' disconnected'));
         if (wasVoice) broadcastVoice();
       }
@@ -464,7 +480,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     // backgrounded tab can't silently rejoin past the kick.
     let graceKicked = false;
     for (const [tok, p] of Array.from(pendingDrops.entries())) {
-      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} pendingDrops.delete(tok); resumeTokens.delete(tok); roster.set(nm, 'gone'); hit = true; graceKicked = true; }
+      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} pendingDrops.delete(tok); resumeTokens.delete(tok); markGone(nm); hit = true; graceKicked = true; }
     }
     if (graceKicked) { try { systemChat(nm + ' was removed by the host'); } catch {} }   // a guest kicked while in the reconnect grace window has no live socket, so drop()'s "removed by host" line never fires — announce it here for parity
     if (hit) notifyRoster();

@@ -1165,9 +1165,9 @@ function startPoll() {
       if (r && (r.imported || r.updated || r.pushed)) changed = true;
     }
     pollDelay = changed ? SYNC_MIN : Math.min(SYNC_MAX, Math.round(pollDelay * 1.5));
-    setTimeout(tick, pollDelay);
+    appTimers.sync = setTimeout(tick, pollDelay);
   };
-  setTimeout(tick, pollDelay);
+  appTimers.sync = setTimeout(tick, pollDelay);
 }
 // Hook events are also forwarded raw to the renderer; here we track per-tab turn busy/idle + push the tab's
 // workspace after each turn. tabId comes from which per-tab hooks file the line was read from.
@@ -1665,6 +1665,11 @@ ipcMain.on('share:chat-send', (e, text) => { try { share.broadcastChat(text); } 
 // never clobber one meter; every 'status' IPC carries its tabId so the renderer routes it to the right tab.
 const lastStatusByTab = new Map();   // tabId -> last raw status json (dedupe)
 const appIntervals = [];   // long-lived poller intervals — cleared on window-all-closed so none leak or fire against a dead window (H3)
+// Two pollers RESCHEDULE THEMSELVES with setTimeout instead of running on a fixed interval (their cadence is
+// adaptive), so they never landed in appIntervals and nothing ever cleared them — the only two of six outside the
+// quit sweep. Both spawn a WSL subprocess per tick (sessions-sync.sh / workflows.sh). Today `app.quit()` masks it;
+// the day this process outlives its window (a tray icon, a background mode) they'd tick forever against nothing.
+const appTimers = { sync: null, workflow: null };
 // Heartbeat for the app→Claude context channel: the hook drops live/typedBy from a context.json whose ts is
 // >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
 // session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.
@@ -1773,9 +1778,9 @@ function startWorkflowPoll() {
       const running = Array.isArray(wfs) && wfs.some((w) => w.running > 0);
       delay = running ? 1200 : (Array.isArray(wfs) && wfs.length ? 2500 : 5000);   // fast while a swarm runs, lazy when idle
     } else { delay = 4000; }
-    setTimeout(tick, delay);
+    appTimers.workflow = setTimeout(tick, delay);
   };
-  setTimeout(tick, 2500);
+  appTimers.workflow = setTimeout(tick, 2500);
 }
 
 // ---- audio (in main: no renderer CORS) ----
@@ -2311,6 +2316,7 @@ function reapDeadGenerations() {
 app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); });
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
+  try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the two self-rescheduling ones
   try { stopAdvertiseHeartbeat(); } catch {}
   // Kill Windows-side ptys AND reap each WSL-side tree — the execFile'd wsl.exe survives our exit, so the
   // reap completes even though the app is quitting (this is how zombies stopped accumulating across restarts).
