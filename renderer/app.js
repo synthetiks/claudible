@@ -3505,12 +3505,12 @@ async function refreshSessions() {
   if (!Array.isArray(list)) list = [];
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
   // Hide promptless stubs ('(empty session)' — fork artifacts / killed boots): clicking one can only re-fail
-  // resume (nothing to resume) and mint ANOTHER stub. A stub reappears the moment it gains a real user
-  // message; a live tab currently sitting on one keeps it reachable via the liveSessions carve-out.
-  {
-    const liveSessions = new Set(Array.from(tabs.values()).map((r) => r.session).filter(Boolean));
-    list = list.filter((s) => (s.msgs || 0) > 0 || liveSessions.has(s.id) || hasExplicitTitle(s.id));   // a NAMED session always shows — naming is deliberate, stub-hiding is for accidental fork artifacts (the "my new session zzz never appeared for him" bug: it synced fine, this filter ate it)
-  }
+  // resume (nothing to resume) and mint ANOTHER stub. A stub reappears the moment it gains a real user message.
+  // A live/draft tab sitting on a just-created promptless session is deliberately NOT carved back in here: doing
+  // that landed the stub's id in savedIds, which then DISQUALIFIED the tab from the draft bucket below and demoted
+  // its clean "New session" draft row to an ugly saved "(empty session)" row (the "new project shows an
+  // (empty session)" bug). Such a tab renders as its own DRAFT · UNSAVED row via `liveTabs` instead.
+  list = list.filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id));   // a NAMED session always shows — naming is deliberate, stub-hiding is for accidental fork artifacts (the "my new session zzz never appeared for him" bug: it synced fine, this filter ate it)
   _wsSessCache.set(myWs, { list, ts: Date.now() });                                 // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash) — keyed by the SAME id the fetch was scoped to, so it can never hold another workspace's rows
   const savedIds = new Set(list.map((s) => s.id));
   // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row — but ONLY for a session
@@ -3519,7 +3519,12 @@ async function refreshSessions() {
   // latest-session id NOT yet in savedIds must NOT flash a phantom "New session" row — that's exactly the glitch
   // where clicking a workspace briefly showed an auto-created session that then vanished. (Boot '' is excluded too.)
   const liveTabs = Array.from(tabs.values()).filter((r) => r.wsId === activeWsId && r.session !== '' && !savedIds.has(r.session) && (r.session === 'new' || r.bornNew));
-  const joinedLive = Array.from(tabs.values()).filter((r) => r.kind === 'live');   // peers' sessions I've joined (cross-workspace) → always reachable
+  // A joined peer's session belongs to the workspace I joined it IN (peerWsId, stamped at join). Filtering only by
+  // kind:'live' pinned it atop EVERY project's sidebar forever — the "my brand-new project shows our old live
+  // session" bug. Scope it to its origin workspace; the active-tab exception keeps its own pinned row visible while
+  // I'm actually viewing that live mirror (its wsId is null, so activeWsId doesn't follow it). A dead/offline joined
+  // tab in its origin ws still shows here with its ✕ Leave — that recovery affordance is deliberate.
+  const joinedLive = Array.from(tabs.values()).filter((r) => r.kind === 'live' && (r.peerWsId === activeWsId || r.tabId === activeTabId));
   if (!list.length && !liveTabs.length && !joinedLive.length) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
