@@ -698,6 +698,11 @@
     .ws-busy{font-size:11px;color:var(--ink-dim);min-height:15px;margin:-4px 0 12px;text-align:left}
     .ws-note{display:none;font-size:10.5px;line-height:1.5;color:var(--ink-dim);text-align:left;margin:-2px 0 12px}
     .ws-note code{font-size:10px;color:var(--silver);background:rgba(255,255,255,.05);padding:0 3px;border-radius:3px}
+    /* "Been invited? Check for invites" — discovery also runs on window focus, this is the immediate manual path */
+    .ws-invite-check{font-size:11px;color:var(--ink-dim);text-align:left;margin:-4px 0 12px}
+    .linkbtn{display:inline;width:auto;padding:0;border:none;background:none;color:var(--accent,#7bb6ee);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+    .linkbtn:hover{color:var(--ink)}
+    .linkbtn:disabled{opacity:.5;cursor:default;text-decoration:none}
     .ws-pick-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);margin:2px 0 12px;cursor:pointer;text-align:left}
     .ws-pick-row input{cursor:pointer}
     .ws-busy.err{color:var(--live-soft)}
@@ -1369,6 +1374,7 @@
       <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose a folder for it (local only — else it goes in ~/.claudible)</span></label>
       <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
       <div class="ws-busy" id="ws-busy"></div>
+      <div class="ws-invite-check">Been invited to a shared project? <button type="button" id="ws-discover" class="linkbtn">Check for invites</button></div>
       <div class="row">
         <button id="ws-create">Create</button>
         <button id="ws-cancel" class="ghost">Cancel</button>

@@ -381,6 +381,11 @@ function createWindow() {
   // attempt to open new windows — defense-in-depth for distributed Electron software.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  // Discovery was a one-shot boot event, so a repo you accept an invite to AFTER launch never appeared until a
+  // restart (the "I accepted on GitHub but it's not in my projects" report). Re-run it when the window regains
+  // focus — throttled, since focus fires constantly, and DECOUPLED from syncAllEnabled (a discovery pass must not
+  // drag a full re-sync of every workspace with it; the adaptive poll already handles syncing).
+  win.on('focus', maybeDiscoverOnFocus);
   // Optional diagnostics (opt-in): launch with CLAUDIBLE_DEBUG=1 to capture the renderer console + crashes
   // to .claudible-debug.log and auto-open DevTools. OFF by default, so nothing pops up in normal use.
   const DEBUG = !!process.env.CLAUDIBLE_DEBUG;
@@ -409,7 +414,7 @@ function createWindow() {
     startPoll();            // adaptive background session sync for the active repo workspace
     startWorkflowPoll();    // live workflow/swarm agents for the foreground tab's Agents pane
     // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
-    setTimeout(() => { discoverWorkspaces().then(syncAllEnabled); }, 3000);
+    setTimeout(() => { _lastDiscover = Date.now(); discoverWorkspaces().then(syncAllEnabled); }, 3000);
     // Bound ~/.claudible/trash. Deleting a session moves a transcript there; deleting a PROJECT moves the whole
     // folder there (an adopted repo, node_modules and all). Nothing ever emptied it, so it grew without limit.
     // Well after boot, off the critical path, and failure is logged rather than swallowed.
@@ -1263,6 +1268,22 @@ function discoverWorkspaces() {
 function syncAllEnabled() {
   for (const ws of registry.workspaces) if (ws.kind === 'repo' && ws.syncSessions && !ws.needsClone) doSync(ws, 'sync', {});
 }
+// Throttled focus-driven re-discovery (see win.on('focus')). One paginated GitHub call per run, so cap the rate.
+let _lastDiscover = 0;
+const DISCOVER_MIN_MS = 45000;
+function maybeDiscoverOnFocus() {
+  const now = Date.now();
+  if (now - _lastDiscover < DISCOVER_MIN_MS) return;
+  _lastDiscover = now;
+  discoverWorkspaces().catch(() => {});   // NOT syncAllEnabled — discovery only; newly-added invites are needsClone anyway
+}
+// Manual "check for invites" (the New-project modal). Bypasses the focus throttle — an explicit ask always runs —
+// and reports how many NEW workspaces it added so the renderer can toast a result either way.
+ipcMain.handle('workspace:discover', async () => {
+  _lastDiscover = Date.now();
+  const r = await discoverWorkspaces();
+  return { ok: !!(r && r.ok), added: (r && r.added ? r.added.length : 0) };
+});
 // Turn sync on/off for a workspace. Enabling = one-time consent to publish this workspace's transcripts;
 // it clones if needed, sets up the branch, and kicks a first sync. Disabling leaves all files in place.
 ipcMain.handle('session:syncSetEnabled', async (e, payload) => {

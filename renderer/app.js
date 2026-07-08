@@ -3912,8 +3912,8 @@ function renderWsChips() {
       tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-left:4px';
       chip.appendChild(tag);
     } else if (w.kind === 'repo' && w.needsClone) {                    // invited but not cloned yet → click to choose where it saves
-      const tag = document.createElement('span'); tag.textContent = 'invited';
-      tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ok,#5fb487);margin-left:4px';
+      const tag = document.createElement('span'); tag.textContent = 'invited';   // a FILLED green pill (was an 8px whisper nobody noticed) so an accepted invite reads at a glance
+      tag.style.cssText = 'flex:none;font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ok,#5fb487);background:color-mix(in srgb,var(--ok) 16%,transparent);border:1px solid color-mix(in srgb,var(--ok) 34%,transparent);border-radius:999px;padding:1px 7px;margin-left:6px';
       chip.appendChild(tag);
       chip.title = (w.owner ? w.owner + '/' + (w.slug || w.label) : w.label) + ' — invited shared project · click to choose where to save it';
     }
@@ -4528,6 +4528,16 @@ async function createWorkspace() {
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
 $('ws-add').addEventListener('click', openWsModal);
+// "Check for invites" — discovery also re-runs on window focus, but this is the immediate manual path for
+// "I just accepted MK's invite on GitHub, show it now". onWorkspaceAdded repaints the list when it finds one.
+if ($('ws-discover')) $('ws-discover').addEventListener('click', async () => {
+  const b = $('ws-discover'); if (b.disabled) return;
+  b.disabled = true; const was = b.textContent; b.textContent = 'checking…';
+  let r = null; try { r = await claudible.discoverWorkspaces(); } catch {}
+  b.disabled = false; b.textContent = was;
+  if (r && r.ok) toast(r.added ? ('Found ' + r.added + ' invited project' + (r.added > 1 ? 's' : '')) : 'No new invites — you’re all caught up');
+  else toast('Couldn’t check for invites');
+});
 // keyboard access for the radio-style picker: Enter/Space selects; arrows move through the group (standard radiogroup keys)
 WS_KINDS.forEach((k, i) => {
   const el = $('ch-' + k); if (!el) return;
