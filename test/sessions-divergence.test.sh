@@ -96,5 +96,30 @@ run_stub_case() (
 r=$(LOCAL_C="$LOCAL_C" run_stub_case)
 ok "$r" "SKIPPED IMPORTED" "promptless stub refused on import; real transcript still imports"
 
+# --- Scenario 5: import_sessions reports WHICH ids it changed (ids_json) — the app uses this list to
+# respawn any OPEN tab whose transcript was just replaced (the "out of sync doesn't refresh the open
+# session" fix). A new import + a fast-forward update are listed; an untouched fork is NOT.
+run_ids_case() (
+  TMP="$(mktemp -d)"
+  export HOME="$TMP"
+  mkdir -p "$TMP/bin"
+  printf '#!/usr/bin/env bash\necho tester\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
+  export PATH="$TMP/bin:$PATH"
+  export CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws CLAUDIBLE_PROJ=testproj
+  mkdir -p "$TMP/.claudible/repos/testws/.git"
+  # shellcheck disable=SC1090
+  source "$SCRIPT" status >/dev/null 2>&1
+  mkdir -p "$PROJ" "$WT/sessions/aaa_peer"
+  printf %s "$LOCAL_C" > "$PROJ/bb-ff.jsonl"                       # will fast-forward
+  printf %s "$LOCAL_C" > "$PROJ/cc-fork.jsonl"                     # will fork (untouched)
+  printf %s "$LOCAL_C" > "$WT/sessions/aaa_peer/aa-new.jsonl"      # new on the branch → import
+  printf %s "$FF_C"    > "$WT/sessions/aaa_peer/bb-ff.jsonl"       # local + one more turn → update
+  printf %s "$FORK_C"  > "$WT/sessions/aaa_peer/cc-fork.jsonl"     # true fork → flagged, NOT listed
+  import_sessions >/dev/null 2>&1
+  echo "$(ids_json) $IMPORTED $UPDATED $DIVERGED"
+)
+r=$(LOCAL_C="$LOCAL_C" FF_C="$FF_C" FORK_C="$FORK_C" run_ids_case)
+ok "$r" '["aa-new","bb-ff"] 1 1 1' "changed ids listed (import+ff), fork excluded"
+
 echo "sessions-divergence: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

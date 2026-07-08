@@ -528,6 +528,7 @@ function respawnPty(tabId, session, opts) {
     try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {}
   }
   const old = rec && rec.proc;
+  if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // a pending post-sync reload for the OLD generation dies with it (the new pty re-reads the transcript anyway)
   ptys.delete(tabId);                                       // drop the entry first → the old handlers' guard goes quiet
   if (old) { try { old.kill(); } catch {} }
   if (rec) _killSessionTree(rec.runtimeId);                 // the ConPTY kill never reaches the WSL side — reap the old generation's bash/claude tree
@@ -573,6 +574,7 @@ ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
 ipcMain.on('pty:input', (e, { tabId, data }) => {
   const t = ptys.get(tabId);
   if (!t) return;
+  t.lastKeyTs = Date.now();   // "user is typing here" signal — a pending post-sync reload defers rather than destroying their composer draft
   // A HOST keystroke ends any pending guest attribution: last typist wins. One context write per
   // guest→host transition (t.lastInputBy is only ever set while a guest was typing), so this stays cold.
   if (t.lastInputBy) { t.lastInputBy = null; t.typistWrittenTs = 0; try { _writeContext(tabId); } catch {} }
@@ -604,6 +606,7 @@ ipcMain.handle('tab:open', (e, { tabId, wsId, session }) => {
 ipcMain.handle('tab:close', (e, { tabId }) => {
   const rec = ptys.get(tabId);
   setGenBusy(tabId, false);
+  if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // parity with the other per-tab timers — no orphaned post-sync reload timer
   ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId); tabIntent.delete(tabId);
   if (rec) { try { rec.proc.kill(); } catch {} }
   if (rec) _killSessionTree(rec.runtimeId);                            // reap the WSL-side tree too (ConPTY kill stops at the Windows boundary)
@@ -924,9 +927,13 @@ ipcMain.handle('session:resolveDiverged', (e, arg) => new Promise((resolve) => {
   const strategy = (arg && arg.strategy === 'local') ? 'local' : 'remote';
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: _wsById(arg && arg.wsId) || activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {
+  const rws = _wsById(arg && arg.wsId) || activeWorkspace;
+  runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: rws, timeout: 45000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session:resolveDiverged:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
+      // 'remote' replaced the transcript on disk — an open tab on this session must respawn to show it
+      // (deferred safely if that tab is mid-turn or the user is typing). 'local' changed nothing.
+      if (r.ok && strategy === 'remote') reloadChangedTabs(rws, [sid]);
       resolve(r.ok ? r : { ok: false, error: (r.error || 'resolve failed') });
     });
 }));
@@ -965,6 +972,37 @@ function setGenBusy(tabId, v) {
 // Is any tab bound to this workspace mid-turn? Auto-sync waits until a ws is fully quiesced before pushing.
 function wsHasBusyTab(wsId) { for (const r of ptys.values()) if (r.ws && r.ws.id === wsId && r.busy) return true; return false; }
 
+// ---- reload an OPEN tab whose transcript a sync/resolve just replaced on disk -------------------
+// A tab's `claude --resume <id>` reads the .jsonl ONCE at spawn; when import_sessions/resolve overwrites
+// that file, the open terminal keeps showing the stale conversation until the pty respawns (this was the
+// "clicked out-of-sync but the session doesn't update until I bounce to another session and back" bug).
+// So: after any sync that changed ids, respawn every affected tab in place. Two safety deferrals — never
+// kill a mid-turn Claude (rec.busy), and never yank the pty while the user is actively typing a prompt
+// (rec.lastKeyTs, would destroy their composer draft); both re-check every 10s until the tab quiesces.
+function tryPendingReload(tabId) {
+  const rec = ptys.get(tabId);
+  if (!rec || !rec.pendingReload) return;
+  if (rec.reloadTimer) { clearTimeout(rec.reloadTimer); rec.reloadTimer = null; }
+  const typing = Date.now() - (rec.lastKeyTs || 0) < 15000;
+  if (rec.busy || typing) { rec.reloadTimer = setTimeout(() => tryPendingReload(tabId), 10000); return; }
+  rec.pendingReload = false;
+  // Deliberately NO openGen++ here: that global counter arbitrates USER-intent opens (session:open,
+  // workspace:open) — a ~30s background reload bumping it would silently abort an in-flight multi-minute
+  // workspace clone ("superseded") while the renderer already flipped its state (wrong-workspace desync).
+  // If an open continuation respawns this tab after us, its respawn simply wins — last writer is the user.
+  respawnPty(tabId, rec.session, { guardBusy: true });
+  try { win && win.webContents.send('session:reloaded', { tabId, id: rec.session }); } catch {}
+}
+function reloadChangedTabs(ws, ids) {
+  if (!ws || !Array.isArray(ids) || !ids.length) return;
+  const want = new Set(ids.filter((x) => typeof x === 'string' && x));
+  for (const [tabId, rec] of ptys) {
+    if (!rec.ws || rec.ws.id !== ws.id || !rec.session || !want.has(rec.session)) continue;
+    rec.pendingReload = true;
+    tryPendingReload(tabId);
+  }
+}
+
 // op ∈ {init,pull,push,sync,status}. Resolves to the script's parsed JSON (or {ok:false,...}).
 function runSync(ws, op, opts) {
   return new Promise((resolve) => {
@@ -992,7 +1030,8 @@ async function doSync(ws, op, opts) {
   _syncDivSeen.set(ws.id, divNow);
   const changed = !!(r && (r.imported || r.updated || r.pushed)) || (divNow !== divPrev);   // a divergence-only sync must notify too — but only when the fork set CHANGES (divNow is recomputed every tick, so a raw OR would refresh forever)
   try { win && win.webContents.send('sync:state', { id: ws.id, status: r && r.ok ? 'idle' : 'error', synced: r && r.synced, diverged: r && r.diverged }); } catch {}
-  if (changed) { try { win && win.webContents.send('sync:changed', { id: ws.id }); } catch {} }   // renderer refreshes only if it's the shown workspace
+  if (changed) { try { win && win.webContents.send('sync:changed', { id: ws.id, ids: (r && r.ids) || [] }); } catch {} }   // renderer refreshes only if it's the shown workspace
+  reloadChangedTabs(ws, r && r.ids);   // an OPEN tab on an imported/updated session shows stale turns until its pty respawns — do it now, not on the next manual session bounce
   return r;
 }
 // Only needed to SKIP the live session during a MANUAL sync mid-turn; auto-syncs already wait out a busy

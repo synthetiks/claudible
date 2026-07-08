@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('claudible', {
   syncNow: (id) => ipcRenderer.invoke('session:syncNow', id),
   onSyncState: (cb) => ipcRenderer.on('sync:state', (_e, s) => cb(s)),
   onSyncChanged: (cb) => ipcRenderer.on('sync:changed', (_e, s) => cb(s)),
+  onSessionReloaded: (cb) => ipcRenderer.on('session:reloaded', (_e, s) => cb(s)),   // main respawned an open tab whose transcript a sync just replaced
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser
   sessionListWs: (wsId) => ipcRenderer.invoke('session:list-ws', wsId),   // list a (possibly non-active) workspace's sessions

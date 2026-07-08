@@ -336,8 +336,15 @@ function titleWrite() {
     pairs = [];
   }
 
-  // d[i] = {"title": n, "ts": int(time.time())}  — update in place if key exists, else append.
-  const entry = obj([['title', n], ['ts', Math.floor(Date.now() / 1000)]]);
+  // d[i] = {"title": n, "ts": now}  — update in place if key exists, else append.
+  // ts is MILLISECONDS now (was int(time.time()) seconds): two collaborators renaming inside the same
+  // wall-clock second used to tie, and the tie-break (file order at read + each side preferring its own
+  // local name) let the two machines disagree FOREVER. titleRead normalizes old second-stamps up to ms,
+  // so UPGRADED readers compare mixed old/new entries correctly. Known transition artifact: a peer still
+  // on an OLD build compares raw magnitudes, so any ms entry out-ranks their seconds entries until they
+  // upgrade — bounded, self-healing (their next rename after upgrading stamps ms), and better than keeping
+  // the permanent same-second split.
+  const entry = obj([['title', n], ['ts', Date.now()]]);
   let found = false;
   for (const p of pairs) {
     if (p[0] === i) {
@@ -391,6 +398,10 @@ function titleRead() {
       if (typeof ts === 'boolean') ts = ts ? 1 : 0;
       else if (typeof ts !== 'number') continue;
       if (typeof t !== 'string') continue;
+      // UNIT-SAFE newest-wins: titleWrite now stamps ms, but branch files written by older builds hold
+      // seconds. Normalize seconds→ms before comparing (and emitting), or every new-format rename would
+      // beat a genuinely newer old-format one purely on magnitude. (Epoch seconds < 1e12 < epoch ms.)
+      if (ts > 0 && ts < 1e12) ts = ts * 1000;
       if (!best.has(i) || ts > best.get(i)[0]) best.set(i, [ts, t]);
     }
   }

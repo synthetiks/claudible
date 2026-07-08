@@ -2427,6 +2427,7 @@ const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const SHARE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><polyline points="8 7 12 3 16 7"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 const OPTIONS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>';   // "settings-2" sliders — the options trigger on session rows + workspace chips. A settings glyph (not a ▾ that wrongly implies a dropdown), distinct from both the ⋯ and the top-bar gear.
 let sessIndex = {};                                                                 // id -> session record (labels/preview)
+let sessIndexWs = '';                                                               // which workspace sessIndex belongs to — activeWsId flips synchronously on a switch while sessIndex is rebuilt async, so consumers that must not cross workspaces (pollTitles' re-publish) check this tag
 // Session title: prefer the workspace-shared name (so everyone in a repo workspace sees the SAME title), then a
 // local-only override (legacy/local workspaces, or before the first poll), then the transcript-derived preview.
 function sessTitle(s, wsId) {   // wsId: the row's workspace when it ISN'T the active one (the expanded tree) — the shared-name cache is keyed per workspace
@@ -2618,6 +2619,25 @@ async function pollTitles(force) {
       if (nv && lt[id] && lt[id] !== nv && (Number(lts[id]) || 0) < nts) { lt[id] = nv; lts[id] = nts; changed = true; }
     }
     if (changed) savePrefs({ sessionTitles: lt, sessionTitleTs: lts });
+    // INVERSE reconcile — self-healing publish. If MY rename is strictly NEWER than what the branch holds
+    // (its title-set push failed, or happened offline), re-publish it so collaborators converge on it instead
+    // of silently keeping the stale shared name forever. Guards: only ids that belong to THIS workspace's
+    // session list (sessionTitles is a global map — never leak another ws's name onto this branch; the
+    // sessIndexWs tag closes the switch window where activeWsId already flipped but sessIndex still holds
+    // the previous workspace's rows), only renames older than 60s (a just-committed rename's own push is
+    // still in flight — don't double-push), and at most one id per poll pass (a permanently-failing push
+    // must not spam git every 20s).
+    for (const id in lt) {
+      if (sessIndexWs !== myWs) break;
+      if (!sessIndex[id]) continue;
+      const localTs = Number(lts[id]) || 0;
+      if (!localTs || now - localTs < 60000) continue;
+      if (titleVal(m[id]) === lt[id]) continue;                       // branch already agrees
+      if (localTs > titleTs(m[id])) {
+        try { claudible.titleSet(id, lt[id], myWs).catch(() => {}); } catch (e) {}
+        break;
+      }
+    }
   } catch (e) {}
   refreshSessions();
 }
@@ -2926,7 +2946,7 @@ function startSessEdit(row, p, s) {
         if (_aw && _aw.kind === 'repo') {
           const shared = (t && t !== s.preview) ? t : '';
           if (shared) remoteTitles[s.id] = { n: shared, ts: _now }; else delete remoteTitles[s.id];
-          try { claudible.titleSet(s.id, shared, activeWsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}   // the renamed row lives under the SIDEBAR's active ws — main's can differ while a joined live tab is on screen
+          try { claudible.titleSet(s.id, shared, activeWsId).then((r) => { if (r && r.ok === false) toast('Renamed here — sharing the name failed, will keep retrying'); pollTitles(true); }).catch(() => {}); } catch (e) {}   // the renamed row lives under the SIDEBAR's active ws — main's can differ while a joined live tab is on screen. A failed push is no longer silent: the user hears it, and pollTitles' inverse reconcile re-publishes until the branch agrees
         }
         p.textContent = sessTitle(s);
         // keep ANY open tab on this session in sync so the command center + guest tracker also show the new name
@@ -3087,7 +3107,7 @@ async function deleteSession(id, scope) {
     if (rec.wsId === activeWsId && rec.session === id) {
       if (rec.busy) return abort();      // fast path — no point even attempting the switch
       if (rec.tabId === activeTabId) {
-        await openSession(next, next === 'new' ? '' : (sessIndex[next] && sessIndex[next].preview));
+        await openSession(next, next === 'new' ? '' : (sessIndex[next] ? sessTitle(sessIndex[next]) : ''));   // label by the SHARED name, matching every other openSession call site (preview here leaked the raw first-prompt line into the tab/guest labels)
         const still = tabs.get(rec.tabId);
         if (still && still.session === id) return abort();   // busy race: main refused the re-point (openSession left this tab untouched)
       } else {
@@ -3238,7 +3258,7 @@ async function refreshSessions() {
   }
   const order = mergeSessionOrder(getOrder(), list);
   setOrder(order);
-  sessIndex = {}; list.forEach((s) => { sessIndex[s.id] = s; });
+  sessIndex = {}; list.forEach((s) => { sessIndex[s.id] = s; }); sessIndexWs = myWs;   // tag whose rows these are (guaranteed == activeWsId here by the guard above)
   const ordered = order.map((id) => sessIndex[id]).filter(Boolean);
   // Default highlight must match what session.sh `--continue` resumes — the most-recent conversation
   // (max mtime) — not the top of the stable saved order.
@@ -3250,7 +3270,7 @@ async function refreshSessions() {
   if (!activeSession && list.length && !(AT() && (AT().session === 'new' || AT().kind === 'live'))) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
   const act = sessIndex[activeSession];
   const at = AT();
-  if (at && act && !at.curSessionLabel) { at.curSessionLabel = act.preview; pushTracker(); }    // tell guests which session is live
+  if (at && act && !at.curSessionLabel) { at.curSessionLabel = sessTitle(act); pushTracker(); }    // tell guests which session is live — by its SHARED name (sessTitle), not the raw first-prompt preview, so a joiner sees the same title the sidebar shows everywhere (preview-seeding was why MK and a joiner could see two different names for one session)
   // SMOOTH SWITCH: if the session SET (ids/order/titles/chips/live/joined/peers/share) is unchanged and only the
   // highlight differs, re-apply the active/open-in-tab classes IN PLACE instead of wiping + rebuilding the whole
   // list. This kills the "entire sidebar flickers/reloads on every session click" jank.
@@ -4064,6 +4084,16 @@ claudible.onSyncState((s) => {
   renderWsChips();
 });
 claudible.onSyncChanged((s) => { if (s && s.id === activeWsId) { refreshSessions(); try { pollTitles(true); } catch (e) {} } });   // a pull that changed anything also refreshes shared titles immediately (renames land on the next sync, not the next 20s poll)
+// Main respawned an open tab because a sync replaced its transcript on disk (the "out of sync doesn't
+// update the open session" fix). Mirror openSession's respawn housekeeping for THAT tab — clear the xterm
+// (else the resume replay lands on top of stale scrollback), reset the scroll estimate, and reset the
+// tracker baselines (token/cost state belongs to the old transcript) — then tell the user why it reloaded.
+if (claudible.onSessionReloaded) claudible.onSessionReloaded((s) => {
+  const t = tabs.get(s && s.tabId);
+  if (t) { try { t.term.reset(); } catch {} t.altFrac = 0; resetStats(t); }
+  toast('Session updated with synced changes');
+  refreshSessions();
+});
 claudible.onWorkspaceAdded(() => { refreshWorkspaces(); });
 $('invite-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); doInvite(); }

@@ -202,11 +202,10 @@ purge_tombstoned() {
     # the deleter's own copy was already trashed by the delete op. So no local trash here.
   done
 }
-apply_tombstones() { purge_tombstoned; }   # import_sessions calls this name — keep the shim
 import_sessions() {
   mkdir -p "$PROJ" 2>/dev/null
-  apply_tombstones                                                  # honor collaborators' "delete everywhere"
-  IMPORTED=0; UPDATED=0; DIVERGED=0
+  purge_tombstoned                                                  # honor collaborators' "delete everywhere"
+  IMPORTED=0; UPDATED=0; DIVERGED=0; CHANGED_IDS=""
   [ -d "$WT/sessions" ] || return 0
   # _divset seeds the run-scoped guard read by clear_diverged_run: an id added here (a fork flagged, or a kept-local
   # ack) can no longer be cleared by a later author dir THIS pass, so a fork is flagged no matter the glob order.
@@ -233,12 +232,12 @@ import_sessions() {
     grep -aq '"type":"user"' "$f" 2>/dev/null || continue            # never import a promptless stub (defense against collaborators on builds that still export them)
     dest="$PROJ/$id.jsonl"
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
-      import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); clear_diverged_run "$id"; }; continue
+      import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }; continue
     fi
     if cmp -s "$f" "$dest"; then clear_diverged_run "$id"; continue; fi  # identical → leave trust status unchanged, resolve any fork flag
     dsz="$(wc -c < "$dest" 2>/dev/null || echo 0)"
     if [ "$(wc -c < "$f")" -gt "$dsz" ] && head -c "$dsz" "$f" | cmp -s - "$dest"; then
-      import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); clear_diverged_run "$id"; }   # remote = local + more turns → ff (now foreign)
+      import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
       clear_diverged_run "$id"                                       # local is ahead of remote → our push handles it
     elif is_acked "$id"; then
@@ -294,6 +293,15 @@ commit_and_push() {
 
 count_synced() { ls "$WT"/sessions/*/*.jsonl 2>/dev/null | wc -l | tr -d ' '; }
 
+# JSON array of the session ids import_sessions changed on disk this run. Safe to interpolate raw:
+# every id passed the strict [A-Za-z0-9-] filter above. The app uses this to reload any OPEN tab
+# whose transcript was just replaced — the "out of sync doesn't refresh the open session" fix.
+ids_json() {
+  local out="" i
+  for i in ${CHANGED_IDS:-}; do out="$out,\"$i\""; done   # :- guards set -u if an op ever emits without importing
+  printf '[%s]' "${out#,}"
+}
+
 case "$op" in
   init)
     ensure_worktree || fail "could not set up the sessions branch"
@@ -303,7 +311,7 @@ case "$op" in
     ensure_worktree || fail "could not set up the sessions branch"
     pull_branch || fail "pull failed"
     import_sessions
-    emit "{\"ok\":true,\"op\":\"pull\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED}"
+    emit "{\"ok\":true,\"op\":\"pull\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"ids\":$(ids_json)}"
     ;;
   push)
     ensure_worktree || fail "could not set up the sessions branch"
@@ -318,7 +326,7 @@ case "$op" in
     import_sessions
     export_sessions
     commit_and_push || fail "push failed (no access, or network)"
-    emit "{\"ok\":true,\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"pushed\":$PUSHED}"
+    emit "{\"ok\":true,\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"pushed\":$PUSHED,\"ids\":$(ids_json)}"
     ;;
   delete)
     # "Delete everywhere": drop a tombstone on the branch + remove the transcript from EVERY author dir, so
