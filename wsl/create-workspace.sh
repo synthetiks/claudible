@@ -17,6 +17,10 @@ esac
 case "$kind" in
   local)
     pdir="${3:-}"                                          # optional custom parent dir (absolute WSL path from the app)
+    # $pdir had NO guard: a `"`, `\` or control byte in the chosen folder's name reached the printf below and
+    # produced JSON main.js couldn't parse — AFTER mkdir had already created the folder, which was then orphaned.
+    # Same charset as lib/pathSafe.js (which now rejects it upstream) and as the other three workspace scripts.
+    case "$pdir" in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac
     if [ -n "$pdir" ]; then dir="$pdir/$slug"; else dir="$HOME/.claudible/workspaces/$slug"; fi
     # win-native: normalize to a real Windows path (C:/..) so the stored ws.path drives node-pty/claude.exe + the project-dir key correctly, instead of a /c/.. form read as a stray C:\c\.. (no-op on WSL/Posix). Mirrors clone-workspace.sh.
     if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi

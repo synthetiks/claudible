@@ -12,7 +12,7 @@ case "$slug" in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad
 [ -z "$dir" ] && dir="$HOME/.claudible/workspaces/$slug"   # default local workspace dir when the app passes none
 # win-native: normalize to a Windows path (C:/..) so the returned ws.path drives node-pty/claude.exe correctly (no-op off Windows).
 if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
-case "$dir"  in *\'* | *\"*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac
+case "$dir"  in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac   # ' ends the bash arg; " \ and control bytes break the JSON below (lib/pathSafe.js)
 [ -d "$dir" ] || { printf '{"ok":false,"error":"workspace folder not found"}'; exit 0; }
 command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed"}'; exit 0; }
 owner="$(gh api user --jq .login 2>/dev/null)"

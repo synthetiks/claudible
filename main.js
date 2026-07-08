@@ -8,7 +8,8 @@
 const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { atomicWriteJson } = require('./lib/atomicWrite');   // every JSON file this process owns is written tmp+rename; every reader of one treats a parse error as "empty"
+const { atomicWriteJson } = require('./lib/atomicWrite');          // every JSON file this process owns is written tmp+rename; every reader of one treats a parse error as "empty"
+const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
 const { createShareServer } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
@@ -1211,7 +1212,7 @@ function ensureClone(ws) {
     const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
     const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!slug || !owner) return resolve({ ok: false, error: 'bad workspace' });
-    const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? ws.path : '';   // the invitee's chosen clone dir (else the script's default)
+    const wsp = safePath(ws.path);   // the invitee's chosen clone dir (else the script's default). A path that can't round-trip was never storable — but workspaces.json is hand-editable
     const dirArg = wsp ? ` '${wsp}'` : '';
     runner.runScript('clone-workspace.sh', `'${owner}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
         // Surface the REAL reason so a Windows-specific failure isn't swallowed as a silent re-prompt — but log the
@@ -1298,7 +1299,7 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   if (!APPDIR_WSL) return { ok: false, error: ERR_NO_BACKEND };
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!slug) return { ok: false, error: 'bad workspace' };
-  const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? runner.toGuestPath(ws.path) : '';
+  const wsp = ws.path ? safePath(runner.toGuestPath(ws.path)) : '';
   const dirArg = wsp ? ` '${wsp}'` : '';
   const { err, stdout } = await runner.runScript('upgrade-workspace.sh', `'${slug}'${dirArg}`, { timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
   if (err) return { ok: false, error: 'upgrade failed to run' };
@@ -1372,8 +1373,8 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
     if (res.canceled || !res.filePaths || !res.filePaths.length) return { ok: false, error: 'cancelled' };
     ws = live();                                                     // the project may have been deleted while the picker was open
     if (!ws) return { ok: false, error: 'unknown workspace' };
-    const wslp = runner.toGuestPath(res.filePaths[0]);
-    if (!wslp || /['"]/.test(wslp)) return { ok: false, error: 'could not use that folder' };
+    const wslp = safePath(runner.toGuestPath(res.filePaths[0]));
+    if (!wslp) return { ok: false, error: PATH_UNSAFE_MSG };
     ws.path = `${wslp.replace(/\/+$/, '')}/${slug}`;                 // clone into <chosen>/<slug> (mirrors create-workspace's <parent>/<slug>)
     saveRegistry();
   }
@@ -1437,9 +1438,10 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
     dialog.showOpenDialog(win, { title: 'Choose where to create this workspace', properties: ['openDirectory', 'createDirectory'] })
       .then((res) => {
         if (res.canceled || !res.filePaths || !res.filePaths.length) return resolve({ ok: false, error: 'cancelled' });
-        let wslp = '';
-        wslp = runner.toGuestPath(res.filePaths[0]);
-        if (!wslp || wslp.includes("'")) return resolve({ ok: false, error: 'could not use that folder' });
+        // Was `.includes("'")` — the shell hazard only. A `"` or `\` sailed through into create-workspace.sh's
+        // `printf '…"path":"%s"…'`, and by the time JSON.parse threw, the folder was on disk owned by nothing.
+        const wslp = safePath(runner.toGuestPath(res.filePaths[0]));
+        if (!wslp) return resolve({ ok: false, error: PATH_UNSAFE_MSG });
         exec(wslp);
       }).catch(() => resolve({ ok: false, error: 'folder pick failed' }));
   } else {
@@ -1459,9 +1461,9 @@ ipcMain.handle('workspace:adopt', (e, payload) => new Promise((resolve) => {
   dialog.showOpenDialog(win, { title: 'Choose a folder you already work in', properties: ['openDirectory'] })
     .then((res) => {
       if (res.canceled || !res.filePaths || !res.filePaths.length) return resolve({ ok: false, error: 'cancelled' });
-      const guest = runner.toGuestPath(res.filePaths[0]);
-      // A quote would escape the single-quoted bash arg below; a backslash would break the script's JSON.
-      if (!guest || /['"\\]/.test(guest)) return resolve({ ok: false, error: 'could not use that folder' });
+      // This site had the strongest charset of the four; lib/pathSafe.js is its union with the control bytes.
+      const guest = safePath(runner.toGuestPath(res.filePaths[0]));
+      if (!guest) return resolve({ ok: false, error: PATH_UNSAFE_MSG });
       runner.runScript('adopt-workspace.sh', `'${guest}'`, { timeout: 30000 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] adopt-workspace:', err.message); return resolve({ ok: false, error: 'could not read that folder' }); }
         let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}

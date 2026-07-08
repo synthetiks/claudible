@@ -20,6 +20,10 @@ function humanError(code) {
     'bad token': 'that live link looks invalid', 'bad id': 'that item could not be found',
     'not live': "you're not sharing a live session right now", 'bad workspace': 'that project is not available',
     'bad ws': 'that project is not available', 'bad args': 'invalid request', 'bad slug': 'that name is not allowed',
+    // the workspace scripts' refusals — 'bad dir' is the one a user can actually trigger, by picking a folder
+    // whose path holds a quote, a backslash or a control byte (see lib/pathSafe.js)
+    'bad dir': 'that folder’s path contains a quote, a backslash or a line break — Claudible can’t use it',
+    'bad owner': 'that GitHub owner name is not valid', 'bad kind': 'invalid request',
     apply: 'could not apply that change', 'stopped during start': 'sharing was stopped while it was starting',
     'push failed': 'could not reach the server — check your connection', 'pull failed': 'could not reach the server — check your connection',
     full: 'the session is full', 'not found': 'not found', unknown: 'something went wrong',

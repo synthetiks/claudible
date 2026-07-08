@@ -10,7 +10,9 @@ slug="${2:-}"
 dir_in="${3:-}"
 case "$owner" in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad owner"}'; exit 0 ;; esac
 case "$slug"  in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad slug"}'; exit 0 ;; esac
-case "$dir_in" in *\'* | *\"*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac   # shell/JSON injection guard
+# A `'` ends the single-quoted bash arg; a `"`, a `\` or a control byte breaks the JSON we printf below.
+# Same charset as lib/pathSafe.js (main.js rejects it first) and as adopt-workspace.sh. Belt: workspaces.json is hand-editable.
+case "$dir_in" in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac
 
 if [ -n "$dir_in" ]; then dir="$dir_in"; else dir="$HOME/.claudible/repos/$slug"; fi
 # Windows git-bash: the runner sets MSYS_NO_PATHCONV, so gh/git.exe read our path literally and turn the MSYS
