@@ -4368,6 +4368,29 @@ async function refreshWorkspaces() {
   renderWsChips();
   maybeFirstRun(r);
 }
+// Paint a workspace's saved session rows from warm cache the instant we switch to it, so the sidebar never
+// flashes the OLD workspace's rows or a blank gap while the live fetch is in flight. Two things the old inline
+// pre-fill got wrong (the "sidebar glitches / cuts sessions out on switch" report):
+//   * it sorted by `used`/mtime while the authoritative render (refreshSessions) sorts by mergeSessionOrder's
+//     shared `created` order — so every pre-filled row visibly REORDERED the moment real data landed. Match it.
+//   * a cold cache cleared to BLANK, then refreshSessions showed "loading…", then content — two flashes. Show a
+//     single clean "loading…" instead.
+// activeWsId MUST already be the new id here (orderKey/getOrder key off it). refreshSessions still runs after and
+// replaces this with authoritative rows; _sessSig='' forces that real render (the ws — part of the sig — changed).
+function primeSessionListForWs(id) {
+  if (!sessListEl) return;
+  _sessSig = '';
+  const pf = _wsSessCache.get(id);
+  const raw = pf && Array.isArray(pf.list) ? pf.list.filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, id)) : null;   // same stub rule as refreshSessions
+  if (raw && raw.length) {
+    sessIndex = {}; raw.forEach((s) => { sessIndex[s.id] = s; }); sessIndexWs = id;
+    const ordered = mergeSessionOrder(getOrder(), raw).map((sid) => sessIndex[sid]).filter(Boolean);   // SAME order key as the authoritative render → no reorder jump
+    sessListEl.innerHTML = '';
+    ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
+  } else {
+    sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';
+  }
+}
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
 async function switchWorkspace(id, targetSession) {
@@ -4405,9 +4428,7 @@ async function switchWorkspace(id, targetSession) {
   setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)
   activeSession = (sess && sess !== 'new') ? sess : null; t.curSessionLabel = (sess === 'new') ? 'New session' : '';
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
-  sessListEl.innerHTML = ''; _sessSig = '';        // drop the OLD workspace's session rows immediately so they don't flash under the NEW workspace before refreshSessions lands
-  const _pf = _wsSessCache.get(id);                // …and immediately PRE-FILL the new ws's rows from cache (warm if it was expanded before) so the list shows correct content instantly, not an empty gap until the live fetch lands
-  if (_pf && Array.isArray(_pf.list) && _pf.list.length) { _pf.list.slice().sort((a, b) => ((b.used || b.mtime || 0) - (a.used || a.mtime || 0))).forEach((s) => { sessIndex[s.id] = s; sessListEl.appendChild(renderSessionRow(s)); }); }
+  primeSessionListForWs(id);                       // paint the new ws's rows from warm cache in the AUTHORITATIVE order (no blank gap, no reorder jump) before the live fetch lands
   renderWsChips();
   let failed = false, kept = false;
   try {
