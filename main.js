@@ -1551,7 +1551,9 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
   _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id);               // drop the deleted ws's leftover per-workspace state
   _lastFetch.delete(id); fetchLock.delete(id);                                         // …incl. the background-fetch throttle (a re-added project must fetch immediately, not wait out a stale 90s window)
-  _repoWrite.forget(id);                                                               // …and its worktree-write chain (the folder is on its way to the trash; nothing may queue behind it)
+  // NOT the worktree-write chain: a checkpoint snapshot from the just-ended turn may still be in flight, and this
+  // id can recur (it's `${kind}-${slug}`) — so force-dropping the key would let a re-created same-name workspace's
+  // writes race the orphaned chain. The queue self-drains and self-bounds; letting it finish is the safe path.
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
   // TOMBSTONE a deleted repo workspace (per-machine, in the registry): discoverWorkspaces would otherwise

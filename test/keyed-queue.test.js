@@ -108,13 +108,20 @@ const noOverlap = (log) => {
     eq('…and ran last', log.join(''), '+a-a+b-b+c-c');
   }
 
-  // ---- forget(): the workspace is gone; nothing may queue behind it -------------------------------------------
+  // ---- a re-created same-key workspace queues behind an in-flight task, never races it -----------------------
+  // main.js keys on ws.id = `${kind}-${slug}`, which RECURS: delete a project mid-checkpoint, re-create one with
+  // the same name, and both map to the same key. There is deliberately no forget() — force-dropping the busy key
+  // would let the new workspace's writes race the orphaned snapshot, the exact overlap this queue prevents. This
+  // pins that: a second run() on a key whose task is still in flight must wait, even across the "workspace was
+  // deleted" gap (which, without forget(), is invisible to the queue — as it should be).
   {
-    const q = makeKeyedQueue();
-    await q.run('ws1', () => tick(1));
-    q.forget('ws1');
-    eq('forget() drops the key', q.size(), 0);
-    eq('…and a later task on that key still works', await q.run('ws1', () => 'ok'), 'ok');
+    const q = makeKeyedQueue(), log = [], t = tracer(log);
+    const deleted = q.run('repo-proj', t('snapshot-of-deleted-ws', 25));   // Stop-hook snapshot still running…
+    // …workspace deleted here (no queue call — the id just recurs later)…
+    const recreated = q.run('repo-proj', t('write-in-recreated-ws', 1));   // same id, new workspace
+    await Promise.all([deleted, recreated]);
+    ok('a re-created same-id workspace never overlaps the orphaned in-flight task', noOverlap(log));
+    eq('…it waited its turn', log.join(''), '+snapshot-of-deleted-ws-snapshot-of-deleted-ws+write-in-recreated-ws-write-in-recreated-ws');
   }
 
   // ---- null / undefined keys collapse to one chain (main.js passes ws && ws.id) --------------------------------
