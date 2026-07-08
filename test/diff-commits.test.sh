@@ -96,6 +96,23 @@ out="$(CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" bash "$DIFF_SH" 2>/dev/null
 case "$out" in *'"repo": false'*|*'"repo":false'*) pass=$((pass+1)) ;; *) fail=$((fail+1)); echo "  FAIL non-repo reports repo:false (got: ${out:0:80})" ;; esac
 rm -rf "$D"
 
+# --- 8a. a huge UNTRACKED tree (un-ignored node_modules/dist) must not kill the whole read. The path list is
+#         passed as ONE env var to node; over ~128KB (MAX_ARG_STRLEN) the exec dies "Argument list too long" and
+#         a repo full of real commits reported nothing. Only the two diffs were capped; untracked was exempt.
+D="$(newrepo)"
+echo z >> "$D/root.txt"; git -C "$D" commit -qam "a real commit"
+node -e '
+  const fs = require("fs"), p = process.argv[1] + "/node_modules/pkg/deeply/nested";
+  fs.mkdirSync(p, { recursive: true });
+  for (let i = 0; i < 6000; i++) fs.writeFileSync(p + "/some_long_module_filename_" + i + ".js", "x");' "$D"
+bytes="$(git -C "$D" ls-files --others --exclude-standard | wc -c)"
+ok "$([ "$bytes" -gt 130000 ] && echo big || echo small)" "big" "fixture really does exceed MAX_ARG_STRLEN ($bytes bytes)"
+r="$(probe "$D")"; ok "$(echo "$r" | cut -d' ' -f1-2)" "2 2" "a huge untracked tree still lists the repo's commits"
+unt="$(CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" bash "$DIFF_SH" 2>/dev/null | node -e '
+  let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s); console.log((j.untracked||[]).length);});')"
+ok "$unt" "200" "the untracked list is bounded, not dropped"
+rm -rf "$D"
+
 # --- 8b. diff.sh must survive being invoked by a RELATIVE path: it cd's into the repo, so `dirname $0` used to
 #         resolve diff-tool.js against the WORKSPACE (MODULE_NOT_FOUND), which the old fallback then reported as a
 #         healthy empty repo. Run it as `bash wsl/diff.sh` from the app root, the way a careless caller would.
@@ -113,6 +130,17 @@ meta="$(CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" bash "$DIFF_SH" 2>/dev/nul
   let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s); const c=(j.commits||[])[0]||{};
     console.log([!!c.hash, c.subject === "a meaningful subject", c.author === "T", /^\d{4}-\d{2}-\d{2}$/.test(c.date||"")].join(" "));});')"
 ok "$meta" "true true true true" "each commit carries hash, subject, author, ISO date"
+# the displayed date must be the COMMITTER date — the same clock `--since` filtered on. An amended/rebased commit
+# would otherwise be listed under "last 7 days" while showing an author date from months ago.
+D2="$(mktemp -d)"
+git -C "$D2" init -q; git -C "$D2" config user.email t@t; git -C "$D2" config user.name T; git -C "$D2" config commit.gpgsign false
+echo a > "$D2/a.txt"; git -C "$D2" add -A
+GIT_AUTHOR_DATE="2020-03-04T00:00:00" git -C "$D2" commit -qm "old author date, committed today"
+today="$(date +%Y-%m-%d)"
+shown="$(CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D2" bash "$DIFF_SH" 2>/dev/null | node -e '
+  let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s); console.log(((j.commits||[])[0]||{}).date||"");});')"
+ok "$shown" "$today" "a rebased/amended commit shows its committer date (matches the --since window)"
+rm -rf "$D2"
 rm -rf "$D"
 
 echo "diff-commits: $pass passed, $fail failed"

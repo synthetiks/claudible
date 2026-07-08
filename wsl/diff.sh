@@ -28,7 +28,10 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '{"ok":true,"rep
 
 # Uncommitted: raw unified diff of the whole working tree vs HEAD (python skips binary).
 diff_text="$(git -c core.quotepath=false diff HEAD --no-color 2>/dev/null)"
-untracked="$(git -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null)"
+# Bounded at the source: an un-ignored node_modules/dist/vendor tree yields tens of thousands of paths, and this
+# whole string is passed as ONE env var to node below — over ~128KB (MAX_ARG_STRLEN) the exec dies with "Argument
+# list too long", taking the commit list down with it. diff-tool.js only ever renders the first 200 anyway.
+untracked="$(git -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null | head -n 200)"
 
 # Committed: the commits from the LAST 7 DAYS ("recent" = this week), plus their NET diff.
 #
@@ -47,7 +50,9 @@ rcount="$(git rev-list --count --since='7 days ago' HEAD 2>/dev/null || echo 0)"
 EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904                  # git's well-known empty tree object
 clog=""; cdiff_text=""
 if [ "${rcount:-0}" -gt 0 ]; then
-  clog="$(git log --no-color --since='7 days ago' -n 50 --format='%h%x1f%s%x1f%an%x1f%ad' --date=short HEAD 2>/dev/null)"
+  # %cd (COMMITTER date), not %ad: `--since` filters on the committer date, so a rebased/amended commit would
+  # otherwise be listed under "last 7 days" while displaying an author date from months ago.
+  clog="$(git log --no-color --since='7 days ago' -n 50 --format='%h%x1f%s%x1f%an%x1f%cd' --date=short HEAD 2>/dev/null)"
   base="$(git rev-list -1 --before='7 days ago' HEAD 2>/dev/null)"   # newest commit OLDER than the window (may be empty)
   [ -z "$base" ] && base="$EMPTY_TREE"                               # whole history is inside the window → diff from nothing
   cdiff_text="$(git -c core.quotepath=false diff "$base" HEAD --no-color 2>/dev/null)"
@@ -63,6 +68,8 @@ maxb=110000
 _lc="${LC_ALL-}"; _lcset="${LC_ALL+x}"; LC_ALL=C
 if [ "${#diff_text}" -gt "$maxb" ]; then diff_text="${diff_text:0:$maxb}"; diff_text="${diff_text%$'\n'*}"; fi
 [ "${#cdiff_text}" -gt "$maxb" ] && cdiff_text=""
+# untracked was the one env var NOT capped here — 200 pathological paths can still blow the byte limit.
+if [ "${#untracked}" -gt "$maxb" ]; then untracked="${untracked:0:$maxb}"; untracked="${untracked%$'\n'*}"; fi
 if [ -n "$_lcset" ]; then LC_ALL="$_lc"; else unset LC_ALL; fi
 
 unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
