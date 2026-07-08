@@ -27,17 +27,7 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # absolute BEFORE the cd (see diff.sh)
 . "$HERE/_git-safe.sh"                                  # neutralize command-executing keys in a hostile .git/config
-WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
-WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
-case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
-if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
-elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/repos/$WS_SLUG"
-else
-  SDIR="$HOME/.claudible/session"
-fi
-[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"
+. "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 cd "$SDIR" 2>/dev/null || { printf '{"ok":false,"error":"no such folder"}'; exit 0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '{"ok":false,"error":"not a git repo"}'; exit 0; }
 

@@ -7,17 +7,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"                   # resolve the script dir
 . "$HERE/node-path.sh" 2>/dev/null || true             # nvm's node isn't on PATH for non-interactive shells → resolve it
 . "$HERE/_git-safe.sh"                                  # belt: neutralize command-executing .git/config keys (checkpoints are repo-only today, but never trust a workspace's git config)
 
-WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
-WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
-case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
-if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
-elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/repos/$WS_SLUG"
-else
-  SDIR="$HOME/.claudible/session"
-fi
-[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"
+. "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 
 cd "$SDIR" 2>/dev/null || { printf '{"ok":false,"error":"no workspace dir"}\n'; exit 0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '{"ok":false,"repo":false,"error":"not a git repo"}\n'; exit 0; }

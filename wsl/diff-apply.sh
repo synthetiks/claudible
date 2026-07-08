@@ -5,21 +5,12 @@
 #   $1 = mode: 'apply-reverse' (revert a hunk/file patch) | 'discard' (delete an untracked file)
 #   $2 = path to a temp file: the unified patch (apply-reverse) OR the target path (discard)
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
 . "$(cd "$(dirname "$0")" && pwd)/_git-safe.sh"   # a hostile .git/config (adopted repo) can run commands via git — neutralize before `git apply`
 emit() { printf '%s\n' "$1"; }
 mode="${1:-}"; tmp="${2:-}"
 [ -n "$tmp" ] && [ -f "$tmp" ] || { emit '{"ok":false,"error":"bad args"}'; exit 0; }
-WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
-WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
-case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
-if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
-elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/repos/$WS_SLUG"
-else
-  SDIR="$HOME/.claudible/session"
-fi
-[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"
+. "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 cd "$SDIR" 2>/dev/null || { emit '{"ok":false,"error":"no workspace"}'; exit 0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { emit '{"ok":false,"error":"not a git repo"}'; exit 0; }
 

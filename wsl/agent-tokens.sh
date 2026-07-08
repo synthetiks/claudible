@@ -5,14 +5,9 @@
 # the resent context every turn and cache_read_input_tokens is re-reads, so both are excluded.
 # $1 = session id. Workspace cwd from CLAUDIBLE_WS_* (mirrors the other scripts). Prints one integer.
 set -u
-. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
-WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
-WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
-case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
-if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
-elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then SDIR="$HOME/.claudible/repos/$WS_SLUG"
-else SDIR="$HOME/.claudible/session"; fi
-[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
+. "$HERE/node-path.sh" 2>/dev/null || true              # nvm's node isn't on PATH for non-interactive shells → resolve it
+. "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 
 SID="${1:-}"
 case "$SID" in '' | *[!A-Za-z0-9-]*) printf '0'; exit 0 ;; esac

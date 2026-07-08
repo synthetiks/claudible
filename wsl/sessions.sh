@@ -3,20 +3,11 @@
 # Each conversation is a <session-id>.jsonl under ~/.claude/projects/<encoded cwd>/. We emit
 # [{id, mtime, preview, msgs}] sorted newest-first so the renderer can show a session switcher.
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
 . "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → ensure it is, or this returns []
 # Per-workspace cwd (mirrors session.sh): list conversations for the SELECTED workspace's dir.
 # Unset / bad slug → the original single session dir. Slug is a strict [A-Za-z0-9-] leaf.
-WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
-WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
-case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
-if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
-elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/repos/$WS_SLUG"
-else
-  SDIR="$HOME/.claudible/session"
-fi
-[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"   # custom save-location override
+. "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 # Same encoding Claude uses: every non-alphanumeric char in the cwd path → '-'.
 PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 # Sessions-sync worktree (repo workspaces only): lets us flag sessions a collaborator deleted on GitHub.

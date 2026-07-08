@@ -5,19 +5,10 @@
 # Resolves the SAME per-workspace project dir as sessions.sh. Emits [{role:'you'|'claude',text}] oldest-first,
 # capping message count + per-message length so a huge transcript can't blow up the payload.
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
 id="${1:-}"
 case "$id" in '' | *[!A-Za-z0-9-]*) printf '[]'; exit 0 ;; esac
-WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
-WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
-case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
-if [ "$WS_KIND" = "local" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/workspaces/$WS_SLUG"
-elif [ "$WS_KIND" = "repo" ] && [ -n "$WS_SLUG" ]; then
-  SDIR="$HOME/.claudible/repos/$WS_SLUG"
-else
-  SDIR="$HOME/.claudible/session"
-fi
-[ -n "${CLAUDIBLE_WS_DIR:-}" ] && SDIR="$CLAUDIBLE_WS_DIR"
+. "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 # Same encoding Claude uses: every non-alphanumeric char in the cwd path → '-'.
 PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 f="$PROJ/$id.jsonl"
