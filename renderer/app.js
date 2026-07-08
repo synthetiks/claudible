@@ -3196,12 +3196,12 @@ function savedSessMenuItems(row, p, s) {
   );
   if (synced) {                                                      // a synced session can be removed locally or for everyone
     items.push({ icon: TRASH_SVG, label: 'Delete for me', hint: 'Remove from this machine (may sync back from GitHub).',
-      act: () => { if (confirm('Delete “' + sessTitle(s) + '” from this machine?\nIt may sync back if a collaborator still has it. Moves to ~/.claudible/trash (recoverable).')) deleteSession(s.id, 'local'); } });
+      act: () => { if (confirm('Delete “' + sessTitle(s) + '” from this machine?\nIt may sync back if a collaborator still has it. Moves to ~/.claudible/trash, kept 30 days.')) deleteSession(s.id, 'local'); } });
     items.push({ icon: TRASH_SVG, label: 'Delete everywhere', danger: true, hint: 'Also delete from GitHub for everyone — can’t be undone.',
       act: () => { if (confirm('Delete “' + sessTitle(s) + '” everywhere?\nThis removes it from GitHub for everyone and can’t be undone.')) deleteSession(s.id, 'everywhere'); } });
   } else {
-    items.push({ icon: TRASH_SVG, label: 'Delete', danger: true, hint: 'Move to trash (recoverable).',
-      act: () => { if (confirm('Delete “' + sessTitle(s) + '”?\nMoves to ~/.claudible/trash (recoverable).')) deleteSession(s.id, 'local'); } });
+    items.push({ icon: TRASH_SVG, label: 'Delete', danger: true, hint: 'Move to trash — kept 30 days, then swept.',
+      act: () => { if (confirm('Delete “' + sessTitle(s) + '”?\nMoves to ~/.claudible/trash, kept 30 days.')) deleteSession(s.id, 'local'); } });
   }
   return items;
 }
@@ -4050,6 +4050,10 @@ async function deleteWorkspace(w) {
     }
     for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }   // belt: any record main didn't know (e.g. a tab with no pty yet) must not keep naming a dead ws
     await refreshWorkspaces(); refreshSessions(); renderTabStrip();
+    // The registry entry is gone either way — but if the FOLDER couldn't be moved to trash (locked file, no
+    // permission, disk full) it's still on disk, owned by nothing. Main used to discard that result entirely and
+    // report a clean success. Say it out loud.
+    if (r.folderError) toast(r.folderError);
   } else if (r && r.error === 'busy') { busyToast(); }     // a turn started between the local check and main's authoritative one
   else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
 }
@@ -4100,7 +4104,7 @@ function wsMenuItems(chip, nm, w) {
       hint: 'Stop tracking this folder as a project. The folder itself is left exactly where it is.',
     } : {
       icon: TRASH_SVG, label: 'Delete project', danger: true,
-      hint: 'Move this project’s folder to trash (recoverable). A repo keeps its GitHub copy.',
+      hint: 'Move this project’s folder to trash (kept 30 days). A repo keeps its GitHub copy.',
     }, { act: () => { if (confirm(deleteWsPrompt(w))) deleteWorkspace(w); } }));
   }
   return items;
@@ -4268,7 +4272,7 @@ function isLastLocal(w) {
 function deleteWsPrompt(w) {
   return w.adopted
     ? 'Remove "' + w.label + '" from Claudible?\nThis only stops tracking the folder as a project — nothing on disk is moved or deleted.'
-    : 'Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo project keeps its GitHub repo — only the local copy is removed.';
+    : 'Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash and is kept for 30 days. A repo project keeps its GitHub repo — only the local copy is removed.';
 }
 // First launch (no local workspace existed → main materialized a default): once, welcome the user and open the
 // workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.

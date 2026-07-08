@@ -382,6 +382,21 @@ function createWindow() {
     startWorkflowPoll();    // live workflow/swarm agents for the foreground tab's Agents pane
     // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
     setTimeout(() => { discoverWorkspaces().then(syncAllEnabled); }, 3000);
+    // Bound ~/.claudible/trash. Deleting a session moves a transcript there; deleting a PROJECT moves the whole
+    // folder there (an adopted repo, node_modules and all). Nothing ever emptied it, so it grew without limit.
+    // Well after boot, off the critical path, and failure is logged rather than swallowed.
+    setTimeout(() => pruneTrash(), 12000);
+  });
+}
+// Age- + size-bounded sweep of the soft-delete trash. Fire-and-forget: a failure must never block the app, but it
+// must not be invisible either (a silently-failing prune is how the directory grew to gigabytes in the first place).
+function pruneTrash() {
+  if (!APPDIR_WSL) return;
+  runner.runScript('trash-prune.sh', '', { timeout: 120000 }).then(({ err, stdout }) => {
+    if (err) return console.error('[claudible] trash-prune:', err.message);
+    let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+    if (r.ok === false) return console.error('[claudible] trash-prune refused:', r.error);
+    if (r.removed) console.log(`[claudible] trash: pruned ${r.removed} item(s), freed ${Math.round((r.freedKb || 0) / 1024)}MB, ${Math.round((r.remainingKb || 0) / 1024)}MB left`);
   });
 }
 
@@ -1511,13 +1526,23 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
     syncShare();   // refresh the granted library for guests (the deleted ws drops out of grantedList)
   }
   for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true, endShare: tid === sharedTabId }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
-  const finish = () => resolve({ ok: true, activeId: registry.activeId, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
+  // `folderError` is honest reporting, not a failure: the registry entry IS gone (saveRegistry already ran), so the
+  // delete succeeded from the user's point of view. But the FOLDER move can still fail — permission denied, a file
+  // locked by another process, disk full — and this used to be `.then(() => finish())`, discarding the result
+  // entirely and resolving `{ok:true}` regardless. The folder would sit orphaned on disk, unreferenced by any
+  // workspace, and the user was never told.
+  const finish = (folderError) => resolve({ ok: true, activeId: registry.activeId, folderError: folderError || undefined, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   // ADOPTED workspaces point at a folder the USER already owned — Claudible never created it, so removing the
   // project must never remove the folder. delete-workspace.sh prefers CLAUDIBLE_WS_DIR (wsEnv emits ws.path), so
   // shelling out here would `mv -f` their real source tree into ~/.claudible/trash. Unregister only.
   if (APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo')) {
-    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(() => finish());
+    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
+      if (err) { console.error('[claudible] delete-workspace:', err.message); return finish('the project was removed, but its folder could not be moved to trash'); }
+      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      if (r.ok === false) { console.error('[claudible] delete-workspace refused:', r.error); return finish('the project was removed, but its folder is still on disk: ' + (r.error || 'unknown')); }
+      finish();
+    });
   } else finish();
 }));
 // Reorder the workspace chips (drag). Accepts the new id order; any ids not listed keep their place at the end.
