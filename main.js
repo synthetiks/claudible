@@ -952,7 +952,7 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
       // also tombstone it on the shared sessions branch so a sync can never bring it back (for anyone)
       runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws, timeout: 45000 }).then(({ err: err2, stdout: out2 }) => {
-          if (err2) { console.error('[claudible] delete-session everywhere:', err2.message); return resolve({ ok: false, error: 'sync-exec', localDone: true }); }
+          if (err2) { console.error('[claudible] delete-session everywhere:', err2.message); return resolve({ ok: false, error: 'exec', localDone: true }); }
           let r = {}; try { r = JSON.parse((out2 || '').trim() || '{}'); } catch {}
           resolve(r.ok ? { ok: true, everywhere: true } : { ok: false, error: (r.error || 'sync failed'), localDone: true });
         });

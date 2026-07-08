@@ -626,7 +626,6 @@ let pttKey = 'AltLeft', pttCapturing = false;   // default push-to-talk key (con
 // This guards both the saved pref (self-heal on load) and the rebind capture.
 const PTT_SAFE = /^(ControlLeft|ControlRight|AltLeft|AltRight|ShiftLeft|ShiftRight|MetaLeft|MetaRight|CapsLock|F\d{1,2})$/;
 const isSafePttKey = (code) => PTT_SAFE.test(code || '');
-const pttHint = document.querySelector('.ptt-hint');
 function pttCancelTimer() { if (pttTimer) { clearTimeout(pttTimer); pttTimer = null; } }
 window.addEventListener('keydown', (e) => {
   if (pttCapturing) {                      // rebinding: the next key becomes the new push-to-talk key
@@ -642,7 +641,7 @@ window.addEventListener('keydown', (e) => {
     pttHeld = true; pttCombo = false; pttStart = Date.now(); warmMic();   // warm the mic the instant you press, so capture is live before the hold-debounce fires startRecording
     pttTimer = setTimeout(() => {          // held long enough alone => it's a deliberate talk, start the mic
       pttTimer = null;
-      if (pttHeld && !pttCombo) { if (pttHint) pttHint.classList.add('live'); startRecording(); }
+      if (pttHeld && !pttCombo) startRecording();   // startRecording → talkUI(true) lights the real .vin.live cue
     }, PTT_HOLD_MS);
     return;
   }
@@ -652,7 +651,6 @@ window.addEventListener('keyup', (e) => {
   if (e.code === pttKey && pttHeld) {
     e.preventDefault(); e.stopPropagation();
     pttHeld = false; pttCancelTimer();
-    if (pttHint) pttHint.classList.remove('live');
     // Discard ONLY a too-short clip. We don't discard on pttCombo here: the debounce already stops quick
     // Ctrl+<key> shortcuts from ever starting the mic, so once recording is underway a later stray
     // keypress must NOT nuke a long dictation.
@@ -663,7 +661,6 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => {
   if (!pttHeld) return;
   pttHeld = false; pttCancelTimer();
-  if (pttHint) pttHint.classList.remove('live');
   if (recording) stopRecording({ discard: (Date.now() - pttStart) < (PTT_HOLD_MS + 200) });
 });
 // push-to-talk key: friendly label + click-to-rebind (persisted with the other prefs)
@@ -678,7 +675,6 @@ function keyLabel(code) {
   return code || '—';
 }
 function applyPttKey() {
-  const kbd = $('ptt-kbd'); if (kbd) kbd.textContent = keyLabel(pttKey);
   const btn = $('ptt-key-btn'); if (btn && !pttCapturing) btn.textContent = keyLabel(pttKey);
 }
 function setPttKey(code) { pttKey = code; savePrefs({ pttKey: code }); applyPttKey(); }
@@ -768,11 +764,8 @@ async function speak(text) {
 $('speak').addEventListener('click', () => { if (ttsBusy || ttsAudio) stopSpeech(); else speak($('tts-in').value.trim()); });
 
 // ---- voice selection + Voice Out top-bar controls, kept in sync with the drawer ----
-const VOICE_NAMES = { af_bella: 'Bella', af_heart: 'Heart', am_michael: 'Michael' };
-const VOICE_ORDER = ['af_bella', 'af_heart', 'am_michael'];
 function syncVoiceUI() {
   document.querySelectorAll('.vpill').forEach((x) => x.classList.toggle('on', x.dataset.voice === selectedVoice));
-  const n = $('vout-name'); if (n) n.textContent = VOICE_NAMES[selectedVoice] || selectedVoice;
   const a = $('vout-auto'); if (a) { a.classList.toggle('on', alwaysSpeak); a.setAttribute('aria-pressed', String(alwaysSpeak)); }
   const t = $('always-toggle'); if (t) t.classList.toggle('on', alwaysSpeak);
   const cb = $('always-speak'); if (cb) cb.checked = alwaysSpeak;
@@ -781,8 +774,7 @@ function setVoice(v) { selectedVoice = v; savePrefs({ voice: v }); syncVoiceUI()
 function setAlways(on) { alwaysSpeak = !!on; savePrefs({ alwaysSpeak: alwaysSpeak }); syncVoiceUI(); }
 // drawer voice pills
 document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown', (e) => { e.preventDefault(); setVoice(p.dataset.voice); }));
-// top-bar Voice Out: voice name cycles voices, ■ stops Claude speaking, auto = always-speak toggle
-if ($('vout-name')) $('vout-name').addEventListener('click', () => { const i = VOICE_ORDER.indexOf(selectedVoice); setVoice(VOICE_ORDER[(i + 1) % VOICE_ORDER.length]); });
+// top-bar Voice Out: ■ stops Claude speaking, auto = always-speak toggle (voice SELECTION is the drawer .vpill pills)
 if ($('vout-stop')) {
   $('vout-stop').addEventListener('click', async () => {
     if (ttsBusy || ttsAudio) { stopSpeech(); return; }
