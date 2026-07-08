@@ -64,3 +64,32 @@ jobs:
         run: xvfb-run -a npm run test:e2e
         env:
           CLAUDIBLE_E2E: "1"
+
+  # `electron-builder --dir` assembles the unpacked app on all three OSes WITHOUT building installers (no NSIS,
+  # no dmg/AppImage, no FUSE, no signing) — fast, and it needs no secrets. build.yml is tag/dispatch-only, so
+  # without this a change that breaks packaging (a bad build.files glob, a missing runtime dep, an asar issue)
+  # would not surface until tag day, on the one workflow nobody runs during development. This catches it on every
+  # push to main. fail-fast:false so a Windows-only break still shows the Linux/mac result.
+  pack:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    name: pack (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      # Mirror build.yml: node-pty 1.1.0 has no linux prebuild, so the packaged app would fail to assemble the
+      # native module on the Linux runner without the multiarch fallback ptyInfo() loads at runtime.
+      - name: Linux node-pty fallback
+        if: matrix.os == 'ubuntu-latest'
+        run: npm install --no-save node-pty-prebuilt-multiarch@^0.10.1-pre.5
+      - name: Assemble the unpacked app (no installer)
+        run: npx electron-builder --dir
