@@ -26,6 +26,7 @@
 # Read-only. Emits one JSON line. Never fails loudly: "no upstream" is the normal state of a local-only repo.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # absolute BEFORE the cd (see diff.sh)
+. "$HERE/_git-safe.sh"                                  # neutralize command-executing keys in a hostile .git/config
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
 case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
@@ -48,13 +49,32 @@ remote="$(git config --get "branch.$branch.remote" 2>/dev/null || printf '')"
 merge="$(git config --get "branch.$branch.merge" 2>/dev/null || printf '')"   # e.g. refs/heads/main
 rbranch="${merge#refs/heads/}"
 [ -n "$remote" ] && [ -n "$rbranch" ] || { printf '{"ok":false,"error":"no upstream"}'; exit 0; }
-# These come from .git/config, which is repo-controlled data in an ADOPTED folder — never let one be read as a
-# flag, and keep them out of the JSON below unless they're plain.
-case "$remote"  in -* | *\"* | *\\*) printf '{"ok":false,"error":"unusable remote"}'; exit 0 ;; esac
+# `$remote`/`$rbranch` come from .git/config, which is REPO-CONTROLLED data in an adopted folder — an attacker
+# who ships a `.git/` (a "starter template" zip, say) chooses these strings, and they flow straight into
+# `git fetch "$remote" "$rbranch"` below. The old guard only rejected a leading '-', a '"' and a '\'. It did NOT
+# reject git's transport-helper syntax: a remote of `ext::sh -c <cmd>` runs <cmd> as a subprocess. git blocks the
+# `ext`/`file` transports by DEFAULT on current builds (verified: git 2.43 → "transport 'ext' not allowed"), but
+# that default is the ONLY thing stopping it, it is version- and build-dependent (older/differently-configured
+# git can default `ext` to the permissive `user` tier), and `maybeFetch` fires this automatically from the 4s
+# Project-History poll. Two independent defenses:
+#   1. Only ever fetch a remote we RECOGNISE — a plain remote NAME that git itself lists (never a raw URL/helper
+#      string from config). `git remote` output is trustworthy; a poisoned `branch.<b>.remote` value that isn't a
+#      real remote name simply won't be in it. This alone closes the whole class.
+#   2. Belt: pin `protocol.{ext,file}.allow=never` on the invocation so even a bug in (1) can't reach a helper.
 case "$rbranch" in -* | *\"* | *\\*) printf '{"ok":false,"error":"unusable branch"}'; exit 0 ;; esac
+# Is `$remote` an actual configured remote (by name)? Compare against `git remote`'s own list — exact line match.
+remote_ok=0
+while IFS= read -r r; do [ "$r" = "$remote" ] && { remote_ok=1; break; }; done <<EOF
+$(git remote 2>/dev/null)
+EOF
+[ "$remote_ok" = 1 ] || { printf '{"ok":false,"error":"unusable remote"}'; exit 0; }
 
-#   gc.auto=0        never trigger a repack inside somebody else's repo as a side effect of our polling
-#   http.lowSpeed*   a STALLED transfer (connected, no bytes) aborts in 8s instead of hanging to the app's timeout
+# The command-executing config keys (core.sshCommand / core.fsmonitor / protocol.ext / …) are already neutralized
+# process-wide by `_git-safe.sh` above, so they can't fire from ANY git call here. These `-c` flags are only the
+# fetch-specific network + credential settings:
+#   credential.helper=  no Git Credential Manager GUI (re-added scoped to github.com below)
+#   gc.auto=0           never trigger a repack inside somebody else's repo as a side effect of our polling
+#   http.lowSpeed*      a STALLED transfer (connected, no bytes) aborts in 8s, not at the app's 15s timeout
 CFG=(-c credential.helper= -c core.askpass= -c gc.auto=0 -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=8)
 GH="$(command -v gh 2>/dev/null || printf '')"
 # The path goes inside a single-quoted string that git hands to `sh -c`, so a quote/backslash/newline in it
@@ -64,9 +84,7 @@ GH="$(command -v gh 2>/dev/null || printf '')"
 case "$GH" in *\'* | *\\* | *$'\n'*) GH="" ;; esac
 [ -n "$GH" ] && CFG+=(-c "credential.https://github.com.helper=!'$GH' auth git-credential")
 
-export GIT_TERMINAL_PROMPT=0   # no username/password prompt on the terminal
-export SSH_ASKPASS_REQUIRE=never   # …and ssh may not escalate a passphrase prompt into a GUI dialog
-unset GIT_ASKPASS SSH_ASKPASS DISPLAY 2>/dev/null || true
+unset DISPLAY 2>/dev/null || true   # (GIT_TERMINAL_PROMPT / SSH_ASKPASS already set by _git-safe.sh); no GUI passphrase dialog
 if git "${CFG[@]}" fetch --no-tags --no-recurse-submodules --quiet "$remote" "$rbranch" >/dev/null 2>&1; then
   printf '{"ok":true,"fetched":true,"upstream":"%s/%s"}' "$remote" "$rbranch"
 else

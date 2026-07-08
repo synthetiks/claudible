@@ -219,17 +219,31 @@ if (!HAS_BASH || !HAS_GIT) {
 // whether the gh path is safe to embed had a bug that disabled it for EVERY path — pinned here.
 // ===========================================================================================================
 const GITFETCH = fs.readFileSync(path.join(ROOT, 'wsl/git-fetch.sh'), 'utf8');
+const GITSAFE = fs.readFileSync(path.join(ROOT, 'wsl/_git-safe.sh'), 'utf8');
 ok('git-fetch.sh: resets the helper chain (no GCM GUI can pop during a background fetch)',
   /-c credential\.helper=/.test(GITFETCH));
 ok('git-fetch.sh: …then re-adds gh\'s helper, scoped to github.com (private repos must still refresh)',
   /-c "credential\.https:\/\/github\.com\.helper=!'\$GH' auth git-credential"/.test(GITFETCH));
 ok('git-fetch.sh: the scoped key means a GitHub token is never offered to another host',
   !/-c "?credential\.helper=!/.test(GITFETCH));
-ok('git-fetch.sh: git\'s own prompt is off', /GIT_TERMINAL_PROMPT=0/.test(GITFETCH));
-ok('git-fetch.sh: ssh cannot escalate to a GUI passphrase dialog', /SSH_ASKPASS_REQUIRE=never/.test(GITFETCH));
+ok('git-fetch.sh: sources the hostile-config neutralizer before any git call',
+  /\. "\$HERE\/_git-safe\.sh"/.test(GITFETCH));
+ok('_git-safe.sh: git\'s own prompt is off + ssh cannot escalate to a GUI passphrase dialog',
+  /GIT_TERMINAL_PROMPT=0 SSH_ASKPASS_REQUIRE=never/.test(GITSAFE));
 ok('git-fetch.sh: an explicit branch, never a bare `git fetch origin` (which would rewrite claudible/sessions)',
   /fetch --no-tags --no-recurse-submodules --quiet "\$remote" "\$rbranch"/.test(GITFETCH));
 ok('git-fetch.sh: never repacks somebody else\'s repo as a side effect', /-c gc\.auto=0/.test(GITFETCH));
+// The hostile-.git/config surface: _git-safe.sh must neutralize the command-executing keys, and every script that
+// runs git in an (adopted) workspace must source it. Pin both.
+ok('_git-safe.sh: neutralizes core.sshCommand (the verified RCE vector)', /core\.sshCommand[^\n]*ssh/.test(GITSAFE));
+ok('_git-safe.sh: neutralizes core.fsmonitor (fires on git diff → the 4s poll)', /core\.fsmonitor/.test(GITSAFE));
+ok('_git-safe.sh: blocks the ext transport (arbitrary command)', /protocol\.ext\.allow[^\n]*never/.test(GITSAFE));
+ok('_git-safe.sh: uses git\'s env-var config so it applies to EVERY git call in the process',
+  /GIT_CONFIG_COUNT=/.test(GITSAFE) && /GIT_CONFIG_KEY_0/.test(GITSAFE));
+for (const s of ['diff.sh', 'diff-apply.sh', 'checkpoint.sh']) {
+  ok(`${s}: sources _git-safe.sh (runs git in a possibly-adopted repo)`,
+    /_git-safe\.sh/.test(fs.readFileSync(path.join(ROOT, 'wsl', s), 'utf8')));
+}
 if (HAS_BASH) {
   // Run the SHIPPED sanitizer line against real inputs. `$(printf '\n')` inside a case pattern is the empty
   // string (command substitution strips trailing newlines) → the pattern `*""*` matches everything → GH="" →

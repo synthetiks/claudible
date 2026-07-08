@@ -309,5 +309,55 @@ case "$out" in *'"ok":true'*'"fetched":false'*) pass=$((pass+1)) ;; *) fail=$((f
 ok "$([ "$el" -lt 10 ] && echo fast || echo slow)" "fast" "an unreachable/credential-less remote fails fast (${el}s), never prompts"
 rm -rf "$D"
 
+# --- 10d. SECURITY: a repo-controlled `branch.<b>.remote` is REPO data in an adopted folder. The old guard only
+#          rejected a leading '-'/'"'/'\', so `ext::sh -c <cmd>` sailed through into `git fetch "$remote"`, where
+#          git's `ext` transport runs <cmd> as a subprocess. git blocks ext/file by default on current builds, but
+#          that default is the ONLY thing stopping it and is version-dependent — and this fires automatically from
+#          the 4s Project-History poll. The fix: only fetch a remote git itself LISTS by name, and pin
+#          protocol.{ext,file}.allow=never. This test plants the exact PoC and asserts the command never runs.
+D="$(newrepo)"
+br="$(git -C "$D" symbolic-ref --short HEAD)"
+MARK="$D/PWNED"
+git -C "$D" config "branch.$br.remote" "ext::sh -c touch>$MARK"   # a poisoned remote value, no leading dash/quote/backslash
+git -C "$D" config "branch.$br.merge" "refs/heads/$br"
+out="$(CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" bash "$FETCH_SH" 2>/dev/null)"
+ok "$([ -e "$MARK" ] && echo PWNED || echo safe)" "safe" "an ext:: remote NEVER executes its command"
+case "$out" in *'"error":"unusable remote"'*) pass=$((pass+1)) ;; *) fail=$((fail+1)); echo "  FAIL an ext:: remote is rejected as unusable (got: $out)" ;; esac
+# belt: even a remote NAMED like a helper string, added via `git remote add`, can't reach the ext transport
+git -C "$D" remote add "weird" "ext::sh -c touch>$MARK" 2>/dev/null || true
+git -C "$D" config "branch.$br.remote" "weird"
+CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" bash "$FETCH_SH" >/dev/null 2>&1
+ok "$([ -e "$MARK" ] && echo PWNED || echo safe)" "safe" "…and protocol.ext.allow=never blocks it even past the name check"
+rm -rf "$D"
+
+# --- 10e. SECURITY: a hostile .git/config is more than a poisoned remote. `core.sshCommand` is a config value git
+#          RUNS when fetching an ssh origin — and `origin` is a perfectly valid remote NAME, so the allowlist in 10d
+#          can't help. (Found only by testing, not by the first fix — exactly the "sibling call site" trap.) The fix
+#          neutralizes every command-executing config key via `-c` overrides; this pins that core.sshCommand can't fire.
+D="$(newrepo)"
+br="$(git -C "$D" symbolic-ref --short HEAD)"
+MARK="$D/PWNED_SSH"
+git -C "$D" remote add origin "git@github.com:definitely-does-not-exist-xyz/nope.git"
+git -C "$D" config "branch.$br.remote" origin
+git -C "$D" config "branch.$br.merge" "refs/heads/$br"
+git -C "$D" config core.sshCommand "sh -c 'touch $MARK' #"
+CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" timeout 20 bash "$FETCH_SH" >/dev/null 2>&1
+ok "$([ -e "$MARK" ] && echo PWNED || echo safe)" "safe" "a malicious core.sshCommand in .git/config never runs"
+rm -rf "$D"
+
+# --- 10f. SECURITY: the same hostile-config surface is bigger than git-fetch — `core.fsmonitor` is a command git
+#          runs on ordinary `git diff HEAD` / `git ls-files`, i.e. it reaches DIFF.SH, which the Project-History
+#          panel runs on every card every 4 seconds. `_git-safe.sh` (sourced by diff.sh/diff-apply.sh/checkpoint.sh/
+#          git-fetch.sh) neutralizes it process-wide. Plant it and prove diff.sh both stays safe AND still works.
+D="$(newrepo)"
+echo "a change" >> "$D/root.txt"                                   # a working-tree change so diff.sh does real work
+git -C "$D" config core.fsmonitor "sh -c 'touch $D/FSMON' #"
+git -C "$D" config core.alternateRefsCommand "sh -c 'touch $D/ALT' #"
+r="$(CLAUDIBLE_WS_KIND=local CLAUDIBLE_WS_DIR="$D" bash "$DIFF_SH" 2>/dev/null | node -e '
+  let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s); console.log([j.ok, (j.files||[]).length].join(" "));});')"
+ok "$([ -e "$D/FSMON" ] && echo PWNED || echo safe)" "safe" "diff.sh: a malicious core.fsmonitor never runs (the 4s-poll surface)"
+ok "$r" "true 1" "…and diff.sh still reports the working-tree change (hardening didn't break the read)"
+rm -rf "$D"
+
 echo "diff-commits: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

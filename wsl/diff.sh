@@ -12,6 +12,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, r
                                                         # fallback then reported as a perfectly healthy, empty repo).
                                                         # Mirrors checkpoint.sh, which already does exactly this.
 . "$HERE/node-path.sh" 2>/dev/null || true              # nvm's node isn't on PATH for non-interactive shells → resolve it
+. "$HERE/_git-safe.sh"                                   # a hostile .git/config in an ADOPTED repo can run commands (core.fsmonitor fires on `git diff HEAD`, verified) — neutralize before ANY git call
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
 case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac

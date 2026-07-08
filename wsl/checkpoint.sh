@@ -5,6 +5,7 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # resolve the script dir as an ABSOLUTE path BEFORE we cd into the repo (else the tool path below resolves against the repo)
 . "$HERE/node-path.sh" 2>/dev/null || true             # nvm's node isn't on PATH for non-interactive shells → resolve it
+. "$HERE/_git-safe.sh"                                  # belt: neutralize command-executing .git/config keys (checkpoints are repo-only today, but never trust a workspace's git config)
 
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
