@@ -292,7 +292,7 @@ function setActiveTab(tabId) {
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
   rec.attention = false;                              // you're looking at it now — drop any "finished while away" pulse
   if (sidebarReady) {   // guard: the sessions/workspace section's consts aren't initialized during the boot tab
-    if (rec.wsId && rec.wsId !== activeWsId) { activeWsId = rec.wsId; renderWsChips(); }   // sidebar library follows the tab's ws
+    if (rec.wsId && rec.wsId !== activeWsId) { activeWsId = rec.wsId; primeSessionListForWs(rec.wsId); renderWsChips(); }   // sidebar library follows the tab's ws — prime the new ws's rows BEFORE reconcileWsChips re-nests the list, so it can't nest the OLD project's rows under the NEW project's label for a frame (the cross-project-click "wrong content" flash)
     refreshSessions();                                                                     // re-highlight rows for this tab's ws/session
   }
   clearTabAttention(tabId);                           // and un-pulse the row if it's already painted
