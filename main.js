@@ -1103,9 +1103,19 @@ async function doSync(ws, op, opts) {
 }
 // Only needed to SKIP the live session during a MANUAL sync mid-turn; auto-syncs already wait out a busy
 // workspace entirely (wsHasBusyTab), so they never push a mid-write transcript and need no live skip.
-async function liveIdNow() {
-  if (!activeWorkspace || !wsHasBusyTab(activeWorkspace.id)) return '';
-  try { const a = await listSessions(); return (Array.isArray(a) && a[0] && a[0].id) || ''; } catch { return ''; }
+function liveIdNow() {
+  if (!activeWorkspace || !wsHasBusyTab(activeWorkspace.id)) return Promise.resolve('');
+  // sessions.sh lists the active workspace's conversations newest-first, so [0] is the one being written right now.
+  // (This used to call a `listSessions()` that doesn't exist — every call threw and returned '', silently disabling
+  // the "skip the live session during a manual mid-turn sync" guard, so a half-written transcript could be pushed.)
+  if (!APPDIR_WSL) return Promise.resolve('');
+  return new Promise((resolve) => {
+    runner.runScript('sessions.sh', '', { ws: activeWorkspace, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
+      if (err) return resolve('');
+      let a = []; try { a = JSON.parse(String(stdout).trim() || '[]'); } catch { return resolve(''); }
+      resolve((Array.isArray(a) && a[0] && a[0].id) || '');
+    });
+  });
 }
 // After a turn ends (Stop) push that turn's WORKSPACE — but only once NO tab bound to it is still mid-turn,
 // so two concurrent sessions in one workspace are pushed together, quiesced, never torn. Debounced per ws.

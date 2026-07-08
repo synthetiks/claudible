@@ -70,7 +70,7 @@ function applyTheme(name) {
   try { TERM_OPTS.theme = TERM_THEMES[t]; } catch {}                              // new tabs spawn with this palette
   for (const r of tabs.values()) { try { r.term.options.theme = TERM_THEMES[t]; } catch {} }   // retint live terminals
 }
-let term, fit;                    // ALWAYS point at the ACTIVE tab, so the 40+ foreground term.* sites need no change
+let term;                         // ALWAYS points at the ACTIVE tab, so the 40+ foreground term.* sites need no change (fitting is per-tab via rec.fit / sync(), not a global)
 let tabSeq = 0;
 const newTabId = () => 'tab-' + (++tabSeq);
 // Declared here (not in the sessions section) so the tab-strip boot below can reference them safely:
@@ -266,14 +266,14 @@ function tabLabel(rec) {
 function renderTabStrip() {
   const strip = $('tabstrip'); if (strip) { strip.innerHTML = ''; strip.style.display = 'none'; }
 }
-// Show one tab, hide the rest. Point the global term/fit at it, fit it (NEVER fit a hidden tab), and
+// Show one tab, hide the rest. Point the global term at it, fit it (NEVER fit a hidden tab), and
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
 function setActiveTab(tabId) {
   const rec = tabs.get(tabId); if (!rec) return;
   if (dragging) { dragging = false; thumb.classList.remove('drag'); }   // a scroll-thumb drag must not straddle a tab switch (its window-level pointermove would page the newly-active tab)
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
-  term = rec.term; fit = rec.fit;
+  term = rec.term;
   if (rec.kind !== 'live') { try { claudible.tabForeground(tabId); } catch {} }   // guests + main's active-workspace follow the foreground tab — a live tab must NOT (it would hijack your own outgoing mirror)
   sync();                                          // fit the now-visible tab + (re)start/resize its pty (or fit the live mirror)
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
@@ -4527,7 +4527,7 @@ $('new-session').addEventListener('click', async () => {                        
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }
 // Seed + activate the first tab ('main' — matches main.js's spawn fallback id) NOW that every const/helper
 // it touches is defined. sidebarReady is still false here, so setActiveTab skips the sidebar refresh; the
-// async loader below does workspaces + sessions once. (term/fit resolve; the foreground pty starts fitted.)
+// async loader below does workspaces + sessions once. (term resolves; the foreground pty starts fitted.)
 makeTab('main', null, '');
 setActiveTab('main');
 sidebarReady = true;   // the sessions/workspace section is now fully initialized — tab switches may refresh the sidebar

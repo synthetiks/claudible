@@ -4,7 +4,6 @@
 // array (which would make the renderer's JSON.parse throw and silently kill the roster / "Join live" badge).
 // Run: node test/presence-filter.test.js
 'use strict';
-const assert = require('assert');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const TOOL = path.join(__dirname, '..', 'wsl', 'sessions-sync-tool.js');

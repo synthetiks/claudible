@@ -1,8 +1,9 @@
 name: Tests
 
-# The runner-seam acceptance gate: parity (command strings byte-identical across
-# backends), the pure win.js core, the live Posix runScript, the Node-hooks parity,
-# and the python3->Node port parity. All pure Node + bash — no Electron, no display.
+# Two gates. `test` is the pure-Node+bash acceptance suite (parity across backends, the win.js core, live
+# Posix runScript, hooks parity, python3->Node port parity) — no npm install, no Electron, no display, fast.
+# `lint` installs deps and runs ESLint (correctness rules — no-undef, no-unused-vars, …) + shellcheck over the
+# wsl scripts, which eat collaborator- and repo-controlled input.
 on:
   push:
     branches: [main]
@@ -24,3 +25,21 @@ jobs:
       # ubuntu-latest, which the port-parity test uses to diff old-vs-new output.
       - name: Runner + hooks + port parity suite
         run: npm test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      # shellcheck ships on ubuntu-latest. --severity=error only (real bugs, not style); every wsl/*.sh already
+      # passes `bash -n`, so this is a genuine gate, not a nitpick wall. SC1091 = "can't follow sourced file"
+      # (we source _git-safe.sh / node-path.sh by a runtime-resolved path shellcheck can't statically follow).
+      - name: shellcheck (wsl scripts)
+        run: shellcheck --severity=error -e SC1091 wsl/*.sh

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # node-path.sh — make `node` resolvable in the non-interactive shells Claudible spawns, ON ANY INSTALL MODE.
 #
 # Claudible runs in three modes with different folders/tools:

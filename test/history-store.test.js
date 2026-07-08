@@ -6,7 +6,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { load, save, append } = require('../lib/historyStore.js');
+const { load, append } = require('../lib/historyStore.js');
 const { makeEntry, MAX_ENTRIES } = require('../lib/history.js');
 
 let pass = 0, fail = 0;

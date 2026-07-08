@@ -3,7 +3,6 @@
 // stdin like Claude Code does. Must ALWAYS exit 0 (a non-zero UserPromptSubmit hook rejects the prompt) and
 // ALWAYS emit valid {hookSpecificOutput:{hookEventName,additionalContext}} JSON. Run: node test/context-hook.test.js
 'use strict';
-const assert = require('assert');
 const fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
 const HOOK = path.join(__dirname, '..', 'hooks', 'context-hook.js');
 

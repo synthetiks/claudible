@@ -71,7 +71,9 @@ ok('wsEnv: an unknown kind WOULD have degraded to legacy (why we reuse local)', 
 // The exact regex main.js uses, read from the source so this test can never drift from what ships.
 const reSrc = /const GITHUB_REMOTE = (\/.*\/i);/.exec(MAIN);
 ok('main.js exposes a GITHUB_REMOTE literal', !!reSrc);
-const GITHUB_REMOTE = eval(reSrc[1]);   // eslint-disable-line no-eval — a literal lifted verbatim from source
+// eval() lifts the ACTUAL regex literal from main.js source so this test exercises the shipped regex, not a copy
+// that could drift — the gold-standard pattern (see share-names.test.js's GITHUB_REMOTE test). no-eval isn't gated.
+const GITHUB_REMOTE = eval(reSrc[1]);
 const repoId = (u) => { const m = GITHUB_REMOTE.exec(u); return m ? `${m[1]}/${m[2]}` : null; };
 eq('remote: https', repoId('https://github.com/MKDevv05/Crazy.git'), 'MKDevv05/Crazy');
 eq('remote: https, no .git', repoId('https://github.com/MKDevv05/Crazy'), 'MKDevv05/Crazy');

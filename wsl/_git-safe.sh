@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Claudible — neutralize the command-executing keys in a workspace's `.git/config`. SOURCE this (`. _git-safe.sh`)
 # at the top of any script that runs `git` inside a workspace directory, BEFORE the first git call.
 #
