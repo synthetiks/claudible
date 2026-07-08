@@ -413,7 +413,7 @@ function createWindow() {
     // Bound ~/.claudible/trash. Deleting a session moves a transcript there; deleting a PROJECT moves the whole
     // folder there (an adopted repo, node_modules and all). Nothing ever emptied it, so it grew without limit.
     // Well after boot, off the critical path, and failure is logged rather than swallowed.
-    setTimeout(() => pruneTrash(), 12000);
+    appTimers.trash = setTimeout(() => pruneTrash(), 12000);   // tracked so window-all-closed's sweep cancels it — a quit inside the first 12s must not spawn trash-prune.sh post-shutdown
   });
 }
 // Age- + size-bounded sweep of the soft-delete trash. Fire-and-forget: a failure must never block the app, but it
@@ -1300,7 +1300,13 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   if (!APPDIR_WSL) return { ok: false, error: ERR_NO_BACKEND };
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!slug) return { ok: false, error: 'bad workspace' };
-  const wsp = ws.path ? safePath(runner.toGuestPath(ws.path)) : '';
+  // A stored path we can't round-trip must REFUSE, not silently become ''. Upgrade operates on an EXISTING
+  // folder in place; an empty dirArg makes upgrade-workspace.sh fall back to its default ~/.claudible/workspaces
+  // /<slug> — the WRONG folder — where it would either error confusingly or (if that folder exists) publish a
+  // repo from it and rewrite ws.path to point there, orphaning the user's real project. (ws.path can only be
+  // unsafe on a pre-existing/hand-edited registry; every creation path runs safePath up front.)
+  let wsp = '';
+  if (ws.path) { wsp = safePath(runner.toGuestPath(ws.path)); if (!wsp) return { ok: false, error: PATH_UNSAFE_MSG }; }
   const dirArg = wsp ? ` '${wsp}'` : '';
   const { err, stdout } = await runner.runScript('upgrade-workspace.sh', `'${slug}'${dirArg}`, { timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
   if (err) return { ok: false, error: 'upgrade failed to run' };
@@ -1716,7 +1722,7 @@ const appIntervals = [];   // long-lived poller intervals — cleared on window-
 // adaptive), so they never landed in appIntervals and nothing ever cleared them — the only two of six outside the
 // quit sweep. Both spawn a WSL subprocess per tick (sessions-sync.sh / workflows.sh). Today `app.quit()` masks it;
 // the day this process outlives its window (a tray icon, a background mode) they'd tick forever against nothing.
-const appTimers = { sync: null, workflow: null };
+const appTimers = { sync: null, workflow: null, trash: null };
 // Heartbeat for the app→Claude context channel: the hook drops live/typedBy from a context.json whose ts is
 // >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
 // session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.

@@ -3384,7 +3384,11 @@ async function deleteSession(id, scope) {
   }
   setOrder(order);
   let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs); } catch {} finally { deletingIds.delete(id); }
-  forgetSessionTitle(id);   // the id can never recur — don't carry its name in settings.json forever
+  // Forget the title only once the LOCAL transcript is actually gone (r.ok, or r.localDone for an everywhere
+  // delete whose GitHub half failed). If the delete threw or the script failed (r null / {ok:false,error:'exec'}),
+  // the session is STILL on disk under this id — wiping its custom name would silently drop back to the auto
+  // preview. Mirrors deleteWorkspace(), which already gates forgetWorkspaceCaches on success.
+  if (r && (r.ok || r.localDone)) forgetSessionTitle(id);
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions();
 }
