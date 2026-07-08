@@ -133,7 +133,11 @@
         if (localStream) { localStream.getTracks().forEach(function (t) { t.stop(); }); localStream = null; }
         for (var id in srcs) { if (srcs[id]) srcs[id].forEach(function (s) { try { s.stop(); } catch (e) {} }); }
         for (var gid in gains) { try { gains[gid].disconnect(); } catch (e) {} }
-        inCtx = micSrc = proc = zero = null; speaking = {}; playHead = {}; srcs = {}; gains = {}; ui();   // keep `volume` so per-person levels survive a rejoin
+        // keep `volume` so per-person levels survive a rejoin. That only works because share/server.js hands a
+        // RESUMING socket back the peer-id it dropped under (ghost._pid / back.pid) — the keys here are those ids.
+        // If a future change re-mints the pid per socket, this map silently stops matching. test/share-names.test.js
+        // Part D pins it.
+        inCtx = micSrc = proc = zero = null; speaking = {}; playHead = {}; srcs = {}; gains = {}; ui();
       },
       toggleMute: function () {
         muted = !muted;

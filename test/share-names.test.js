@@ -66,7 +66,7 @@ function joinAndHello(port, cred) {
     const t = setTimeout(() => { if (!settled) { settled = true; try { ws.close(); } catch {} reject(new Error('hello timeout')); } }, 4000);
     ws.on('message', (data) => {
       let m = null; try { m = JSON.parse(data.toString()); } catch { return; }
-      if (m && m.type === 'hello' && !settled) { settled = true; clearTimeout(t); resolve({ ws, you: m.you, resume: m.resume }); }
+      if (m && m.type === 'hello' && !settled) { settled = true; clearTimeout(t); resolve({ ws, you: m.you, resume: m.resume, pid: m.pid }); }
     });
     ws.on('error', (e) => { if (!settled) { settled = true; clearTimeout(t); reject(e); } });
   });
@@ -140,6 +140,83 @@ function joinAndHello(port, cred) {
     fail++; console.error('  FAIL roster-bound threw: ' + (e && e.message));
   } finally {
     try { srv2.stop(); } catch {}
+  }
+
+  // ---- Part D: the peer-id is a PERSON id, and survives a reconnect ------------------------------------------
+  // `ws._pid` tags every audio frame (`from: <pid>`) and keys the listener's per-person volume in voice-core.js,
+  // whose `leave()` deliberately keeps that map "so per-person levels survive a rejoin". They could not: the pid
+  // was re-minted on EVERY socket — including a resume — so one WiFi blip silently reset how loud you hear someone,
+  // and the map grew a dead entry per reconnect. The server called the field "stable peer-id for voice signaling".
+  //
+  // Making it genuinely stable creates an aliasing hazard the drop() guard exists for: after a SUPERSEDE, the
+  // zombie's close fires drop() with the same pid the live successor now owns. Unguarded, that evicts the successor
+  // from byPid and from the voice room, mid-call. Both halves are asserted here.
+  const srv3 = createShareServer({});
+  try {
+    const st3 = await srv3.start({ requireApproval: false, name: 'Host' });
+    const port3 = st3.port, tok3 = st3.token;
+
+    // A message-waiter that survives the socket being handed around.
+    const waitFor = (ws, pred, ms = 2500) => new Promise((res, rej) => {
+      const t = setTimeout(() => { ws.off('message', h); rej(new Error('timeout waiting for ' + pred.name)); }, ms);
+      function h(data) { let m = null; try { m = JSON.parse(data.toString()); } catch { return; } if (pred(m)) { clearTimeout(t); ws.off('message', h); res(m); } }
+      ws.on('message', h);
+    });
+    const isAudio = (m) => m && m.type === 'audio';
+    const voiceIds = (m) => (m.members || []).map((x) => x.id).sort();
+
+    const A = await joinAndHello(port3, `t=${tok3}&n=Ann`);
+    const B = await joinAndHello(port3, `t=${tok3}&n=Bob`);
+    ok('a fresh joiner is handed a peer-id', !!A.pid && !!B.pid);
+    ok('two different people get different peer-ids', A.pid !== B.pid);
+
+    A.ws.send(JSON.stringify({ type: 'voice-join' }));
+    const vm = await waitFor(B.ws, (m) => m && m.type === 'voice-members' && m.members.length === 1);
+    ok('A appears in the voice roster under its peer-id', voiceIds(vm).includes(A.pid));
+    B.ws.send(JSON.stringify({ type: 'voice-join' }));
+    await waitFor(A.ws, (m) => m && m.type === 'voice-members' && m.members.length === 2);
+
+    // Audio is tagged with the SENDER's pid — this is the key B's volume slider is stored under.
+    const heard1 = waitFor(B.ws, isAudio);
+    A.ws.send(JSON.stringify({ type: 'audio', data: 'AAAA', sr: 16000 }));
+    eq("B hears A tagged with A's peer-id", (await heard1).from, A.pid);
+
+    // --- 1. DROP + RESUME inside the grace window: same person, same peer-id ---
+    const aTok = A.resume;
+    await new Promise((res) => { A.ws.on('close', res); try { A.ws.close(); } catch {} });
+    await new Promise((res) => setTimeout(res, 120));                        // let drop() land + reserve the grace record
+    const A2 = await joinAndHello(port3, `r=${encodeURIComponent(aTok)}&n=Ann`);
+    eq('a resume inside the grace window keeps the SAME peer-id', A2.pid, A.pid);
+    eq('…and the same name', A2.you, 'Ann');
+    const heard2 = waitFor(B.ws, isAudio);
+    A2.ws.send(JSON.stringify({ type: 'audio', data: 'BBBB', sr: 16000 }));
+    eq("…so B's per-person volume for A still applies (same `from` key)", (await heard2).from, A.pid);
+
+    // --- 2. SUPERSEDE (laptop sleep: no FIN, the old socket is still registered) ---
+    const a2Closed = new Promise((res) => A2.ws.on('close', (code) => res(code)));
+    const A3 = await joinAndHello(port3, `r=${encodeURIComponent(A2.resume)}&n=Ann`);
+    eq('a supersede reclaims the zombie’s peer-id', A3.pid, A.pid);
+    eq('…and the zombie is closed 4001', await a2Closed, 4001);
+
+    // --- 3. the drop() guard: the zombie's close must not evict its successor ---
+    await new Promise((res) => setTimeout(res, 150));                        // give the ghost's drop() time to run
+    const heard3 = waitFor(B.ws, isAudio);
+    A3.ws.send(JSON.stringify({ type: 'audio', data: 'CCCC', sr: 16000 }));
+    eq('the successor is STILL in the voice room after the zombie’s drop', (await heard3).from, A.pid);
+    const heard4 = waitFor(A3.ws, isAudio);
+    B.ws.send(JSON.stringify({ type: 'audio', data: 'DDDD', sr: 16000 }));
+    eq('…and still RECEIVES relayed audio (voiceGuests kept its pid)', (await heard4).from, B.pid);
+    ok('…and B was never disturbed', B.pid !== A.pid);
+
+    // --- 4. a genuinely new guest still gets a fresh id, never a recycled one ---
+    const C = await joinAndHello(port3, `t=${tok3}&n=Cid`);
+    ok('a brand-new guest gets a peer-id nobody holds', C.pid !== A.pid && C.pid !== B.pid);
+
+    try { A3.ws.close(); B.ws.close(); C.ws.close(); } catch {}
+  } catch (e) {
+    fail++; console.error('  FAIL peer-id threw: ' + (e && e.message));
+  } finally {
+    try { srv3.stop(); } catch {}
     done();
   }
 })();

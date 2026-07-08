@@ -264,7 +264,16 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     ws._alive = true;
     ws.on('pong', () => { ws._alive = true; });   // heartbeat: the client answered our ping → still connected
     clients.add(ws);
-    ws._pid = 'g' + (++pidSeq); byPid.set(ws._pid, ws);   // stable peer-id for voice signaling
+    // Peer-id. This is a PERSON id, not a socket id — every audio frame is tagged `from: <pid>`, voiceMembers()
+    // reports it, and both the guest and the host key their per-person volume slider on it. So a RESUME must
+    // inherit the pid the same person was using: from the zombie it just superseded, or from its grace record.
+    // It used to mint a fresh 'g<n>' on every socket while calling itself "stable", so a single WiFi blip
+    // silently reset everyone's carefully-set volume for that person — and voice-core.js's `volume` map, which
+    // is deliberately kept across a rejoin ("levels survive a rejoin"), accumulated a dead entry per reconnect.
+    // Aliasing consequence, handled in drop(): a superseded socket must NOT evict the successor that now owns
+    // its pid. A fresh pid is minted only for someone genuinely new.
+    ws._pid = (ghost && ghost._pid) || (back && back.pid) || ('g' + (++pidSeq));
+    byPid.set(ws._pid, ws);
     // Returning from a transient drop within the grace window → cancel the pending "left" and restore voice.
     if (back) { clearTimeout(back.timer); pendingDrops.delete(resumeTok); if (back.wasVoice) voiceGuests.add(ws._pid); }
     if (ghostVoice) voiceGuests.add(ws._pid);              // superseded socket was in voice → the successor stays in
@@ -334,10 +343,14 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     });
     const drop = () => {
       if (!clients.delete(ws)) return;
-      byPid.delete(ws._pid);
+      // A SUPERSEDED socket handed its whole identity — name, peer-id, voice membership — to its successor back
+      // in admit(). It owns nothing now. Deleting byPid[ws._pid] here would evict the LIVE socket that holds
+      // that pid, and voiceGuests.delete(ws._pid) would drop the successor out of the voice room mid-call.
+      // (Before pids were inherited this was merely redundant; now it would be destructive.)
+      if (ws._superseded) { notifyGuests(); return; }   // no announce, no grace record — the roster entry belongs to the successor
+      if (byPid.get(ws._pid) === ws) byPid.delete(ws._pid);
       const wasVoice = voiceGuests.delete(ws._pid);
       notifyGuests();
-      if (ws._superseded) return;   // identity already transferred to the successor socket (see SUPERSEDE above) — no announce, no grace record, and the roster entry now belongs to the successor
       const tok = ws._resume, who = ws._name;
       if (tok && !ws._kicked) {
         // Don't cry "left" the instant the socket closes — a backgrounded tab / locked phone reconnects with this
@@ -353,7 +366,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
           if (wasVoice) broadcastVoice();
         }, REJOIN_GRACE);
         if (timer && timer.unref) timer.unref();
-        pendingDrops.set(tok, { timer, wasVoice, name: who });
+        pendingDrops.set(tok, { timer, wasVoice, name: who, pid: ws._pid });   // pid too: a resume inside the grace window is the same person, and must come back as the same voice peer
       } else {
         if (ws._kicked && tok) resumeTokens.delete(tok);   // kick → kill the resume token so they can't silently rejoin
         markGone(who); notifyRoster();
