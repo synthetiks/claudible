@@ -43,3 +43,24 @@ jobs:
       # (we source _git-safe.sh / node-path.sh by a runtime-resolved path shellcheck can't statically follow).
       - name: shellcheck (wsl scripts)
         run: shellcheck --severity=error -e SC1091 wsl/*.sh
+
+  # Boots the REAL Electron app and drives the renderer over CDP — the only gate that can catch a TDZ error, a
+  # missing preload export, or a renderer syntax error before a human opens the app. Its own job: an ephemeral
+  # container with a virtual display, so it can never touch a developer's live registry. It refuses to run
+  # without CLAUDIBLE_E2E=1 and without a temp HOME/CLAUDIBLE_RUNTIME (see the header of test/e2e-boot.test.js).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Virtual display + Electron runtime libs
+        run: sudo apt-get update && sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgtk-3-0 libgbm1 libasound2t64
+      - name: Boot smoke (real Electron, isolated HOME)
+        run: xvfb-run -a npm run test:e2e
+        env:
+          CLAUDIBLE_E2E: "1"
