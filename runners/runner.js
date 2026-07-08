@@ -21,13 +21,15 @@
 //   runScript(name,argStr,o)  -> Promise<{err, stdout}>   run wsl/<name> with wsEnv + args (SEAMS §7)
 //                                              o: { ws, extraEnv, timeout, maxBuffer }
 //   startVoiceServices()      -> void     bring up whisper(:2022) + kokoro(:8880) (SEAMS §5)
-//   voiceHealth()             -> Promise<{whisper, kokoro}>
-//   installHooks(sessionDir)  -> void|Promise   write CC settings + hooks (SEAMS §4; Node-ported in 0.5)
-//   setup(opts)               -> Promise   per-OS install/build (SEAMS §6; driven by the installer)
 //   detectDeps()              -> map|Promise<map>   raw dependency status for the self-bootstrap provisioner
 //                                              (runners/deps.js merges it with the install manifest). win:
 //                                              pure-Node `where`/version/cred read (NO git-bash — Git itself
 //                                              may be missing); wsl/posix: delegate to bash wsl/preflight.sh.
+//
+// NOT in the contract: hook installation and the per-OS install/build. The bash backends fuse hooks into
+// spawnClaude (session.sh rewrites $SDIR/.claude on every boot) and win.js calls its own installHooks() from
+// its spawnClaude — so no caller ever needs a runner method. Building is the installer's job (install.ps1 /
+// setup/setup.sh). SEAMS §4/§6. Voice health lives in services.sh, not here.
 //
 // SELECTION (plan 0.4): honor CLAUDIBLE_RUNNER for testing; else auto-detect. Until win/posix are
 // built and proven, every path resolves to the WSL backend, so today's behavior is unchanged.

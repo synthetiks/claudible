@@ -149,4 +149,4 @@ async function installPosix(runner, m, onProgress) {
   return { ok, error, env: {}, restartRequired: false };
 }
 
-module.exports = { MANIFEST, detect, install, toOnboardStatus, _internals: { rowState, installable } };
+module.exports = { MANIFEST, detect, install, toOnboardStatus };

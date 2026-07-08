@@ -432,21 +432,14 @@ function startVoiceServices() {
       (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh (win):', err.message, stderr || ''); });
   } catch (e) { console.error('[claudible] services.sh (win):', e.message); }
 }
-async function voiceHealth() {
-  const probe = async (url) => { try { const r = await fetch(url, { method: 'GET' }); return r.status < 500; } catch { return false; } };
-  const [w, k] = await Promise.all([probe(process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022'), probe(process.env.CLAUDIBLE_KOKORO || 'http://localhost:8880')]);
-  return { whisper: w, kokoro: k };
-}
 function detect() { return process.platform === 'win32' && whichClaude() !== 'claude'; }   // native claude present
-function setup(_opts) { return Promise.resolve({ ok: true, note: 'Windows-native setup is install.ps1 -Native (A5)' }); }
 
 module.exports = {
   id: 'win',
   detect, detectDeps, resetCaches, claudePresent, claudeState,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
-  startVoiceServices, voiceHealth,
-  installHooks, setup,
+  startVoiceServices,
   // pure core, exported for the unit test:
   _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT },
 };

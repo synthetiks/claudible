@@ -71,7 +71,7 @@
       user-select:none;-webkit-user-select:none;cursor:default;
     }
     /* sleek, minimal scrollbar everywhere — thin floating thumb, no track. The few areas that hide their
-       scrollbar entirely (terminal, tabstrip, cmdscroll) keep their width:0 overrides via higher specificity. */
+       scrollbar entirely (terminal, cmdscroll) keep their width:0 overrides via higher specificity. */
     ::-webkit-scrollbar{width:9px;height:9px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
@@ -256,10 +256,6 @@
     /* a joined peer's session, pinned atop the sidebar list */
     .sess-joined-live{border-left:2px solid var(--ok,#5fb487)}
     .sess-joined-live .sess-prev{color:#cfe8da}
-    /* tab strip — one chip per live session/pty (the active chip = the visible terminal) */
-    /* top tab strip retired — concurrent sessions now live in the left sidebar; kept hidden so old refs are harmless */
-    .tabstrip{display:none;align-items:center;gap:6px;flex:none;height:32px;padding:0 2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-    .tabstrip::-webkit-scrollbar{height:0}
     /* sidebar rows already open in a tab get a subtle left accent — NEUTRAL steel ("still open in the
        background"), never var(--live): the red rail was the pre-redesign SELECTED look and reads as a stale
        selection on a row you've switched away from. Red is reserved for .busy rows (rule further down). */
@@ -522,7 +518,6 @@
     .sidebar{display:none;flex-direction:column;min-height:0;background-color:var(--panel);background-image:linear-gradient(180deg,rgba(255,255,255,.022),transparent 22%);
       box-shadow:inset -1px 0 0 var(--sheen);overflow:hidden}   /* ④ a real material: top-lit panel. No hard right border — the panel-vs-bg brightness STEP is the edge; only a faint light-catching bevel (sheen) remains */
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
-    .newsess{width:auto;margin:12px 14px;color:var(--ink)}
     .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
       background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
@@ -1082,7 +1077,6 @@
       </div>
     </aside>
     <div class="center">
-      <div class="tabstrip" id="tabstrip"></div>
       <!-- LIVE bar: shown when this session is live (synced collab) — who's in it -->
       <div class="livebar" id="livebar" style="display:none">
         <span class="live-dot"></span><span class="live-txt">Live</span>

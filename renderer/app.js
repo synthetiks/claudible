@@ -255,16 +255,12 @@ sc.addEventListener('pointerdown', (e) => {           // click the gutter: page 
 sc.addEventListener('wheel', (e) => { if (isAlt()) { jogPages(e.deltaY < 0 ? -1 : 1); e.preventDefault(); } }, { passive: false });
 // ---------- concurrent sessions ----------
 // Each tab is still one live session/pty running in the background; the active tab is the visible terminal.
-// There is NO top tab strip anymore — every live session is shown as a row in the LEFT SIDEBAR instead
-// (saved ones as their normal session row, brand-new unsaved ones as a synthetic "live" row). So this
-// function just keeps the old top strip permanently hidden; all the renderTabStrip() callers stay valid.
+// There is NO top tab strip — every live session is shown as a row in the LEFT SIDEBAR instead (saved
+// ones as their normal session row, brand-new unsaved ones as a synthetic "live" row).
 const MAX_TABS = 8;
 function tabLabel(rec) {
   if (rec.label) return rec.label;
   return (rec.session === 'new' || !rec.session) ? 'New session' : 'Session';
-}
-function renderTabStrip() {
-  const strip = $('tabstrip'); if (strip) { strip.innerHTML = ''; strip.style.display = 'none'; }
 }
 // Show one tab, hide the rest. Point the global term at it, fit it (NEVER fit a hidden tab), and
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
@@ -282,7 +278,6 @@ function setActiveTab(tabId) {
   _agentsSig = '';                                 // force an agents rebuild for THIS tab (the sig guard is module-global)
   renderAgents();                                  // …and its agents into the agents pane
   updateScrollbar();
-  renderTabStrip();
   refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined)
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
   rec.attention = false;                              // you're looking at it now — drop any "finished while away" pulse
@@ -322,7 +317,7 @@ function closeTab(tabId) {
     const next = vals.find((r) => r.kind !== 'live' && r.session && r.session !== 'new') || vals.find((r) => r.kind !== 'live') || vals[0];
     setActiveTab(next.tabId);
   }
-  else { renderTabStrip(); if (sidebarReady) refreshSessions(); }      // ✕ on a BACKGROUND tab (e.g. a joined live row you're not viewing) must still refresh the sidebar: drop its row + bring back any saved row it was deduping
+  else if (sidebarReady) refreshSessions();      // ✕ on a BACKGROUND tab (e.g. a joined live row you're not viewing) must still refresh the sidebar: drop its row + bring back any saved row it was deduping
 }
 
 new ResizeObserver(sync).observe(termHost);
@@ -3375,7 +3370,7 @@ async function deleteSession(id, scope) {
   let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs); } catch {} finally { deletingIds.delete(id); }
   forgetSessionTitle(id);   // the id can never recur — don't carry its name in settings.json forever
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
-  refreshSessions(); renderTabStrip();
+  refreshSessions();
 }
 // Lightweight centered choice modal (self-contained; labels/subs are static strings we control). Resolves the
 // chosen key, or null on Cancel / backdrop / Esc.
@@ -3736,7 +3731,6 @@ async function openSession(id, label, opts) {
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
   t.term.reset(); t.altFrac = 0;                       // clear this tab's view (the new pty repaints it) + reset its scroll estimate
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
-  renderTabStrip();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
 // ---------- workspaces (the library a session belongs to: legacy / local folder / private repo) ----------
@@ -4085,7 +4079,7 @@ async function deleteWorkspace(w) {
     }
     for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }   // belt: any record main didn't know (e.g. a tab with no pty yet) must not keep naming a dead ws
     forgetWorkspaceCaches(w.id);   // its warm caches are dead weight — and _wsSessCache would serve STALE rows to a ws later re-created with this id
-    await refreshWorkspaces(); refreshSessions(); renderTabStrip();
+    await refreshWorkspaces(); refreshSessions();
     // The registry entry is gone either way — but if the FOLDER couldn't be moved to trash (locked file, no
     // permission, disk full) it's still on disk, owned by nothing. Main used to discard that result entirely and
     // report a clean success. Say it out loud.
@@ -4376,7 +4370,7 @@ async function switchWorkspace(id, targetSession) {
   sessListEl.innerHTML = ''; _sessSig = '';        // drop the OLD workspace's session rows immediately so they don't flash under the NEW workspace before refreshSessions lands
   const _pf = _wsSessCache.get(id);                // …and immediately PRE-FILL the new ws's rows from cache (warm if it was expanded before) so the list shows correct content instantly, not an empty gap until the live fetch lands
   if (_pf && Array.isArray(_pf.list) && _pf.list.length) { _pf.list.slice().sort((a, b) => ((b.used || b.mtime || 0) - (a.used || a.mtime || 0))).forEach((s) => { sessIndex[s.id] = s; sessListEl.appendChild(renderSessionRow(s)); }); }
-  renderWsChips(); renderTabStrip();
+  renderWsChips();
   let failed = false, kept = false;
   try {
     const r = await claudible.workspaceOpen(id, sess);
@@ -4460,7 +4454,7 @@ async function createWorkspace() {
       if (tabs.size < MAX_TABS) newBlankTab(newWsId, 'new');
       else toast('Project added — close a tab to open it (this one is still running)');
     }
-    refreshSessions(); renderTabStrip();
+    refreshSessions();
     return;
   }
   { const t = AT(); if (t) { t.wsId = newWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; t.term.reset(); resetStats(t); } }
@@ -4471,7 +4465,7 @@ async function createWorkspace() {
   if (wasFirstRun && workspaces.some((w) => w.id === 'local-local') && workspaces.filter((w) => w.kind === 'local').length >= 2) {
     try { await claudible.workspaceDelete('local-local'); await refreshWorkspaces(); } catch (e) {}
   }
-  refreshSessions(); renderTabStrip();
+  refreshSessions();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
 $('ws-add').addEventListener('click', openWsModal);
@@ -4543,7 +4537,7 @@ claudible.onWorkspaceActiveChanged((p) => {
     t.wsId = id; t.session = ''; t.label = ''; t.curSessionLabel = ''; t.term.reset(); resetStats(t);
     if (t.tabId === activeTabId) activeSession = null;   // the re-pointed tab is the one on screen → its highlight resets too
   }
-  refreshWorkspaces(); refreshSessions(); renderTabStrip();
+  refreshWorkspaces(); refreshSessions();
   try { if (globalNeeds && $('diffpanel') && $('diffpanel').classList.contains('open')) { refreshHistoryFeed(); refreshDiff(); } } catch {}   // Repo Review open → keep its feed + diff on the workspace we just switched to (don't let it show the old ws)
 });
 
@@ -4563,7 +4557,7 @@ $('new-session').addEventListener('click', async () => {                        
 makeTab('main', null, '');
 setActiveTab('main');
 sidebarReady = true;   // the sessions/workspace section is now fully initialized — tab switches may refresh the sidebar
-(async () => { await refreshWorkspaces(); refreshSessions(); renderTabStrip(); })();   // load workspaces first, then this workspace's conversations
+(async () => { await refreshWorkspaces(); refreshSessions(); })();   // load workspaces first, then this workspace's conversations
 
 // ---------- desktop clipboard shortcuts (Ctrl on Win/Linux, ⌘ on Mac) ----------
 // In the TERMINAL: Ctrl/⌘+C copies the selection (or passes through as interrupt/SIGINT when nothing
@@ -4707,7 +4701,7 @@ window.addEventListener('keydown', (e) => {
     { const t = AT(); if (t) { t.wsId = (r.workspace && r.workspace.id) || activeWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; try { t.term.reset(); } catch {} resetStats(t); } }
     activeSession = null;
     try { await refreshWorkspaces(); } catch {}
-    try { refreshSessions(); renderTabStrip(); } catch {}
+    try { refreshSessions(); } catch {}
     goGh();
   }
 

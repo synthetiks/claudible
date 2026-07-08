@@ -75,23 +75,13 @@ function startVoiceServices() {
       (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh:', err.message, stderr || ''); });
   } catch (e) { console.error('[claudible] failed to start voice services:', e.message); }
 }
-async function voiceHealth() {
-  const probe = async (url) => { try { const r = await fetch(url, { method: 'GET' }); return r.status < 500; } catch { return false; } };
-  const whisper = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
-  const kokoro = process.env.CLAUDIBLE_KOKORO || 'http://localhost:8880';
-  const [w, k] = await Promise.all([probe(whisper), probe(kokoro)]);
-  return { whisper: w, kokoro: k };
-}
 
 // detect: this backend serves the non-Windows platforms.
 function detect() { return process.platform === 'linux' || process.platform === 'darwin'; }
 
-// installHooks: NO-OP — session.sh (run natively under bash) stages the shared Node hooks + writes
-// settings.json on every boot, exactly as on WSL (0.5). Native node is on PATH, so the node path is taken.
-function installHooks(_sessionDir) { /* handled by session.sh under bash */ }
-
-// setup: the Linux/macOS voice build is `bash setup/setup.sh` run natively; driven by the platform installer.
-function setup(_opts) { return Promise.resolve({ ok: true, note: 'Posix setup is bash setup/setup.sh (native)' }); }
+// NOTE: as on WSL, hook installation is fused into spawnClaude (session.sh stages the shared Node hooks +
+// writes settings.json on every boot), and the install-time voice build is `bash setup/setup.sh`, driven by
+// the platform installer. Neither needs a runner method here.
 
 // detectDeps: the provisioner's dependency probe. Same cross-runner preflight.sh, run natively under bash.
 // Same trap as wsl.js: runScript resolves `{err, stdout:''}` rather than rejecting, so a preflight that couldn't run
@@ -109,7 +99,6 @@ module.exports = {
   detect, detectDeps,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
-  startVoiceServices, voiceHealth,
-  installHooks, setup,
+  startVoiceServices,
   _internals: { buildBoot, APP_ROOT },
 };
