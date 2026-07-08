@@ -6,7 +6,7 @@
 #   $2 = path to a temp file: the unified patch (apply-reverse) OR the target path (discard)
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
-. "$(cd "$(dirname "$0")" && pwd)/_git-safe.sh"   # a hostile .git/config (adopted repo) can run commands via git — neutralize before `git apply`
+. "$HERE/_git-safe.sh"   # a hostile .git/config (adopted repo) can run commands via git — neutralize before `git apply`
 emit() { printf '%s\n' "$1"; }
 mode="${1:-}"; tmp="${2:-}"
 [ -n "$tmp" ] && [ -f "$tmp" ] || { emit '{"ok":false,"error":"bad args"}'; exit 0; }

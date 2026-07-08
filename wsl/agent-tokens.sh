@@ -16,4 +16,4 @@ SA="$PROJ/$SID/subagents"
 [ -d "$SA" ] || { printf '0'; exit 0; }
 
 unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
-node "$(dirname "$0")/agent-tokens-tool.js" "$SA" 2>/dev/null || printf '0'
+node "$HERE/agent-tokens-tool.js" "$SA" 2>/dev/null || printf '0'
