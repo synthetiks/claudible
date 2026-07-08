@@ -1145,8 +1145,13 @@ async function doSync(ws, op, opts) {
   try { win && win.webContents.send('sync:state', { id: ws.id, status: 'syncing' }); } catch {}
   const r = await runSync(ws, op, opts);
   syncLock.delete(ws.id);
-  const divNow = (r && r.diverged) || 0, divPrev = _syncDivSeen.get(ws.id) || 0;
-  _syncDivSeen.set(ws.id, divNow);
+  // Only pull/sync report a `diverged` count; a plain 'push' has no such field. Treating its absence as 0 wiped
+  // the real baseline (push runs constantly via schedulePush), so the NEXT sync saw 0→N and fired a spurious
+  // "changed" every time. Only update the baseline when this op actually measured divergence.
+  const reportsDiv = r && typeof r.diverged === 'number';
+  const divPrev = _syncDivSeen.get(ws.id) || 0;
+  const divNow = reportsDiv ? r.diverged : divPrev;
+  if (reportsDiv) _syncDivSeen.set(ws.id, divNow);
   const changed = !!(r && (r.imported || r.updated || r.pushed)) || (divNow !== divPrev);   // a divergence-only sync must notify too — but only when the fork set CHANGES (divNow is recomputed every tick, so a raw OR would refresh forever)
   try { win && win.webContents.send('sync:state', { id: ws.id, status: r && r.ok ? 'idle' : 'error', synced: r && r.synced, diverged: r && r.diverged }); } catch {}
   if (changed) { try { win && win.webContents.send('sync:changed', { id: ws.id, ids: (r && r.ids) || [] }); } catch {} }   // renderer refreshes only if it's the shown workspace

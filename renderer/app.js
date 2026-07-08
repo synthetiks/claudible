@@ -3826,7 +3826,7 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     // A non-active workspace lists its sessions for browsing/opening; to start a new one you select it first.
   };
   const c = _wsSessCache.get(w.id);
-  if (c) fill(c.list); else { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }
+  if (c) fill(c.list); else if (!kids.querySelector('.sess')) { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }   // no "loading…" flash over rows we're merely refreshing (busted cache but the list is still on screen)
   if ((!c || Date.now() - c.ts > 4000) && !_wsSessFetching.has(w.id)) {   // skip if a fetch for this ws is already in flight
     _wsSessFetching.add(w.id);
     claudible.sessionListWs(w.id)
@@ -3838,6 +3838,20 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
       .catch(() => {})
       .finally(() => { _wsSessFetching.delete(w.id); });
   }
+}
+// Force-refresh a NON-active workspace's expanded session subtree in place — used after a sync pulled changes for
+// a project you have open-but-not-selected. reconcileWsChips deliberately leaves a POPULATED non-active list
+// untouched (no animation restart), so without this a synced-in session only appeared once you switched into that
+// project (part of the "I have to bounce to another tab to see synced changes" report). No-op if it isn't expanded.
+function refreshWsSubtree(wsId) {
+  const el = $('ws-chips'); if (!el) return;
+  let chip = null;
+  el.querySelectorAll('.ws-chip').forEach((c) => { if (c.dataset.id === wsId) chip = c; });
+  if (!chip) return;
+  const kids = chip.nextElementSibling;
+  if (!kids || !kids.classList.contains('ws-children')) return;   // not expanded → nothing on screen to refresh
+  const w = workspaces.find((x) => x.id === wsId); if (!w) return;
+  renderWsNonActiveSessions(w, kids);   // cache was already busted by the caller → this refetches fresh
 }
 // Structural signature of the chip ROW themselves (everything that shapes a chip's own DOM) — but NOT which chip is
 // active/expanded (those are reconciled in place). Unchanged sig on a switch/expand → take the fast path below.
@@ -4527,7 +4541,15 @@ claudible.onSyncState((s) => {
   wsSyncState[s.id] = Object.assign({}, wsSyncState[s.id], u);
   renderWsChips();
 });
-claudible.onSyncChanged((s) => { if (s && s.id === activeWsId) { refreshSessions(); try { pollTitles(true); } catch (e) {} } });   // a pull that changed anything also refreshes shared titles immediately (renames land on the next sync, not the next 20s poll)
+claudible.onSyncChanged((s) => {
+  if (!s || !s.id) return;
+  _wsSessCache.delete(s.id);                                          // pulled changes are on disk now → any cached session list for this ws is stale; drop it so the switch-away pre-fill + non-active tree can't serve pre-sync rows
+  if (s.id === activeWsId) { refreshSessions(); try { pollTitles(true); } catch (e) {} }   // a pull that changed anything also refreshes shared titles immediately (renames land on the next sync, not the next 20s poll)
+  else { refreshWsSubtree(s.id); }                                    // a non-active but EXPANDED project must update in place too — not only when you next switch into it
+  // Repo Review (diff + history feed) was never wired to sync: a pulled commit/revert only showed after switching
+  // away and back. Refresh it now (no-op when the drawer is closed / the card is collapsed).
+  try { refreshDiff({ quiet: true }); } catch (e) {}
+});
 // Main respawned an open tab because a sync replaced its transcript on disk (the "out of sync doesn't
 // update the open session" fix). Mirror openSession's respawn housekeeping for THAT tab — clear the xterm
 // (else the resume replay lands on top of stale scrollback), reset the scroll estimate, and reset the
