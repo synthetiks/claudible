@@ -4732,6 +4732,16 @@ window.addEventListener('keydown', (e) => {
   async function refreshSystem() {
     const list = $('wiz-dep-list'); if (!list) return;
     let r; try { r = await claudible.preflightStatus(); } catch { r = null; }
+    // The probe couldn't run at all. Without this, every dependency row rendered "missing" — six separate failures
+    // for one cause the user was never told, and no discoverable way forward.
+    if (r && r.unavailable) {
+      list.innerHTML = ''; const d = document.createElement('div'); d.className = 'wiz-dim';
+      d.textContent = r.unavailable === 'wsl'
+        ? 'Claudible can’t reach WSL, so it can’t check anything else. Install WSL2 (PowerShell, as admin: wsl --install), restart, and reopen Claudible. Everything below depends on it.'
+        : 'Claudible can’t run its setup shell, so it can’t check anything else.';
+      list.appendChild(d);
+      const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Next'; $('wiz-sys-install').style.display = 'none'; return;
+    }
     if (!r || !Array.isArray(r.deps) || !r.deps.length) {
       list.innerHTML = ''; const d = document.createElement('div'); d.className = 'wiz-dim';
       d.textContent = 'Couldn’t run the system check — you can Skip and set things up manually.';

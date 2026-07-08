@@ -61,6 +61,20 @@ if [ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ]; then
   export CLAUDIBLE_MODEL_STRATEGY
 fi
 
+# The project folder is GONE — deleted or moved outside Claudible, or an unmounted drive. `mkdir -p` below would
+# silently RECREATE the whole path and launch Claude in an empty directory where the user's code used to be, with no
+# warning whatsoever. Only a PERMISSION failure was ever reported; a vanished folder was not. Say it, loudly, first.
+# (We warn rather than refuse: a dead tab with no way forward is worse, and for a Claudible-created workspace an
+# empty dir is the correct state anyway. For an adopted folder it is emphatically not — hence the wording.)
+if [ ! -d "$SDIR" ]; then
+  echo "" >&2
+  echo "[claudible] WARNING — this project's folder does not exist:" >&2
+  echo "[claudible]   $SDIR" >&2
+  echo "[claudible] It was deleted or moved outside Claudible (or its drive isn't mounted)." >&2
+  echo "[claudible] Recreating it EMPTY. Your files are NOT here. If the folder still exists somewhere," >&2
+  echo "[claudible] quit, restore or remount it, and reopen the project — don't work in this directory." >&2
+  echo "" >&2
+fi
 mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
 # Our pid + kernel start-time, so killtree.sh can reap this generation's whole tree (ConPTY kills never reach
 # the WSL side). Start-time (field 22 of /proc/self/stat; field 20 after stripping "pid (comm) ") makes the

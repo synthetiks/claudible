@@ -76,7 +76,9 @@ async function detect(runner, extra) {
       version: r.version || '', account: r.account || '',
     };
   });
-  return { runner: runner.id, gitBash: raw.gitBash !== false, deps };
+  // `unavailable` = the probe itself couldn't run (WSL absent, no bash). Every row below will read "missing", which
+  // is technically true and completely useless — pass the real cause up so the wizard can name it once.
+  return { runner: runner.id, gitBash: raw.gitBash !== false, unavailable: raw.unavailable || '', deps };
 }
 
 // Map the rich detect() result back onto the legacy onboard:status shape, so main.js can derive onboard:status

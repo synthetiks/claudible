@@ -138,12 +138,16 @@ function setup(_opts) { return Promise.resolve({ ok: true, note: 'WSL setup is d
 
 // detectDeps: the provisioner's dependency probe. Delegates to the cross-runner bash preflight.sh — the WSL
 // guest is where node/git/claude/uv/gh actually live (and bash always exists here, so no chicken-and-egg).
+// `runScript` NEVER rejects — it resolves `{ err, stdout: '' }`. So when WSL itself isn't installed, `err` was
+// dropped, `JSON.parse('' || '{}')` succeeded, and this returned `{gitBash:true}` with no dependency data at all:
+// the onboarding System-check then rendered node/git/claude/uv/gh/cloudflared as SIX separate "missing" rows, with
+// nothing anywhere telling the user the single real cause. Report it, so the wizard can say the true thing.
 async function detectDeps() {
-  try {
-    const { stdout } = await runScript('preflight.sh', '', { timeout: 12000 });
-    const o = JSON.parse(String(stdout).trim() || '{}');
-    return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
-  } catch { return { gitBash: true }; }
+  const { err, stdout } = await runScript('preflight.sh', '', { timeout: 12000 });
+  if (err) { console.error('[claudible] preflight (wsl):', err.message); return { gitBash: true, unavailable: 'wsl' }; }
+  let o = {};
+  try { o = JSON.parse(String(stdout).trim() || '{}'); } catch { return { gitBash: true, unavailable: 'wsl' }; }
+  return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
 }
 
 module.exports = {

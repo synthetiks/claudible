@@ -105,5 +105,26 @@ eq('diff-apply.sh (ws, mode, tmp)', _scriptCmd(APP, 'diff-apply.sh', `apply-reve
 eq('plugins.sh available (no-ws)', _scriptCmd(APP, 'plugins.sh', 'available', {}),
   `bash '${APP}/wsl/plugins.sh' available`);
 
-console.log(`\nrunner-parity: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// ---- deps.detect surfaces "the probe itself couldn't run" ----------------------------------------------------
+// runScript NEVER rejects — it resolves {err, stdout:''}. So a missing WSL used to make detectDeps() return
+// {gitBash:true} with no data, and the onboarding System-check rendered node/git/claude/uv/gh/cloudflared as SIX
+// "missing" rows, never once naming the single real cause. The runners now report `unavailable`; deps.detect must
+// carry it up, or the wizard can't say the true thing.
+{
+  const deps = require('../runners/deps.js');
+  const stub = (detectDeps) => ({ id: 'stub', detectDeps });
+  (async () => {
+    const broken = await deps.detect(stub(async () => ({ gitBash: true, unavailable: 'wsl' })), {});
+    eq('deps.detect surfaces `unavailable` when the probe could not run', broken.unavailable, 'wsl');
+    eq('…and still returns the full dependency list (so the UI shape never changes)', Array.isArray(broken.deps) && broken.deps.length > 0, true);
+
+    const healthy = await deps.detect(stub(async () => ({ gitBash: true, node: { version: '22.12.0' } })), {});
+    eq('a healthy probe reports no `unavailable`', healthy.unavailable, '');
+
+    const thrown = await deps.detect(stub(async () => { throw new Error('boom'); }), {});
+    eq('a THROWING probe still yields a usable result (no unavailable claim it cannot back)', thrown.unavailable, '');
+
+    console.log(`\nrunner-parity: ${pass} passed, ${fail} failed`);
+    process.exit(fail ? 1 : 0);
+  })();
+}

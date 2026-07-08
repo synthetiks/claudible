@@ -94,12 +94,14 @@ function installHooks(_sessionDir) { /* handled by session.sh under bash */ }
 function setup(_opts) { return Promise.resolve({ ok: true, note: 'Posix setup is bash setup/setup.sh (native)' }); }
 
 // detectDeps: the provisioner's dependency probe. Same cross-runner preflight.sh, run natively under bash.
+// Same trap as wsl.js: runScript resolves `{err, stdout:''}` rather than rejecting, so a preflight that couldn't run
+// at all used to be indistinguishable from "every dependency is missing". Report the real cause.
 async function detectDeps() {
-  try {
-    const { stdout } = await runScript('preflight.sh', '', { timeout: 12000 });
-    const o = JSON.parse(String(stdout).trim() || '{}');
-    return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
-  } catch { return { gitBash: true }; }
+  const { err, stdout } = await runScript('preflight.sh', '', { timeout: 12000 });
+  if (err) { console.error('[claudible] preflight (posix):', err.message); return { gitBash: true, unavailable: 'shell' }; }
+  let o = {};
+  try { o = JSON.parse(String(stdout).trim() || '{}'); } catch { return { gitBash: true, unavailable: 'shell' }; }
+  return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
 }
 
 module.exports = {

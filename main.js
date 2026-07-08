@@ -278,21 +278,32 @@ function startVoiceServices() { runner.startVoiceServices(); }
 // winget/npm write the registry PATH, not THIS process's env — so a tool installed at runtime is invisible
 // until refreshed. Reload PATH from the machine+user registry and fold in the dirs winget/npm/uv drop bins
 // into, so a freshly-installed dep resolves WITHOUT a restart (the non-Git provisioner path). Windows-only.
+// ASYNC on purpose. This used to be execFileSync('powershell.exe', …) on the Electron MAIN process: starting
+// PowerShell and reading two registry values takes hundreds of ms (more on a loaded machine), and for that entire
+// time every IPC call, every pty's I/O, and all five pollers are frozen. It ran right after the System-check
+// wizard's "Install" button — precisely when several Claude sessions are usually mid-turn. Its one caller is
+// already an async handler, so awaiting costs nothing.
 function refreshWindowsPath() {
-  if (process.platform !== 'win32') return;
-  try {
-    const out = require('child_process').execFileSync('powershell.exe',
+  if (process.platform !== 'win32') return Promise.resolve();
+  const addLocalBins = () => {
+    const home = app.getPath('home');
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    for (const bin of [path.join(roaming, 'npm'), path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(home, '.local', 'bin')]) {
+      if (!String(process.env.PATH || '').split(path.delimiter).includes(bin)) process.env.PATH = bin + path.delimiter + (process.env.PATH || '');
+    }
+  };
+  return new Promise((resolve) => {
+    require('child_process').execFile('powershell.exe',
       ['-NoProfile', '-Command', "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"],
-      { encoding: 'utf8', windowsHide: true });
-    const merged = String(out).trim();
-    if (merged) process.env.PATH = merged + path.delimiter + (process.env.PATH || '');
-  } catch {}
-  const home = app.getPath('home');
-  const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-  const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-  for (const bin of [path.join(roaming, 'npm'), path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(home, '.local', 'bin')]) {
-    if (!String(process.env.PATH || '').split(path.delimiter).includes(bin)) process.env.PATH = bin + path.delimiter + (process.env.PATH || '');
-  }
+      { encoding: 'utf8', windowsHide: true, timeout: 15000 },
+      (err, out) => {
+        if (err) console.error('[claudible] refreshWindowsPath:', err.message);   // a stale PATH is survivable; a silent one is not debuggable
+        else { const merged = String(out).trim(); if (merged) process.env.PATH = merged + path.delimiter + (process.env.PATH || ''); }
+        addLocalBins();   // never needed PowerShell — apply it whether or not the registry read worked
+        resolve();
+      });
+  });
 }
 
 function voiceProvisioned() {
@@ -1323,8 +1334,17 @@ ipcMain.handle('workspace:open', async (e, id, session) => {
 // Accept an invited repo workspace, letting the user choose WHERE it clones. useDefault → the script's
 // ~/.claudible/repos/<slug>; otherwise a native folder picker, cloning into <chosen>/<slug>. Stamps ws.path so
 // every downstream script (sessions, sync, claude) runs in that dir via CLAUDIBLE_WS_DIR.
+// STALE-CONTINUATION GUARD. This handler awaits a USER-PACED folder dialog — it can sit open for minutes — and then
+// awaits a network clone. A `workspace:delete` for the same id can land in either window. Its three sibling
+// workspace-mutating handlers all defend against this (workspace:open re-checks openGen AND fgTabId, "audit
+// finding"); this one held a live `ws` object across the awaits and defended against nothing. The object would be
+// detached from `registry.workspaces`, so `ws.path = …` + saveRegistry() silently discarded the change — and
+// ensureClone() still cloned the repo onto disk, owned by no registry entry, with no cleanup path.
+// So: never hold `ws` across an await. Re-resolve it by id, every time.
 ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
-  const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
+  const wsId = payload && payload.id;
+  const live = () => registry.workspaces.find((w) => w.id === wsId);   // the CURRENT object, or undefined if deleted
+  let ws = live();
   if (!ws) return { ok: false, error: 'unknown workspace' };
   if (ws.kind !== 'repo') return { ok: false, error: 'not a repo workspace' };
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
@@ -1334,15 +1354,20 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
   } else {
     let res; try { res = await dialog.showOpenDialog(win, { title: 'Choose where to save this shared workspace', properties: ['openDirectory', 'createDirectory'] }); } catch { res = { canceled: true }; }
     if (res.canceled || !res.filePaths || !res.filePaths.length) return { ok: false, error: 'cancelled' };
-    let wslp = '';
-    wslp = runner.toGuestPath(res.filePaths[0]);
+    ws = live();                                                     // the project may have been deleted while the picker was open
+    if (!ws) return { ok: false, error: 'unknown workspace' };
+    const wslp = runner.toGuestPath(res.filePaths[0]);
     if (!wslp || /['"]/.test(wslp)) return { ok: false, error: 'could not use that folder' };
     ws.path = `${wslp.replace(/\/+$/, '')}/${slug}`;                 // clone into <chosen>/<slug> (mirrors create-workspace's <parent>/<slug>)
     saveRegistry();
   }
-  const c = await ensureClone(ws);                                  // honors ws.path; clears needsClone on success
-  if (!c.ok && !(payload && payload.useDefault) && ws.path) { delete ws.path; saveRegistry(); }   // failed custom clone → don't leave a dangling path
-  return c.ok ? { ok: true, path: ws.path || null } : { ok: false, error: c.error || 'clone failed' };
+  ws = live();                                                       // …and again, immediately before we touch the disk
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  const c = await ensureClone(ws);                                   // honors ws.path; clears needsClone on success. Minutes, over the network.
+  const after = live();
+  if (!after) return { ok: false, error: 'unknown workspace' };      // deleted mid-clone: the registry is already right; don't resurrect it
+  if (!c.ok && !(payload && payload.useDefault) && after.path) { delete after.path; saveRegistry(); }   // failed custom clone → don't leave a dangling path
+  return c.ok ? { ok: true, path: after.path || null } : { ok: false, error: c.error || 'clone failed' };
 });
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
 ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
@@ -1956,7 +1981,7 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
       } catch {}
       for (const [k, v] of Object.entries(res.env)) if (typeof v === 'string' && v) process.env[k] = v;
     }
-    refreshWindowsPath();
+    await refreshWindowsPath();   // async: never block the main process (pty I/O + every poller) on a PowerShell spawn
     if (runner.id === 'win' && typeof runner.resetCaches === 'function') runner.resetCaches();   // re-resolve git-bash/app-dir next call
   }
   return { ok: res.ok, error: res.error || '', restartRequired: !!res.restartRequired };
