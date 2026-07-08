@@ -2631,8 +2631,6 @@ function sessTitle(s, wsId) {   // wsId: the row's workspace when it ISN'T the a
   if (cached) return cached;
   return s.preview;
 }
-function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
-function sessionOpenInTabWs(id, wsId) { for (const r of tabs.values()) if (r.kind !== 'live' && r.wsId === wsId && r.session === id) return true; return false; }
 // Does a tab bound to this session have an unseen "turn finished" flag? (drives the sidebar pulse; survives rebuilds)
 // wsId defaults to the active workspace; the expanded-tree rows pass THEIR workspace, since a background tab can
 // now live in another project (openWsSessionInTab) and its pulse must still show on that project's rows.
@@ -3093,7 +3091,7 @@ function appendConflictChip(m, s, w) {
 }
 function renderSessionRow(s) {
   const row = document.createElement('div');
-  row.className = 'sess' + (s.id === activeSession ? ' active' : '') + (sessionOpenInTab(s.id) ? ' open-in-tab' : '')
+  row.className = 'sess' + (s.id === activeSession ? ' active' : '')
     + (sessionBusyInTab(s.id) ? ' busy' : '') + (sessionNeedsAttention(s.id) ? ' sess-done' : '');   // busy dot + done-pulse survive a full rebuild (they live on the tab record)
   row.dataset.id = s.id; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
@@ -3542,7 +3540,7 @@ async function refreshSessions() {
   const at = AT();
   if (at && act && !at.curSessionLabel) { at.curSessionLabel = sessTitle(act); pushTracker(); }    // tell guests which session is live — by its SHARED name (sessTitle), not the raw first-prompt preview, so a joiner sees the same title the sidebar shows everywhere (preview-seeding was why MK and a joiner could see two different names for one session)
   // SMOOTH SWITCH: if the session SET (ids/order/titles/chips/live/joined/peers/share) is unchanged and only the
-  // highlight differs, re-apply the active/open-in-tab classes IN PLACE instead of wiping + rebuilding the whole
+  // highlight differs, re-apply the active/busy/done classes IN PLACE instead of wiping + rebuilding the whole
   // list. This kills the "entire sidebar flickers/reloads on every session click" jank.
   const sig = JSON.stringify({
     ws: activeWsId,
@@ -3555,7 +3553,7 @@ async function refreshSessions() {
   if (sig === _sessSig && sessListEl.querySelector('.sess')) {                       // structure unchanged → just move the highlight (no flicker)
     Array.prototype.forEach.call(sessListEl.querySelectorAll('.sess'), (row) => {
       const sid = row.dataset.id, tb = row.dataset.tab, lv = row.dataset.livetab;
-      if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('open-in-tab', sessionOpenInTab(sid)); row.classList.toggle('sess-done', sessionNeedsAttention(sid)); row.classList.toggle('busy', sessionBusyInTab(sid)); }
+      if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('sess-done', sessionNeedsAttention(sid)); row.classList.toggle('busy', sessionBusyInTab(sid)); }
       if (tb || lv) row.classList.toggle('active', (tb || lv) === activeTabId);
     });
     updateCollab(); pollTitles(); return;
@@ -3794,7 +3792,7 @@ function openWsSessionInTab(w, s) {
 function renderWsSessionRow(w, s) {
   const row = document.createElement('div');
   // a background tab in THIS (non-active) project gets the same busy dot / done-pulse as the active list
-  row.className = 'sess' + (sessionOpenInTabWs(s.id, w.id) ? ' open-in-tab' : '') + (sessionBusyInTab(s.id, w.id) ? ' busy' : '') + (sessionNeedsAttention(s.id, w.id) ? ' sess-done' : '');
+  row.className = 'sess' + (sessionBusyInTab(s.id, w.id) ? ' busy' : '') + (sessionNeedsAttention(s.id, w.id) ? ' sess-done' : '');
   row.dataset.id = s.id;
   row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s, w.id); p.title = p.textContent;   // shared names from THIS row's workspace cache, not the active one's
