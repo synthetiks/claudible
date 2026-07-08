@@ -15,7 +15,7 @@ function toast(msg) {
 // junk) pass through unchanged; anything else becomes a generic line.
 function humanError(code) {
   const map = {
-    exec: 'the WSL command could not run', parse: 'could not read the response',
+    exec: 'the backend command could not run', parse: 'could not read the response',   // "WSL" was wrong on macOS/Linux, where there is no WSL
     'bad handle': 'that live link looks invalid', 'bad url': 'that live link looks invalid',
     'bad token': 'that live link looks invalid', 'bad id': 'that item could not be found',
     'not live': "you're not sharing a live session right now", 'bad workspace': 'that project is not available',
@@ -25,7 +25,13 @@ function humanError(code) {
     full: 'the session is full', 'not found': 'not found', unknown: 'something went wrong',
     // session:resolveDiverged refuses to overwrite a transcript that's being written right now
     live: 'that session is live — end the live session first',
+    // TWO different locks, so two different codes. `busy` = a Claude turn is mid-flight in some tab (main's
+    // authoritative rec.busy). `sync-busy` = a git sync already holds this workspace's lock. They used to share
+    // the string 'busy', so a contended sync told the user to "wait for the turn to finish" — on a session that
+    // wasn't running. Whichever sentence you got depended on which guard fired first.
     busy: 'that session is still running — wait for the turn to finish',
+    'sync-busy': 'a sync is already running for this project',
+    spawn: 'Claude could not be started', clipboard: 'could not write to the clipboard',
   };
   const c = String(code == null ? '' : code).trim();
   if (map[c]) return map[c];
@@ -1685,11 +1691,12 @@ $('name-start').addEventListener('click', doStartSharing);
 $('host-name-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doStartSharing(); } else if (e.key === 'Escape') { e.preventDefault(); $('namemodal').classList.remove('show'); } });   // Esc cancels, matching ws-modal/invite-modal
 $('name-cancel').addEventListener('click', () => $('namemodal').classList.remove('show'));
 // click the link to copy it (clipboard handled in main, so it works regardless of web perms)
-shareLink.addEventListener('click', () => {
+shareLink.addEventListener('click', async () => {
   if (!shareLink.value) return;
-  shareLink.select(); claudible.clipWrite(shareLink.value);
+  shareLink.select();
+  let r = null; try { r = await claudible.clipWrite(shareLink.value); } catch {}
   const prev = shareOut.textContent;
-  shareOut.textContent = 'link copied ✓';
+  shareOut.textContent = (r && r.ok) ? 'link copied ✓' : 'press Ctrl+C to copy';   // the text is selected either way — never claim a copy the OS refused
   setTimeout(() => { if (webShare) shareOut.textContent = prev; }, 1200);
 });
 // (the "New link" button was removed — the same link works for everyone you invite; nothing to rotate)
@@ -2013,7 +2020,12 @@ function renderHistoryEntry(en, revertable) {
   }
   const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt'; copy.setAttribute('aria-label', 'Copy prompt');
   copy.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
-  copy.onclick = (e) => { e.stopPropagation(); try { claudible.clipWrite(en.prompt || ''); } catch {} copy.classList.add('done'); toast('Prompt copied'); setTimeout(() => copy.classList.remove('done'), 900); };
+  copy.onclick = async (e) => {
+    e.stopPropagation();
+    let r = null; try { r = await claudible.clipWrite(en.prompt || ''); } catch {}
+    if (!r || !r.ok) return toast('Could not copy — ' + humanError('clipboard'));
+    copy.classList.add('done'); toast('Prompt copied'); setTimeout(() => copy.classList.remove('done'), 900);
+  };
   row.appendChild(copy);
   requestAnimationFrame(() => { if (_histExpanded.has(en.id) || pr.scrollHeight > pr.clientHeight + 2) more.style.display = ''; });   // show expand only when there's more than 3 lines to read
   return row;
@@ -2435,11 +2447,11 @@ function renderChatLog() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 // Hover copy on any chat message → clipboard, so a collaborator's prompt can be pasted straight into Claude.
-if (chatLog) chatLog.addEventListener('click', (e) => {
+if (chatLog) chatLog.addEventListener('click', async (e) => {
   const cp = e.target.closest('.chat-copy'); if (!cp) return;
   e.stopPropagation();
-  claudible.clipWrite(cp.dataset.text || '');   // main-process clipboard → works regardless of renderer perms (matches the rest of the app)
-  toast('Message copied');
+  let r = null; try { r = await claudible.clipWrite(cp.dataset.text || ''); } catch {}   // main-process clipboard → works regardless of renderer perms (matches the rest of the app)
+  toast((r && r.ok) ? 'Message copied' : 'Could not copy — ' + humanError('clipboard'));
 });
 { const _term = $('chat-terminate'); if (_term) _term.addEventListener('click', () => { const t = AT(); if (t && t.kind === 'live') closeTab(t.tabId); else terminateLive(); }); }   // host → End Session (terminate for all); joiner → Leave Session (close the joined tab → back to single-person view)
 // Append to a SPECIFIC buffer; only repaint if that buffer is the one currently on screen.
@@ -4223,14 +4235,14 @@ async function upgradeWorkspace(w) {
   toast('Setting up sync — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
   if (r && r.ok) { toast('Synced ✓ — this project now appears on your other devices'); try { await refreshWorkspaces(); } catch {} }
-  else { const m = (r && r.error) || 'unknown'; toast('Could not sync: ' + m + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); }
+  else { const m = (r && r.error) || 'unknown'; toast('Could not sync: ' + humanError(m) + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); }   // humanize for the toast, but sniff the RAW code for the gh hint
 }
 // Inviting to a local workspace: it must become a synced repo first (collaborators need a GitHub repo), then
 // open the normal invite modal on the now-repo workspace.
 async function inviteToLocal(w) {
   toast('Preparing to share — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
-  if (!r || !r.ok) { const m = (r && r.error) || 'unknown'; toast('Could not share: ' + m + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); return; }
+  if (!r || !r.ok) { const m = (r && r.error) || 'unknown'; toast('Could not share: ' + humanError(m) + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); return; }
   try { await refreshWorkspaces(); } catch {}
   const up = (workspaces || []).find((x) => x.id === w.id) || w;   // re-fetch the entry (now kind 'repo')
   openInviteModal(up);
@@ -4255,13 +4267,14 @@ async function doInvite() {
   let r = null; try { r = await claudible.repoInvite(inviteWs.id, u); } catch {}
   $('invite-go').disabled = false;
   if (r && r.ok) busy.textContent = '✓ invited ' + u + ' — they need to accept on GitHub';
-  else { busy.textContent = (r && r.error) || 'invite failed'; busy.classList.add('err'); }
+  else { busy.textContent = (r && r.error) ? humanError(r.error) : 'invite failed'; busy.classList.add('err'); }
 }
 // sessions sync: manual "sync now" (when already on); state arrives via the sync:state event from main.
 async function triggerSyncNow(w) {
   wsSyncState[w.id] = Object.assign({}, wsSyncState[w.id], { status: 'syncing' }); renderWsChips();
   let r = null; try { r = await claudible.syncNow(w.id); } catch {}
-  if (r && !r.ok && r.error !== 'busy') { wsSyncState[w.id] = { status: 'error' }; renderWsChips(); }
+  // 'sync-busy' = the poll already has this workspace's lock; our sync is redundant, not failed. Don't paint red.
+  if (r && !r.ok && r.error !== 'sync-busy') { wsSyncState[w.id] = { status: 'error' }; renderWsChips(); }
 }
 // turn sharing OFF (right-click the cloud) — stops publishing; already-committed history stays in the repo
 async function disableSync(w) {
@@ -4284,7 +4297,7 @@ async function confirmSync() {
   let r = null; try { r = await claudible.syncSetEnabled(w.id, true); } catch {}
   $('sync-go').disabled = false;
   if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); updateCollab(); }   // sync on → a peer can now Join live
-  else { busy.textContent = (r && r.error) || 'could not turn on sharing'; busy.classList.add('err'); }
+  else { busy.textContent = (r && r.error) ? humanError(r.error) : 'could not turn on sharing'; busy.classList.add('err'); }   // r.error may be a bare code ('sync-busy') — never paint one into the modal
 }
 let firstRunHandled = false, firstRunActive = false;
 // "Never delete the last local project" exists so there is always somewhere to open. An ADOPTED project is only
@@ -4428,7 +4441,7 @@ async function createWorkspace() {
   try { r = adopt ? await claudible.workspaceAdopt(name) : await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
   $('ws-create').disabled = false;
   if (r && !r.ok && r.error === 'cancelled') { busy.textContent = ''; return; }   // they closed the folder picker — not an error
-  if (!r || !r.ok) { busy.textContent = (r && r.error) || (adopt ? 'could not add that folder' : 'creation failed'); busy.classList.add('err'); return; }
+  if (!r || !r.ok) { busy.textContent = (r && r.error) ? humanError(r.error) : (adopt ? 'could not add that folder' : 'creation failed'); busy.classList.add('err'); return; }
   const wasFirstRun = firstRunActive; firstRunActive = false;
   if (r.note) { try { toast(r.note); } catch {} }   // honest partial-success (e.g. repo created but the discovery marker push failed)
   if (adopt) {
@@ -4694,7 +4707,7 @@ window.addEventListener('keydown', (e) => {
     let r; try { r = await claudible.workspaceCreate('local', name, false); } catch (e) { r = { ok: false, error: e && e.message }; }
     btn.disabled = false;
     if (r && !r.ok && /already exists/i.test(r.error || '')) { b.textContent = ''; goGh(); return; }   // a prior run made it → just continue (no dead-end)
-    if (!r || !r.ok) { b.classList.add('err'); b.textContent = (r && r.error) || 'Could not create the project.'; return; }
+    if (!r || !r.ok) { b.classList.add('err'); b.textContent = (r && r.error) ? humanError(r.error) : 'Could not create the project.'; return; }
     b.textContent = '';
     // mirror createWorkspace()'s post-create reconcile so the foreground tab points at the NEW ws (else its
     // session list / live tracking key off the old ws — a sidebar desync immediately after onboarding).

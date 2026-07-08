@@ -199,6 +199,11 @@ ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); cons
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
+// The ONE sentence for "the script backend cannot run here" (`!APPDIR_WSL`). This identical condition used to
+// reach the user as three different strings — 'WSL unavailable', 'WSL is not available', and 'WSL/GitHub backend
+// is not available' — because humanError() passes any sentence through verbatim, so whichever code path you hit
+// decided what you read. Names the real backend, matching detectDeps()'s `unavailable: 'wsl' | 'shell'`.
+const ERR_NO_BACKEND = runner.id === 'wsl' ? 'WSL is not available' : 'the shell backend is not available';
 // Guest-side runtime root (host RT translated for the execution space: wslpath on WSL, cygpath on win, identity on
 // Posix). diff-apply hands bash a temp path UNDER runtime/, so it must track RT wherever RT now lives (not assume
 // it sits beside the app dir). Empty if translation is unavailable — diff then fails safe via diffAction's guard
@@ -885,7 +890,9 @@ ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time
   return { ok: true, url: `${shareBaseUrl}/?t=${t}` };
 });
 ipcMain.handle('share:kick', (e, arg) => { try { return { ok: !!share.kickGuest(arg && arg.name) }; } catch { return { ok: false }; } });   // host removes one guest by name
-ipcMain.handle('share:approve', (e, arg) => share.decideApproval(arg && arg.id, !!(arg && arg.ok)));   // host's verdict
+// Host's verdict on a pending guest. `ok:false` means the request was already gone (the guest gave up, timed out,
+// or a second click raced the first) — not that the verdict was refused. Shaped like every other channel.
+ipcMain.handle('share:approve', (e, arg) => ({ ok: share.decideApproval(arg && arg.id, !!(arg && arg.ok)) }));
 
 // ---- Live sessions: advertise the session I'm hosting (presence on the shared branch) so a collaborator in
 // the same workspace can JOIN it natively — no link to paste. Joins run through liveConnect (a client
@@ -942,7 +949,11 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     resolve(r || { ok: false });
   }, ws);
 }));
-ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = advertisedWs; stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: true }), ws); }));   // clear on the ws we advertised on, not the (possibly-switched) active one
+// Clear on the ws we advertised on, not the (possibly-switched) active one. runPresence hands back `null` both
+// when there's no backend and when the script failed — either way the presence entry is STILL on the branch and
+// peers keep seeing us as live until its TTL expires. That is not `ok:true`. (live:advertise, right above, already
+// defaults to false for the same callback.)
+ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = advertisedWs; stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: false, error: 'exec' }), ws); }));
 ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
 // Shared session names: publish my rename to meta/<login>.json on the branch; read the merged (last-writer-wins)
 // map back. The name goes out-of-band as base64 so arbitrary text can never break the shell command.
@@ -1127,7 +1138,7 @@ function runSync(ws, op, opts) {
 const _syncDivSeen = new Map();   // ws.id -> last-seen diverged count, so a divergence-only sync notifies the renderer only on a real change (not every poll tick)
 async function doSync(ws, op, opts) {
   if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) return { ok: false, error: 'sync off' };
-  if (syncLock.has(ws.id)) return { ok: false, error: 'busy' };
+  if (syncLock.has(ws.id)) return { ok: false, error: 'sync-busy' };   // a sync already holds this ws's lock — NOT the same 'busy' as a mid-turn Claude (see ERR note above humanError)
   syncLock.add(ws.id);
   try { win && win.webContents.send('sync:state', { id: ws.id, status: 'syncing' }); } catch {}
   const r = await runSync(ws, op, opts);
@@ -1196,7 +1207,7 @@ function handleHook(tabId, line) {
 function ensureClone(ws) {
   if (cloneInFlight.has(ws.id)) return cloneInFlight.get(ws.id);   // a clone for this ws is already running → share it (no double gh clone into the same dir)
   const p = new Promise((resolve) => {
-    if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+    if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
     const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
     const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!slug || !owner) return resolve({ ok: false, error: 'bad workspace' });
@@ -1254,7 +1265,7 @@ ipcMain.handle('session:syncSetEnabled', async (e, payload) => {
   ws.syncSessions = enabled; saveRegistry();
   if (!enabled) return { ok: true, enabled: false };
   if (ws.needsClone) { const c = await ensureClone(ws); if (!c.ok) { ws.syncSessions = false; saveRegistry(); return { ok: false, error: c.error }; } }
-  if (syncLock.has(ws.id)) return { ok: false, error: 'busy' };
+  if (syncLock.has(ws.id)) return { ok: false, error: 'sync-busy' };
   syncLock.add(ws.id);                          // hold the lock across init so the poll can't race the worktree setup
   let r;
   try { r = await runSync(ws, 'init', {}); } finally { syncLock.delete(ws.id); }
@@ -1284,7 +1295,7 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   // upgrade-workspace.sh runs `git remote remove origin` + `git add -A` + `gh repo create --source=. --push`:
   // on an adopted repo that DROPS their remote and republishes their whole tree to a new private repo. Refuse.
   if (ws.adopted) return { ok: false, error: 'This project points at a folder you already own — Claudible won’t re-publish it to a new GitHub repo. Create a “shared repo project” instead.' };
-  if (!APPDIR_WSL) return { ok: false, error: 'WSL/GitHub backend is not available' };
+  if (!APPDIR_WSL) return { ok: false, error: ERR_NO_BACKEND };
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!slug) return { ok: false, error: 'bad workspace' };
   const wsp = (ws.path && typeof ws.path === 'string' && !/['"]/.test(ws.path)) ? runner.toGuestPath(ws.path) : '';
@@ -1382,7 +1393,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
   const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   if (!slug) return resolve({ ok: false, error: 'enter a name (letters, numbers, dashes)' });
   if (registry.workspaces.some((w) => w.id === `${kind}-${slug}`)) return resolve({ ok: false, error: 'a workspace with that name already exists' });
-  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
   const exec = (pdirWsl) => {
     const arg3 = pdirWsl ? ` '${pdirWsl}'` : '';                       // optional custom parent dir (local only)
     runner.runScript('create-workspace.sh', `'${kind}' '${slug}'${arg3}`, { timeout: kind === 'repo' ? 300000 : 30000 }).then(({ err, stdout }) => {   // repo = network-bound (clone+push)
@@ -1444,7 +1455,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
 const GITHUB_REMOTE = /^(?:https?:\/\/(?:[^@/]*@)?(?:www\.)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i;
 ipcMain.handle('workspace:adopt', (e, payload) => new Promise((resolve) => {
   const targetTab = fgTabId;                                       // the tab this adopt was FOR (mirrors workspace:create)
-  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
   dialog.showOpenDialog(win, { title: 'Choose a folder you already work in', properties: ['openDirectory'] })
     .then((res) => {
       if (res.canceled || !res.filePaths || !res.filePaths.length) return resolve({ ok: false, error: 'cancelled' });
@@ -1633,7 +1644,7 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   if (!login) return resolve({ ok: false, error: 'enter a GitHub username' });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');          // honor the bash-interpolation invariant (re-sanitise)
   if (!slug) return resolve({ ok: false, error: 'bad workspace' });
-  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
   runner.runScript('repo-invite.sh', `'${slug}' '${login}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
@@ -1652,7 +1663,7 @@ ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
   const name = String((payload && payload.name) || '').replace(/[^A-Za-z0-9:/_.-]/g, '');
   const state = ['on', 'off', 'name-only', 'user-invocable-only'].includes(payload && payload.state) ? payload.state : '';
   if (!name || !state) return resolve({ ok: false, error: 'bad args' });
-  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
   runner.runScript('skills.sh', `set '${name}' '${state}'`, { ws: activeWorkspace, timeout: 20000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] skills:set', err.message); return resolve({ ok: false, error: 'failed' }); }
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
@@ -1676,7 +1687,7 @@ ipcMain.handle('plugins:toggle', (e, payload) => new Promise((resolve) => {
   const key = String((payload && payload.key) || '').replace(/[^A-Za-z0-9@._/-]/g, '');
   const act = (payload && payload.enable) ? 'enable' : 'disable';
   if (!key) return resolve({ ok: false, error: 'bad key' });
-  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
   runner.runScript('plugins.sh', `toggle '${key}' '${act}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] plugins:toggle', err.message); return resolve({ ok: false, error: 'failed' }); }
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
@@ -1848,7 +1859,9 @@ ipcMain.handle('open-external', (e, url) => {
 });
 
 // clipboard for the right-click menu (works regardless of renderer clipboard permissions)
-ipcMain.handle('clip:write', (e, text) => { try { clipboard.writeText(String(text ?? '')); } catch {} });
+// Returns whether the write landed. Callers that announce success ("Prompt copied") must not announce it on a
+// clipboard the OS refused — every other channel reports; this one used to resolve `undefined` and swallow.
+ipcMain.handle('clip:write', (e, text) => { try { clipboard.writeText(String(text ?? '')); return { ok: true }; } catch (err) { console.error('[claudible] clipboard:', err.message); return { ok: false, error: 'clipboard' }; } });
 ipcMain.handle('clip:read', () => { try { return clipboard.readText(); } catch { return ''; } });
 
 // Export a saved session as a SELF-CONTAINED, shareable HTML replay (no server, works offline). Reads the
@@ -1995,13 +2008,17 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
 ipcMain.handle('preflight:restart', () => { try { app.relaunch(); app.exit(0); } catch {} return { ok: true }; });
 // After the Connect-Claude flow succeeds: if the spawn-gate suppressed the terminal (or it died on a missing
 // claude), bring it up now that claude resolves. No-op if a foreground pty is already live (don't disturb it).
+// Bring the terminal up once onboarding says Claude is ready. spawnPty NEVER throws for the case that actually
+// happens (no node-pty backend) — it writes the reason into the terminal and returns. So `ok` is decided by
+// whether a pty is really there afterwards, not by whether the try block completed. It used to return ok:true
+// unconditionally, including from inside a swallowed catch.
 ipcMain.handle('claude:connected', () => {
-  try {
-    if (fgTabId && ptys.has(fgTabId)) return { ok: true };   // already running — leave it
-    const id = fgTabId || 'main';
-    spawnPty(id, 120, 32, activeWorkspace, '');
-    if (!fgTabId && ptys.has(id)) fgTabId = id;
-  } catch {}
+  const id = fgTabId || 'main';
+  if (ptys.has(id)) { if (!fgTabId) fgTabId = id; return { ok: true }; }   // already running — leave it
+  try { spawnPty(id, 120, 32, activeWorkspace, ''); }
+  catch (e) { console.error('[claudible] claude:connected:', e.message); return { ok: false, error: 'spawn' }; }
+  if (!ptys.has(id)) return { ok: false, error: 'spawn' };
+  if (!fgTabId) fgTabId = id;
   return { ok: true };
 });
 // Focused claude-only status for the Connect-Claude dot + popup. The win runner answers cheaply (no gh network,
