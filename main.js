@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const { atomicWriteJson } = require('./lib/atomicWrite');          // every JSON file this process owns is written tmp+rename; every reader of one treats a parse error as "empty"
 const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
+const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
 const { createShareServer } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
@@ -1550,6 +1551,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
   _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id);               // drop the deleted ws's leftover per-workspace state
   _lastFetch.delete(id); fetchLock.delete(id);                                         // …incl. the background-fetch throttle (a re-added project must fetch immediately, not wait out a stale 90s window)
+  _repoWrite.forget(id);                                                               // …and its worktree-write chain (the folder is on its way to the trash; nothing may queue behind it)
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
   // TOMBSTONE a deleted repo workspace (per-machine, in the registry): discoverWorkspaces would otherwise
@@ -2092,11 +2094,22 @@ ipcMain.handle('diff:list', (e, { wsId } = {}) => new Promise((resolve) => {
 // Reverse-apply a hunk/file patch, or discard an untracked file. The patch text / target path is written to
 // an APP-controlled temp file and only its path is passed to bash (never the repo data) — no injection.
 let diffActionSeq = 0;
+// ---- one worktree writer at a time, per workspace (lib/keyedQueue.js explains why) -------------------------
+// Both queued scripts carry a hard timeout (checkpoint.sh 30s, diff-apply.sh 20s), so a hung script drains the
+// queue rather than wedging it. Reads (`diff:list`'s 4s poll, `numstat`) are deliberately NOT queued.
+const _repoWrite = makeKeyedQueue();
+const withRepoWriteLock = (ws, fn) => _repoWrite.run(ws && ws.id, fn);
+
+// Both modes rewrite the worktree, so they queue behind (and ahead of) checkpoint snapshot/restore for this
+// workspace — see withRepoWriteLock. The ws must be resolved BEFORE the lock, or every action would queue on '_none'.
 function diffAction(mode, payload, wsId) {
+  const lockWs = (wsId && _wsById(wsId)) || activeWorkspace;
+  return withRepoWriteLock(lockWs, () => _diffActionNow(mode, payload, lockWs));
+}
+function _diffActionNow(mode, payload, ws) {
   return new Promise((resolve) => {
     try {
       if (!APPDIR_WSL || typeof payload !== 'string' || !payload) return resolve({ ok: false, error: 'bad args' });
-      const ws = (wsId && _wsById(wsId)) || activeWorkspace;   // mutate the CARD's project, not whatever's active — Project History can review any repo (mirrors diff:list + checkpoint:revert). Falls back to active for a legacy call with no wsId.
       const name = `diffaction-${process.pid}-${++diffActionSeq}.tmp`;   // unique per action → concurrent revert/discard never read each other's payload (M1)
       const tmp = path.join(RT, name);
       fs.writeFileSync(tmp, payload, 'utf8');
@@ -2190,7 +2203,13 @@ const _ckptIdRe = /^[A-Za-z0-9_-]{1,64}$/;
 // permission) produced NOTHING: `_snapshotOnStop` and `_seedCkpt` run automatically after every turn and silently
 // `return` on a null result. The whole session-history Revert feature could go dark for an entire session with
 // zero trace anywhere — no console line, nothing surfaced. Log the reason; the callers still see null.
+const _CKPT_WRITES = /^(snapshot|restore)\b/;        // `prune` only touches refs; `numstat`/`list` are reads
+
 function _ckptRun(ws, argStr) {
+  if (_CKPT_WRITES.test(String(argStr))) return withRepoWriteLock(ws, () => _ckptRunNow(ws, argStr));
+  return _ckptRunNow(ws, argStr);
+}
+function _ckptRunNow(ws, argStr) {
   return new Promise((resolve) => {
     if (!APPDIR_WSL || !ws) return resolve(null);
     runner.runScript('checkpoint.sh', argStr, { ws, timeout: 30000, maxBuffer: 8 * 1024 * 1024 })
