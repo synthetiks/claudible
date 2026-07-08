@@ -131,6 +131,16 @@ function main() {
   if (gitEmail) lines.push('Git identity here: ' + (gitName ? clean(gitName, 60) + ' <' + clean(gitEmail, 60) + '>' : clean(gitEmail, 60)));
   if (cwd) lines.push('Working directory: ' + clean(cwd, 200));
   if (app.workspace) lines.push('Claudible project: ' + clean(app.workspace, 120));
+  // "Plan big, execute small" nudge (Anthropic cookbook pattern): the split only pays if the coordinator
+  // actually delegates the token-heavy legs, so tell it its workers are cheap. Gated on an APP-SET env var
+  // (exported by session.sh / injected by win.js — never collaborator data); the pushed text is a static
+  // string with zero interpolated values, so there is nothing for the sanitizer to sanitize.
+  if (process.env.CLAUDIBLE_MODEL_STRATEGY === 'planBigExecSmall') {
+    lines.push('Model strategy: plan big, execute small — your subagents run on Sonnet 5 (the cheap tier).'
+      + ' Delegate token-heavy legs (bulk reading, repo sweeps, searches, mechanical edits) to subagents and'
+      + ' keep planning/synthesis in the main loop. Skip delegation for narrow tasks or judgment-heavy'
+      + ' analysis a cheap reader could summarize away.');
+  }
 
   // Live-session state — the "am I hosting / joined / did it end, and who's here" half of the ask.
   // Today's main only ever writes role:'hosting' (a joined tab mirrors a PEER's session — no local Claude to

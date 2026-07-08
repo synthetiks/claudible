@@ -11,8 +11,10 @@ let pass = 0, fail = 0;
 function ok(l, c) { c ? pass++ : (fail++, console.error('  FAIL ' + l)); }
 
 // run the hook with a payload on stdin + optional CLAUDIBLE_CONTEXT file; returns { code, json, ctx }
-function run(payload, appState) {
+function run(payload, appState, extraEnv) {
   const env = Object.assign({}, process.env);
+  delete env.CLAUDIBLE_MODEL_STRATEGY;                        // isolate: the suite may itself run inside a strategy-on session
+  Object.assign(env, extraEnv || {});
   let ctxFile = '';
   if (appState !== undefined) {
     ctxFile = path.join(os.tmpdir(), 'cl-ctx-' + process.pid + '-' + Math.floor(pass + fail) + '.json');
@@ -143,6 +145,17 @@ function run(payload, appState) {
   const hostLine = r.ctx.split('\n').find((l) => l.startsWith('Live session'));
   ok('injection: guest name stripped of angle brackets', hostLine && hostLine.indexOf('<') < 0 && hostLine.indexOf('>') < 0);
   ok('injection: the legit tags still bound the block', /^<claudible-runtime>\n[\s\S]*\n<\/claudible-runtime>$/.test(r.ctx));
+}
+
+// ---- "plan big, execute small" nudge (env-gated, static text) ----
+{
+  const on = run({ hook_event_name: 'UserPromptSubmit' }, undefined, { CLAUDIBLE_MODEL_STRATEGY: 'planBigExecSmall' });
+  ok('strategy on → nudge line present', /Model strategy: plan big, execute small/.test(on.ctx));
+  ok('nudge names the cheap tier', /subagents run on Sonnet 5/.test(on.ctx));
+  const off = run({ hook_event_name: 'UserPromptSubmit' });
+  ok('strategy absent → no nudge', !/Model strategy:/.test(off.ctx));
+  const bogus = run({ hook_event_name: 'UserPromptSubmit' }, undefined, { CLAUDIBLE_MODEL_STRATEGY: 'hax' });
+  ok('unknown strategy value → no nudge (allowlist)', !/Model strategy:/.test(bogus.ctx));
 }
 
 console.log(`\ncontext-hook: ${pass} passed, ${fail} failed`);

@@ -323,16 +323,24 @@ function detectDeps() {
 // so push both thresholds out of reach → resumed sessions open straight into the composer. Layering: our
 // defaults first, then base (real env) OVERRIDES them so an explicit user setting wins, then CLAUDIBLE_TAB is
 // always this tab's runtime id.
-function spawnEnv(runtimeId, base) {
-  return Object.assign({
+function spawnEnv(runtimeId, base, modelStrategy) {
+  const defaults = {
     CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '2000000000',
     CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '2000000000',
-  }, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
+  };
+  // "Plan big, execute small" (Anthropic cookbook pattern, parity with wsl/session.sh): the main session
+  // plans/synthesizes on the user's chosen model; SUBAGENTS — the token-heavy leg — run on Sonnet 5.
+  // Defaults-first layering means an explicit user env override of either var still wins.
+  if (modelStrategy === 'planBigExecSmall') {
+    defaults.CLAUDE_CODE_SUBAGENT_MODEL = 'claude-sonnet-5';
+    defaults.CLAUDIBLE_MODEL_STRATEGY = 'planBigExecSmall';   // read by the context hook for the delegation nudge
+  }
+  return Object.assign(defaults, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
 }
 
 // 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
 // the Windows claude with WINDOWS-path args. ConPTY hosts a native console app fine (it hosts cmd/pwsh).
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
   const sdir = sessionDir(ws, home);
@@ -354,7 +362,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const isCmd = /\.cmd$|\.bat$/i.test(claude) || claude === 'claude';
   const file = isCmd ? (process.env.COMSPEC || 'cmd.exe') : claude;
   const args = isCmd ? ['/c', claude, ...argv] : argv;
-  const env = spawnEnv(runtimeId);
+  const env = spawnEnv(runtimeId, undefined, modelStrategy);
   const proc = pty.mod.spawn(file, args, { name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: sdir, env });
   // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —
   // main injects the same line into the terminal when it sees this flag). Never weakens the guard: argv above

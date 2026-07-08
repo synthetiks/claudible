@@ -56,6 +56,17 @@ eq('boot default mode omits perm env',
   _bootStr(APP, 'new', legacy, 'main', 'high', 'default'),
   `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
 
+// model strategy: 'planBigExecSmall' inlines CLAUDIBLE_MODEL_STRATEGY (after PERM); anything else omits it
+eq('boot planBigExecSmall inlines the strategy env',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass', 'planBigExecSmall'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_PERMISSION_MODE='bypass' CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+eq('boot strategy off omits the env',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'default', 'off'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+eq('boot unknown strategy value omitted (allowlist)',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'default', "hax'; rm -rf /"),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+
 // ---- runScript / _scriptCmd : every call-site shape (main.js line cited) ----
 // sessions.sh — ws, no args  (main.js:562)
 eq('sessions.sh (ws)', _scriptCmd(APP, 'sessions.sh', '', { ws: legacy }),

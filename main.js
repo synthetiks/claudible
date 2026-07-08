@@ -430,7 +430,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // still sandboxed downstream regardless; session.sh / win.js print that override into the terminal.)
     console.log('[claudible] spawn tab=' + tabId + ' ws=' + ((ws && (ws.slug || ws.id)) || 'default')
       + ' permission-mode=' + (registry.permissionMode || 'default') + ' (from workspaces.json registry)');
-    const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId });
+    const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId, modelStrategy: modelStrategyNow() });
     if (!proc) {   // node-pty failed to load/build — on Linux this is almost always a missing C toolchain. Tell the user how to fix it instead of a bare error.
       const hint = process.platform === 'linux' ? '\r\n  On Linux node-pty builds from source — install: sudo apt install build-essential python3   (then: npm rebuild)\r\n' : '';
       winSend('pty:data', { tabId, data: `\r\n[claudible] terminal backend (node-pty) unavailable: ${pty.err}\r\n${hint}` }); return;
@@ -1357,6 +1357,19 @@ ipcMain.handle('effort:set', (e, level) => {
   registry.effort = ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'].includes(level) ? level : '';
   saveRegistry();
   return { ok: true, effort: registry.effort };
+});
+// "Plan big, execute small" (Anthropic cookbook pattern) — the main session plans/synthesizes on the user's
+// chosen model while SUBAGENTS (the token-heavy leg: bulk reading, sweeps, workflows) run on Sonnet 5 via
+// CLAUDE_CODE_SUBAGENT_MODEL. DEFAULT ON: absent/unknown registry value means enabled; only an explicit
+// 'off' disables. On a Fable 5 / Opus main model this is the cookbook's measured 2.5×-cheaper split; on a
+// Sonnet main model it's a harmless no-op. Applies to the NEXT session each tab launches.
+function modelStrategyNow() { return registry.modelStrategy === 'off' ? 'off' : 'planBigExecSmall'; }
+ipcMain.handle('modelStrategy:get', () => modelStrategyNow());
+ipcMain.handle('modelStrategy:set', (e, v) => {
+  registry.modelStrategy = v === 'off' ? 'off' : 'planBigExecSmall';
+  const persisted = saveRegistry();
+  if (!persisted) return { ok: false, error: 'could not write workspaces.json — applies to THIS run only', modelStrategy: modelStrategyNow() };
+  return { ok: true, modelStrategy: modelStrategyNow() };
 });
 // Default PERMISSION mode for the user's own sessions — ships as 'default' (Claude prompts); 'bypass' & 'acceptEdits'
 // are opt-in and remembered. A FOREIGN (collaborator-synced) session is ALWAYS sandboxed regardless (session.sh /

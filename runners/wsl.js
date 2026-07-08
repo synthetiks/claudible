@@ -50,7 +50,7 @@ function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 // Command construction (wsEnv + the boot string) is OS-agnostic and lives in _shared.js (also used by
 // posix.js); this backend only adds the wsl.exe wrapper + wslpath app-dir. buildBoot injects the
 // resolved guest app-dir into the shared pure builder.
-function buildBoot(session, ws, runtimeId, effort, permMode) { return shared.bootStr(appDirGuest(), session, ws, runtimeId, effort, permMode); }
+function buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy) { return shared.bootStr(appDirGuest(), session, ws, runtimeId, effort, permMode, modelStrategy); }
 
 // --- node-pty backend (was main.js:156-161) ------------------------------------------------------
 let _pty = undefined;
@@ -71,10 +71,10 @@ function ptyInfo() {
 // main.js owns the rec/handlers/armUltracode lifecycle around it. ConPTY (default Win11) preserves
 // the dim ANSI attribute; its AttachConsole crash is neutralized by patches/node-pty + the
 // uncaughtException net in main.js.
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
   const pty = ptyInfo();
   if (!pty.mod) return null;
-  return pty.mod.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, runtimeId, effort, permMode)], {
+  return pty.mod.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy)], {
     name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
   });
 }

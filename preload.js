@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('claudible', {
   effortSet: (level) => ipcRenderer.invoke('effort:set', level),
   permissionModeGet: () => ipcRenderer.invoke('permissionMode:get'),
   permissionModeSet: (mode) => ipcRenderer.invoke('permissionMode:set', mode),   // 'default' | 'acceptEdits' | 'bypass'
+  modelStrategyGet: () => ipcRenderer.invoke('modelStrategy:get'),
+  modelStrategySet: (v) => ipcRenderer.invoke('modelStrategy:set', v),           // 'planBigExecSmall' (default) | 'off'
   repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsSet: (name, state) => ipcRenderer.invoke('skills:set', { name, state }),

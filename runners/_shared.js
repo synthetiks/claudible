@@ -18,7 +18,7 @@ function wsEnv(ws) {
 
 // The `bash -lc` boot string for the Claude TUI (appdir injected — pure, so a parity test can verify it).
 // 'ultracode' isn't a CLI value: launch at xhigh, main.js injects `/effort ultracode` once it settles.
-function bootStr(appdir, session, ws, runtimeId, effort, permMode) {
+function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy) {
   if (!appdir) return 'echo "[claudible] could not resolve the app path — is the environment set up?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
   const tab = String(runtimeId || 'default').replace(/[^A-Za-z0-9-]/g, '') || 'default';   // interpolated into single-quoted bash → sanitize (defense-in-depth; tab ids are app-generated, but keep parity with sel/slug which are stripped)
@@ -27,7 +27,11 @@ function bootStr(appdir, session, ws, runtimeId, effort, permMode) {
   // Only non-default modes are inlined; 'default' (or unset) omits it so session.sh launches Claude's own
   // prompting default. session.sh ALWAYS sandboxes a foreign session regardless of this.
   const perm = ['bypass', 'acceptEdits'].includes(permMode) ? ` CLAUDIBLE_PERMISSION_MODE='${permMode}'` : '';
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + ' ' + wsEnv(ws) + ' ';
+  // "Plan big, execute small" (Anthropic cookbook pattern): the main session plans/synthesizes on the user's
+  // chosen model while SUBAGENTS — the token-heavy leg — run on Sonnet 5. session.sh translates this into
+  // CLAUDE_CODE_SUBAGENT_MODEL. Allowlist inline: only the one known value ever reaches the bash string.
+  const strat = modelStrategy === 'planBigExecSmall' ? ` CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall'` : '';
+  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + strat + ' ' + wsEnv(ws) + ' ';
   return `${prefix}bash '${appdir}/wsl/session.sh' '${appdir}'`;
 }
 

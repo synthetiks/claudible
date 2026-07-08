@@ -1826,6 +1826,22 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
     else toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
   }));
 })();
+// model-strategy selector — "plan big, execute small" (Anthropic cookbook): main session on the user's chosen
+// model, subagents on Sonnet 5. Ships ON (absent registry value = on); 'off' is the explicit opt-out.
+(async () => {
+  const row = $('strategy-row'); if (!row) return;
+  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.strategy || 'planBigExecSmall') === (v || 'planBigExecSmall')));
+  let cur = 'planBigExecSmall'; try { cur = await claudible.modelStrategyGet(); } catch {}
+  paint(cur || 'planBigExecSmall');
+  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
+    const v = b.dataset.strategy || 'planBigExecSmall';
+    let r = null; try { r = await claudible.modelStrategySet(v); } catch {}
+    const set = (r && r.modelStrategy) ? r.modelStrategy : v; paint(set);
+    const lbl = set === 'off' ? 'off — subagents inherit your main model' : 'plan big, execute small — subagents run on Sonnet 5';
+    if (r && r.ok === false) toast('Model strategy: ' + lbl + ' — set for THIS run, but SAVING FAILED (' + (r.error || 'disk error') + ')');
+    else toast('Model strategy: ' + lbl + ' — applies to new sessions');
+  }));
+})();
 // theme selector — load the saved theme, highlight it, persist + apply (UI + terminal) instantly on click
 (function () {
   const row = $('theme-row'); if (!row) return;

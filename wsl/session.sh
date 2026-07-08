@@ -50,6 +50,17 @@ export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS" CLAUDIB
 export CLAUDE_CODE_RESUME_THRESHOLD_MINUTES="${CLAUDE_CODE_RESUME_THRESHOLD_MINUTES:-2000000000}"
 export CLAUDE_CODE_RESUME_TOKEN_THRESHOLD="${CLAUDE_CODE_RESUME_TOKEN_THRESHOLD:-2000000000}"
 
+# "PLAN BIG, EXECUTE SMALL" (Anthropic cookbook pattern; app setting, default ON). The main session plans and
+# synthesizes on the user's chosen model; SUBAGENTS — the token-heavy leg (bulk reading, sweeps, workflows) —
+# run on Sonnet 5 via Claude Code's CLAUDE_CODE_SUBAGENT_MODEL. On a Fable 5/Opus main model this is the
+# cookbook's measured ~2.5×-cheaper split at matched rigor; on a Sonnet main it's a harmless no-op. An
+# explicit user override of CLAUDE_CODE_SUBAGENT_MODEL always wins. The exported strategy var is inherited
+# by the context hook, which injects the delegation nudge (the savings only happen if the model delegates).
+if [ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ]; then
+  export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-claude-sonnet-5}"
+  export CLAUDIBLE_MODEL_STRATEGY
+fi
+
 mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
 # Our pid + kernel start-time, so killtree.sh can reap this generation's whole tree (ConPTY kills never reach
 # the WSL side). Start-time (field 22 of /proc/self/stat; field 20 after stripping "pid (comm) ") makes the
@@ -138,6 +149,9 @@ ctx="This block is injected by Claudible each turn — the AUTHORITATIVE live ru
 ctx="$ctx\nUser: ${gname:-$who}\nMachine: ${host:-unknown} (login ${who:-unknown})"
 [ -n "$gmail" ] && ctx="$ctx\nGit identity here: ${gname} <${gmail}>"
 [ -n "$cwd" ] && ctx="$ctx\nWorking directory: ${cwd}"
+# Static text only (no interpolated values → nothing to sanitize): the plan-big-execute-small nudge. The
+# strategy env is app-set (session.sh export), never collaborator-influenced.
+[ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ] && ctx="$ctx\nModel strategy: plan big, execute small — your subagents run on Sonnet 5 (the cheap tier). Delegate token-heavy legs (bulk reading, repo sweeps, searches, mechanical edits) to subagents and keep planning/synthesis in the main loop. Skip delegation for narrow tasks or judgment-heavy analysis a cheap reader could summarize away."
 printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"<claudible-runtime>\\n%s\\n</claudible-runtime>"}}\n' "$ev" "$ctx"
 exit 0
 EOF
