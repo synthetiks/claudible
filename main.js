@@ -11,6 +11,7 @@ const fs = require('fs');
 const { atomicWriteJson } = require('./lib/atomicWrite');          // every JSON file this process owns is written tmp+rename; every reader of one treats a parse error as "empty"
 const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
 const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
+const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
 const { createShareServer } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
@@ -1246,20 +1247,30 @@ function discoverWorkspaces() {
         if (err) { console.error('[claudible] discover:', err.message); return resolve({ ok: false, added: [] }); }
         let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
         const added = [];
+        let changed = false;   // registry mutated by a backfill/reconcile even when nothing new was added
         for (const item of (Array.isArray(list) ? list : [])) {
-          const slug = String(item && item.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+          const slug = String(item && item.slug || '').replace(/[^A-Za-z0-9-]/g, '');   // the repo's CURRENT name
           const owner = String(item && item.owner || '').replace(/[^A-Za-z0-9-]/g, '');
           if (!slug || !owner) continue;
+          const ghId = (item && Number.isFinite(item.id)) ? item.id : (/^\d+$/.test(String(item && item.id || '')) ? Number(item.id) : null);   // stable GitHub repo id (survives a rename)
           const wid = `repo-${slug}`;
-          // Already known? Also skip a repo the user has ADOPTED a working copy of (ws.repoId = 'owner/name' from
-          // its `origin`): its folder is already on disk, so offering it again as a "clone me" invite is noise.
-          // Keyed on the remote identity, not a tombstone — un-adopting the folder restores discovery by itself.
-          if (registry.workspaces.some((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner) || (w.adopted && w.repoId === owner + '/' + slug))) continue;   // already known (incl. an upgraded-in-place ws: it's kind 'repo' with owner set, so this catches it without hiding a different owner's same-slug invite)
+          const repoUrl = (item && item.repoUrl) || ('https://github.com/' + owner + '/' + slug);
+          // Find the workspace this repo already IS (rename-safe: renamed repos match ONLY by stable ghId — see
+          // lib/discovery.js). Also skips a repo the user ADOPTED a working copy of (re-offering "clone me" is noise).
+          const existing = findExistingWorkspace(registry.workspaces, { slug, owner, ghId, wid });
+          if (existing) {
+            // Backfill the stable id (so the NEXT rename is dedupe-safe) and FOLLOW a GitHub rename — never touching
+            // slug (it names the local folder + every transcript). Sync keeps working via GitHub's redirect until the
+            // folder's origin is next rewritten.
+            const { changed: c, patch } = reconcileWorkspace(existing, { slug, owner, ghId, repoUrl });
+            if (c) { Object.assign(existing, patch); changed = true; }
+            continue;
+          }
           if ((registry.dismissedRepos || []).includes(owner + '/' + slug)) continue;   // the user DELETED this repo workspace here — discovery must not resurrect it as a fresh invite every launch (deliberately re-adding it clears the tombstone)
-          const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoUrl: (item && item.repoUrl) || undefined, createdAt: Date.now(), needsClone: true };
+          const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoName: slug, repoUrl, ghId: ghId != null ? ghId : undefined, createdAt: Date.now(), needsClone: true };
           registry.workspaces.push(ws); added.push(ws);
         }
-        if (added.length) { saveRegistry(); try { win && win.webContents.send('workspace:added', added.map((w) => ({ id: w.id, label: w.label }))); } catch {} }
+        if (added.length || changed) { saveRegistry(); try { win && win.webContents.send('workspace:added', added.map((w) => ({ id: w.id, label: w.label }))); } catch {} }
         resolve({ ok: true, added });
       });
   });
@@ -1547,15 +1558,48 @@ ipcMain.handle('workspace:setShared', (e, payload) => {
   syncShare();
   return { ok: true, shared: ws.shared };
 });
-// Rename a workspace (registry is the source of truth; mirror the new label to guests' granted library).
-ipcMain.handle('workspace:rename', (e, payload) => {
+// Rename a workspace. The display label is always updated (registry is the source of truth; mirrored to guests'
+// granted library via syncShare). For a repo workspace the user OWNS, this ALSO renames the GitHub repo — the
+// requested behavior — while deliberately leaving ws.slug (and thus the local folder + every Claude transcript)
+// frozen. A repo you don't own (a collaborator's invite) can't be renamed on GitHub, so it degrades to label-only
+// with a notice; a local project has no repo to rename.
+ipcMain.handle('workspace:rename', async (e, payload) => {
   const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
   if (!ws) return { ok: false, error: 'unknown workspace' };
   const label = String((payload && payload.label) || '').trim().slice(0, 80);
   if (!label) return { ok: false, error: 'empty name' };
+
+  let repoRenamed = false, repoUrl, notice = '';
+  // Only a Claudible-managed repo workspace (created/cloned here, not merely ADOPTED — an adopted repo points at
+  // the user's own external folder whose remote we must not touch) has a GitHub repo we should rename.
+  if (ws.kind === 'repo' && !ws.needsClone && !ws.adopted && ws.owner && APPDIR_WSL) {
+    const curName = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+    const newName = label.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90);   // GitHub-safe name from the label (Claudible slug charset: letters/digits/dashes)
+    const owner = String(ws.owner).replace(/[^A-Za-z0-9-]/g, '');
+    if (newName && owner && curName && newName !== curName) {
+      const rr = await new Promise((res) => {
+        runner.runScript('rename-repo.sh', `'${owner}' '${curName}' '${newName}'`, { ws, timeout: 60000 }).then(({ err, stdout }) => {
+          if (err) { console.error('[claudible] rename-repo:', err.message); return res({ ok: false, error: 'exec' }); }
+          let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+          res(r);
+        });
+      });
+      if (rr && rr.ok) {
+        ws.repoName = rr.repoName || newName;
+        ws.repoUrl = rr.repoUrl || ('https://github.com/' + owner + '/' + (rr.repoName || newName));
+        if (Number.isFinite(rr.ghId)) ws.ghId = rr.ghId;
+        repoRenamed = true; repoUrl = ws.repoUrl;
+      } else if (rr && rr.error === 'not-owner') {
+        notice = 'Renamed here only — you don’t own the GitHub repo, so its name is unchanged.';
+      } else {
+        notice = 'Renamed here — but the GitHub repo couldn’t be renamed' + (rr && rr.error && rr.error !== 'exec' ? ' (' + rr.error + ')' : '') + '.';
+      }
+    }
+  }
+
   ws.label = label; saveRegistry();
   syncShare();
-  return { ok: true, label };
+  return { ok: true, label, repoRenamed, repoUrl, notice };
 });
 // Delete a workspace: soft-delete its folder (recoverable) + drop it from the registry. Invariant: never the
 // last local workspace (the guaranteed home to open) — the renderer also hides delete in that case.
@@ -1680,10 +1724,12 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   if (!ws || ws.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
   const login = String((payload && payload.username) || '').trim().replace(/[^A-Za-z0-9-]/g, '');   // GitHub logins are [A-Za-z0-9-]
   if (!login) return resolve({ ok: false, error: 'enter a GitHub username' });
-  const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');          // honor the bash-interpolation invariant (re-sanitise)
-  if (!slug) return resolve({ ok: false, error: 'bad workspace' });
+  // The repo's CURRENT GitHub name (repoName), NOT the frozen slug: after a rename the two diverge, and the
+  // collaborators API path must target the live name. repoName falls back to slug for never-renamed workspaces.
+  const repo = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');   // honor the bash-interpolation invariant (re-sanitise)
+  if (!repo) return resolve({ ok: false, error: 'bad workspace' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
-  runner.runScript('repo-invite.sh', `'${slug}' '${login}'`, { timeout: 60000 }).then(({ err, stdout }) => {
+  runner.runScript('repo-invite.sh', `'${repo}' '${login}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });

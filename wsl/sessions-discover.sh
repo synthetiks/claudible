@@ -20,21 +20,24 @@ case "$me" in '' | *[!A-Za-z0-9-]*) emit '[]'; exit 0 ;; esac
 # — but BOUNDED to 60 checks total so it can never become the slow per-repo storm the old script was. This must
 # run for every account (not just when the fast path is empty), else a mix of tagged + pre-topic repos would
 # permanently drop the untagged ones.
+# `.id` is the repo's STABLE numeric id — it survives a rename, unlike owner/name. main.js dedupes on it so a
+# renamed workspace is recognised as the SAME project instead of re-added as a phantom duplicate.
 all="$(gh api --paginate '/user/repos?affiliation=owner,collaborator,organization_member&per_page=100' \
-         --jq '.[] | select(.private==true) | [.owner.login, .name, (if (.topics and (.topics|index("claudible-workspace"))) then "1" else "0" end)] | @tsv' 2>/dev/null)"
+         --jq '.[] | select(.private==true) | [.owner.login, .name, (.id|tostring), (if (.topics and (.topics|index("claudible-workspace"))) then "1" else "0" end)] | @tsv' 2>/dev/null)"
 [ -n "$all" ] || { emit '[]'; exit 0; }
 
 repos=""; checks=0
-while IFS="$(printf '\t')" read -r o n tagged; do
+while IFS="$(printf '\t')" read -r o n id tagged; do
   case "$o" in '' | *[!A-Za-z0-9-]*) continue ;; esac
   case "$n" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+  case "$id" in *[!0-9]*) id="" ;; esac                       # numeric id only; empty is fine (main.js falls back to name matching)
   if [ "$tagged" = "1" ]; then
-    repos="$repos$o	$n
+    repos="$repos$o	$n	$id
 "
   elif [ "$checks" -lt 60 ]; then
     checks=$((checks + 1))
     if gh api "repos/$o/$n/contents/.claudible-workspace" >/dev/null 2>&1; then
-      repos="$repos$o	$n
+      repos="$repos$o	$n	$id
 "
     fi
   fi
@@ -46,12 +49,17 @@ EOF
 
 first=1
 printf '['
-while IFS="$(printf '\t')" read -r owner name; do
+while IFS="$(printf '\t')" read -r owner name gid; do
   case "$owner" in '' | *[!A-Za-z0-9-]*) continue ;; esac
   case "$name"  in '' | *[!A-Za-z0-9-]*) continue ;; esac     # only repos whose name is a valid slug
+  case "$gid"   in *[!0-9]*) gid="" ;; esac
   [ "$first" = 1 ] || printf ','
   first=0
-  printf '{"slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' "$name" "$owner" "$owner" "$name"
+  if [ -n "$gid" ]; then
+    printf '{"slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","id":%s}' "$name" "$owner" "$owner" "$name" "$gid"
+  else
+    printf '{"slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' "$name" "$owner" "$owner" "$name"
+  fi
 done <<EOF
 $repos
 EOF

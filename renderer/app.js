@@ -4239,7 +4239,15 @@ function startWsEdit(chip, nm, w) {
     if (done) return; done = true;
     if (save) {
       const t = inp.value.trim();
-      if (t && t !== w.label) { let r = null; try { r = await claudible.workspaceRename(w.id, t); } catch {} if (r && r.ok) w.label = r.label; }
+      if (t && t !== w.label) {
+        let r = null; try { r = await claudible.workspaceRename(w.id, t); } catch {}
+        if (r && r.ok) {
+          w.label = r.label;
+          if (r.repoUrl) w.repoUrl = r.repoUrl;                       // GitHub repo was renamed → the chip's title/link follows the new URL
+          if (r.repoRenamed) toast('Renamed — GitHub repo updated too');
+          else if (r.notice) toast(r.notice);
+        }
+      }
     }
     try { inp.remove(); } catch {} nm.style.display = '';
     nm.textContent = w.label; chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;

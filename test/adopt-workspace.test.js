@@ -372,8 +372,12 @@ ok('main.js: workspace:delete skips the folder-trashing script for an adopted ws
   ok('main.js: workspace:upgrade refuses an adopted ws BEFORE it can shell out',
     iRefuse > -1 && iShell > -1 && iRefuse < iShell);
 }
-ok('main.js: an adopted repo suppresses its own re-discovery as a clone-me invite',
-  /w\.adopted && w\.repoId === owner \+ '\/' \+ slug/.test(MAIN));
+// The adopted-repo dedupe moved into lib/discovery.js (rename-safe matching, unit-tested in test/discovery.test.js);
+// main.js delegates via findExistingWorkspace. Pin the invariant to its new home.
+ok('lib/discovery.js: an adopted repo suppresses its own re-discovery as a clone-me invite',
+  /w\.adopted && w\.repoId === owner \+ '\/' \+ slug/.test(fs.readFileSync(path.join(ROOT, 'lib/discovery.js'), 'utf8')));
+ok('main.js: discovery delegates dedupe to lib/discovery.js findExistingWorkspace',
+  /findExistingWorkspace\(registry\.workspaces,/.test(MAIN));
 ok('main.js: the background-fetch throttle stamps BEFORE the await (no stacked spawns)',
   /_lastFetch\.set\(ws\.id, Date\.now\(\)\);[\s\S]{0,200}?fetchLock\.add\(ws\.id\);[\s\S]{0,200}?runScript\('git-fetch\.sh'/.test(MAIN));
 ok('main.js: deleting a workspace clears its fetch throttle', /_lastFetch\.delete\(id\); fetchLock\.delete\(id\)/.test(MAIN));
