@@ -151,7 +151,11 @@ function joinAndHello(port, cred) {
   // Making it genuinely stable creates an aliasing hazard the drop() guard exists for: after a SUPERSEDE, the
   // zombie's close fires drop() with the same pid the live successor now owns. Unguarded, that evicts the successor
   // from byPid and from the voice room, mid-call. Both halves are asserted here.
-  const srv3 = createShareServer({});
+  // Capture EVERY voice-member list the server computes (broadcastVoice calls onVoiceMembers synchronously with
+  // the same array). The regression is a duplicate id in the list broadcast DURING a supersede, while the ghost
+  // is still in `clients` sharing the successor's pid — onVoiceMembers sees it without any socket-timing games.
+  const allVoiceLists = [];
+  const srv3 = createShareServer({ onVoiceMembers: (list) => allVoiceLists.push(list) });
   try {
     const st3 = await srv3.start({ requireApproval: false, name: 'Host' });
     const port3 = st3.port, tok3 = st3.token;
@@ -207,6 +211,15 @@ function joinAndHello(port, cred) {
     B.ws.send(JSON.stringify({ type: 'audio', data: 'DDDD', sr: 16000 }));
     eq('…and still RECEIVES relayed audio (voiceGuests kept its pid)', (await heard4).from, B.pid);
     ok('…and B was never disturbed', B.pid !== A.pid);
+
+    // --- 3b. NO voice-member list the server ever computed listed the same person twice ---
+    // The dup would appear in the list broadcast during A3's supersede admit(): clients then held BOTH the
+    // closing ghost A2 and the successor A3, both carrying pid A.pid, both in voiceGuests. Without the
+    // readyState===OPEN guard in voiceMembers(), that list is [Bob, Ann, Ann]. `.close()` sets CLOSING
+    // synchronously, so the guard excludes the ghost the moment broadcastVoice runs.
+    const dupList = allVoiceLists.find((list) => { const ids = list.map((x) => x.id); return new Set(ids).size !== ids.length; });
+    ok('no voice-member list ever listed the same peer-id twice (supersede window)', !dupList, dupList && JSON.stringify(dupList));
+    ok('…and the server DID broadcast voice lists during the run (guard is not vacuous)', allVoiceLists.length > 0);
 
     // --- 4. a genuinely new guest still gets a fresh id, never a recycled one ---
     const C = await joinAndHello(port3, `t=${tok3}&n=Cid`);

@@ -115,7 +115,13 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   function voiceMembers() {
     const m = [];
     if (hostVoice) m.push({ id: 'host', name: hostName });
-    for (const ws of clients) { if (voiceGuests.has(ws._pid)) m.push({ id: ws._pid, name: ws._name }); }
+    // `ws.readyState === ws.OPEN` is NOT optional here, and it is the one consumer of `clients` in the voice
+    // subsystem that was missing it (audioFromHost and the guest relay both have it). A superseded socket stays
+    // in `clients` until its async 'close' lands, and since the pid-stability fix its `_pid` is now IDENTICAL to
+    // the successor's — so without this guard, both objects match voiceGuests during the reconnect window and the
+    // same person is listed TWICE (and it never self-heals: a superseded drop() doesn't re-broadcast). .close()
+    // sets readyState to CLOSING synchronously, so the ghost is already excluded by the time this runs.
+    for (const ws of clients) { if (ws.readyState === ws.OPEN && voiceGuests.has(ws._pid)) m.push({ id: ws._pid, name: ws._name }); }
     return m;
   }
   function broadcastVoice() {
@@ -491,11 +497,12 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     }
     // also evict a guest of that name still in the reconnect grace window (disconnected, token alive) so a
     // backgrounded tab can't silently rejoin past the kick.
-    let graceKicked = false;
+    let graceKicked = false, graceVoice = false;
     for (const [tok, p] of Array.from(pendingDrops.entries())) {
-      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} pendingDrops.delete(tok); resumeTokens.delete(tok); markGone(nm); hit = true; graceKicked = true; }
+      if (p && p.name === nm) { try { clearTimeout(p.timer); } catch {} if (p.wasVoice) graceVoice = true; pendingDrops.delete(tok); resumeTokens.delete(tok); markGone(nm); hit = true; graceKicked = true; }
     }
     if (graceKicked) { try { systemChat(nm + ' was removed by the host'); } catch {} }   // a guest kicked while in the reconnect grace window has no live socket, so drop()'s "removed by host" line never fires — announce it here for parity
+    if (graceVoice) { try { broadcastVoice(); } catch {} }   // …and if they were a voice member when they dropped, refresh the voice roster so they don't linger in it (pre-existing gap: drop()'s own branches do this, the grace-kick path didn't)
     if (hit) notifyRoster();
     return hit;
   }
