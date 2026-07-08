@@ -8,6 +8,7 @@
 const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { atomicWriteJson } = require('./lib/atomicWrite');   // every JSON file this process owns is written tmp+rename; every reader of one treats a parse error as "empty"
 const { createShareServer } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
@@ -172,9 +173,13 @@ const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<ta
 // The sandboxed preload can't use fs, so MAIN owns the file; these handlers are registered at top level here
 // (before any window loads) because the preload reads it via a blocking sendSync.
 const SETTINGS_FILE = path.join(RT, 'settings.json');
+// A parse error here is INDISTINGUISHABLE from "no settings yet" — both mean {}. That's the right default for a
+// missing file and a silent wipe for a torn one (every session title, the collab name, the permission mode), so
+// writeSettings goes through tmp+rename: the file this returns is always one whole write or another.
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
+function writeSettings(obj) { fs.mkdirSync(RT, { recursive: true }); atomicWriteJson(fs, SETTINGS_FILE, obj); }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj && typeof obj === 'object' ? obj : {}, null, 2)); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); writeSettings(obj && typeof obj === 'object' ? obj : {}); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -259,7 +264,7 @@ function loadRegistry() {
 // whether the write actually landed so settings-like callers (permissionMode:set) can tell the user
 // instead of reporting success for a change that will vanish on relaunch.
 function saveRegistry() {
-  try { fs.writeFileSync(WORKSPACES + '.tmp', JSON.stringify(registry, null, 2)); fs.renameSync(WORKSPACES + '.tmp', WORKSPACES); return true; }
+  try { atomicWriteJson(fs, WORKSPACES, registry); return true; }
   catch (e) { console.error('[claudible] workspaces.json:', e.message); return false; }
 }
 let registry = loadRegistry();
@@ -1977,7 +1982,7 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
       try {
         const s = readSettings();
         s.depEnv = Object.assign({}, s.depEnv, res.env);   // survive a relaunch (re-applied at boot, before APPDIR_WSL)
-        fs.mkdirSync(RT, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2));
+        writeSettings(s);
       } catch {}
       for (const [k, v] of Object.entries(res.env)) if (typeof v === 'string' && v) process.env[k] = v;
     }
@@ -2151,7 +2156,7 @@ function _writeContext(tabId) {
     };
     const dir = path.join(RT, 'tabs', rec.runtimeId); try { fs.mkdirSync(dir, { recursive: true }); } catch {}
     const file = path.join(dir, 'context.json');
-    try { fs.writeFileSync(file + '.tmp', JSON.stringify(ctx)); fs.renameSync(file + '.tmp', file); } catch {}   // atomic: the hook never reads a half-written file
+    try { atomicWriteJson(fs, file, ctx, 0); } catch {}   // atomic: the hook never reads a half-written file
   } catch {}
 }
 function _writeAllContexts() { try { for (const id of ptys.keys()) _writeContext(id); } catch {} }   // a global live-state change (share start/stop, roster) touches every tab's file
