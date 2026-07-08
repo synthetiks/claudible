@@ -2182,14 +2182,19 @@ async function loadDiffInto(targetWsId, body, opts) {
   if (!r || !r.ok) { if (!quiet) body.innerHTML = '<div class="diff-empty">Couldn’t read changes.</div>'; return; }
   if (!r.repo) { body._diffSig = 'norepo'; body.innerHTML = '<div class="diff-empty">This project isn’t a git repo — nothing to review here.</div>'; if (opts && opts.onMeta) try { opts.onMeta({ total: null }); } catch (e) {} return; }
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
-  const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally
+  const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally (card header)
+  const week = (r && typeof r.week === 'number') ? r.week : commits.length;   // commits in the last 7 days (list may be capped at 50)
   if (opts && opts.onMeta) try { opts.onMeta({ total }); } catch (e) {}   // identity/totals live on the card's MAIN BAR now — hand the count up
   // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
-  const sig = JSON.stringify({ ws: targetWsId, t: total, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
+  const sig = JSON.stringify({ ws: targetWsId, t: total, w: week, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
   if (quiet && sig === body._diffSig) return;
   body._diffSig = sig;
-  if (!files.length && !untracked.length && !committed.length) {
-    body.innerHTML = '<div class="diff-empty">No changes yet — nothing in the working tree or recent commits. ✨</div>'; return;
+  if (!files.length && !untracked.length && !committed.length && !commits.length) {
+    // NB: `commits` is checked too. A week of commits can net to an EMPTY diff (commit then revert), and diff.sh
+    // deliberately drops a >110KB net diff while keeping the log — both used to render as "no recent commits".
+    body.innerHTML = total ? '<div class="diff-empty">No changes this week — nothing in the working tree, and no commits in the last 7 days. ✨</div>'
+      : '<div class="diff-empty">No changes yet — nothing in the working tree or recent commits. ✨</div>';
+    return;
   }
   body.innerHTML = '';
   // one-line change summary (the identity half of the old header moved to the card bar)
@@ -2199,7 +2204,7 @@ async function loadDiffInto(targetWsId, body, opts) {
     if (files.length) parts.push(files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed');
     if (adds || dels) parts.push('+' + adds + ' −' + dels);
     if (untracked.length) parts.push(untracked.length + ' new');
-    if (commits.length) parts.push(commits.length + ' commit' + (commits.length > 1 ? 's' : '') + ' this week');
+    if (week) parts.push(week + ' commit' + (week > 1 ? 's' : '') + ' this week');
     if (parts.length) { const sum = document.createElement('div'); sum.className = 'ph-sum'; sum.textContent = parts.join('  ·  '); body.appendChild(sum); }
   }
   if (files.length || untracked.length) {
@@ -2212,12 +2217,22 @@ async function loadDiffInto(targetWsId, body, opts) {
       untracked.forEach((p) => body.appendChild(renderUntracked(p, targetWsId)));
     }
   }
-  if (committed.length) {                                              // work Claude already committed — visible, review-only
+  // Commits and their net diff are INDEPENDENT: the list must show even when the diff is empty (commit+revert)
+  // or was dropped for size. Gating the list on `committed.length` is what made this panel look permanently dead.
+  if (commits.length || committed.length) {                            // work already committed — visible, review-only
+    const shown = commits.length, more = Math.max(0, (week || 0) - shown);
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl';
-    lbl.textContent = 'recent · this week' + (commits.length ? ' · ' + commits.length + ' commit' + (commits.length > 1 ? 's' : '') : '') + ' · review only';
+    lbl.textContent = 'recent · last 7 days'
+      + (week ? ' · ' + week + ' commit' + (week > 1 ? 's' : '') + (more ? ' (showing ' + shown + ')' : '') : '')
+      + ' · review only';
     body.appendChild(lbl);
     if (commits.length) body.appendChild(renderCommitList(commits));
-    committed.forEach((f) => body.appendChild(renderDiffFile(f, true, targetWsId)));
+    if (committed.length) committed.forEach((f) => body.appendChild(renderDiffFile(f, true, targetWsId)));
+    else if (commits.length) {                                         // commits, but nothing to diff (net-zero, or too big)
+      const n = document.createElement('div'); n.className = 'diff-empty'; n.style.cssText = 'padding:6px 0;text-align:left';
+      n.textContent = 'These commits have no net file changes to show (they cancel out, or the diff was too large to render).';
+      body.appendChild(n);
+    }
   }
 }
 function renderCommitList(commits) {

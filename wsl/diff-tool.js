@@ -270,7 +270,8 @@ function main() {
   const out = {
     ok: true,
     repo: true,
-    total: Number(env.TOTAL) || 0,
+    total: Number(env.TOTAL) || 0,      // lifetime commits on HEAD (the card's tally)
+    week: Number(env.WEEK) || 0,        // commits in the last 7 days — the list may be capped, this never is
     files,
     untracked: untracked.slice(0, 200),
     committed,

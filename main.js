@@ -1808,8 +1808,11 @@ ipcMain.handle('diff:list', (e, { wsId } = {}) => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });
   const ws = (wsId && _wsById(wsId)) || activeWorkspace;   // Project History can review any project, not just the active one
   runner.runScript('diff.sh', '', { ws, timeout: 30000, maxBuffer: 32 * 1024 * 1024 }).then(({ err, stdout }) => {
-      let r = { ok: false, repo: false, files: [], untracked: [] };
-      try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      // `err` used to be destructured and dropped: a timeout / crashed script produced no stdout, JSON.parse('{}')
+      // succeeded, and the panel showed "no changes" for a repo that was never actually read. Log it and fail loudly.
+      if (err) { console.error('[claudible] diff.sh:', err.message); return resolve({ ok: false, repo: true, error: 'diff failed: ' + (err.message || 'exec error'), files: [], untracked: [], committed: [], commits: [] }); }
+      let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {}
+      if (!r || typeof r !== 'object') { console.error('[claudible] diff.sh: unparseable output'); return resolve({ ok: false, repo: true, error: 'diff returned no output', files: [], untracked: [], committed: [], commits: [] }); }
       resolve(r);
     });
 }));

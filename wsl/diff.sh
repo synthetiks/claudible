@@ -6,7 +6,12 @@
 #   * recently-COMMITTED changes (net diff of the last few commits) → so work that's already committed is still
 #     reviewable (git diff HEAD alone shows nothing once Claude commits). Committed changes are review-only.
 set -u
-. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE we cd into the repo — else
+                                                        # `node "$(dirname "$0")/diff-tool.js"` resolves against the WORKSPACE
+                                                        # and dies with MODULE_NOT_FOUND (which the old `|| printf ok:true`
+                                                        # fallback then reported as a perfectly healthy, empty repo).
+                                                        # Mirrors checkpoint.sh, which already does exactly this.
+. "$HERE/node-path.sh" 2>/dev/null || true              # nvm's node isn't on PATH for non-interactive shells → resolve it
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
 WS_SLUG="${CLAUDIBLE_WS_SLUG:-}"
 case "$WS_SLUG" in *[!A-Za-z0-9-]*) WS_SLUG="" ;; esac
@@ -25,20 +30,27 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '{"ok":true,"rep
 diff_text="$(git -c core.quotepath=false diff HEAD --no-color 2>/dev/null)"
 untracked="$(git -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null)"
 
-# Committed: net diff of the commits from the LAST 7 DAYS ("recent" = this week). Bounded so a very busy week never
-# dumps the world; never reaches past the root commit. ccount = lifetime total commits (shown as the tally).
-ccount="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
-rcount="$(git rev-list --count --since='7 days ago' HEAD 2>/dev/null || echo 0)"
-N=0
-if [ "${ccount:-0}" -gt 1 ]; then
-  N="${rcount:-0}"
-  [ "$N" -gt 20 ] && N=20                          # cap the net diff for a hyperactive week
-  [ "$N" -gt "$((ccount-1))" ] && N=$((ccount-1))  # never reach past the root commit
-fi
-cdiff_text=""; clog=""
-if [ "$N" -gt 0 ]; then
-  cdiff_text="$(git -c core.quotepath=false diff "HEAD~$N" HEAD --no-color 2>/dev/null)"
-  clog="$(git log --no-color --format='%h%x1f%s%x1f%an%x1f%ad' --date=short "HEAD~$N"..HEAD 2>/dev/null)"
+# Committed: the commits from the LAST 7 DAYS ("recent" = this week), plus their NET diff.
+#
+# The commit LIST and the net DIFF are gathered INDEPENDENTLY, on purpose:
+#   * The list comes straight from `git log --since` — which walks every parent, so a week containing a MERGE
+#     commit is listed correctly. The old code counted with `--since` (all parents) but fetched with `HEAD~N`
+#     (first-parent only). On any merge those disagree, `HEAD~N` doesn't exist, git errored into /dev/null, and
+#     the panel showed NOTHING for a repo that had just merged a branch. `-n` caps the list; `git log` clamps at
+#     the root commit by itself, so no `ccount-1` fudge (which used to silently drop a young repo's first commit,
+#     and hid a repo whose only commit was its root).
+#   * The net diff is `<last commit BEFORE the window>..HEAD`, or the EMPTY TREE when the whole history is inside
+#     the window (a repo younger than a week). It may legitimately come back empty — commit-then-revert nets to
+#     nothing — and that must NOT erase the commit list (the renderer used to gate the list on this diff).
+ccount="$(git rev-list --count HEAD 2>/dev/null || echo 0)"          # lifetime tally (card header)
+rcount="$(git rev-list --count --since='7 days ago' HEAD 2>/dev/null || echo 0)"   # commits this week (all parents)
+EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904                  # git's well-known empty tree object
+clog=""; cdiff_text=""
+if [ "${rcount:-0}" -gt 0 ]; then
+  clog="$(git log --no-color --since='7 days ago' -n 50 --format='%h%x1f%s%x1f%an%x1f%ad' --date=short HEAD 2>/dev/null)"
+  base="$(git rev-list -1 --before='7 days ago' HEAD 2>/dev/null)"   # newest commit OLDER than the window (may be empty)
+  [ -z "$base" ] && base="$EMPTY_TREE"                               # whole history is inside the window → diff from nothing
+  cdiff_text="$(git -c core.quotepath=false diff "$base" HEAD --no-color 2>/dev/null)"
 fi
 
 # A single env var > ~128KB (Linux MAX_ARG_STRLEN) makes the node exec below fail ("Argument list too long").
@@ -54,4 +66,7 @@ if [ "${#diff_text}" -gt "$maxb" ]; then diff_text="${diff_text:0:$maxb}"; diff_
 if [ -n "$_lcset" ]; then LC_ALL="$_lc"; else unset LC_ALL; fi
 
 unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
-DIFF="$diff_text" UNTRACKED="$untracked" CDIFF="$cdiff_text" CLOG="$clog" TOTAL="$ccount" node "$(dirname "$0")/diff-tool.js" 2>/dev/null || printf '{"ok":true,"repo":true,"total":0,"files":[],"untracked":[],"committed":[],"commits":[]}'
+# A node-side crash used to be printed as a SUCCESSFUL, empty repo ({"ok":true,...,"total":0}) — indistinguishable
+# from "this repo has no commits", with the real error swallowed by 2>/dev/null. Emit ok:false instead so the panel
+# can say "couldn't read changes" (and log it) rather than lying that there's nothing here. Keep stderr for the log.
+DIFF="$diff_text" UNTRACKED="$untracked" CDIFF="$cdiff_text" CLOG="$clog" TOTAL="$ccount" WEEK="$rcount" node "$HERE/diff-tool.js" || printf '{"ok":false,"repo":true,"error":"diff-tool failed","total":0,"week":0,"files":[],"untracked":[],"committed":[],"commits":[]}'
