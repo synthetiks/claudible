@@ -143,5 +143,37 @@ const CSS_OK = new Set(['xterm']);
 none('renderer: a literal class toggled in JS with no CSS rule',
   literalClasses.filter((c) => !cssClassPresent(c) && !CSS_OK.has(c)));
 
+// ---------------------------------------------------------------------------------------------------------
+// 7. node ↔ node-path.sh contract. Every script is launched as `bash -lc '…'`, and a NON-INTERACTIVE login
+//    shell never runs the nvm init in ~/.bashrc (it returns early). So `node` is simply absent on a machine
+//    that installed node through nvm — the common case. wsl/node-path.sh exists to fix exactly that, and every
+//    `node … || <fallback>` in this codebase swallows the failure into an empty result.
+//
+//    This shipped: session.sh silently staged its BASH fallback hooks on a machine with node installed;
+//    transcript.sh returned [] so "Export conversation" wrote an empty file; preflight.sh reported
+//    `node: missing` AND `claude: not signed in`, so the wizard offered to install a node that was there.
+//    Nothing failed. Everything just quietly returned the empty answer.
+//
+//    Comment-blind matching is what let two earlier grep guards pass on prose, so strip comments first and
+//    only match `node` in a real command position.
+// ---------------------------------------------------------------------------------------------------------
+const wslDir = path.join(ROOT, 'wsl');
+// provision.sh is the node INSTALLER: priming PATH with an old nvm node would make its post-install
+// version re-check read the wrong binary and report "still older than 22.12" after a successful upgrade.
+const NODE_PATH_EXEMPT = new Set(['node-path.sh', 'provision.sh']);
+const stripComments = (src) => src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+const INVOKES_NODE = /(?:^|[;&|(]|\|\||&&|\$\()\s*node\s|command -v node\b|\bhave node\b|\bver node\b/m;
+const missingNodePath = fs.readdirSync(wslDir).filter((f) => f.endsWith('.sh')).filter((f) => {
+  if (NODE_PATH_EXEMPT.has(f)) return false;
+  const src = stripComments(fs.readFileSync(path.join(wslDir, f), 'utf8'));
+  return INVOKES_NODE.test(src) && !/\.\s+["']?\$(?:HERE|\(dirname[^)]*\))["']?\/node-path\.sh/.test(src);
+});
+none('a wsl script invokes `node` without sourcing node-path.sh', missingNodePath);
+// …and the guard is only worth anything if it actually sees the scripts that DO invoke node.
+const nodeUsers = fs.readdirSync(wslDir).filter((f) => f.endsWith('.sh') && !NODE_PATH_EXEMPT.has(f))
+  .filter((f) => INVOKES_NODE.test(stripComments(fs.readFileSync(path.join(wslDir, f), 'utf8'))));
+none('the node-path guard is vacuous — it matched fewer than 8 node-invoking scripts',
+  nodeUsers.length >= 8 ? [] : [`only ${nodeUsers.length} matched: ${nodeUsers.join(' ')}`]);
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

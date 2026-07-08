@@ -105,6 +105,7 @@ fi
 # two Node hooks are byte-for-byte equivalent to the bash ones (test/hooks-parity.sh). Per-tab routing
 # rides the inherited CLAUDIBLE_STATUS/HOOKS env in BOTH modes; the staged path stays in $SDIR/.claude
 # (fast local reads, no per-tick /mnt/c hit).
+. "$HERE/node-path.sh" 2>/dev/null || true              # nvm's node isn't on PATH for non-interactive shells → resolve it
 NODE_BIN="$(command -v node 2>/dev/null || true)"
 # Guard: a Windows node.exe (or any /mnt-mounted node) reached via WSL interop can't write Linux per-tab
 # paths — reject it so we fall back to bash rather than silently no-op telemetry. (command -v node won't

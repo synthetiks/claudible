@@ -10,6 +10,12 @@
 # this script needs bash and Git-for-Windows may be the very thing missing (the chicken-and-egg). This probe
 # serves WSL/Posix, where bash + the toolchain live in the guest.
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# node runs Claude Code's hooks AND parses the credentials JSON below. Under `bash -lc` (how every runner
+# invokes this) nvm's node is NOT on PATH — so without this, a machine with node installed reported
+# `node: missing` AND `claude: not signed in`, and the wizard offered to install a node that was already there.
+. "$HERE/node-path.sh" 2>/dev/null || true              # nvm's node isn't on PATH for non-interactive shells → resolve it
+
 has() { command -v "$1" >/dev/null 2>&1 && printf true || printf false; }
 # First dotted-number token of `<tool> --version` (handles "git version 2.45.0", "v22.14.0", "uv 0.5.0", …).
 ver() { command -v "$1" >/dev/null 2>&1 || return 0; "$1" --version 2>/dev/null | head -1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
