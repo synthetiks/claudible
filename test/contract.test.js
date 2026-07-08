@@ -22,7 +22,6 @@ const PRELOAD = read('preload.js');
 const MAIN = read('main.js');
 
 let pass = 0, fail = 0;
-const ok = (label, c) => c ? pass++ : (fail++, console.error('  FAIL ' + label));
 // list of offenders, capped so a wholesale breakage doesn't scroll forever
 const none = (label, arr) => { if (!arr.length) { pass++; return; } fail++; console.error(`  FAIL ${label}: ${arr.slice(0, 12).join(', ')}${arr.length > 12 ? ` … (+${arr.length - 12})` : ''}`); };
 const uniq = (a) => [...new Set(a)];
