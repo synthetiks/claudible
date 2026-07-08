@@ -282,10 +282,12 @@ function setActiveTab(tabId) {
   renderTabStrip();
   refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined)
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
+  rec.attention = false;                              // you're looking at it now — drop any "finished while away" pulse
   if (sidebarReady) {   // guard: the sessions/workspace section's consts aren't initialized during the boot tab
     if (rec.wsId && rec.wsId !== activeWsId) { activeWsId = rec.wsId; renderWsChips(); }   // sidebar library follows the tab's ws
     refreshSessions();                                                                     // re-highlight rows for this tab's ws/session
   }
+  clearTabAttention(tabId);                           // and un-pulse the row if it's already painted
   setTimeout(() => { if (term) term.focus(); }, 0);
 }
 // Open a brand-new session in a NEW tab (the current tab keeps running in the background).
@@ -394,6 +396,9 @@ function parseTokCount(str) {
 // and main drops any push whose tabId isn't the mirrored tab — a stray push can never leak another session.
 let sharedTabIdR = null;   // the tab main has pinned the live mirror to (null = not hosting)
 if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); });
+// Main's privacy backstop fired: the pinned tab left its session, so the mirror was paused (guests frozen, no
+// bytes from the new conversation). Tell the host why their guests went quiet. The UI paths above avoid this.
+if (claudible.onShareSessionMoved) claudible.onShareSessionMoved(() => { toast('Live session paused — that tab moved to another conversation. End the share, or re-share from its session.'); });
 function mirrorTabR() { return (sharedTabIdR != null && tabs.get(sharedTabIdR)) || AT(); }
 function pushTracker(t) {
   t = t || mirrorTabR(); if (!t) return;
@@ -940,6 +945,10 @@ claudible.onHookLine((tabId, line) => {
     }
   } else if (o.hook_event_name === 'Stop') {
     t.busy = false; markTabBusy(t.tabId, false);
+    // DONE-WHILE-YOU-WERE-AWAY: a BACKGROUND tab finished its turn. Flag it so its sidebar row pulses — with
+    // several sessions running at once the only other cue was the row's busy dot silently going out. The flag
+    // lives on the tab record (so a sidebar rebuild can't lose it) and clears when you activate that tab.
+    if (tabId !== activeTabId) { t.attention = true; markTabAttention(t.tabId, true); }
     // A turn just finished: if this tab is still showing a "draft · unsaved" row, its transcript now exists on
     // disk, so refresh the sidebar to collapse that draft row into its proper saved session row.
     if (sidebarReady && t.wsId === activeWsId && sessListEl && sessListEl.querySelector('.sess.sess-draft[data-tab="' + t.tabId + '"]')) refreshSessions();
@@ -1409,7 +1418,7 @@ async function terminateLive() {
     choices: [{ key: 'end', label: 'End live session', danger: true }, { key: 'cancel', label: 'Cancel' }],
   });
   if (go !== 'end') return;
-  if (sharedSessionId) sharedSessionId = null;
+  if (sharedSessionId) { sharedSessionId = null; sharedWsId = null; }
   if (webShare) { webShare = false; webShareUI(false); }
   guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
   updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions();   // updateCollab→ensureTunnel drops the tunnel (closes guests)
@@ -1420,7 +1429,11 @@ let lastRoster = [];
 function renderLiveBar() {
   const bar = $('livebar'); if (!bar) return;
   const t = AT(), liveTab = !!(t && t.kind === 'live');
-  if (!collabLive && !liveTab) { bar.style.display = 'none'; return; }   // show when hosting a synced session OR viewing a joined one
+  // collabLive now means "a session of mine is shared", independent of what I'm looking at (that's what keeps the
+  // tunnel up while I work elsewhere). The BAR, though, describes the session ON SCREEN — so paint it only on the
+  // shared tab, else it would claim an unrelated conversation is live. (Before main's pin lands, match by session.)
+  const onSharedTab = !!(t && t.kind !== 'live' && ((sharedTabIdR != null && t.tabId === sharedTabIdR) || (sharedSessionId && t.session === sharedSessionId)));
+  if (!(collabLive && onSharedTab) && !liveTab) { bar.style.display = 'none'; return; }   // show while viewing the session I host, OR a joined one
   bar.style.display = 'flex';
   const mem = $('live-members'); if (!mem) return;
   mem.innerHTML = '';
@@ -1442,7 +1455,7 @@ claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped m
   renderLiveBar(); refreshChatPanel();
 });
 if (claudible.onAdvertiseLost) claudible.onAdvertiseLost((p) => {   // the presence heartbeat lost the one-host-per-session claim (our presence went stale — sleep/outage — and a collaborator went live on the same session) → stop claiming to share
-  sharedSessionId = null; advertisedSession = null;
+  sharedSessionId = null; sharedWsId = null; advertisedSession = null;
   updateCollab(); updateAdvertise(); refreshSessions();
   toast(((p && p.by) || 'A collaborator') + ' went live on this session while you were away — you’re no longer sharing it. Use Join to hop into theirs.');
 });
@@ -2467,6 +2480,13 @@ function sessTitle(s, wsId) {   // wsId: the row's workspace when it ISN'T the a
   return s.preview;
 }
 function sessionOpenInTab(id) { for (const r of tabs.values()) if (r.wsId === activeWsId && r.session === id) return true; return false; }
+function sessionOpenInTabWs(id, wsId) { for (const r of tabs.values()) if (r.kind !== 'live' && r.wsId === wsId && r.session === id) return true; return false; }
+// Does a tab bound to this session have an unseen "turn finished" flag? (drives the sidebar pulse; survives rebuilds)
+// wsId defaults to the active workspace; the expanded-tree rows pass THEIR workspace, since a background tab can
+// now live in another project (openWsSessionInTab) and its pulse must still show on that project's rows.
+function sessionNeedsAttention(id, wsId) { const w = wsId || activeWsId; for (const r of tabs.values()) if (r.wsId === w && r.session === id && r.attention) return true; return false; }
+// …and is it mid-turn? Lets a full rebuild restore the busy dot too, instead of waiting for the next hook line.
+function sessionBusyInTab(id, wsId) { const w = wsId || activeWsId; for (const r of tabs.values()) if (r.wsId === w && r.session === id && r.busy) return true; return false; }
 // A session someone DELIBERATELY NAMED is never stub-noise, even before its first real prompt: the picker's
 // promptless-stub filter exists to bury accidental fork artifacts, and hiding a just-created, just-named
 // session reads as "my new session didn't sync" to the collaborator. Checks my local rename, the live shared
@@ -2483,11 +2503,18 @@ function hasExplicitTitle(id, wsId) {
 // because sync is on. sharedSessionId is the one session I've chosen to share (null = not sharing). It resets on
 // reload, so a refresh never silently re-hosts (the bug that made two people both host the same session).
 let sharedSessionId = null;
+// The workspace the shared session lives in, captured when Share Live is turned on. The host is free to browse
+// (or work in) a different workspace afterwards — the share stays welded to THIS one, matching main's mirrorWs().
+let sharedWsId = null;
 function isSharingSession(id) { return !!id && sharedSessionId === id; }
 // Advertise only changes when it actually changes (avoids spamming presence pushes).
 function updateAdvertise() {
-  const aw = workspaces.find((w) => w.id === activeWsId);
-  const want = (tunnelUp && aw && aw.kind === 'repo' && activeSession && activeSession === sharedSessionId) ? activeSession : null;
+  // Keyed on the SHARED session, never the VIEWED one. Sharing is a property of a pinned tab (main's
+  // sharedTabId), not of where the host happens to be looking — so opening another session (new tab or
+  // recycled) must not unadvertise. sharedWsId is captured at Share time: the host may be browsing a
+  // different (even non-repo) workspace while the shared session keeps streaming.
+  const aw = workspaces.find((w) => w.id === (sharedWsId || activeWsId));
+  const want = (tunnelUp && aw && aw.kind === 'repo' && sharedSessionId) ? sharedSessionId : null;
   if (want === advertisedSession) return;
   advertisedSession = want;
   if (!want) { try { claudible.liveUnadvertise(); } catch (e) {} return; }
@@ -2500,7 +2527,7 @@ function updateAdvertise() {
           // The authoritative claim check refused: a collaborator beat us to hosting this exact session (the
           // race the ~10s presence poll can miss). Roll the share back completely — keeping sharedSessionId
           // would leave the UI saying "sharing" while nothing is advertised.
-          if (sharedSessionId === want) sharedSessionId = null;
+          if (sharedSessionId === want) { sharedSessionId = null; sharedWsId = null; }
           advertisedSession = null;
           updateCollab(); refreshSessions();
           toast((r.by || 'A collaborator') + ' went live on this session first — use Join to hop in instead');
@@ -2538,8 +2565,13 @@ async function ensureTunnel() {
 // Join live, automatically — no manual sharing. Recomputed whenever the active workspace/session/sync changes.
 function updateCollab() {
   if (AT() && AT().kind === 'live') { renderLiveBar(); return; }   // viewing a peer's session — DON'T recompute your own share off the live tab's (null) session, or you'd drop your own tunnel + guests
-  const aw = workspaces.find((w) => w.id === activeWsId);
-  collabLive = !!(aw && aw.kind === 'repo' && activeSession && activeSession === sharedSessionId);   // explicit: tunnel only when I've chosen to Share THIS session
+  // Keyed on the SHARED session + ITS workspace, not the viewed tab's. This is the whole "work in another
+  // session while a guest keeps watching the shared one" guarantee: every tab switch runs refreshSessions →
+  // updateCollab, and keying this on activeSession made an ordinary sidebar click tear the tunnel down
+  // (shareStop closes every guest socket). Sharing ends only on an explicit user action (toggle off / End
+  // Session) or when the one-host arbiter revokes our claim.
+  const aw = workspaces.find((w) => w.id === (sharedWsId || activeWsId));
+  collabLive = !!(aw && aw.kind === 'repo' && sharedSessionId);   // explicit: tunnel only when I've chosen to Share a session
   ensureTunnel();
   renderLiveBar();                                  // show/hide the in-session "● Live · who's here" bar
 }
@@ -2548,7 +2580,7 @@ function updateCollab() {
 function toggleShareSession(s) {
   if (!s || !s.id) return;
   if (sharedSessionId === s.id) {
-    sharedSessionId = null;
+    sharedSessionId = null; sharedWsId = null;
     updateCollab(); updateAdvertise(); refreshSessions();
     toast('Stopped sharing this session');
   } else {
@@ -2558,8 +2590,11 @@ function toggleShareSession(s) {
     // authoritatively at claim time for the race this ~10s poll can miss.
     const holder = livePeers.find((p) => p && p.session === s.id);
     if (holder) { toast((holder.name || holder.login || 'A collaborator') + ' is already live on this session — use Join to hop in instead'); return; }
-    sharedSessionId = s.id;
-    if (activeSession !== s.id) openSession(s.id, sessTitle(s));   // must be the running session to stream it live
+    sharedSessionId = s.id; sharedWsId = activeWsId;   // weld the share to THIS session + workspace; browsing elsewhere later must not drop it
+    // The shared session must be the FOREGROUND tab when the tunnel starts (main pins sharedTabId = fgTabId).
+    // openSession focuses its existing tab, or opens one — either way that tab is foregrounded before
+    // updateCollab→ensureTunnel→shareStart runs (tabForeground and shareStart are ordered on the same IPC channel).
+    if (activeSession !== s.id) openSession(s.id, sessTitle(s));
     updateCollab(); updateAdvertise(); refreshSessions();
     toast('Sharing live — collaborators can now Join');
   }
@@ -2873,7 +2908,8 @@ function appendConflictChip(m, s, w) {
 }
 function renderSessionRow(s) {
   const row = document.createElement('div');
-  row.className = 'sess' + (s.id === activeSession ? ' active' : '') + (sessionOpenInTab(s.id) ? ' open-in-tab' : '');
+  row.className = 'sess' + (s.id === activeSession ? ' active' : '') + (sessionOpenInTab(s.id) ? ' open-in-tab' : '')
+    + (sessionBusyInTab(s.id) ? ' busy' : '') + (sessionNeedsAttention(s.id) ? ' sess-done' : '');   // busy dot + done-pulse survive a full rebuild (they live on the tab record)
   row.dataset.id = s.id; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
   const m = document.createElement('div'); m.className = 'sess-meta';
@@ -3116,14 +3152,33 @@ async function deleteSession(id, scope) {
     toast('That session is still running — stop it before deleting');
     refreshSessions();
   };
+  // Deleting the session you're SHARING ends the share: the conversation guests are watching is about to be
+  // trashed. Do it before the tab is re-pointed, so main's sessionMoved backstop never has to fire (it would
+  // otherwise leave a live-but-frozen tunnel pinned to a session that no longer exists).
+  if (sharedSessionId === id) {
+    sharedSessionId = null; sharedWsId = null;
+    updateCollab(); updateAdvertise();                 // ensureTunnel → shareStop: guests are told, tunnel closes
+    toast('That session was shared — the live session ended with it');
+  }
   const order = getOrder().filter((x) => x !== id);
-  const next = order[0] || 'new';
+  // Park the doomed tab on a session NO OTHER TAB already hosts — since sidebar clicks now open their own tabs,
+  // order[0] is frequently already open, and re-pointing onto it would put two tabs on one session (breaking the
+  // one-row-per-session invariant markTabBusy relies on). Fall back to a fresh 'new' session.
+  // Exclude by SESSION, not by tab identity: a tab bound to `id` is about to be re-pointed anyway (and `id` is
+  // already filtered out of `order`), while every OTHER tab's session — the ACTIVE tab's included — is occupied.
+  // Keying this on `tabId !== activeTabId` let a BACKGROUND tab get parked onto the active tab's session, putting
+  // two live Claudes on one transcript (main has no cross-tab uniqueness check).
+  const openElsewhere = new Set(Array.from(tabs.values()).filter((r) => r.kind !== 'live' && r.wsId === activeWsId && r.session !== id).map((r) => r.session));
+  const next = order.find((x) => !openElsewhere.has(x)) || 'new';
   for (const rec of Array.from(tabs.values())) {
     if (rec.kind === 'live') continue;   // a joined mirror is never re-pointed by a local delete (it belongs to the peer's session)
     if (rec.wsId === activeWsId && rec.session === id) {
       if (rec.busy) return abort();      // fast path — no point even attempting the switch
       if (rec.tabId === activeTabId) {
-        await openSession(next, next === 'new' ? '' : (sessIndex[next] ? sessTitle(sessIndex[next]) : ''));   // label by the SHARED name, matching every other openSession call site (preview here leaked the raw first-prompt line into the tab/guest labels)
+        // MUST re-point THIS tab off the doomed session — opening the next one in a new tab would leave this
+        // tab holding the transcript open. So drive main's re-point directly (identical to the background-tab
+        // branch below), rather than through openSession, whose default is now "open beside, don't recycle".
+        await openSession(next, next === 'new' ? '' : (sessIndex[next] ? sessTitle(sessIndex[next]) : ''), { inPlace: true });
         const still = tabs.get(rec.tabId);
         if (still && still.session === id) return abort();   // busy race: main refused the re-point (openSession left this tab untouched)
       } else {
@@ -3301,7 +3356,7 @@ async function refreshSessions() {
   if (sig === _sessSig && sessListEl.querySelector('.sess')) {                       // structure unchanged → just move the highlight (no flicker)
     Array.prototype.forEach.call(sessListEl.querySelectorAll('.sess'), (row) => {
       const sid = row.dataset.id, tb = row.dataset.tab, lv = row.dataset.livetab;
-      if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('open-in-tab', sessionOpenInTab(sid)); }
+      if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('open-in-tab', sessionOpenInTab(sid)); row.classList.toggle('sess-done', sessionNeedsAttention(sid)); row.classList.toggle('busy', sessionBusyInTab(sid)); }
       if (tb || lv) row.classList.toggle('active', (tb || lv) === activeTabId);
     });
     updateCollab(); pollTitles(); return;
@@ -3384,8 +3439,7 @@ function startLiveRename(row, p, rec) {
 // Cheap in-place busy toggle on a tab's sidebar row (no disk re-read): live row by tab id, or saved row by session id.
 function markTabBusy(tabId, busy) {
   const rec = tabs.get(tabId); if (!rec || !sessListEl) return;
-  let row = sessListEl.querySelector('.sess.sess-draft[data-tab="' + tabId + '"]');
-  if (!row && rec.session && rec.session !== 'new') row = sessListEl.querySelector('.sess[data-id="' + rec.session + '"]');
+  const row = tabRow(rec);
   if (!row) return;
   row.classList.toggle('busy', !!busy);
   if (row.classList.contains('sess-draft')) {
@@ -3393,17 +3447,58 @@ function markTabBusy(tabId, busy) {
     if (meta) meta.innerHTML = '<span class="sess-draftdot"></span>' + (busy ? 'working…' : 'draft · unsaved');
   }
 }
+// Row locator shared by the busy dot + the done-pulse: a draft row is keyed by tab, a saved row by session id.
+function tabRow(rec) {
+  if (!rec || !sessListEl) return null;
+  let row = sessListEl.querySelector('.sess.sess-draft[data-tab="' + rec.tabId + '"]');
+  if (!row && rec.session && rec.session !== 'new') {
+    row = sessListEl.querySelector('.sess[data-id="' + rec.session + '"]');
+    // …and, for a tab living in a NON-active project, the row inside that project's expanded tree.
+    if (!row && bodyEl) { try { row = bodyEl.querySelector('.ws-children .sess[data-id="' + rec.session + '"]'); } catch (e) {} }
+  }
+  return row;
+}
+// "Something finished here while you were looking elsewhere" — pulse the session's sidebar row until you open it.
+function markTabAttention(tabId, on) {
+  const rec = tabs.get(tabId); if (!rec) return;
+  const row = tabRow(rec); if (!row) return;                  // row not painted (other workspace / list not built) — the tab flag still carries it
+  row.classList.toggle('sess-done', !!on);
+}
+// Clear the pulse when the user actually looks at that session (called from setActiveTab).
+function clearTabAttention(tabId) {
+  const rec = tabs.get(tabId); if (!rec) return;
+  rec.attention = false;
+  markTabAttention(tabId, false);   // unconditional: refreshSessions can bail (rename/drag in progress) and leave the pulse stuck on
+}
 // The sidebar is DOCKED (a left column of .body) — toggling .with-sessions slides the layout, it
 // never covers the terminal/chat. The terminal auto-refits via its ResizeObserver when the column changes.
 function openSidebar(open) {
   bodyEl.classList.toggle('with-sessions', open);
   if (open) { refreshWorkspaces(); refreshSessions(); }
 }
-// Clicking a session row: if a tab already hosts it, focus that tab; otherwise re-point the CURRENT tab
-// to it (replacing the current tab's session, like before — but other tabs keep running). The explicit
-// "New session" button opens a NEW tab instead (so it never clears what you're on).
-async function openSession(id, label) {
-  if (id !== 'new') {
+// Open an EXISTING session in its own new tab. Deliberately NOT newBlankTab's `name` param: that also sets
+// pendingTitle, which must never be used for a saved session — if Claude can't resume it and falls back to a
+// fresh conversation, onStatus would persist THIS session's title onto that fallback. Display labels only.
+// Returns false when the tab cap is hit, so callers can degrade instead of silently doing nothing.
+function openSessionInNewTab(wsId, id, label) {
+  if (tabs.size >= MAX_TABS) return false;
+  const tabId = newTabId();
+  const rec = makeTab(tabId, wsId || activeWsId, id);
+  if (rec && label) { rec.label = label; rec.curSessionLabel = label; }   // display only — no pendingTitle (see above)
+  setActiveTab(tabId);                                                    // activates + fits + starts its pty
+  return true;
+}
+// Clicking a session row: if a tab already hosts it, focus that tab; otherwise open it in a NEW tab, so the
+// session you were on keeps running in the background — sessions behave like browser tabs. `opts.inPlace`
+// forces the legacy recycle-this-tab behavior for the flows that structurally need it (toggleShareSession
+// pinning the share to THIS tab). At the tab cap we degrade to recycling an idle, non-shared tab so the user
+// is never stuck.
+async function openSession(id, label, opts) {
+  const inPlace = !!(opts && opts.inPlace);
+  // inPlace callers need THIS tab moved onto `id`; focusing some other tab that already hosts it would leave
+  // this tab where it was (for deleteSession: still holding the doomed transcript open → a false "still
+  // running" abort). Callers guarantee `id` isn't already open elsewhere.
+  if (id !== 'new' && !inPlace) {
     for (const rec of tabs.values()) {                // focus an existing tab for this (ws, session)
       if (rec.wsId === activeWsId && rec.session === id) { setActiveTab(rec.tabId); return; }
     }
@@ -3413,8 +3508,23 @@ async function openSession(id, label) {
   // the mirror's id (two byte streams interleave into one xterm) AND keeps routing your keystrokes + scroll to
   // the host. So a session click while viewing a mirror opens that session in its OWN local tab. (An existing
   // local tab for this (ws, session) was already focused + returned by the loop above.)
-  if (t.kind === 'live') { newBlankTab(activeWsId, id); return; }
+  if (t.kind === 'live') { if (!openSessionInNewTab(activeWsId, id, label)) toast('Tab limit reached (' + MAX_TABS + ') — close a session tab first'); return; }
   if (id !== 'new' && t.session === id && t.wsId === activeWsId) return;   // already on this one
+  // DEFAULT (the "tabs" behavior): open the click in a NEW tab. The tab you were on keeps its Claude running —
+  // busy or idle — and stays reachable from the sidebar, so 2-3 sessions can work at once. Only when the cap is
+  // reached do we consider recycling, and then never a busy tab and never the live-shared one.
+  if (!inPlace && id !== 'new') {
+    if (openSessionInNewTab(activeWsId, id, label)) return;
+    if (t.busy) { toast('Tab limit reached (' + MAX_TABS + ') — that session is still running; close a tab first'); return; }
+    if (t.tabId === sharedTabIdR) { toast('Tab limit reached (' + MAX_TABS + ') — this tab is live-shared; close another tab first'); return; }
+    toast('Tab limit reached (' + MAX_TABS + ') — reusing this tab');     // idle + not shared → safe to recycle below
+  }
+  // Re-pointing the SHARED tab moves the guests' mirror onto another conversation. Main pauses the mirror
+  // defensively (respawnPty's sessionMoved guard); the right answer here is simply never to do it.
+  if (!inPlace && t.tabId === sharedTabIdR && id !== t.session) {
+    if (openSessionInNewTab(activeWsId, id, label)) return;
+    toast('That tab is live-shared — close a tab to open this session beside it'); return;
+  }
   // NEVER kill a session that's actively running. Re-pointing the current tab respawns its pty (main's old.kill()),
   // so if this tab is BUSY (Claude is working), open the clicked session in a NEW background tab instead — the
   // running one keeps going untouched. (An idle tab is safe to recycle — there's no live process to lose.)
@@ -3467,8 +3577,26 @@ function isWsExpanded(id) { return expandedSet().has(id); }
 function setWsExpanded(id, on) { const s = expandedSet(); if (on) s.add(id); else s.delete(id); saveExpandedWs(); }
 const _wsSessCache = new Map();   // wsId -> { list, ts } — avoid refetching a non-active workspace's sessions on every re-render
 const _wsSessFetching = new Set();   // wsIds with a fetch in flight — dedupe concurrent fetches across rapid re-renders
+// Clicking a session that lives in ANOTHER project: give it its own tab bound to that workspace, so the session
+// you're on keeps running. A tab already hosting it just gets focused. An invited-but-never-cloned repo must go
+// through the accept/clone flow FIRST — tab:open→pty:start has no clone gate (it would spawn Claude into a
+// directory that doesn't exist yet); only workspace:open awaits ensureClone.
+function openWsSessionInTab(w, s) {
+  if (!w || !s) return;
+  for (const rec of tabs.values()) {                       // already open somewhere → just focus it
+    if (rec.kind !== 'live' && rec.wsId === w.id && rec.session === s.id) { setActiveTab(rec.tabId); return; }
+  }
+  if (w.kind === 'repo' && w.needsClone) { openAcceptInviteModal(w); return; }   // clone it before any pty is spawned
+  if (!openSessionInNewTab(w.id, s.id, sessTitle(s, w.id))) {
+    toast('Tab limit reached (' + MAX_TABS + ') — close a session tab first');
+  }
+}
 function renderWsSessionRow(w, s) {
-  const row = document.createElement('div'); row.className = 'sess'; row.setAttribute('role', 'button'); row.tabIndex = 0;
+  const row = document.createElement('div');
+  // a background tab in THIS (non-active) project gets the same busy dot / done-pulse as the active list
+  row.className = 'sess' + (sessionOpenInTabWs(s.id, w.id) ? ' open-in-tab' : '') + (sessionBusyInTab(s.id, w.id) ? ' busy' : '') + (sessionNeedsAttention(s.id, w.id) ? ' sess-done' : '');
+  row.dataset.id = s.id;
+  row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s, w.id); p.title = p.textContent;   // shared names from THIS row's workspace cache, not the active one's
   const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.used || s.mtime); m.appendChild(mt);   // last-USED (see renderSessionRow) — file mtime is security-aged for imports
   // live indicator — parity with the active list (this row generation predated the redesign and never got it,
@@ -3478,7 +3606,7 @@ function renderWsSessionRow(w, s) {
   if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s, w.id))); }
   row.appendChild(p); row.appendChild(m);
   appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
-  const go = () => { switchWorkspace(w.id, s.id); };   // switch to that workspace AND open the specific session in one shot (single respawn, no flicker)
+  const go = () => { openWsSessionInTab(w, s); };   // open that project's session in its OWN tab (the tab you're on keeps running)
   row.addEventListener('click', go);
   row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
   return row;
@@ -4008,6 +4136,11 @@ async function switchWorkspace(id, targetSession) {
   }
   if (!t) return;
   if (t.busy) {   // switching workspace mid-turn must NOT kill the running Claude — open the target in a NEW tab, leave this one working in the background (main's workspace:open would otherwise respawn+kill the fg pty)
+    if (targetSession && targetSession !== 'new') {        // dedupe: a tab may already host it (newBlankTab never checks)
+      for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === targetSession) { setActiveTab(rec.tabId); return; }
+    }
+    const tws = workspaces.find((w) => w.id === id);
+    if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
     if (tabs.size < MAX_TABS) newBlankTab(id, targetSession || 'new');
     else toast('That session is still running — finish it or close a tab before switching');
     return;

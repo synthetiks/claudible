@@ -548,6 +548,14 @@
       margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px var(--warn)}
     .sess.busy .sess-livedot,.sess.busy .sess-draftdot{animation:ws-sync-pulse 1s ease-in-out infinite}
     .sess.busy.open-in-tab,.sess.busy.sess-draft{border-left-color:var(--live)}
+    /* DONE-WHILE-AWAY: a background session finished its turn. Green (success), pulsing until you open it —
+       distinct from busy (red/live accent) and from draft (amber). Cleared on activation, so it never nags. */
+    .sess.sess-done{border-left-color:var(--ok);animation:sess-done-pulse 1.6s ease-in-out infinite}
+    .sess.sess-done .sess-prev{color:var(--ok)}
+    .sess.sess-done.busy{animation:none;border-left-color:var(--live)}   /* it started working again → busy wins */
+    @keyframes sess-done-pulse{0%,100%{box-shadow:inset 2px 0 0 0 var(--ok),0 0 0 0 rgba(79,190,138,.28)}
+      50%{box-shadow:inset 2px 0 0 0 var(--ok),0 0 7px 1px rgba(79,190,138,0)}}
+    @media (prefers-reduced-motion:reduce){.sess.sess-done{animation:none}}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */

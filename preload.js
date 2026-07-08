@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),
   onShareGuests: (cb) => ipcRenderer.on('share:guests', (_e, n) => cb(n)),
   onSharePinned: (cb) => ipcRenderer.on('share:pinned', (_e, p) => cb(p)),   // { tabId } the live mirror is pinned to (null = share ended)
+  onShareSessionMoved: (cb) => ipcRenderer.on('share:session-moved', (_e, p) => cb(p)),   // the shared tab was re-pointed off its session → mirror auto-paused
   onShareTypist: (cb) => ipcRenderer.on('share:typist', (_e, p) => cb(p)),   // { name } a guest is typing into the session I host
   onLiveTypist: (cb) => ipcRenderer.on('live:typist', (_e, p) => cb(p)),     // { tabId, name } someone is typing in a session I joined
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),

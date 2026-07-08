@@ -129,7 +129,7 @@ const share = createShareServer({
     // returns to the shared tab.
     const hostIsHere = target === fgTabId;
     if (hostIsHere) { activeWorkspace = ws; registry.activeId = id; saveRegistry(); }
-    respawnPty(target, '');                                            // resume the most-recent conversation in that cwd
+    respawnPty(target, '', { trustedReroute: true });                   // resume the most-recent conversation in that cwd (guest-driven, pre-approved: `w.shared` — never a privacy pause)
     try { win && win.webContents.send('workspace:active-changed', { id, tabId: target, global: hostIsHere }); } catch {}   // tabId = the tab whose pty was ACTUALLY re-pointed (the pinned shared tab); global:false = reset that tab's record but leave the host's sidebar scope alone
   },
   // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
@@ -523,9 +523,28 @@ function respawnPty(tabId, session, opts) {
   if (opts && opts.guardBusy && rec && rec.busy) return false;
   setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
   const cols = (rec && rec.cols) || 120, rows = (rec && rec.rows) || 32, ws = (rec && rec.ws) || activeWorkspace;
+  // PRIVACY GUARD — the SHARED tab is being re-pointed at a DIFFERENT session. The old pause check below is
+  // workspace-granular (isShareable(ws)), so recycling the pinned tab onto another session INSIDE the same
+  // shared workspace used to leave the mirror live: spawnPty re-registers `tabId === mirrorTabId()` and tees
+  // the new session's bytes straight to guests who joined a different conversation. Pause BEFORE the new pty
+  // exists and wipe the replay ring, so not one foreign byte can reach them. (A post-sync reload respawns the
+  // SAME session — `same` is true there, so a legitimate reload never pauses.) The renderer avoids this path
+  // entirely now (it opens the click in a new tab); this is the defense-in-depth backstop.
+  // opts.trustedReroute: the caller IS the share's own machinery (a guest switching to another GRANTED
+  // workspace, or Claude restarting on the SAME conversation for a re-login). Those legitimately pass
+  // session:'' and must not be mistaken for the host re-pointing the mirror at a private conversation.
+  const trusted = !!(opts && opts.trustedReroute);
+  const sharing = (() => { try { return !!share.status().running; } catch { return false; } })();
+  const sessionMoved = !trusted && sharing && sharedTabId && tabId === sharedTabId && rec && rec.session !== (session || '');
+  if (sessionMoved) {
+    try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    try { winSend('share:session-moved', { tabId, from: rec.session || '', to: session || '' }); } catch {}
+    console.log('[claudible] shared tab re-pointed off its session — mirror paused (guests frozen, no leak)');
+  }
   if (tabId === mirrorTabId()) {
     // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
-    try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {}
+    // (A sessionMoved pause above is authoritative — never un-pause it here on the way back in.)
+    try { if (share.status().running && !sessionMoved) share.setPaused(!isShareable(ws)); } catch {}
   }
   const old = rec && rec.proc;
   if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // a pending post-sync reload for the OLD generation dies with it (the new pty re-reads the transcript anyway)
@@ -536,7 +555,10 @@ function respawnPty(tabId, session, opts) {
   // safe (the new file starts empty — nothing to replay) and required (stale offsets belong to the old gen's file).
   hookState.delete(tabId); lastStatusByTab.delete(tabId);
   spawnPty(tabId, cols, rows, ws, session);
-  if (tabId === mirrorTabId()) syncShare();                 // refresh the granted library (live flag) for guests
+  // syncShare re-derives pause from isShareable(mirrorWs()) — which would UNPAUSE the sessionMoved guard above
+  // (same workspace ⇒ still shareable). Skip it in that case: the mirror must stay frozen until the host
+  // explicitly ends or re-starts the share.
+  if (tabId === mirrorTabId() && !sessionMoved) syncShare();   // refresh the granted library (live flag) for guests
   return true;
 }
 // Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points
@@ -1698,7 +1720,7 @@ ipcMain.handle('onboard:install-claude', async () => {
 // The renderer hides the wizard to reveal the terminal, then polls onboard:status until signedIn flips true.
 ipcMain.handle('onboard:claude-login', async () => {
   try {
-    if (fgTabId && ptys.has(fgTabId)) respawnPty(fgTabId, '');     // restart Claude in the live tab → login surfaces
+    if (fgTabId && ptys.has(fgTabId)) respawnPty(fgTabId, '', { trustedReroute: true });   // restart Claude in the live tab → login surfaces (same conversation; never a privacy pause)
     else spawnPty('main', 120, 32, activeWorkspace, '');           // no tab yet → spawn one
     return { ok: true };
   } catch (e) { return { ok: false, error: (e && e.message) || 'could not start Claude' }; }

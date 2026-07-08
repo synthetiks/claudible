@@ -44,7 +44,7 @@
     "setup": "wsl.exe -e bash setup/setup.sh",
     "rebuild": "electron-rebuild -f -w node-pty",
     "postinstall": "patch-package",
-    "test": "node test/runner-parity.test.js && node test/posix-runner.test.js && node test/win-runner.test.js && node test/history.test.js && node test/identity.test.js && node test/history-store.test.js && node test/checkpoint.test.js && node test/checkpoint-tool.test.js && node test/share-names.test.js && node test/presence-filter.test.js && node test/live-holder.test.js && node test/context-hook.test.js && bash test/sessions-divergence.test.sh && bash test/hooks-parity.sh && bash test/port-parity.sh",
+    "test": "node test/runner-parity.test.js && node test/posix-runner.test.js && node test/win-runner.test.js && node test/history.test.js && node test/identity.test.js && node test/history-store.test.js && node test/checkpoint.test.js && node test/checkpoint-tool.test.js && node test/share-names.test.js && node test/presence-filter.test.js && node test/live-holder.test.js && node test/context-hook.test.js && node test/tabs-share.test.js && bash test/sessions-divergence.test.sh && bash test/hooks-parity.sh && bash test/port-parity.sh",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
