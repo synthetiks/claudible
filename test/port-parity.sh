@@ -117,20 +117,18 @@ DIFFV=$'diff --git a/café.txt b/café.txt\nindex e69de29..d95f3ad 100644\n--- a
 UNTRACKEDV=$'new1.txt\n\nnew2-ünïcode.txt\n   \nnew3.txt'
 CDIFFV=$'diff --git a/old.js b/old.js\nindex 111..222 100644\n--- a/old.js\n+++ b/old.js\n@@ -1 +1 @@\n-was\n+now'
 CLOGV="abc123${US}first commit 🎉${US}Alice${US}2026-01-01"$'\n'"def456${US}second${US}Bob${US}2026-01-02"
-# `week` is a passthrough of the WEEK env var added AFTER the port (the commit-list fix); the frozen python
-# oracle predates it and never emits it. It is not part of the DIFF/CDIFF/CLOG/UNTRACKED parsing this test
-# pins, so strip it from the node output before diffing (same spirit as normalizing title-write's wall-clock ts).
-strip_week() { sed 's/"week": [0-9]*, //' "$1" > "$1.norm"; }
+# The keys added AFTER the port (week / window / branch / upstream / ahead / behind, and each commit's `pushed`)
+# are pure passthroughs of env vars the frozen python oracle never knew about. diff-tool.js emits each one ONLY
+# when its env var is actually set — which it isn't here — so the two outputs are byte-identical with no
+# normalizer at all. That's the point: a normalizer would have hidden a real regression in the shared keys.
 # (A) populated
 DIFF="$DIFFV" UNTRACKED="$UNTRACKEDV" CDIFF="$CDIFFV" CLOG="$CLOGV" python3 "$T/diff.py" > "$T/diff.py.out" 2>/dev/null
 DIFF="$DIFFV" UNTRACKED="$UNTRACKEDV" CDIFF="$CDIFFV" CLOG="$CLOGV" node "$ROOT/wsl/diff-tool.js" > "$T/diff.node.out" 2>/dev/null
-strip_week "$T/diff.node.out"
-report "diff.sh [populated]" "$T/diff.py.out" "$T/diff.node.out.norm"
+report "diff.sh [populated]" "$T/diff.py.out" "$T/diff.node.out"
 # (B) empty / fallback
 DIFF="" UNTRACKED="" CDIFF="" CLOG="" python3 "$T/diff.py" > "$T/diff2.py.out" 2>/dev/null
 DIFF="" UNTRACKED="" CDIFF="" CLOG="" node "$ROOT/wsl/diff-tool.js" > "$T/diff2.node.out" 2>/dev/null
-strip_week "$T/diff2.node.out"
-report "diff.sh [empty]" "$T/diff2.py.out" "$T/diff2.node.out.norm"
+report "diff.sh [empty]" "$T/diff2.py.out" "$T/diff2.node.out"
 
 # ---------------------------------------------------------------------------
 # 4) agent-tokens.sh — python3 - "$SA"  |  node agent-tokens-tool.js "$SA"

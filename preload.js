@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceFirstRunDone: () => ipcRenderer.invoke('workspace:firstRunDone'),
   workspaceCreate: (kind, name, pick) => ipcRenderer.invoke('workspace:create', { kind, name, pick: !!pick }),
+  workspaceAdopt: (name) => ipcRenderer.invoke('workspace:adopt', { name }),   // point at a folder that already exists (never moves/publishes/deletes it)
   workspaceUpgrade: (id) => ipcRenderer.invoke('workspace:upgrade', id),   // local → synced (private repo) so it appears on other devices + can be shared
   workspaceOpen: (id, session) => ipcRenderer.invoke('workspace:open', id, session),   // session id → open it directly on switch
   workspaceAcceptInvite: (id, useDefault) => ipcRenderer.invoke('workspace:acceptInvite', { id, useDefault: !!useDefault }),   // choose clone dir + clone

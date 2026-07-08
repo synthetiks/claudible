@@ -256,27 +256,44 @@ function main() {
   const untracked = (env.UNTRACKED || '').split('\n').filter((l) => !pyBlank(l));
   const files = parseDiff(env.DIFF || '');
   const committed = parseDiff(env.CDIFF || '');
+  // Which of HEAD's commits GitHub has never seen. diff.sh passes FULL 40-char hashes (`git rev-list
+  // <upstream>..HEAD`), not %h: git's auto-abbreviation grows with repo size (8 chars past ~60k commits), so a
+  // set-membership test on abbreviated hashes would silently stop matching on a big repo. CLOG carries %H too.
+  const unpushed = new Set((env.UNPUSHED || '').split('\n').filter((l) => !pyBlank(l)));
+  const hasUpstream = !!(env.UPSTREAM || '');
   const commits = [];
   for (const line of (env.CLOG || '').split('\n')) {
     if (pyBlank(line)) continue;
     const parts = line.split('\x1f');
-    commits.push({
+    const c = {
       hash: parts.length > 0 ? parts[0] : '',
       subject: parts.length > 1 ? parts[1] : '',
       author: parts.length > 2 ? parts[2] : '',
       date: parts.length > 3 ? parts[3] : '',
-    });
+    };
+    // Only claim to know a commit's push state when there IS an upstream to compare against. No upstream →
+    // the key is absent and the UI says nothing, rather than labelling every commit "unpushed".
+    if (hasUpstream && parts.length > 4) c.pushed = !unpushed.has(parts[4]);
+    commits.push(c);
   }
   const out = {
     ok: true,
     repo: true,
     total: Number(env.TOTAL) || 0,      // lifetime commits on HEAD (the card's tally)
-    week: Number(env.WEEK) || 0,        // commits in the last 7 days — the list may be capped, this never is
-    files,
-    untracked: untracked.slice(0, 200),
-    committed,
-    commits,
   };
+  // Everything below is emitted ONLY when diff.sh actually passed it. That keeps the byte-for-byte parity test
+  // against the frozen python oracle (which predates these keys, and sets none of these vars) honest and
+  // normalizer-free — the shape is identical whenever the inputs are.
+  if ('WEEK' in env) out.week = Number(env.WEEK) || 0;       // commits in the last 7 days — the list may be capped, this never is
+  if ('WINDOW' in env) out.window = env.WINDOW || 'none';    // 'week' | 'latest' | 'none' — what `commits` actually contains
+  if ('BRANCH' in env) out.branch = env.BRANCH || '';        // '' on a detached HEAD
+  if ('UPSTREAM' in env) out.upstream = env.UPSTREAM || '';  // e.g. 'origin/main' — GitHub's copy of this branch
+  if ('ORIGIN' in env) out.origin = env.ORIGIN || '';        // the folder's own remote URL — main.js re-derives an adopted project's GitHub link from it
+  if (hasUpstream) {
+    out.ahead = Number(env.AHEAD) || 0;                      // local commits GitHub hasn't seen
+    out.behind = Number(env.BEHIND) || 0;                    // commits on GitHub that aren't here yet
+  }
+  Object.assign(out, { files, untracked: untracked.slice(0, 200), committed, commits });
   // python used print(...), which appends a trailing newline — match it byte-for-byte.
   process.stdout.write(pyJson(out) + '\n');
 }

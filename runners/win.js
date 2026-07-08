@@ -140,6 +140,29 @@ function installHooks(sdir, tabRuntimeId) {
   const contextPath = path.join(rt, 'context.json');   // identity/live-state main writes; the context hook reads it (matches main.js's per-tab path)
   fs.mkdirSync(cdir, { recursive: true }); fs.mkdirSync(rt, { recursive: true });
   try { fs.writeFileSync(hooksPath, ''); fs.writeFileSync(statusPath, '{}'); } catch {}   // fresh per launch
+  // Take ownership of <sdir>\.claude the same way wsl/session.sh does, and BEFORE the first overwrite below.
+  // Claudible created the folder for its own workspaces, but an ADOPTED folder is the user's project: their
+  // statusline.js / hook.js / settings.json (permissions, MCP servers) live under these exact names. Snapshot
+  // each one once. The sidecar records it — Claude Code warns on unknown keys inside settings.json, so no marker
+  // goes in the JSON. Keep this list in sync with wsl/session.sh's.
+  const owned = path.win32.join(cdir, '.claudible-owned');
+  if (!fs.existsSync(owned)) {
+    // A .claude that predates the sidecar but is already OURS must not be "backed up" — that would litter every
+    // existing workspace with a copy of Claudible's own settings. Two markers together, neither plausible in a
+    // hand-written config: the DISABLE_AUTO_COMPACT env we set, and a statusLine command inside this .claude.
+    let mine = false;
+    try {
+      const s = fs.readFileSync(path.win32.join(cdir, 'settings.json'), 'utf8');
+      mine = s.includes('DISABLE_AUTO_COMPACT') && /\.claude[\\/]+statusline/.test(s);
+    } catch { mine = false; }   // no settings.json → nothing of theirs to lose either way
+    if (!mine) {
+      for (const f of ['settings.json', 'statusline.js', 'hook.js', 'context-hook.js']) {
+        const p = path.win32.join(cdir, f);
+        try { if (fs.existsSync(p)) fs.copyFileSync(p, p + '.pre-claudible'); } catch {}
+      }
+    }
+    try { fs.writeFileSync(owned, ''); } catch {}
+  }
   fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js'));
   fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js'));
   // Stage the context hook too (additive; its absence in an older bundle just omits the identity injection).
@@ -148,6 +171,7 @@ function installHooks(sdir, tabRuntimeId) {
   // MUST be a real node.exe, NOT process.execPath (= electron.exe under Electron, which won't run a .js
   // without ELECTRON_RUN_AS_NODE). Claudible's installer guarantees Windows Node 22.12+ on PATH.
   const nodeBin = whichNode();
+  // settings.json was snapshotted by the ownership block above, alongside the hook scripts. Safe to overwrite.
   fs.writeFileSync(path.win32.join(cdir, 'settings.json'),
     JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2));
   return { cdir, statusPath, hooksPath, contextPath };

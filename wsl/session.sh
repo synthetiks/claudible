@@ -70,6 +70,34 @@ printf '%s %s\n' "$$" "$(sed 's/.*) //' "/proc/$$/stat" 2>/dev/null | awk '{prin
 : > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
 printf '{}' > "$STATUS" # clear stale status so the meter starts blank, not on last session's numbers
 
+# --- taking ownership of $SDIR/.claude ---------------------------------------------------------------
+# Everything below stages Claudible's runtime into $SDIR/.claude and OVERWRITES each file unconditionally. For a
+# workspace Claudible CREATED, those names have never meant anything else. An ADOPTED folder is the user's own
+# project: a hand-rolled .claude/statusline.js is a common thing to have, and settings.json may hold their
+# permissions, MCP servers and hooks. Snapshot every name we are about to take, ONCE, before the first write.
+#
+# The sidecar — not a marker key inside settings.json — records that we already did: Claude Code validates that
+# file against a schema and warns on unknown keys. Keep this list in sync with what gets written below (node
+# hooks, bash-fallback hooks, settings) and with runners/win.js's installHooks(), its Windows-native twin.
+#
+# Workspaces created before the sidecar existed have a .claude full of OUR files and no marker. Backing those up
+# would litter every existing install with a "pre-claudible" copy of Claudible's own settings. So recognize our
+# own settings.json first, by two things together that no hand-written config would both carry: the
+# DISABLE_AUTO_COMPACT env we set, and a statusLine command pointing inside this workspace's .claude. The bias is
+# deliberate — a false "not ours" costs one stray backup file, a false "ours" costs the user their config.
+if [ ! -e "$SDIR/.claude/.claudible-owned" ]; then
+  if [ -f "$SDIR/.claude/settings.json" ] \
+     && grep -q 'DISABLE_AUTO_COMPACT' "$SDIR/.claude/settings.json" 2>/dev/null \
+     && grep -q '\.claude/statusline' "$SDIR/.claude/settings.json" 2>/dev/null; then
+    : # this .claude was already Claudible's — adopt the sidecar, back nothing up
+  else
+    for _f in settings.json statusline.js hook.js context-hook.js statusline.sh hook.sh context-hook.sh; do
+      [ -f "$SDIR/.claude/$_f" ] && cp "$SDIR/.claude/$_f" "$SDIR/.claude/$_f.pre-claudible" 2>/dev/null
+    done
+  fi
+  : > "$SDIR/.claude/.claudible-owned" 2>/dev/null || true
+fi
+
 # --- statusLine + hooks ----------------------------------------------------------------------------
 # Prefer the SHARED Node hooks ($APPDIR/hooks/*.js — ONE implementation reused by WSL / Windows-native /
 # Posix, and no python3). Fall back to inline bash hooks if node can't be found: a minimal native-claude
@@ -172,6 +200,7 @@ else
   UPS_HOOKS="[{\"type\":\"command\",\"command\":\"$HK_CMD\"}]"
   SESSIONSTART_LINE=""
 fi
+# settings.json is one of the names the ownership snapshot above already backed up. This overwrite is safe.
 cat > "$SDIR/.claude/settings.json" <<EOF
 {
   "autoCompactEnabled": false,

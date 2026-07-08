@@ -1134,7 +1134,10 @@ function discoverWorkspaces() {
           const owner = String(item && item.owner || '').replace(/[^A-Za-z0-9-]/g, '');
           if (!slug || !owner) continue;
           const wid = `repo-${slug}`;
-          if (registry.workspaces.some((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner))) continue;   // already known (incl. an upgraded-in-place ws: it's kind 'repo' with owner set, so this catches it without hiding a different owner's same-slug invite)
+          // Already known? Also skip a repo the user has ADOPTED a working copy of (ws.repoId = 'owner/name' from
+          // its `origin`): its folder is already on disk, so offering it again as a "clone me" invite is noise.
+          // Keyed on the remote identity, not a tombstone — un-adopting the folder restores discovery by itself.
+          if (registry.workspaces.some((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner) || (w.adopted && w.repoId === owner + '/' + slug))) continue;   // already known (incl. an upgraded-in-place ws: it's kind 'repo' with owner set, so this catches it without hiding a different owner's same-slug invite)
           if ((registry.dismissedRepos || []).includes(owner + '/' + slug)) continue;   // the user DELETED this repo workspace here — discovery must not resurrect it as a fresh invite every launch (deliberately re-adding it clears the tombstone)
           const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoUrl: (item && item.repoUrl) || undefined, createdAt: Date.now(), needsClone: true };
           registry.workspaces.push(ws); added.push(ws);
@@ -1183,6 +1186,10 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   if (!ws) return { ok: false, error: 'no such workspace' };
   if (ws.kind === 'repo') return { ok: true, already: true };
   if (ws.kind !== 'local') return { ok: false, error: 'only a local workspace can be made synced' };
+  // An ADOPTED folder is the user's own working tree, very often already a git repo with a real `origin`.
+  // upgrade-workspace.sh runs `git remote remove origin` + `git add -A` + `gh repo create --source=. --push`:
+  // on an adopted repo that DROPS their remote and republishes their whole tree to a new private repo. Refuse.
+  if (ws.adopted) return { ok: false, error: 'This project points at a folder you already own — Claudible won’t re-publish it to a new GitHub repo. Create a “shared repo project” instead.' };
   if (!APPDIR_WSL) return { ok: false, error: 'WSL/GitHub backend is not available' };
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!slug) return { ok: false, error: 'bad workspace' };
@@ -1312,6 +1319,60 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
     exec('');
   }
 }));
+// ADOPT a folder the user already works in as a project. Unlike workspace:create, nothing is provisioned: the
+// folder exists, may be a git repo with its own remote, and Claudible must never move, republish, or delete it.
+// It registers as kind:'local' (so the existing local/repo/legacy allowlists in the runners keep working —
+// an unknown kind silently degrades to 'legacy' and would point Claude at ~/.claudible/session) plus the
+// `adopted:true` marker that gates the two destructive paths: workspace:delete's folder-trashing script, and
+// workspace:upgrade's `git remote remove origin` + republish.
+const GITHUB_REMOTE = /^(?:https?:\/\/(?:[^@/]*@)?(?:www\.)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i;
+ipcMain.handle('workspace:adopt', (e, payload) => new Promise((resolve) => {
+  const targetTab = fgTabId;                                       // the tab this adopt was FOR (mirrors workspace:create)
+  if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL is not available' });
+  dialog.showOpenDialog(win, { title: 'Choose a folder you already work in', properties: ['openDirectory'] })
+    .then((res) => {
+      if (res.canceled || !res.filePaths || !res.filePaths.length) return resolve({ ok: false, error: 'cancelled' });
+      const guest = runner.toGuestPath(res.filePaths[0]);
+      // A quote would escape the single-quoted bash arg below; a backslash would break the script's JSON.
+      if (!guest || /['"\\]/.test(guest)) return resolve({ ok: false, error: 'could not use that folder' });
+      runner.runScript('adopt-workspace.sh', `'${guest}'`, { timeout: 30000 }).then(({ err, stdout }) => {
+        if (err) { console.error('[claudible] adopt-workspace:', err.message); return resolve({ ok: false, error: 'could not read that folder' }); }
+        let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+        if (!r.ok || !r.path) return resolve({ ok: false, error: r.error || 'could not add that folder' });
+        // The SCRIPT's canonical path is the identity (it resolved `..`, symlinks and the Windows spelling), so
+        // "same folder twice" is one string compare. Adding it again just re-opens the project already tracking it.
+        const same = registry.workspaces.find((w) => w.path === r.path);
+        if (same) {
+          registry.activeId = same.id; activeWorkspace = same; saveRegistry();
+          openWorkspaceInTab(same, targetTab);
+          return resolve({ ok: true, workspace: same, already: true });
+        }
+        const base = String(payload && payload.name || r.name || '').trim().toLowerCase()
+          .replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'project';
+        // Two different folders can share a basename (`~/work/api` and `~/oss/api`). Uniquify rather than
+        // dead-end: the slug only names the registry id — an adopted workspace always resolves via ws.path.
+        let slug = base, n = 1;
+        while (registry.workspaces.some((w) => w.id === `local-${slug}`)) slug = `${base}-${++n}`;
+        const m = GITHUB_REMOTE.exec(String(r.origin || ''));
+        const ws = { id: `local-${slug}`, label: String(payload && payload.name || r.name || slug).slice(0, 80),
+          kind: 'local', slug, adopted: true, path: r.path,
+          repoId: m ? `${m[1]}/${m[2]}` : undefined, createdAt: Date.now() };
+        registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
+        openWorkspaceInTab(ws, targetTab);
+        resolve({ ok: true, workspace: ws, repo: !!r.repo, claudeTracked: !!r.claudeTracked, excluded: !!r.excluded });
+      });
+    }).catch(() => resolve({ ok: false, error: 'folder pick failed' }));
+}));
+// Point the tab this action was FOR at `ws` and start a fresh conversation there — but only if the user hasn't
+// foregrounded a different tab meanwhile, and never over a mid-turn Claude (same contract as workspace:create).
+function openWorkspaceInTab(ws, targetTab) {
+  openGen++;                                                       // supersede any in-flight workspace:open clone
+  if (fgTabId !== targetTab) return;
+  const fr = ptys.get(targetTab); const prevWs = fr && fr.ws;
+  if (fr) fr.ws = ws;
+  const respawned = respawnPty(targetTab, 'new', { guardBusy: true });
+  if (!respawned && fr) fr.ws = prevWs;
+}
 // Grant / revoke a workspace to guests (default-deny). Updates the live share immediately.
 ipcMain.handle('workspace:setShared', (e, payload) => {
   const ws = registry.workspaces.find((w) => w.id === (payload && payload.id));
@@ -1335,8 +1396,16 @@ ipcMain.handle('workspace:rename', (e, payload) => {
 ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return resolve({ ok: false, error: 'unknown workspace' });
-  if (ws.kind === 'local' && registry.workspaces.filter((w) => w.kind === 'local').length <= 1)
+  // Mirrors the renderer's isLastLocal(). An ADOPTED entry only POINTS at a folder the user already owned —
+  // removing it moves nothing — so the "keep a guaranteed home" rule must not make it permanently un-removable
+  // (which it did: adopt on first run, the placeholder gets cleaned up, and it becomes the only kind:'local').
+  // It can go whenever another OPENABLE project remains — `fallback` below must resolve to a real directory.
+  if (ws.adopted) {
+    if (!registry.workspaces.some((w) => w.id !== id && (w.kind === 'local' || (w.kind === 'repo' && !w.needsClone))))
+      return resolve({ ok: false, error: 'This is your only project — add another first.' });
+  } else if (ws.kind === 'local' && registry.workspaces.filter((w) => w.kind === 'local').length <= 1) {
     return resolve({ ok: false, error: 'You need at least one local workspace — create another first.' });
+  }
   // BUSY GUARD: main's rec.busy is authoritative (hook poller). Deleting a workspace respawns every tab bound
   // to it — doing that under a mid-turn Claude kills the turn and trashes the directory it's writing into.
   // Same contract as session delete: refuse, let the renderer toast, user stops the turn first.
@@ -1347,6 +1416,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   for (const [tid, rec] of ptys) { if (rec.ws && rec.ws.id === id) { rec.ws = fallback; moved.push(tid); } }
   const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
   _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id);               // drop the deleted ws's leftover per-workspace state
+  _lastFetch.delete(id); fetchLock.delete(id);                                         // …incl. the background-fetch throttle (a re-added project must fetch immediately, not wait out a stale 90s window)
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
   // TOMBSTONE a deleted repo workspace (per-machine, in the registry): discoverWorkspaces would otherwise
@@ -1359,7 +1429,10 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
   const finish = () => resolve({ ok: true, activeId: registry.activeId, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
-  if (APPDIR_WSL && slug && (ws.kind === 'local' || ws.kind === 'repo')) {
+  // ADOPTED workspaces point at a folder the USER already owned — Claudible never created it, so removing the
+  // project must never remove the folder. delete-workspace.sh prefers CLAUDIBLE_WS_DIR (wsEnv emits ws.path), so
+  // shelling out here would `mv -f` their real source tree into ~/.claudible/trash. Unregister only.
+  if (APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo')) {
     runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(() => finish());
   } else finish();
 }));
@@ -1804,15 +1877,40 @@ ipcMain.handle('session:latest-reply', async (e, sessionId) => {
 });
 
 // ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
+// Refresh a project's `origin/<branch>` ref in the BACKGROUND, so diff.sh can say which commits GitHub already
+// has. Deliberately NOT inside diff.sh: that read has a 30s budget the panel waits on, and it must never be
+// spent on a network round-trip. This fires alongside the read; the next 4s repaint shows the fresher state.
+const _lastFetch = new Map();       // wsId -> ms of the last ATTEMPT (success or failure — a dead remote must throttle too)
+const fetchLock = new Set();        // wsId with a fetch in flight
+const FETCH_EVERY_MS = 90 * 1000;   // the panel repaints every 4s; the network doesn't need to
+function maybeFetch(ws) {
+  if (!APPDIR_WSL || !ws || !ws.id || ws.needsClone) return;
+  if (fetchLock.has(ws.id)) return;
+  if (Date.now() - (_lastFetch.get(ws.id) || 0) < FETCH_EVERY_MS) return;
+  _lastFetch.set(ws.id, Date.now());   // stamp + lock BEFORE the await (mirrors syncLock): a 10s fetch must not let the 4s poller stack a queue of them
+  fetchLock.add(ws.id);
+  runner.runScript('git-fetch.sh', '', { ws, timeout: 15000 })
+    .catch(() => {})                   // offline / no upstream / no creds are all normal — the script says so in JSON and never throws
+    .then(() => { fetchLock.delete(ws.id); });
+}
 ipcMain.handle('diff:list', (e, { wsId } = {}) => new Promise((resolve) => {
   if (!APPDIR_WSL) return resolve({ ok: false, repo: false, files: [], untracked: [] });
   const ws = (wsId && _wsById(wsId)) || activeWorkspace;   // Project History can review any project, not just the active one
+  maybeFetch(ws);                                          // fire-and-forget; this read uses whatever ref is on disk right now
   runner.runScript('diff.sh', '', { ws, timeout: 30000, maxBuffer: 32 * 1024 * 1024 }).then(({ err, stdout }) => {
       // `err` used to be destructured and dropped: a timeout / crashed script produced no stdout, JSON.parse('{}')
       // succeeded, and the panel showed "no changes" for a repo that was never actually read. Log it and fail loudly.
       if (err) { console.error('[claudible] diff.sh:', err.message); return resolve({ ok: false, repo: true, error: 'diff failed: ' + (err.message || 'exec error'), files: [], untracked: [], committed: [], commits: [] }); }
       let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {}
       if (!r || typeof r !== 'object') { console.error('[claudible] diff.sh: unparseable output'); return resolve({ ok: false, repo: true, error: 'diff returned no output', files: [], untracked: [], committed: [], commits: [] }); }
+      // An adopted project's ws.repoId (its card's "owner/name ↗" link) was parsed from `origin` at adopt time.
+      // It's the USER's repo — they can repoint or remove the remote whenever they like — so re-derive it from
+      // what the folder says RIGHT NOW rather than serving a link to a repo they've moved on from.
+      if (ws && ws.adopted && typeof r.origin === 'string') {
+        const m = GITHUB_REMOTE.exec(r.origin);
+        const next = m ? `${m[1]}/${m[2]}` : undefined;
+        if (next !== ws.repoId) { if (next) ws.repoId = next; else delete ws.repoId; saveRegistry(); }
+      }
       resolve(r);
     });
 }));
@@ -1994,15 +2092,25 @@ ipcMain.handle('history:load', (e, arg) => {
 // Revert the entry's workspace repo to the code state captured at that prompt (its checkpointRef). checkpoint.sh
 // snapshots the CURRENT tree to an 'undo' ref FIRST, so the revert is reversible. Worktree-only — it does NOT
 // rewind commits (the renderer's confirm dialog says so). 'undo' is not a valid revert target here (use checkpoint:undo).
+// `restore` OVERWRITES worktree files and deletes anything added since the checkpoint. Both handlers below are
+// unreachable for a non-repo workspace today — only _snapshotOnStop/_seedCkpt mint a checkpointRef, and both bail
+// on `kind !== 'repo'`, so restore() finds no ref and returns {ok:false}. But that's a guard living in a *different
+// function*: the day someone snapshots an adopted folder, the destructive call here would silently start firing on
+// the user's real source tree. Every other destructive path in this app checks at the call site. So does this one.
+const _ckptAllowed = (ws) => !!ws && (!ws.kind || ws.kind === 'repo');   // matches _snapshotOnStop / _seedCkpt exactly (legacy ws has no kind)
 ipcMain.handle('checkpoint:revert', (e, { id, wsId } = {}) => new Promise((resolve) => {
   if (!_histEnabled()) return resolve({ ok: false, error: 'disabled' });
   const cid = String(id || '');
   if (!_ckptIdRe.test(cid) || cid === 'undo') return resolve({ ok: false, error: 'bad id' });
-  _ckptRun(_wsById(wsId) || activeWorkspace, 'restore ' + cid).then((r) => resolve(r || { ok: false, error: 'revert failed' }));
+  const ws = _wsById(wsId) || activeWorkspace;
+  if (!_ckptAllowed(ws)) return resolve({ ok: false, error: 'checkpoints are only kept for repo projects' });
+  _ckptRun(ws, 'restore ' + cid).then((r) => resolve(r || { ok: false, error: 'revert failed' }));
 }));
 ipcMain.handle('checkpoint:undo', (e, { wsId } = {}) => new Promise((resolve) => {
   if (!_histEnabled()) return resolve({ ok: false, error: 'disabled' });
-  _ckptRun(_wsById(wsId) || activeWorkspace, 'restore undo').then((r) => resolve(r || { ok: false, error: 'undo failed' }));
+  const ws = _wsById(wsId) || activeWorkspace;
+  if (!_ckptAllowed(ws)) return resolve({ ok: false, error: 'checkpoints are only kept for repo projects' });
+  _ckptRun(ws, 'restore undo').then((r) => resolve(r || { ok: false, error: 'undo failed' }));
 }));
 ipcMain.handle('history:append', (e, payload) => {
   try {

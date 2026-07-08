@@ -701,6 +701,8 @@
     .choice .ct{font-size:12.5px;color:var(--ink);margin-bottom:3px}
     .choice .cd{font-size:10.5px;line-height:1.45;color:var(--ink-dim)}
     .ws-busy{font-size:11px;color:var(--ink-dim);min-height:15px;margin:-4px 0 12px;text-align:left}
+    .ws-note{display:none;font-size:10.5px;line-height:1.5;color:var(--ink-dim);text-align:left;margin:-2px 0 12px}
+    .ws-note code{font-size:10px;color:var(--silver);background:rgba(255,255,255,.05);padding:0 3px;border-radius:3px}
     .ws-pick-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);margin:2px 0 12px;cursor:pointer;text-align:left}
     .ws-pick-row input{cursor:pointer}
     .ws-busy.err{color:var(--live-soft)}
@@ -868,6 +870,12 @@
     .ph-sec svg{flex:none;opacity:.8}
     .ph-sec::after{content:'';flex:1;height:1px;background:var(--hairline-soft,rgba(255,255,255,.05));margin-left:2px}
     .ph-sum{font-size:10.5px;color:var(--ink-dim);letter-spacing:.02em;padding:1px 0 3px}
+    /* where this branch stands against its GitHub upstream (origin/<branch> as of the last background fetch) */
+    .ph-sync{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:1px 0 6px}
+    .ph-sync-t{font-size:10px;color:var(--ink-faint,#565c66);font-family:var(--mono,ui-monospace,monospace)}
+    .ph-chip{flex:none;font-size:9.5px;line-height:1.6;padding:0 6px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+    .ph-chip.ahead{color:#e8c37a;border-color:rgba(232,195,122,.32);background:rgba(232,195,122,.09)}
+    .ph-chip.behind{color:#7f9cff;border-color:rgba(127,156,255,.32);background:rgba(127,156,255,.09)}
     .diff-file{border:1px solid var(--hairline);border-radius:10px;overflow:hidden;background:#0b0d10}
     .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:#101216;border-bottom:1px solid var(--hairline)}
     .diff-path{font-size:12px;color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}
@@ -1349,6 +1357,10 @@
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           <div><div class="ct">Local project</div><div class="cd">Point Claude at a folder on your machine. Private to you.</div></div>
         </div>
+        <div class="choice" id="ch-adopt" data-kind="adopt" role="radio" tabindex="0" aria-checked="false">
+          <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14l3-3 3 3"/></svg>
+          <div><div class="ct">Add a folder I already have</div><div class="cd">Point Claudible at an existing folder — your repo, your code. Nothing is moved, copied, or published, and its commits show up in Project History.</div></div>
+        </div>
         <div class="choice" id="ch-repo" data-kind="repo" role="radio" tabindex="0" aria-checked="false">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
           <div><div class="ct">Shared repo project</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team, so you can build (and go live) together.</div></div>
@@ -1356,6 +1368,7 @@
       </div>
       <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dashes)" />
       <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose a folder for it (local only — else it goes in ~/.claudible)</span></label>
+      <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
       <div class="ws-busy" id="ws-busy"></div>
       <div class="row">
         <button id="ws-create">Create</button>

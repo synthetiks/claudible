@@ -1731,7 +1731,13 @@ async function loadSkills() {
     row.appendChild(main);
     const on = s.state !== 'off';
     const tog = document.createElement('button'); tog.className = 'ext-tog' + (on ? ' on' : ''); tog.textContent = on ? 'on' : 'off';
-    tog.addEventListener('click', async () => { let r = null; try { r = await claudible.skillsSet(s.name, on ? 'off' : 'on'); } catch {} if (r && r.ok) loadSkills(); });
+    // A refusal used to be a silent no-op (the toggle just didn't move). It has a real cause now — an adopted
+    // project whose own .claude/settings.local.json doesn't parse, which we refuse to overwrite — so say it.
+    tog.addEventListener('click', async () => {
+      let r = null; try { r = await claudible.skillsSet(s.name, on ? 'off' : 'on'); } catch {}
+      if (r && r.ok) loadSkills();
+      else if (r && r.error) toast(r.error);
+    });
     row.appendChild(tog); el.appendChild(row);
   });
 }
@@ -1926,6 +1932,10 @@ function repoIdOf(aw) {
       if (/^https?:\/\//i.test(ru)) url = ru.replace(/\.git$/, '');
       else if (/^git@github\.com:/i.test(ru)) url = 'https://github.com/' + ru.replace(/^git@github\.com:/i, '').replace(/\.git$/, '');
     }
+  } else if (aw && aw.adopted && aw.repoId) {
+    // An adopted folder's own `origin`, parsed to 'owner/name' by main.js at adopt time (github.com only, so
+    // this can only ever build an https://github.com/… link — openExternal rejects anything else regardless).
+    idText = aw.repoId; url = 'https://github.com/' + aw.repoId;
   }
   return { idText, url };
 }
@@ -2081,8 +2091,13 @@ async function loadHistoryInto(targetWsId, wrap, liveEntries) {
 // under it. Replaces the single-active-workspace "Repo Review" with a browse-any-project view. ----
 const _phExpanded = new Set();   // project ids currently expanded in the drawer (default: the active one)
 function _phProjects() {
-  const list = (typeof workspaces !== 'undefined' ? workspaces : []).filter((w) => w && (w.kind === 'repo' || w.id === activeWsId));   // shared repos + the active project (so a local active is still reviewable)
-  list.sort((a, b) => (a.id === activeWsId ? -1 : b.id === activeWsId ? 1 : 0));   // active project first
+  // EVERY project, in the order the chips are in: new, old, local, adopted, shared repo. This used to be
+  // `kind === 'repo' || id === activeWsId`, which hid every non-active local project — including an adopted
+  // folder, the only kind whose commit history the user actually recognizes. A project with no git in it renders
+  // an honest "isn't a git repo" line, and an invited repo that isn't cloned yet says so; neither is a reason to
+  // omit the card. Cards load lazily (only the expanded one reads git), so listing them all costs nothing.
+  const list = (typeof workspaces !== 'undefined' ? workspaces : []).filter(Boolean);
+  list.sort((a, b) => (a.id === activeWsId ? -1 : b.id === activeWsId ? 1 : 0));   // active project first, rest keep chip order
   return list;
 }
 function renderProjectHistory() {
@@ -2150,6 +2165,13 @@ function _phCard(id, label, kind, isLive, w) {
 // header's commit-count stat.
 function _phFillBody(w, card) {
   loadHistoryInto(w.id, card.feed);
+  // An invited repo you haven't accepted yet has NO folder on this machine. Running git in a directory that
+  // doesn't exist reports "not a git repo", which reads as "your repo is empty" — say the true thing instead.
+  if (w.needsClone) {
+    if (card.diff) card.diff.innerHTML = '<div class="diff-empty">Not downloaded yet — click this project in the sidebar to choose where to save it.</div>';
+    if (card.stats) card.stats.textContent = '';
+    return;
+  }
   loadDiffInto(w.id, card.diff, { onMeta: (meta) => { if (card.stats) card.stats.textContent = (typeof meta.total === 'number' && meta.total > 0) ? meta.total.toLocaleString() + ' commit' + (meta.total > 1 ? 's' : '') : 'no commits yet'; } });
 }
 // Live refresh (4s timer + per-prompt hook line): reload only the EXPANDED cards' bodies in place, so the
@@ -2164,6 +2186,7 @@ function refreshExpandedProjects(opts) {
     if (String(el.dataset.ws).startsWith('live-')) { if (at && at.kind === 'live') loadHistoryInto(null, feed, at.liveHistory || []); return; }
     const w = workspaces.find((x) => x.id === el.dataset.ws); if (!w) return;
     loadHistoryInto(w.id, feed);
+    if (w.needsClone) return;                          // no local folder → nothing to read (and no WSL spawn every 4s)
     loadDiffInto(w.id, diff, Object.assign({}, opts || {}, { onMeta: (meta) => { if (stats) stats.textContent = (typeof meta.total === 'number' && meta.total > 0) ? meta.total.toLocaleString() + ' commit' + (meta.total > 1 ? 's' : '') : 'no commits yet'; } }));
   });
 }
@@ -2184,9 +2207,16 @@ async function loadDiffInto(targetWsId, body, opts) {
   const files = r.files || [], untracked = r.untracked || [], committed = r.committed || [], commits = r.commits || [];
   const total = (r && typeof r.total === 'number') ? r.total : null;   // lifetime commit tally (card header)
   const week = (r && typeof r.week === 'number') ? r.week : commits.length;   // commits in the last 7 days (list may be capped at 50)
+  // What `commits` actually holds: this week's, or — when the week was empty but the repo has history — its
+  // latest. An older diff.sh emits neither key, so infer conservatively (it only ever sent a week's worth).
+  const win = r.window || (commits.length ? 'week' : 'none');
+  const upstream = r.upstream || '';                                   // '' → this branch isn't tracking anything on GitHub
+  const ahead = typeof r.ahead === 'number' ? r.ahead : 0;             // local commits GitHub hasn't seen
+  const behind = typeof r.behind === 'number' ? r.behind : 0;          // commits on GitHub that aren't here yet
   if (opts && opts.onMeta) try { opts.onMeta({ total }); } catch (e) {}   // identity/totals live on the card's MAIN BAR now — hand the count up
-  // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed
-  const sig = JSON.stringify({ ws: targetWsId, t: total, w: week, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => c.hash), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
+  // change-signature, so a silent auto-refresh leaves the panel (and your scroll) untouched when nothing changed.
+  // The GitHub state belongs in it: a background fetch that reveals 3 new upstream commits changes nothing else.
+  const sig = JSON.stringify({ ws: targetWsId, t: total, w: week, win, up: upstream, a: ahead, b: behind, f: files.map((f) => [f.path, f.additions, f.deletions]), u: untracked, c: commits.map((c) => [c.hash, c.pushed]), cf: committed.map((f) => [f.path, f.additions, f.deletions]) });
   if (quiet && sig === body._diffSig) return;
   body._diffSig = sig;
   if (!files.length && !untracked.length && !committed.length && !commits.length) {
@@ -2207,6 +2237,21 @@ async function loadDiffInto(targetWsId, body, opts) {
     if (week) parts.push(week + ' commit' + (week > 1 ? 's' : '') + ' this week');
     if (parts.length) { const sum = document.createElement('div'); sum.className = 'ph-sum'; sum.textContent = parts.join('  ·  '); body.appendChild(sum); }
   }
+  // Where this branch stands against GitHub. `origin/<branch>` after a fetch IS what github.com shows, so
+  // "3 to push" / "2 to pull" are facts about the remote, not guesses. Silent when there's no upstream to compare.
+  if (upstream && (ahead || behind)) {
+    const sy = document.createElement('div'); sy.className = 'ph-sync';
+    const chip = (txt, cls) => { const s = document.createElement('span'); s.className = 'ph-chip ' + cls; s.textContent = txt; sy.appendChild(s); };
+    if (ahead) chip('↑ ' + ahead + ' to push', 'ahead');
+    if (behind) chip('↓ ' + behind + ' to pull', 'behind');
+    const t = document.createElement('span'); t.className = 'ph-sync-t';
+    t.textContent = (r.branch ? r.branch + ' → ' : '') + upstream;
+    t.title = ahead && behind ? 'This branch and ' + upstream + ' have both moved on.'
+      : ahead ? ahead + ' commit' + (ahead > 1 ? 's' : '') + ' exist only on this machine — GitHub hasn’t seen them.'
+      : upstream + ' has ' + behind + ' commit' + (behind > 1 ? 's' : '') + ' you don’t have yet.';
+    sy.appendChild(t);
+    body.appendChild(sy);
+  }
   if (files.length || untracked.length) {
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl'; lbl.textContent = 'uncommitted — in the working tree';
     body.appendChild(lbl);
@@ -2222,9 +2267,13 @@ async function loadDiffInto(targetWsId, body, opts) {
   if (commits.length || committed.length) {                            // work already committed — visible, review-only
     const shown = commits.length, more = Math.max(0, (week || 0) - shown);
     const lbl = document.createElement('div'); lbl.className = 'diff-sec-lbl';
-    lbl.textContent = 'recent · last 7 days'
-      + (week ? ' · ' + week + ' commit' + (week > 1 ? 's' : '') + (more ? ' (showing ' + shown + ')' : '') : '')
-      + ' · review only';
+    // A repo you commit to monthly isn't a repo with "no commits" — when this week is empty, diff.sh sends the
+    // latest ones instead and says so, and the label has to stop claiming they happened in the last 7 days.
+    lbl.textContent = win === 'latest'
+      ? 'latest commits · nothing in the last 7 days · review only'
+      : 'recent · last 7 days'
+        + (week ? ' · ' + week + ' commit' + (week > 1 ? 's' : '') + (more ? ' (showing ' + shown + ')' : '') : '')
+        + ' · review only';
     body.appendChild(lbl);
     if (commits.length) body.appendChild(renderCommitList(commits));
     if (committed.length) committed.forEach((f) => body.appendChild(renderDiffFile(f, true, targetWsId)));
@@ -2241,8 +2290,16 @@ function renderCommitList(commits) {
     const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:baseline;gap:8px;font-size:11.5px;line-height:1.4';
     const h = document.createElement('code'); h.textContent = c.hash; h.style.cssText = 'color:#7f9cff;flex:none;font-size:11px';
     const s = document.createElement('span'); s.textContent = c.subject; s.title = c.subject; s.style.cssText = 'color:var(--ink,#e7eaef);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0';
+    row.appendChild(h); row.appendChild(s);
+    // `pushed` is absent (not false) when there's no upstream to compare against — never label a commit
+    // "not on GitHub" just because the branch doesn't track anything.
+    if (c.pushed === false) {
+      const u = document.createElement('span'); u.className = 'ph-chip ahead'; u.textContent = 'not on GitHub';
+      u.title = 'This commit exists only on this machine — push the branch to share it.';
+      row.appendChild(u);
+    }
     const m = document.createElement('span'); m.textContent = [c.author, c.date].filter(Boolean).join(' · '); m.style.cssText = 'color:var(--ink-faint,#565c66);flex:none;font-size:10px';
-    row.appendChild(h); row.appendChild(s); row.appendChild(m); box.appendChild(row);
+    row.appendChild(m); box.appendChild(row);
   });
   return box;
 }
@@ -3744,9 +3801,9 @@ function renderWsChips() {
     chip.addEventListener('pointerup', onWsPointerUp);
     chip.addEventListener('pointercancel', onWsPointerUp);
     chip.addEventListener('contextmenu', (e) => {
-      if (isLastLocal(w)) { try { toast('You need at least one local project'); } catch (e) {} return; }   // never delete the last local (the guaranteed home)
+      if (isLastLocal(w)) { try { toast(w.adopted ? 'This is your only project — add another first' : 'You need at least one local project'); } catch (e) {} return; }   // never delete the last local (the guaranteed home)
       e.preventDefault(); e.stopPropagation();
-      if (confirm('Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo project keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w);
+      if (confirm(deleteWsPrompt(w))) deleteWorkspace(w);   // same wording as the ▾ menu — an adopted folder is never trashed
     });
     el.appendChild(chip);
     if (isWsExpanded(w.id)) {                               // expanded → nest its sessions beneath it
@@ -3945,7 +4002,9 @@ function wsMenuItems(chip, nm, w) {
         hint: 'Sync this project’s sessions over its GitHub repo so teammates can open, resume, AND Join your sessions live — no link needed.',
         act: () => openSyncModal(w) });
     }
-  } else if (w.kind === 'local') {
+  } else if (w.kind === 'local' && !w.adopted) {
+    // ADOPTED folders are excluded: both actions run upgrade-workspace.sh, which drops the folder's existing
+    // `origin` and republishes the whole tree to a brand-new private repo. main.js refuses it too (belt + braces).
     items.push({ icon: CLOUD_SVG, label: 'Sync across my devices…',
       hint: 'Back this project with a private GitHub repo so it + its sessions appear on your other devices (needs GitHub connected).',
       act: () => upgradeWorkspace(w) });
@@ -3956,11 +4015,14 @@ function wsMenuItems(chip, nm, w) {
   items.push({ sep: true });
   items.push({ icon: PENCIL_SVG, label: 'Rename', hint: 'Rename this project (local label only).', act: () => startWsEdit(chip, nm, w) });
   if (!isLastLocal(w)) {                                  // never offer delete on the LAST local workspace (the guaranteed home)
-    items.push({
+    items.push(Object.assign(w.adopted ? {
+      // Claudible never created this folder, so "delete" only forgets it — main.js skips delete-workspace.sh.
+      icon: TRASH_SVG, label: 'Remove from Claudible',
+      hint: 'Stop tracking this folder as a project. The folder itself is left exactly where it is.',
+    } : {
       icon: TRASH_SVG, label: 'Delete project', danger: true,
       hint: 'Move this project’s folder to trash (recoverable). A repo keeps its GitHub copy.',
-      act: () => { if (confirm('Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo project keeps its GitHub repo — only the local copy is removed.')) deleteWorkspace(w); },
-    });
+    }, { act: () => { if (confirm(deleteWsPrompt(w))) deleteWorkspace(w); } }));
   }
   return items;
 }
@@ -4112,7 +4174,23 @@ async function confirmSync() {
   else { busy.textContent = (r && r.error) || 'could not turn on sharing'; busy.classList.add('err'); }
 }
 let firstRunHandled = false, firstRunActive = false;
-function isLastLocal(w) { return !!(w && w.kind === 'local' && workspaces.filter((x) => x.kind === 'local').length <= 1); }
+// "Never delete the last local project" exists so there is always somewhere to open. An ADOPTED project is only
+// a POINTER at a folder the user already owned — removing it deletes nothing — so the rule that guards a real
+// folder must not lock it in place. (First-run repro: adopt a folder, the auto-created "Local" placeholder is
+// then removed as redundant, and the adopted entry becomes the only kind:'local' one → un-removable forever.)
+// It may go whenever some other openable project remains; an un-cloned invite has no folder, so it doesn't count.
+function isLastLocal(w) {
+  if (!w) return false;
+  if (w.adopted) return !workspaces.some((x) => x.id !== w.id && (x.kind === 'local' || (x.kind === 'repo' && !x.needsClone)));
+  return w.kind === 'local' && workspaces.filter((x) => x.kind === 'local').length <= 1;
+}
+// One sentence for both delete affordances (the ▾ menu and the chip's right-click), so they can never disagree
+// about whether the folder survives.
+function deleteWsPrompt(w) {
+  return w.adopted
+    ? 'Remove "' + w.label + '" from Claudible?\nThis only stops tracking the folder as a project — nothing on disk is moved or deleted.'
+    : 'Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash (recoverable). A repo project keeps its GitHub repo — only the local copy is removed.';
+}
 // First launch (no local workspace existed → main materialized a default): once, welcome the user and open the
 // workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.
 function maybeFirstRun(r) {
@@ -4177,13 +4255,20 @@ async function switchWorkspace(id, targetSession) {
 }
 // new-workspace chooser modal
 let wsChoiceKind = 'local';
+const WS_KINDS = ['local', 'adopt', 'repo'];                 // the New-project radiogroup, in DOM order
 function selectWsKind(kind) {
   wsChoiceKind = kind;
-  $('ch-local').classList.toggle('sel', kind === 'local');
-  $('ch-repo').classList.toggle('sel', kind === 'repo');
-  $('ch-local').setAttribute('aria-checked', kind === 'local' ? 'true' : 'false');   // keep the radio state screen-reader-truthful
-  $('ch-repo').setAttribute('aria-checked', kind === 'repo' ? 'true' : 'false');
+  WS_KINDS.forEach((k) => {
+    const el = $('ch-' + (k === 'adopt' ? 'adopt' : k)); if (!el) return;
+    el.classList.toggle('sel', kind === k);
+    el.setAttribute('aria-checked', kind === k ? 'true' : 'false');   // keep the radio state screen-reader-truthful
+  });
   const pr = $('ws-pick-row'); if (pr) pr.style.display = (kind === 'local') ? '' : 'none';   // custom folder is local-only
+  const nt = $('ws-adopt-note'); if (nt) nt.style.display = (kind === 'adopt') ? 'block' : 'none';
+  // Adopting takes its name from the folder you pick, so the name field is optional there.
+  const nm = $('ws-name-in');
+  if (nm) nm.placeholder = (kind === 'adopt') ? 'Project name (optional — defaults to the folder’s name)' : 'Project name (letters, numbers, dashes)';
+  const btn = $('ws-create'); if (btn) btn.textContent = (kind === 'adopt') ? 'Choose folder…' : 'Create';
 }
 function openWsModal() {
   selectWsKind('local');
@@ -4197,15 +4282,25 @@ async function createWorkspace() {
   if ($('ws-create').disabled) return;                      // in-flight guard (the Enter key can bypass the disabled button)
   const name = $('ws-name-in').value.trim();
   const busy = $('ws-busy'); busy.classList.remove('err');
-  if (!name) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }
+  const adopt = wsChoiceKind === 'adopt';
+  if (!name && !adopt) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }   // adopt names itself from the folder
   const pick = wsChoiceKind === 'local' && $('ws-pick') && $('ws-pick').checked;   // custom folder (local only)
-  busy.textContent = pick ? 'choose a folder…' : (wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…');
+  busy.textContent = (adopt || pick) ? 'choose a folder…' : (wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…');
   $('ws-create').disabled = true;
-  let r = null; try { r = await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
+  let r = null;
+  try { r = adopt ? await claudible.workspaceAdopt(name) : await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
   $('ws-create').disabled = false;
-  if (!r || !r.ok) { busy.textContent = (r && r.error) || 'creation failed'; busy.classList.add('err'); return; }
+  if (r && !r.ok && r.error === 'cancelled') { busy.textContent = ''; return; }   // they closed the folder picker — not an error
+  if (!r || !r.ok) { busy.textContent = (r && r.error) || (adopt ? 'could not add that folder' : 'creation failed'); busy.classList.add('err'); return; }
   const wasFirstRun = firstRunActive; firstRunActive = false;
   if (r.note) { try { toast(r.note); } catch {} }   // honest partial-success (e.g. repo created but the discovery marker push failed)
+  if (adopt) {
+    // Say what actually happened to their folder — the one thing a user adopting a real repo needs to know.
+    if (r.already) toast('That folder is already a project — opened it.');
+    else if (r.claudeTracked) toast('Added. Heads up: .claude/ is tracked by git in that repo, so Claudible’s runtime files will show up as changes.');
+    else if (r.repo) toast('Added ' + ((r.workspace && r.workspace.label) || 'project') + ' — nothing was moved, and .claude/ is ignored locally.');
+    else toast('Added ' + ((r.workspace && r.workspace.label) || 'project') + ' — nothing was moved.');
+  }
   closeWsModal();                                   // main already switched the foreground tab + respawned a fresh conversation
   { const t = AT(); if (t) { t.wsId = (r.workspace && r.workspace.id) || activeWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; t.term.reset(); resetStats(t); } }
   activeSession = null;
@@ -4219,14 +4314,20 @@ async function createWorkspace() {
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
 $('ws-add').addEventListener('click', openWsModal);
-$('ch-local').addEventListener('click', () => selectWsKind('local'));
-$('ch-repo').addEventListener('click', () => selectWsKind('repo'));
-// keyboard access for the radio-style picker: Enter/Space selects; ←/→ move between the two (standard radiogroup keys)
-['ch-local', 'ch-repo'].forEach((id) => $(id).addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectWsKind($(id).dataset.kind); }
-  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); selectWsKind('repo'); $('ch-repo').focus(); }
-  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); selectWsKind('local'); $('ch-local').focus(); }
-}));
+// keyboard access for the radio-style picker: Enter/Space selects; arrows move through the group (standard radiogroup keys)
+WS_KINDS.forEach((k, i) => {
+  const el = $('ch-' + k); if (!el) return;
+  el.addEventListener('click', () => selectWsKind(k));
+  el.addEventListener('keydown', (e) => {
+    const step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? -1 : 0;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectWsKind(k); }
+    else if (step) {
+      e.preventDefault();
+      const nk = WS_KINDS[(i + step + WS_KINDS.length) % WS_KINDS.length];
+      selectWsKind(nk); $('ch-' + nk).focus();
+    }
+  });
+});
 $('ws-create').addEventListener('click', createWorkspace);
 $('ws-cancel').addEventListener('click', closeWsModal);
 $('ws-name-in').addEventListener('keydown', (e) => {

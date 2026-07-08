@@ -230,11 +230,21 @@ function cmdSet(sdir, name, state) {
   const d = path.join(sdir, '.claude');
   fs.mkdirSync(d, { recursive: true });
   const p = path.join(d, 'settings.local.json');
-  let cfg;
-  try {
-    cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch (e) {
-    cfg = {};
+  let cfg = {};
+  let raw = null;
+  try { raw = fs.readFileSync(p, 'utf8'); } catch (e) { raw = null; }   // no file yet → starting from {} is correct
+  if (raw !== null) {
+    try {
+      cfg = JSON.parse(raw);
+    } catch (e) {
+      // The file EXISTS but doesn't parse. The old code caught this the same as "missing" and wrote `{}` +
+      // our key over the top. In a Claudible-created workspace that was unreachable (we wrote the file). In an
+      // ADOPTED folder it's the user's own settings.local.json, and a stray trailing comma would cost them the
+      // whole config. Refuse the toggle and say why. (Deliberate divergence from the frozen python oracle,
+      // which port-parity.sh never exercises — it only feeds valid JSON.)
+      process.stdout.write(pyDumps({ ok: false, error: 'this project\'s .claude/settings.local.json is not valid JSON — fix or remove it first' }) + '\n');
+      return;
+    }
   }
   if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) cfg = {};
   let ov = cfg.skillOverrides || {};
