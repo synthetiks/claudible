@@ -139,6 +139,10 @@ const share = createShareServer({
     const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
     if (!ws || !APPDIR_WSL) return reply({ type: 'ws-sessions', wsId, list: [] });
     runner.runScript('sessions.sh', '', { ws, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
+        // `err` used to be dropped: a crashed/timed-out sessions.sh rendered to the connected GUEST as
+        // "this workspace has zero sessions" — a lie about someone else's machine. Log it; still reply (with an
+        // honest empty list) so the guest's browse pane doesn't hang waiting.
+        if (err) console.error('[claudible] browse sessions:', err.message);
         let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
         reply({ type: 'ws-sessions', wsId, label: ws.label, list: Array.isArray(list) ? list : [] });
       });
@@ -148,6 +152,7 @@ const share = createShareServer({
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');   // strict id (also the bash-interp invariant)
     if (!ws || !sid || !APPDIR_WSL) return reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: [] });
     runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
+        if (err) console.error('[claudible] browse transcript:', err.message);   // else a failed read reads as "empty transcript" to the guest
         let msgs = []; try { msgs = JSON.parse(String(stdout).trim() || '[]'); } catch {}
         reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
       });
@@ -961,7 +966,10 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
   const ws = _wsById(arg && arg.wsId) || activeWorkspace;                   // the ROW's workspace (sidebar scope), not main's — they differ while a joined live tab is on screen
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  runner.runScript('delete-session.sh', `'${sid}'`, { ws }).then(({ err, stdout }) => {
+  // timeout: execFile has NO default. Without one a hung script never resolves this IPC call — and the renderer's
+  // deleteSession holds its `deletingIds` entry across the await, so that row could never be deleted or retried
+  // again for the life of the app, with no error shown. (Same for session-keep.sh and `skills.sh set` below.)
+  runner.runScript('delete-session.sh', `'${sid}'`, { ws, timeout: 30000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let local = {}; try { local = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
@@ -979,7 +987,7 @@ ipcMain.handle('session:keep', (e, arg) => new Promise((resolve) => {
   const id = (typeof arg === 'string') ? arg : (arg && arg.id);
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
-  runner.runScript('session-keep.sh', `'${sid}'`, { ws: _wsById(arg && arg.wsId) || activeWorkspace }).then(({ err, stdout }) => {
+  runner.runScript('session-keep.sh', `'${sid}'`, { ws: _wsById(arg && arg.wsId) || activeWorkspace, timeout: 30000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session-keep:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       resolve(r.ok ? r : { ok: false, error: (r.error || 'keep failed') });
@@ -1615,7 +1623,7 @@ ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
   const state = ['on', 'off', 'name-only', 'user-invocable-only'].includes(payload && payload.state) ? payload.state : '';
   if (!name || !state) return resolve({ ok: false, error: 'bad args' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: 'WSL unavailable' });
-  runner.runScript('skills.sh', `set '${name}' '${state}'`, { ws: activeWorkspace }).then(({ err, stdout }) => {
+  runner.runScript('skills.sh', `set '${name}' '${state}'`, { ws: activeWorkspace, timeout: 20000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] skills:set', err.message); return resolve({ ok: false, error: 'failed' }); }
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
     });
@@ -1810,6 +1818,22 @@ ipcMain.handle('clip:read', () => { try { return clipboard.readText(); } catch {
 
 // Export a saved session as a SELF-CONTAINED, shareable HTML replay (no server, works offline). Reads the
 // transcript for the active workspace's session via transcript.sh, renders it, and lets the user pick where
+// Read a session's transcript as a message array. This was written out VERBATIM in three handlers (session:export,
+// session:export-text, session:latest-reply) and all three DROPPED `err`: a crashed or timed-out transcript.sh
+// resolved `[]`, which is indistinguishable from "this session is empty" — and empty is exactly what each of them
+// then told the user ("Nothing to export in this session yet", "No text detected to read"). One copy now, and it
+// returns `null` for "the read FAILED" vs `[]` for "the session is genuinely empty". Callers must tell them apart.
+function _readTranscript(ws, sid) {
+  return new Promise((resolve) => {
+    runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 })
+      .then(({ err, stdout }) => {
+        if (err) { console.error('[claudible] transcript.sh:', err.message); return resolve(null); }
+        let m = null;
+        try { m = JSON.parse(String(stdout).trim() || '[]'); } catch { console.error('[claudible] transcript.sh: unparseable output'); }
+        resolve(Array.isArray(m) ? m : null);
+      });
+  });
+}
 // to save. Text is embedded as JSON and rendered client-side via textContent → no injection from transcript.
 ipcMain.handle('session:export', async (e, arg) => {
   try {
@@ -1817,12 +1841,8 @@ ipcMain.handle('session:export', async (e, arg) => {
     const ws = _wsById(arg && arg.wsId) || activeWorkspace;              // the ROW's workspace — main's active ws differs while a joined live tab is on screen
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!sid || !APPDIR_WSL) return { error: 'no session' };
-    const messages = await new Promise((resolve) => {
-      runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
-          let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
-          resolve(Array.isArray(m) ? m : []);
-        });
-    });
+    const messages = await _readTranscript(ws, sid);
+    if (!messages) return { error: 'exec' };        // the READ failed — do not report it as an empty session
     if (!messages.length) return { error: 'empty' };
     const d = new Date();
     const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1844,12 +1864,8 @@ ipcMain.handle('session:export-text', async (e, arg) => {
     const ws = _wsById(arg && arg.wsId) || activeWorkspace;              // the ROW's workspace — main's active ws differs while a joined live tab is on screen
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!sid || !APPDIR_WSL) return { error: 'no session' };
-    const messages = await new Promise((resolve) => {
-      runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
-          let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
-          resolve(Array.isArray(m) ? m : []);
-        });
-    });
+    const messages = await _readTranscript(ws, sid);
+    if (!messages) return { error: 'exec' };        // the READ failed — do not report it as an empty session
     if (!messages.length) return { error: 'empty' };
     const d = new Date();
     const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1875,7 +1891,8 @@ ipcMain.handle('app:version', () => app.getVersion());   // the real Claudible v
 ipcMain.handle('claude:version', () => {
   if (_claudeVer !== undefined) return _claudeVer;
   return new Promise((resolve) => {
-    runner.runScript('claude-version.sh', '', { timeout: 8000 }).then(({ stdout }) => {
+    runner.runScript('claude-version.sh', '', { timeout: 8000 }).then(({ err, stdout }) => {
+      if (err) console.error('[claudible] claude-version:', err.message);   // cosmetic (the version chip), but never silent
       _claudeVer = (String(stdout || '').match(/\d+\.\d+(?:\.\d+)?/) || [''])[0];   // pull the semver out of any format
       resolve(_claudeVer);
     }).catch(() => { _claudeVer = ''; resolve(''); });
@@ -1971,12 +1988,7 @@ ipcMain.handle('session:latest-reply', async (e, sessionId) => {
     const ws = activeWorkspace;
     const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');
     if (!sid || !APPDIR_WSL) return { text: '' };
-    const messages = await new Promise((resolve) => {
-      runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ stdout }) => {
-          let m = []; try { m = JSON.parse(String(stdout).trim() || '[]'); } catch {}
-          resolve(Array.isArray(m) ? m : []);
-        });
-    });
+    const messages = (await _readTranscript(ws, sid)) || [];   // a failed read is logged inside; treat as no text
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m && m.role === 'claude' && m.text && String(m.text).trim()) return { text: String(m.text) };
@@ -2036,7 +2048,10 @@ function diffAction(mode, payload, wsId) {
       fs.writeFileSync(tmp, payload, 'utf8');
       runner.runScript('diff-apply.sh', `${mode} '${RT_GUEST}/${name}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
           try { fs.unlinkSync(tmp); } catch {}   // clean up the temp patch file
-          let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+          // The pre-initialized `{ok:false}` means the caller still sees a failure — but the REASON was never
+          // logged, unlike every sibling handler. A revert that silently stops working leaves no trace to chase.
+          if (err) { console.error(`[claudible] diff-apply (${mode}):`, err.message); return resolve({ ok: false, error: 'exec' }); }
+          let r = { ok: false }; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch { console.error('[claudible] diff-apply: unparseable output'); }
           resolve(r);
         });
     } catch (err) { console.error('[claudible] diffAction:', err && err.message); resolve({ ok: false, error: 'apply' }); }
@@ -2116,12 +2131,23 @@ function _writeAllContexts() { try { for (const id of ptys.keys()) _writeContext
 // prompt N" restores the code as it was going INTO N. Gated on the SAME sessionHistory setting → zero cost when off.
 const _pendingCkpt = new Map();          // wsId -> latest settled checkpoint id (attached to the next prompt's entry)
 const _ckptIdRe = /^[A-Za-z0-9_-]{1,64}$/;
+// Every checkpoint operation funnels through here: snapshot-on-stop, seed, revert, undo, prune. It used to drop
+// `err` on the floor and resolve(null) — so a checkpoint.sh that started failing (corrupt .git, disk full, no
+// permission) produced NOTHING: `_snapshotOnStop` and `_seedCkpt` run automatically after every turn and silently
+// `return` on a null result. The whole session-history Revert feature could go dark for an entire session with
+// zero trace anywhere — no console line, nothing surfaced. Log the reason; the callers still see null.
 function _ckptRun(ws, argStr) {
   return new Promise((resolve) => {
     if (!APPDIR_WSL || !ws) return resolve(null);
     runner.runScript('checkpoint.sh', argStr, { ws, timeout: 30000, maxBuffer: 8 * 1024 * 1024 })
-      .then(({ stdout }) => { let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {} resolve(r); })
-      .catch(() => resolve(null));
+      .then(({ err, stdout }) => {
+        if (err) { console.error(`[claudible] checkpoint.sh (${String(argStr).split(' ')[0]}):`, err.message); return resolve(null); }
+        let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {
+          console.error(`[claudible] checkpoint.sh (${String(argStr).split(' ')[0]}): unparseable output`);
+        }
+        resolve(r);
+      })
+      .catch((e) => { console.error('[claudible] checkpoint.sh threw:', e && e.message); resolve(null); });
   });
 }
 function _wsById(wsId) { try { return registry.workspaces.find((w) => w && w.id === wsId) || null; } catch { return null; } }
