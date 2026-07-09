@@ -192,5 +192,26 @@ none('renderer: orphanTab is absent from the session signature (smooth path woul
 none('renderer: orphanTab is never rendered',
   /if \(orphanTab && !shown\.has\(orphanTab\.session\)\)[\s\S]{0,120}?renderLiveTabRow\(orphanTab\)/.test(APP) ? [] : ['orphanTab row never appended']);
 
+// ---------------------------------------------------------------------------------------------------------
+// 9. The Linux pty fallback must be PROVISIONED wherever a Linux artifact is produced. node-pty ships prebuilds
+//    for win32 + darwin but NOT linux, so all three runners fall back to `node-pty-prebuilt-multiarch` at
+//    runtime. It is deliberately not a dependency (it would add ~8 MB / 58 packages to the win+mac installers),
+//    which means the ONLY thing keeping it present is an explicit install step. If that step is ever dropped,
+//    a Linux build ships with no fallback and a failed node-pty source build kills the terminal — silently.
+//    So: every runner that names the module must have it provisioned by `dist:linux`, and by CI's Linux jobs.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const PKG = JSON.parse(read('package.json'));
+  const FALLBACK = 'node-pty-prebuilt-multiarch';
+  const runnersNamingIt = ['runners/wsl.js', 'runners/posix.js', 'runners/win.js'].filter((f) => read(f).includes(FALLBACK));
+  none('the pty-fallback guard is vacuous — no runner references the module',
+    runnersNamingIt.length === 3 ? [] : [`only ${runnersNamingIt.length}/3 runners name ${FALLBACK}`]);
+  none('package.json dist:linux does not provision the linux pty fallback',
+    (PKG.scripts['dist:linux'] || '').includes(FALLBACK) ? [] : ['dist:linux is missing the install step']);
+  const ciFiles = ['.github/workflows/build.yml', '.github/workflows/test.yml'];
+  none('a CI workflow that builds/packs on linux does not provision the pty fallback',
+    ciFiles.filter((f) => !read(f).includes(FALLBACK)));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
