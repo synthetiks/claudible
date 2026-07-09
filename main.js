@@ -1239,10 +1239,41 @@ function ensureClone(ws) {
   p.finally(() => cloneInFlight.delete(ws.id));
   return p;
 }
-// Find repo workspaces the user was invited to and register any new ones (sync OFF + needing clone until opened).
-function discoverWorkspaces() {
+// Resolve ONE workspace's stable GitHub identity (numeric id + current name) and record it. GitHub's GET follows a
+// rename redirect, so this works even when the name we hold is stale. Resolves true only if the registry changed.
+function backfillRepoIdentity(ws) {
   return new Promise((resolve) => {
-    if (!APPDIR_WSL) return resolve({ ok: false, added: [] });
+    const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
+    const name = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
+    if (!owner || !name) return resolve(false);
+    runner.runScript('repo-identity.sh', `'${owner}' '${name}'`, { timeout: 30000 }).then(({ err, stdout }) => {
+      if (err) return resolve(false);                                    // offline / gh missing → try again next pass
+      let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      if (!r.ok || !Number.isFinite(r.ghId)) return resolve(false);
+      ws.ghId = r.ghId;
+      if (r.repoName) { ws.repoName = r.repoName; ws.repoUrl = 'https://github.com/' + owner + '/' + r.repoName; }   // slug stays FROZEN (it names the folder + every transcript)
+      resolve(true);
+    });
+  });
+}
+// ONE-TIME identity backfill for repo workspaces that predate stable-id storage. Without it, a repo renamed on
+// GitHub OUTSIDE Claudible can never be matched by discovery (its slug, its `repo-<slug>` id and its owner+name
+// are all stale) and is re-added as a phantom "clone me" duplicate on every launch — a bug that predates the
+// in-app rename feature. It also self-heals a rename whose id fetch failed. Sequential + bounded by the number of
+// repo workspaces, and it runs at most once each: after ghId is set, `w.ghId == null` is false forever.
+// Adopted workspaces are skipped — they point at an external folder whose repo name need not match their slug.
+async function backfillRepoIdentities() {
+  const need = registry.workspaces.filter((w) => w.kind === 'repo' && !w.adopted && w.owner && (w.repoName || w.slug) && w.ghId == null);
+  if (!need.length) return;
+  let changed = false;
+  for (const ws of need) { if (await backfillRepoIdentity(ws)) changed = true; }
+  if (changed) saveRegistry();
+}
+// Find repo workspaces the user was invited to and register any new ones (sync OFF + needing clone until opened).
+async function discoverWorkspaces() {
+  if (!APPDIR_WSL) return { ok: false, added: [] };
+  await backfillRepoIdentities();          // teach the registry who it already owns BEFORE we decide what's new
+  return new Promise((resolve) => {
     runner.runScript('sessions-discover.sh', '', { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] discover:', err.message); return resolve({ ok: false, added: [] }); }
         let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}

@@ -39,7 +39,31 @@ const wsAdopted = { id: 'local-ad', kind: 'repo', adopted: true, repoId: 'mk/ad'
 {
   // and without the guard, id `repo-foo` OR owner+slug 'foo' would have false-matched — prove they don't
   const m = findExistingWorkspace([wsRenamed], { slug: 'foo', owner: 'mk', ghId: 999, wid: 'repo-foo' });
-  ok('renamed ws is matchable ONLY by ghId (id/name clauses skipped)', m === null);
+  ok('renamed ws is never matched by its STALE slug / repo-<slug> id', m === null);
+}
+
+// ---- a renamed ws with NO ghId still matches by its CURRENT name (the `gh repo rename` succeeded but the
+//      follow-up id fetch failed → repoName set, ghId unset. This used to re-add it as a phantom duplicate.) ----
+const wsRenamedNoId = { id: 'repo-foo', kind: 'repo', slug: 'foo', owner: 'mk', repoName: 'bar', label: 'bar' };  // no ghId
+{
+  const m = findExistingWorkspace([wsRenamedNoId], { slug: 'bar', owner: 'mk', ghId: 111 });
+  ok('renamed ws w/o ghId matches by current repoName (no phantom)', m === wsRenamedNoId);
+}
+{
+  // …and the freed-up OLD name being reused by a different repo still must not hijack it
+  const m = findExistingWorkspace([wsRenamedNoId], { slug: 'foo', owner: 'mk', ghId: 999 });
+  ok('renamed ws w/o ghId: reused old name does NOT hijack', m === null);
+}
+{
+  // a same-named repo under a DIFFERENT owner is a different repo
+  const m = findExistingWorkspace([wsRenamedNoId], { slug: 'bar', owner: 'someoneelse', ghId: 777 });
+  ok('renamed ws w/o ghId: different owner does not match', m === null);
+}
+{
+  // the backfill then supplies ghId, and reconcile records it (self-heal)
+  const { changed, patch } = reconcileWorkspace(wsRenamedNoId, { slug: 'bar', owner: 'mk', ghId: 111 });
+  ok('backfilled ghId is recorded on a renamed ws', changed === true && patch.ghId === 111);
+  ok('…and that patch never touches slug', !('slug' in patch));
 }
 
 // ---- never-renamed repos still match by id / owner+slug / adopted ----
@@ -101,6 +125,18 @@ const wsAdopted = { id: 'local-ad', kind: 'repo', adopted: true, repoId: 'mk/ad'
   // the renamer's own machine on the next launch: ghId already set, repoName already 'bar', discovery reports 'bar'
   const { changed } = reconcileWorkspace(wsRenamed, { slug: 'bar', owner: 'mk', ghId: 111 });
   ok('renamer machine: no spurious change post-rename', changed === false);
+}
+
+// ---- ORDERING GUARD. The backfill teaches the registry which repos it already owns (resolving stale names via
+// GitHub's rename redirect). It MUST run before the discovery scan decides what is "new" — otherwise a repo
+// renamed outside Claudible is unmatchable and gets re-added as a phantom "clone me" duplicate on every launch.
+{
+  const fs = require('fs'), path = require('path');
+  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const iBackfill = MAIN.indexOf('await backfillRepoIdentities()');
+  const iScan = MAIN.indexOf("runScript('sessions-discover.sh'");
+  ok('main.js: identity backfill runs BEFORE the discovery scan', iBackfill > -1 && iScan > -1 && iBackfill < iScan);
+  ok('main.js: backfill never writes ws.slug', !/ws\.slug\s*=/.test(MAIN));
 }
 
 console.log('discovery: ' + pass + ' passed, ' + fail + ' failed');
