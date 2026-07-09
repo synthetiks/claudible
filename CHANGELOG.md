@@ -4,7 +4,25 @@ All notable changes to Claudible are documented here.
 
 ## [0.8.0] — unreleased
 
-A hardening pass: no new features, a lot of quietly-wrong things made right. Every change ships with an executable test, and the whole tree now has an ESLint + shellcheck gate, a real-Electron boot smoke test, and a per-OS packaging check running in CI on every push.
+A hardening pass with **one new behavior**: renaming a project now renames its GitHub repo. Everything else is a lot of quietly-wrong things made right — the sidebar in particular now tells the truth. Every change ships with an executable test, and the whole tree has an ESLint + shellcheck gate, a real-Electron boot smoke test, and a per-OS packaging check running in CI on every push.
+
+### Renaming a project renames its GitHub repo
+- **Rename a project and the GitHub repo is renamed too.** It used to change only the label on the chip. Your **conversations are never touched**: the project's internal slug — which names its folder and every Claude transcript — stays frozen, so only the GitHub/display identity moves. The local `origin` remote is repointed, so syncing no longer leans on GitHub's redirect.
+- Renaming a repo **you don't own** (a project someone invited you to) renames it locally and tells you plainly that the GitHub repo was left alone. Projects that merely *point at* a folder you already had are never renamed on GitHub.
+- **A project you already have is no longer re-added as a phantom "invited" duplicate.** Claudible now recognises your repos by GitHub's permanent id rather than by name. This also fixes a long-standing bug for anyone who had **renamed a repo on GitHub outside Claudible** — it used to reappear as a second, ghostly copy of the same project on every launch.
+
+### The sidebar tells the truth
+- **The white bar on the session you just left is gone.** It meant "still open in a background tab", but it read exactly like a stale *selected* highlight. Session rows now carry only the vocabulary we actually use: green for live, amber for draft, a soft wash for the row you're on.
+- **A brand-new project no longer shows someone else's live session, or a phantom `(empty session)`.** A joined live session now stays in the project you joined it from, and a new, untyped session shows once — as the draft row it is.
+- **Switching projects and sessions no longer flickers or blanks the list.** The sidebar paints the new project's rows immediately, in the order they'll settle in, instead of clearing to empty and then reshuffling.
+- **The session you're looking at always has a row.** If a session turned out to be unresumable (a collaborator deleted it) and Claude started a fresh one, the tab you were sitting in could vanish from the sidebar entirely.
+
+### Sync and invites land without a nudge
+- **Synced changes show up when they arrive.** You no longer have to click to another project and back before a pulled session, commit or revert appears. Projects you have expanded but not selected update in place too.
+- **A project you were invited to appears without restarting.** Claudible re-checks for invites when the window regains focus, and the New-project dialog has a **Check for invites** button. The "invited" tag on the chip is now legible.
+
+### Safety
+- **A failed clone can no longer delete a folder that was already there.** The rollback that drops a half-finished clone had only one check — "is there a `.git` here?" — so a directory holding your own files sailed past it, the clone failed on the non-empty target, and the rollback removed your work. It now refuses a non-empty target outright and only ever removes a directory it created itself.
 
 ### Your sessions were running the fallback hooks (the big one)
 - Claudible runs its scripts in a non-interactive login shell, where **nvm's `node` is not on `PATH`** — and four scripts that call `node` weren't compensating for it. On a machine whose Node came from nvm, that meant: every session silently staged the **degraded bash hooks instead of the Node ones**; **"Export conversation" wrote an empty file**; and the System Check reported **Node.js as "missing" and Claude as "not signed in"** — on a machine that had both. All fixed; a build-time check now fails if any script calls `node` without resolving it first.
@@ -30,6 +48,7 @@ A hardening pass: no new features, a lot of quietly-wrong things made right. Eve
 ### Under the hood
 - New: ESLint + shellcheck gates, a static wiring contract (proves the DOM/IPC/script seams still line up), a real-Electron boot smoke test (catches a renderer crash before you open the app), and `electron-builder --dir` on Windows/Linux/macOS — all in CI.
 - Removed dead code (a retired tab strip and its 11 call sites, unused runner methods) and de-duplicated the workspace-directory resolution that had been copy-pasted across twelve shell scripts into one.
+- The **Linux terminal keeps its safety net.** node-pty has no Linux prebuild, so the app falls back to a second module at runtime — which was installed only by a single line of CI config. Any Linux build made anywhere else shipped without it, and a failed build of the primary module would have left the terminal dead with no fallback. `dist:linux` now provisions it itself, and a test fails if that ever stops being true.
 - The whole suite passes under a clean git config, and every fix in this release is covered by a test that fails when the fix is reverted.
 
 ## [0.7.0] — 2026-07-03
