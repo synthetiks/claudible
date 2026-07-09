@@ -3525,7 +3525,21 @@ async function refreshSessions() {
   // I'm actually viewing that live mirror (its wsId is null, so activeWsId doesn't follow it). A dead/offline joined
   // tab in its origin ws still shows here with its ✕ Leave — that recovery affordance is deliberate.
   const joinedLive = Array.from(tabs.values()).filter((r) => r.kind === 'live' && (r.peerWsId === activeWsId || r.tabId === activeTabId));
-  if (!list.length && !liveTabs.length && !joinedLive.length) {
+  // INVARIANT: the tab you are LOOKING AT always has a sidebar row. A tab can land on a promptless session by a
+  // path that isn't "user pressed New": an explicitly-opened session becomes unresumable (a collaborator deleted
+  // it) and the pty falls back to a fresh id. onStatus only sets `bornNew` when the tab adopted its id FROM 'new',
+  // so such a tab is neither in the saved list (0 messages) nor in the draft bucket — and the active tab silently
+  // vanished from the sidebar. Detect it here (before the signature) and render it as the draft row it is.
+  const orphanTab = (() => {
+    const t = AT();
+    if (!t || t.kind === 'live' || t.wsId !== activeWsId) return null;
+    const sid = t.session;
+    if (!sid || sid === 'new') return null;                          // 'new' already qualifies for liveTabs
+    if (savedIds.has(sid)) return null;                              // renders as a saved row
+    if (liveTabs.some((r) => r.tabId === t.tabId)) return null;      // renders as a draft row
+    return t;
+  })();
+  if (!list.length && !liveTabs.length && !joinedLive.length && !orphanTab) {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
@@ -3553,6 +3567,7 @@ async function refreshSessions() {
     j: joinedLive.map((r) => [r.tabId, r.liveState, r.liveSessName || '', !!r.sessMismatch, !!r.busy]),
     lt: liveTabs.map((r) => [r.tabId, r.session, !!r.busy, r.label || '']),
     lp: livePeers.map((p) => [p.session, p.name || p.login || '']),
+    ot: orphanTab ? [orphanTab.tabId, orphanTab.session, !!orphanTab.busy, orphanTab.label || ''] : null,   // in the sig, else the smooth path would return before ever rendering its row
     sh: sharedSessionId || '',
   });
   if (sig === _sessSig && sessListEl.querySelector('.sess')) {                       // structure unchanged → just move the highlight (no flicker)
@@ -3577,6 +3592,7 @@ async function refreshSessions() {
   joinedLive.forEach((rec) => { const sid = rec.peer && rec.peer.session; if (sid) shown.add(sid); sessListEl.appendChild(renderJoinedTabRow(rec)); });   // pinned at the top
   ordered.forEach((s) => { if (shown.has(s.id)) return; shown.add(s.id); sessListEl.appendChild(renderSessionRow(s)); });
   liveTabs.forEach((rec) => { if (rec.session) shown.add(rec.session); sessListEl.appendChild(renderLiveTabRow(rec)); });   // live, not-yet-saved local tabs
+  if (orphanTab && !shown.has(orphanTab.session)) { shown.add(orphanTab.session); sessListEl.appendChild(renderLiveTabRow(orphanTab)); }   // the invariant above: never leave the active tab rowless
   livePeers.forEach((p) => { if (shown.has(p.session)) return; shown.add(p.session); sessListEl.appendChild(renderLivePeerRow(p)); });   // a collaborator live in a session not already shown (folds in the old _localIds check)
   const activeLive = sessListEl.querySelector('.sess.sess-draft.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }

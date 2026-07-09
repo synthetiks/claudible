@@ -175,5 +175,22 @@ const nodeUsers = fs.readdirSync(wslDir).filter((f) => f.endsWith('.sh') && !NOD
 none('the node-path guard is vacuous — it matched fewer than 8 node-invoking scripts',
   nodeUsers.length >= 8 ? [] : [`only ${nodeUsers.length} matched: ${nodeUsers.join(' ')}`]);
 
+// ---------------------------------------------------------------------------------------------------------
+// 8. "The active tab always has a sidebar row." A tab can adopt a promptless session by a non-'new' path (an
+//    explicitly-opened session goes unresumable and the pty falls back to a fresh id) — bornNew is false, the
+//    session has 0 messages, so it lands in neither the saved list nor the draft bucket and the ACTIVE tab
+//    disappears from the sidebar. `orphanTab` restores it, but only if it is wired into all THREE places:
+//    the empty-list early return, the structural signature (else the smooth path returns before rendering),
+//    and the render itself. Each is a silent, separate way to reintroduce the bug.
+// ---------------------------------------------------------------------------------------------------------
+none('renderer: orphanTab is not detected in refreshSessions',
+  /const orphanTab = \(\(\) => \{/.test(APP) ? [] : ['no orphanTab detection']);
+none('renderer: the empty-session early-return ignores orphanTab (would swallow the only row)',
+  /!liveTabs\.length && !joinedLive\.length && !orphanTab/.test(APP) ? [] : ['early return not guarded by orphanTab']);
+none('renderer: orphanTab is absent from the session signature (smooth path would skip its row)',
+  /\bot:\s*orphanTab\s*\?/.test(APP) ? [] : ['orphanTab missing from sig']);
+none('renderer: orphanTab is never rendered',
+  /if \(orphanTab && !shown\.has\(orphanTab\.session\)\)[\s\S]{0,120}?renderLiveTabRow\(orphanTab\)/.test(APP) ? [] : ['orphanTab row never appended']);
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
