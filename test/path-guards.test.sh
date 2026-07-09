@@ -92,5 +92,29 @@ echo "== a bad SLUG must still be rejected as a bad slug, not swallowed by the n
 refuses_with "create-workspace (bad slug)" "bad slug" bash "$WSL/create-workspace.sh" local 'a/b' "$TMP"
 refuses_with "clone-workspace (bad owner)" "bad owner" bash "$WSL/clone-workspace.sh" 'a/b' someslug "$TMP"
 
+echo "== clone-workspace must NEVER rm -rf a folder it did not create =="
+# The rollback exists to drop a half-done clone. Before the guard, a pre-existing NON-git folder sailed past the
+# only check ("$dir/.git"), `gh repo clone` failed on the non-empty target, and `rm -rf "$dir"` ate the user's work.
+# Assert the EXACT refusal (a downstream "clone failed" would mean the guard is gone and the network was hit),
+# AND that the bytes survive. Both directions matter: revert the guard and the second assertion fails.
+EXISTS_MSG='that folder already exists and is not empty — pick another location'
+PRE="$TMP/precious"; mkdir -p "$PRE"; printf 'uncommitted work\n' > "$PRE/work.txt"
+refuses_with "clone-workspace (pre-existing non-empty dir)" "$EXISTS_MSG" bash "$WSL/clone-workspace.sh" someowner someslug "$PRE"
+if [ -f "$PRE/work.txt" ]; then ok; else bad "clone-workspace DELETED a pre-existing folder" "$PRE/work.txt is gone"; fi
+
+PREF="$TMP/afile"; printf 'x' > "$PREF"
+refuses_with "clone-workspace (target is a plain file)" "$EXISTS_MSG" bash "$WSL/clone-workspace.sh" someowner someslug "$PREF"
+if [ -f "$PREF" ]; then ok; else bad "clone-workspace DELETED a pre-existing file" "$PREF is gone"; fi
+
+# …and an EMPTY pre-existing dir is still a legal clone target — don't over-tighten into refusing it. A stub `gh`
+# that always fails keeps this hermetic (no network) AND drives the rollback branch: the dir we did NOT create
+# must survive the failure.
+STUB="$TMP/bin"; mkdir -p "$STUB"; printf '#!/bin/sh\nexit 1\n' > "$STUB/gh"; chmod +x "$STUB/gh"
+PREE="$TMP/emptydir"; mkdir -p "$PREE"
+out="$(PATH="$STUB:$PATH" bash "$WSL/clone-workspace.sh" someowner someslug "$PREE" 2>/dev/null)"
+got="$(json_err "$out")"
+if [ "$got" = "clone failed (check access to someowner/someslug)" ]; then ok; else bad "clone-workspace mishandles an EMPTY pre-existing dir" "error was [$got]"; fi
+if [ -d "$PREE" ]; then ok; else bad "clone-workspace deleted an EMPTY dir it did not create" "$PREE is gone"; fi
+
 printf '\npath-guards: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
