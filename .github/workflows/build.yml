@@ -73,18 +73,12 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run dist:mac
 
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: claudible-${{ matrix.os }}
-          path: |
-            dist/*.exe
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.dmg
-          if-no-files-found: warn
-          retention-days: 14
-
+      # PUBLISH BEFORE UPLOAD. The release asset is the thing users actually download; the CI artifact is a
+      # convenience copy. They draw on DIFFERENT quotas — release assets are effectively unbounded, Actions
+      # artifact storage is 500 MB on a private repo. v0.8.0's first tag run proved the old order was wrong:
+      # all three installers BUILT fine, `Upload installers` hit the artifact quota, the job died there, and
+      # this publish step was skipped as collateral — no release, no .exe, for a pure storage problem.
+      #
       # On a v* tag, publish the Windows installer to a GitHub Release so users download one .exe (no clone,
       # no npm, no PowerShell). Only the Windows leg publishes for now; Linux/macOS remain artifact-only until
       # validated. softprops/action-gh-release upserts the release for the pushed tag; the default GITHUB_TOKEN
@@ -100,3 +94,18 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Convenience copies for the legs that don't publish (and for workflow_dispatch runs). A full artifact
+      # store must never fail a build whose installers are already produced — and, on a tag, already released.
+      - name: Upload installers
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudible-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+          if-no-files-found: warn
+          retention-days: 14
