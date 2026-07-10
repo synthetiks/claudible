@@ -2579,6 +2579,20 @@ const bodyEl = document.querySelector('.body');
 function orderKey() { return 'wsOrder2_' + activeWsId; }   // v2: re-seed from the shared `created` order (drops divergent per-machine v1 orders)
 function getOrder() { return loadPrefs()[orderKey()] || []; }
 function setOrder(order) { savePrefs({ [orderKey()]: order }); }
+// The saved order for ANY workspace, not just the active one — the tree view renders other projects' sessions.
+function orderForWs(wsId) { return loadPrefs()['wsOrder2_' + wsId] || []; }
+// THE one session ordering, for every surface that lists a workspace's sessions: the authoritative active list
+// (refreshSessions), the switch-time pre-fill (primeSessionListForWs), and the non-active expanded tree
+// (renderWsNonActiveSessions). Three sites used to order independently and drifted — the tree sorted by
+// used/mtime while the other two used the saved order, so clicking into a project whose tree was on screen
+// visibly REORDERED the same rows in the same tick (the "sessions switch places" glitch; regression in a0c3c59,
+// which unified only two of the three). Returns session OBJECTS in render order; does NOT persist anything —
+// only refreshSessions (the authoritative pass) calls setOrder.
+function orderedSessionsFor(wsId, list) {
+  const arr = Array.isArray(list) ? list : [];
+  const byId = {}; arr.forEach((s) => { byId[s.id] = s; });
+  return mergeSessionOrder(orderForWs(wsId), arr).map((id) => byId[id]).filter(Boolean);
+}
 function relTime(sec) {
   if (!sec) return '';
   const d = Math.max(0, Date.now() / 1000 - sec);
@@ -3543,10 +3557,9 @@ async function refreshSessions() {
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
-  const order = mergeSessionOrder(getOrder(), list);
-  setOrder(order);
+  const ordered = orderedSessionsFor(myWs, list);   // THE one ordering (shared with the pre-fill + the tree)
+  setOrder(ordered.map((s) => s.id));               // …and only THIS authoritative pass persists it
   sessIndex = {}; list.forEach((s) => { sessIndex[s.id] = s; }); sessIndexWs = myWs;   // tag whose rows these are (guaranteed == activeWsId here by the guard above)
-  const ordered = order.map((id) => sessIndex[id]).filter(Boolean);
   // Default highlight must match what session.sh `--continue` resumes — the most-recent conversation
   // (max mtime) — not the top of the stable saved order.
   // Pick a default highlight only when the active tab isn't itself on a brand-new session (don't hijack the
@@ -3832,10 +3845,19 @@ function renderWsSessionRow(w, s) {
 }
 function renderWsNonActiveSessions(w, kids) {                          // a saved-sessions list for a NON-active expanded workspace
   const fill = (list) => {
+    // The active workspace's list has exactly ONE owner: refreshSessions. If w became active while our fetch was
+    // in flight, reconcileWsChips has REUSED this same `kids` node to host #sess-list — so the querySelectorAll
+    // below would recurse into the nested #sess-list, DELETE every active row, and append stale tree rows next to
+    // the emptied list ("sessions disappear for a split second"). document.body.contains(kids) can't see that;
+    // only the activeness check can. (Cache is already updated by the caller, so the switch-in reads fresh data.)
+    if (w.id === activeWsId) return;
     Array.from(kids.querySelectorAll('.sess,.sess-empty,.newsess-row')).forEach((n) => n.remove());
-    const ordered = (list || []).slice()
-      .filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id))   // same stub rule as the active list: promptless fork artifacts stay hidden, but a session someone NAMED is deliberate and always shows
-      .sort((a, b) => ((b.used || b.mtime || 0) - (a.used || a.mtime || 0))).slice(0, 60);
+    // Same stub rule as the active list (promptless fork artifacts hidden, NAMED sessions always shown), and —
+    // critically — the SAME ordering. This was the one site still sorting by used/mtime after a0c3c59 moved the
+    // other two onto the saved order, so the rows you saw in the tree visibly REORDERED the instant you clicked
+    // into the project and the pre-fill repainted them (the "sessions switch places" glitch). One helper now;
+    // contract check 11 fails if any render path grows its own sort again.
+    const ordered = orderedSessionsFor(w.id, (list || []).filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id))).slice(0, 60);
     if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
     // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).
@@ -4408,7 +4430,7 @@ function primeSessionListForWs(id) {
   const raw = pf && Array.isArray(pf.list) ? pf.list.filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, id)) : null;   // same stub rule as refreshSessions
   if (raw && raw.length) {
     sessIndex = {}; raw.forEach((s) => { sessIndex[s.id] = s; }); sessIndexWs = id;
-    const ordered = mergeSessionOrder(getOrder(), raw).map((sid) => sessIndex[sid]).filter(Boolean);   // SAME order key as the authoritative render → no reorder jump
+    const ordered = orderedSessionsFor(id, raw);   // THE one ordering — same helper as refreshSessions + the tree, keyed by the TARGET ws (not ambient getOrder())
     sessListEl.innerHTML = '';
     ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
   } else {

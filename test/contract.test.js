@@ -234,5 +234,26 @@ none('renderer: orphanTab is never rendered',
     /stopAdvertiseHeartbeat\(\)/.test(quitBlock) ? ['window-all-closed calls stopAdvertiseHeartbeat() around the helper'] : []);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 11. One session ordering. Three surfaces list a workspace's sessions — refreshSessions (authoritative),
+//     primeSessionListForWs (switch-time pre-fill), renderWsNonActiveSessions (the expanded tree) — and they
+//     MUST all order through orderedSessionsFor(). They used to order independently and drifted (the tree kept
+//     used/mtime after a0c3c59 moved the other two to the saved order), so clicking into a project whose tree
+//     was on screen visibly reordered the same rows in the same tick. Comment-blind matching bit us before, so
+//     comments are stripped before matching; the body extraction is brace-naive but each function ends before
+//     the next `function ` declaration, which is all the precision this needs.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const appNoComments = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bodyOf = (name) => (appNoComments.match(new RegExp('function ' + name + '\\([\\s\\S]*?(?=\\nfunction |\\nconst |\\nlet )')) || [''])[0];
+  const surfaces = ['refreshSessions', 'primeSessionListForWs', 'renderWsNonActiveSessions'];
+  none('a session-list surface does not use orderedSessionsFor (orders can drift again)',
+    surfaces.filter((f) => !/orderedSessionsFor\(/.test(bodyOf(f))));
+  none('a render surface grew its own used/mtime sort back',
+    /\.sort\(\(a, b\) => \(\(b\.used \|\| b\.mtime/.test(appNoComments) ? ['a used||mtime session sort exists outside orderedSessionsFor'] : []);
+  none('the tree fetch callback lost its activeness guard (a late fill() would gut the active list)',
+    /if \(w\.id === activeWsId\) return;/.test(bodyOf('renderWsNonActiveSessions')) ? [] : ['renderWsNonActiveSessions.fill lacks `if (w.id === activeWsId) return;`']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
