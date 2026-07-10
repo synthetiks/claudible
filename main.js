@@ -878,14 +878,9 @@ ipcMain.handle('share:start', (e, opts) => {
 ipcMain.handle('share:stop', async () => {
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   cloudflaredProc = null; shareBaseUrl = null;
-  // Clear presence on the workspace we ACTUALLY advertised on — do it HERE, before stopAdvertiseHeartbeat nulls
-  // advertisedWs. The renderer's follow-up live:unadvertise runs AFTER a workspace switch has already re-pointed
-  // activeWorkspace, so if we left the clear to it, advertisedWs would be null and it'd clear the WRONG (new) repo,
-  // leaving the old repo advertised as "live · Join" until its ~5-min TTL. Clearing here makes it ordering-independent.
-  const advWs = advertisedWs, wasAdvertising = !!advertisedSid;
-  stopAdvertiseHeartbeat();                              // no longer hosting → stop re-stamping presence
-  if (wasAdvertising) runPresence('presence-clear', () => {}, advWs);   // pull the stale live/<login>.json off the advertised repo's branch now
-  share.stop();
+  // Presence must be cleared on the workspace we ACTUALLY advertised on, captured before the heartbeat teardown
+  // nulls it — that ordering (and the whole teardown) lives in stopLiveSharing(), shared with the quit path.
+  stopLiveSharing();
   sharedTabId = null;                                    // UN-PIN: no live session → the idle mirror plumbing follows focus again
   try { winSend('share:pinned', { tabId: null }); } catch {}
   _lastRoster = [];
@@ -922,6 +917,20 @@ function runPresence(args, cb, ws) {
 // the clear runs against the new active ws (nothing there) and the OLD ws stays "live" until its ~5-min TTL expires.
 let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '', advertisedWs = null;
 function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; advertisedWs = null; }
+// THE full live-hosting teardown: heartbeat off, presence pulled off the branch, share server down. Called from
+// share:stop (the button) and window-all-closed (quit) — the ONLY two ways hosting ends. It existed twice before,
+// and the copies drifted: the quit path called stopAdvertiseHeartbeat() then share.stop() but never cleared
+// presence — worse, stopping the heartbeat FIRST nulls advertisedWs, destroying the very reference a clear needs.
+// So quitting the app left live/<login>.json on the branch and peers saw "live · Join" for up to 5 more minutes
+// (TTL 300s, heartbeat 120s) on a session whose tunnel was already dead. The capture-BEFORE-stop ordering below is
+// the load-bearing part; test/live-teardown.test.js executes this function and fails if it's reordered.
+// (presence-clear's spawned wsl.exe outlives app exit — the same guarantee the pty reaper relies on.)
+function stopLiveSharing() {
+  const advWs = advertisedWs, wasAdvertising = !!advertisedSid;   // capture BEFORE stopAdvertiseHeartbeat nulls them
+  stopAdvertiseHeartbeat();                                       // no longer hosting → stop re-stamping presence
+  if (wasAdvertising) runPresence('presence-clear', () => {}, advWs);   // pull live/<login>.json off the advertised repo's branch now, not at TTL
+  share.stop();
+}
 function startAdvertiseHeartbeat(sid, ws) {
   advertisedSid = sid;                                   // a session switch just re-points which sid we re-stamp
   advertisedWs = ws || advertisedWs || activeWorkspace;  // remember the ws this presence belongs to (for the heartbeat + clear)
@@ -2496,12 +2505,14 @@ app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); cre
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
   try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the two self-rescheduling ones
-  try { stopAdvertiseHeartbeat(); } catch {}
+  // The FULL live teardown — including presence-clear, which this path used to skip entirely: quitting while
+  // hosting left live/<login>.json on the branch, so collaborators saw "live · Join" for up to 5 minutes after
+  // the app was gone. The spawned wsl.exe completes the clear after exit, same as the pty reaper below.
+  try { stopLiveSharing(); } catch {}
   // Kill Windows-side ptys AND reap each WSL-side tree — the execFile'd wsl.exe survives our exit, so the
   // reap completes even though the app is quitting (this is how zombies stopped accumulating across restarts).
   try { for (const rec of ptys.values()) { try { rec.proc.kill(); } catch {} _killSessionTree(rec.runtimeId); } ptys.clear(); } catch {}
   try { for (const id of [...liveTabs.keys()]) liveDisconnect(id); } catch {}   // close any joined peer sockets
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
-  try { share.stop(); } catch {}
   app.quit();
 });

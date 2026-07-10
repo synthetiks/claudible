@@ -213,5 +213,26 @@ none('renderer: orphanTab is never rendered',
     ciFiles.filter((f) => !read(f).includes(FALLBACK)));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 10. Live-teardown singleton. Hosting ends in exactly two ways — the Stop button (share:stop) and app quit
+//     (window-all-closed) — and both MUST run the same teardown, stopLiveSharing(), because the two used to be
+//     separate implementations and drifted: the quit path never cleared presence, so quitting while hosting left
+//     live/<login>.json on the branch and peers saw "live · Join" for ~5 minutes after the app was gone. The
+//     invariant that keeps that fixed: share.stop() is called from ONE place (inside stopLiveSharing), and the
+//     quit handler calls the helper — never the pieces. (share/server.js's own stop() definition is not main.js;
+//     the tunnel-death recovery at ~line 863 deliberately clears presence WITHOUT tearing down — that's allowed.)
+// ---------------------------------------------------------------------------------------------------------
+{
+  const mainNoComments = MAIN.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const stopCalls = (mainNoComments.match(/\bshare\.stop\(\)/g) || []).length;
+  none('main.js calls share.stop() outside stopLiveSharing (a teardown path that can drift again)',
+    stopCalls === 1 ? [] : [`share.stop() appears ${stopCalls}× — must be exactly once, inside stopLiveSharing`]);
+  const quitBlock = (MAIN.match(/app\.on\('window-all-closed'[\s\S]*?\n\}\);/) || [''])[0];
+  none('the quit handler does not run the full live teardown (presence would outlive the app again)',
+    /stopLiveSharing\(\)/.test(quitBlock) ? [] : ['window-all-closed does not call stopLiveSharing()']);
+  none('the quit handler calls stopAdvertiseHeartbeat directly (nulls advertisedWs before any clear could use it)',
+    /stopAdvertiseHeartbeat\(\)/.test(quitBlock) ? ['window-all-closed calls stopAdvertiseHeartbeat() around the helper'] : []);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
