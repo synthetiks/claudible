@@ -2,7 +2,7 @@
 
 All notable changes to Claudible are documented here.
 
-## [0.8.0] — unreleased
+## [0.8.0] — 2026-07-10
 
 A hardening pass with **one new behavior**: renaming a project now renames its GitHub repo. Everything else is a lot of quietly-wrong things made right — the sidebar in particular now tells the truth. Every change ships with an executable test, and the whole tree has an ESLint + shellcheck gate, a real-Electron boot smoke test, and a per-OS packaging check running in CI on every push.
 
