@@ -362,8 +362,11 @@ ok('app.js: a host browsing elsewhere still sees their live session is running',
   /bar\.classList\.add\('elsewhere'\)/.test(APP) && /live-jump/.test(APP));
 ok('app.js: the out-of-sync chip is suppressed on a live session',
   /\} else if \(s\.diverged && !sessionIsLive\(s\.id\)\) \{/.test(APP));
-ok('app.js: sessionIsLive covers hosted, joined, and peer-hosted sessions — and ignores dead joined tabs',
-  /function sessionIsLive\(id\)[\s\S]{0,200}?sharedSessionId === id[\s\S]{0,700}?r\.peer\.session === id && !LIVE_DEAD\.has\(r\.liveState\)[\s\S]{0,200}?livePeers\.some/.test(APP)
+// The peer-hosted arm is now peersForWs(activeWsId).some — an UNSCOPED livePeers.some let a repo project's live
+// collaborator mark a LOCAL project's session as "live". contract.test.js check 12 owns the no-bare-reads
+// invariant across the file; this pins sessionIsLive's own shape.
+ok('app.js: sessionIsLive covers hosted, joined, and peer-hosted sessions — scoped, and ignores dead joined tabs',
+  /function sessionIsLive\(id\)[\s\S]{0,200}?sharedSessionId === id[\s\S]{0,700}?r\.peer\.session === id && !LIVE_DEAD\.has\(r\.liveState\)[\s\S]{0,400}?peersForWs\(activeWsId\)\.some/.test(APP)
   && /const LIVE_DEAD = new Set\(\['offline', 'denied'\]\);/.test(APP));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
@@ -385,8 +388,10 @@ ok('joined: …but NOT while its owner is browsing another project (the peer lis
 ok('joined: …nor on a failed poll', !autoLeaves({ peerWsId: 'wsA', liveState: 'offline' }, 'wsA', false));
 ok('joined: a healthy connected tab is never auto-left',
   !autoLeaves({ peerWsId: 'wsA', liveState: 'connected' }, 'wsA', true));
-ok('app.js: the joined tab records the workspace its host was discovered on',
-  /rec\.peerWsId = activeWsId;/.test(APP));
+// Taken from the PEER, not from ambient activeWsId: a peer clicked from a stale row would otherwise permanently
+// pin the joined tab to whatever project happened to be on screen.
+ok('app.js: the joined tab records the workspace its host was discovered on (from the peer, not ambient state)',
+  /rec\.peerWsId = peer\.wsId \|\| activeWsId;/.test(APP));
 ok('app.js: …and auto-leave is scoped to it',
   /pollOk && rec\.peerWsId === activeWsId && LIVE_RECONNECTABLE\.has\(rec\.liveState\)/.test(APP));
 

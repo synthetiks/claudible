@@ -255,5 +255,34 @@ none('renderer: orphanTab is never rendered',
     /if \(w\.id === activeWsId\) return;/.test(bodyOf('renderWsNonActiveSessions')) ? [] : ['renderWsNonActiveSessions.fill lacks `if (w.id === activeWsId) return;`']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 12. livePeers is workspace-scoped. It is module-global, is NOT cleared on a workspace switch, and only ever
+//     holds peers for the project the last poll ran in. Reading it unscoped painted a repo project's live peer
+//     as a "Live session" row inside a LOCAL project's sidebar. Every read must go through peersForWs(wsId);
+//     the poll must stamp each peer and must re-check the workspace after its await; and openLiveTab must take
+//     the tab's peerWsId from the PEER, never from ambient activeWsId (that made the mis-pin permanent).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const appNoComments = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  // peersForWs's own body is the ONE sanctioned reader — everything else must go through it.
+  const bareReads = appNoComments.split('\n')
+    .map((l, i) => [i + 1, l])
+    .filter(([, l]) => /\blivePeers\.(find|some|forEach|map|filter|reduce)\(/.test(l) && !/function peersForWs\(/.test(l))
+    .map(([n]) => 'app.js:' + n);
+  none('livePeers is read without peersForWs() (a project’s peers can leak into another project’s sidebar)', bareReads);
+  none('peersForWs() does not exist', /function peersForWs\(/.test(appNoComments) ? [] : ['helper missing']);
+  const poll = (appNoComments.match(/async function pollLivePeers\(\)[\s\S]*?\n\}/) || [''])[0];
+  none('pollLivePeers does not pin its workspace before the await', /const myWs = activeWsId;/.test(poll) ? [] : ['missing `const myWs = activeWsId;`']);
+  none('pollLivePeers does not pass its workspace to the IPC (main would poll its own ambient one)',
+    /claudible\.livePeers\(myWs\)/.test(poll) ? [] : ['livePeers() called without myWs']);
+  none('pollLivePeers does not re-check the workspace after the await (stale peers get published)',
+    /if \(myWs !== activeWsId\) return;/.test(poll) ? [] : ['missing post-await staleness guard']);
+  none('pollLivePeers does not stamp peers with their workspace', /p\.wsId = myWs/.test(poll) ? [] : ['peers never stamped with wsId']);
+  none('live:peers IPC ignores the workspace argument (ambient activeWorkspace again)',
+    /ipcMain\.handle\('live:peers', \(e, wsId\)[\s\S]{0,240}?_wsById\(wsId\)/.test(MAIN) ? [] : ['main.js live:peers does not honor wsId']);
+  none('openLiveTab stamps peerWsId from ambient activeWsId instead of the peer',
+    /rec\.peerWsId = peer\.wsId \|\| activeWsId;/.test(appNoComments) ? [] : ['peerWsId not taken from peer.wsId']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

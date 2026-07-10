@@ -123,7 +123,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // live sessions — advertise the session I'm hosting; discover + join a collaborator's live session natively
   liveAdvertise: (sessionId, name) => ipcRenderer.invoke('live:advertise', { sessionId, name }),
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
-  livePeers: () => ipcRenderer.invoke('live:peers'),
+  livePeers: (wsId) => ipcRenderer.invoke('live:peers', wsId),   // peers on THIS workspace's presence branch, never main's ambient one
   onAdvertiseLost: (cb) => ipcRenderer.on('live:advertise-lost', (_e, p) => cb(p)),   // the presence heartbeat lost the one-host-per-session claim (a collaborator went live while ours was stale) — UI must stop saying "sharing"
   // native joined tab: main holds a client WebSocket to the peer; the renderer draws a normal xterm tab and
   // co-drives over IPC (the renderer's CSP forbids a wss:// socket, so the socket lives in main).

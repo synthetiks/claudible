@@ -971,7 +971,11 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
 // peers keep seeing us as live until its TTL expires. That is not `ok:true`. (live:advertise, right above, already
 // defaults to false for the same callback.)
 ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = advertisedWs; stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: false, error: 'exec' }), ws); }));
-ipcMain.handle('live:peers', () => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : [])); }));
+// Peers for the workspace the SIDEBAR shows, not whatever main is on — the same retrofit title:list already
+// carries. main's activeWorkspace follows tabForeground, which a joined LIVE tab deliberately skips, so the two
+// genuinely diverge. Reading ambient state here polled the wrong repo's presence branch, and one project's live
+// peers got painted into another project's sidebar (the phantom "Live session" row).
+ipcMain.handle('live:peers', (e, wsId) => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : []), _wsById(wsId) || activeWorkspace); }));
 // Shared session names: publish my rename to meta/<login>.json on the branch; read the merged (last-writer-wins)
 // map back. The name goes out-of-band as base64 so arbitrary text can never break the shell command.
 ipcMain.handle('title:set', (e, { id, name, wsId }) => new Promise((resolve) => {

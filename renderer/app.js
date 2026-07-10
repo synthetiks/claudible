@@ -85,7 +85,14 @@ let tabSeq = 0;
 const newTabId = () => 'tab-' + (++tabSeq);
 // Declared here (not in the sessions section) so the tab-strip boot below can reference them safely:
 let activeSession = null;                       // the ACTIVE tab's session id (mirrors AT().session) — drives sidebar row highlight
-let livePeers = [], livePeersSig = '', advertisedSession = null;   // collaborators live in this repo workspace + my own advertised session
+// Collaborators live in a repo workspace + my own advertised session. EVERY entry is stamped with the `wsId`
+// whose presence branch it came from (pollLivePeers), and EVERY read goes through peersForWs() — because this
+// list is module-global, is not cleared on a workspace switch, and used to be rendered unfiltered: a repo
+// project's live peer got painted as a "Live session" row inside a LOCAL project's sidebar until the next 10s
+// poll tick. Never read livePeers directly; contract check 12 enforces it.
+let livePeers = [], livePeersSig = '', advertisedSession = null;
+// The peers that legitimately speak for `wsId` — an unstamped/foreign entry is inert, never merely "probably fine".
+function peersForWs(wsId) { return wsId ? livePeers.filter((p) => p && p.wsId === wsId) : []; }
 let remoteTitles = {}, titlesSig = '', lastTitlePoll = 0;   // session names shared across the project (id -> {n,ts} since the newest-wins upgrade; legacy caches may still hold bare strings), polled from the branch
 // The shared-title maps carry {n,ts} (new) or a bare string (legacy cache) — read through these everywhere.
 const titleVal = (v) => (v && typeof v === 'object') ? (v.n || '') : (v || '');
@@ -2691,7 +2698,7 @@ function sessionIsLive(id) {
   // linger indefinitely (reconcileJoinedTabs only auto-closes it while you're viewing ITS project), and keying
   // liveness on the tab merely EXISTING would suppress that session's "out of sync" chip forever.
   for (const r of tabs.values()) if (r.kind === 'live' && r.peer && r.peer.session === id && !LIVE_DEAD.has(r.liveState)) return true;
-  return livePeers.some((p) => p && p.session === id);                                // a collaborator is hosting it
+  return peersForWs(activeWsId).some((p) => p && p.session === id);                    // a collaborator is hosting it, in THIS project
 }
 // Advertise only changes when it actually changes (avoids spamming presence pushes).
 function updateAdvertise() {
@@ -2774,7 +2781,7 @@ function toggleShareSession(s) {
     // what draws the green Join badge on this very row), a second "Share live" would advertise a rival host —
     // two divergent "live" copies and an ambiguous Join target. Refuse up front; the presence script re-checks
     // authoritatively at claim time for the race this ~10s poll can miss.
-    const holder = livePeers.find((p) => p && p.session === s.id);
+    const holder = peersForWs(activeWsId).find((p) => p && p.session === s.id);
     if (holder) { toast((holder.name || holder.login || 'A collaborator') + ' is already live on this session — use Join to hop in instead'); return; }
     sharedSessionId = s.id; sharedWsId = activeWsId;   // weld the share to THIS session + workspace; browsing elsewhere later must not drop it
     // The shared session must be the FOREGROUND tab when the tunnel starts (main pins sharedTabId = fgTabId).
@@ -2796,7 +2803,7 @@ function reconcileJoinedTabs(pollOk) {
   const ended = [];
   for (const rec of tabs.values()) {
     if (rec.kind !== 'live' || !rec.peer || !rec.peer.session) continue;
-    const fresh = livePeers.find((p) => p.session === rec.peer.session && p.url && p.token);
+    const fresh = peersForWs(rec.peerWsId).find((p) => p.session === rec.peer.session && p.url && p.token);   // only the branch this tab was joined from can speak about its host
     if (!fresh) {
       // The host stopped advertising = they ENDED the session. If our tab has already given up (offline) or is
       // futilely retrying (reconnecting) AND the presence poll genuinely succeeded, auto-leave back to the
@@ -2823,11 +2830,14 @@ function reconcileJoinedTabs(pollOk) {
   if (ended.length) { toast('Host ended the live session'); ended.forEach((id) => { try { closeTab(id); } catch {} }); }
 }
 async function pollLivePeers() {
-  const aw = workspaces.find((w) => w.id === activeWsId);
+  const myWs = activeWsId;                                          // pin the workspace this poll speaks for, BEFORE the await
+  const aw = workspaces.find((w) => w.id === myWs);
   if (!(aw && aw.kind === 'repo')) { if (livePeers.length) { livePeers = []; livePeersSig = ''; refreshSessions(); } return; }
-  let peers = [], pollOk = false; try { peers = await claudible.livePeers(); pollOk = true; } catch (e) {}
+  let peers = [], pollOk = false; try { peers = await claudible.livePeers(myWs); pollOk = true; } catch (e) {}
+  if (myWs !== activeWsId) return;                                  // switched projects mid-fetch → these peers speak for the OLD one; publishing them is the phantom-row bug (same guard refreshSessions/pollTitles use)
   const now = Date.now() / 1000;
   peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 300));   // drop stale (>5 min; a live host re-stamps every ~2 min)
+  peers.forEach((p) => { p.wsId = myWs; });                         // STAMP: every reader filters on this, so a peer can never speak for a project it wasn't discovered in
   const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session]]).sort());   // include local-presence so the Join badge re-renders the moment the host's session syncs into our list — not only when a peer changes (fixes "Join only shows when I click around")
   if (sig === livePeersSig) return;
   livePeersSig = sig; livePeers = peers; refreshSessions(); reconcileJoinedTabs(pollOk);   // host URL rotated? auto-reconnect dead joined tabs · host ended? auto-leave to single view
@@ -2992,7 +3002,12 @@ function openLiveTab(peer, localLabel) {
   const id = newTabId();
   const who = peer.name || peer.login || 'collaborator';
   const rec = makeTab(id, null, '', { kind: 'live', peer });
-  rec.peerWsId = activeWsId;   // the workspace whose presence branch this host was discovered on — the ONLY workspace whose peer list can speak about them (see reconcileJoinedTabs)
+  // The workspace whose presence branch this host was discovered on — the ONLY one whose peer list can speak
+  // about them (see reconcileJoinedTabs). Take it from the PEER, not from ambient activeWsId: a peer clicked
+  // from a stale row would otherwise be stamped with whatever project happened to be on screen, permanently
+  // pinning the joined tab to the wrong project. peersForWs() makes such a row unrenderable; this makes the
+  // stamp correct even if one is reached another way (a badge click racing a switch).
+  rec.peerWsId = peer.wsId || activeWsId;
   rec.label = 'Live · ' + who; rec.curSessionLabel = 'Live · ' + who; rec.hostName = who;
   rec.joinedAsLabel = localLabel || '';                              // name the joined tab after the row you clicked, until the host broadcasts its own session name
   setActiveTab(id);
@@ -3120,7 +3135,7 @@ function renderSessionRow(s) {
     lv.innerHTML = '<span class="live-dot"></span><span class="liw">Live</span>'; lv.title = 'You are sharing this session live';
     m.appendChild(lv);
   } else {
-    const _lp = livePeers.find((x) => x.session === s.id);
+    const _lp = peersForWs(activeWsId).find((x) => x.session === s.id);
     if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s))); }   // a collaborator is live here → green bar + calm dot, "Join" on hover (carry this row's name onto the joined tab)
   }
   row.appendChild(p); row.appendChild(m);
@@ -3242,7 +3257,7 @@ function savedSessMenuItems(row, p, s) {
     items.push({ icon: SHARE_SVG, label: isSharingSession(s.id) ? 'Stop sharing' : 'Share live',
       hint: isSharingSession(s.id) ? 'End the live session — everyone viewing is disconnected.' : 'Share this session live so a collaborator can Join and co-drive it.',
       act: () => toggleShareSession(s) });
-    const peer = livePeers.find((x) => x.session === s.id);
+    const peer = peersForWs(activeWsId).find((x) => x.session === s.id);
     if (peer && !isSharingSession(s.id)) items.push({ icon: SHARE_SVG, label: 'Join live · ' + (peer.name || peer.login || 'host'),
       hint: 'Join this collaborator’s live session and co-drive it.', act: () => openLiveTab(peer) });
   }
@@ -3579,7 +3594,7 @@ async function refreshSessions() {
     o: ordered.map((s) => [s.id, sessTitle(s), !!s.deletedRemote, !!s.diverged]),
     j: joinedLive.map((r) => [r.tabId, r.liveState, r.liveSessName || '', !!r.sessMismatch, !!r.busy]),
     lt: liveTabs.map((r) => [r.tabId, r.session, !!r.busy, r.label || '']),
-    lp: livePeers.map((p) => [p.session, p.name || p.login || '']),
+    lp: peersForWs(activeWsId).map((p) => [p.session, p.name || p.login || '']),   // scoped: another project's peers must not invalidate this list's signature
     ot: orphanTab ? [orphanTab.tabId, orphanTab.session, !!orphanTab.busy, orphanTab.label || ''] : null,   // in the sig, else the smooth path would return before ever rendering its row
     sh: sharedSessionId || '',
   });
@@ -3606,7 +3621,7 @@ async function refreshSessions() {
   ordered.forEach((s) => { if (shown.has(s.id)) return; shown.add(s.id); sessListEl.appendChild(renderSessionRow(s)); });
   liveTabs.forEach((rec) => { if (rec.session) shown.add(rec.session); sessListEl.appendChild(renderLiveTabRow(rec)); });   // live, not-yet-saved local tabs
   if (orphanTab && !shown.has(orphanTab.session)) { shown.add(orphanTab.session); sessListEl.appendChild(renderLiveTabRow(orphanTab)); }   // the invariant above: never leave the active tab rowless
-  livePeers.forEach((p) => { if (shown.has(p.session)) return; shown.add(p.session); sessListEl.appendChild(renderLivePeerRow(p)); });   // a collaborator live in a session not already shown (folds in the old _localIds check)
+  peersForWs(activeWsId).forEach((p) => { if (shown.has(p.session)) return; shown.add(p.session); sessListEl.appendChild(renderLivePeerRow(p)); });   // a collaborator live in a session not already shown (folds in the old _localIds check). SCOPED — an unscoped read here painted a repo project's live peer into a LOCAL project's sidebar
   const activeLive = sessListEl.querySelector('.sess.sess-draft.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
   updateCollab();                                                                   // synced repo session → tunnel up so a peer can Join live (no bottom-left indicator)
@@ -3834,7 +3849,10 @@ function renderWsSessionRow(w, s) {
   // live indicator — parity with the active list (this row generation predated the redesign and never got it,
   // which read as "the old deprecated style"): a collaborator live on this session shows the same green bar +
   // Join badge here as it would in the active workspace's list.
-  const _lp = livePeers.find((x) => x.session === s.id);
+  // Scoped to THIS row's workspace, not the active one. livePeers only ever holds peers for the project the last
+  // poll ran in, so a non-active tree legitimately shows no Join badge — "we never asked", not "nobody is live".
+  // Reading it unscoped is how another project's peer could leak into this tree (same defect as the sidebar row).
+  const _lp = peersForWs(w.id).find((x) => x.session === s.id);
   if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s, w.id))); }
   row.appendChild(p); row.appendChild(m);
   appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
