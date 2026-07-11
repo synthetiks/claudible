@@ -283,6 +283,7 @@ function tabLabel(rec) {
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
 function setActiveTab(tabId) {
   const rec = tabs.get(tabId); if (!rec) return;
+  rec.lastActive = Date.now();   // "least recently VIEWED" — the only ordering reclaimTabSlot() may evict by
   if (dragging) { dragging = false; thumb.classList.remove('drag'); }   // a scroll-thumb drag must not straddle a tab switch (its window-level pointermove would page the newly-active tab)
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
@@ -3726,8 +3727,45 @@ function openSidebar(open) {
 // pendingTitle, which must never be used for a saved session — if Claude can't resume it and falls back to a
 // fresh conversation, onStatus would persist THIS session's title onto that fallback. Display labels only.
 // Returns false when the tab cap is hit, so callers can degrade instead of silently doing nothing.
+// Free ONE tab slot by closing the least valuable background tab, or return false if none is safe to touch.
+//
+// Why this exists: every session you click opens its OWN tab (sessions behave like browser tabs) and nothing ever
+// reclaims an idle one, so the 8-tab cap is easy to reach just by browsing. At the cap there were THREE paths and
+// only ONE could recover — openSession recycled *the tab you are on*. That is exactly the tab a JOINED GUEST can
+// never recycle: a live mirror is immutable (re-pointing it interleaves two byte streams into one xterm and keeps
+// routing your keystrokes to the host), so openSession returns early for it, and openWsSessionInTab (clicking a
+// session in another project's tree) never had a recycle path at all. A guest sitting on a live mirror therefore
+// hard-stopped at 8 with "close a session tab first" — the reported bug. The code's own comment already promised
+// the behavior it lacked: "At the tab cap we degrade to recycling an idle, non-shared tab so the user is never
+// stuck."
+//
+// Every caller of openSessionInNewTab funnels through here, so all three dead-ends are fixed at one choke point.
+// This is purely ADDITIVE: when nothing is safe to reclaim we return false and the pre-existing refusals fire
+// unchanged, so no path loses a guard.
+//
+// A tab is untouchable if it is: the one on screen · mid-turn (busy — killing a running Claude is the one thing
+// every navigation path refuses) · the live-shared/pinned tab (closing it disconnects every guest) · a joined live
+// mirror (closing it silently leaves someone's session). Among what's left, prefer a never-started blank draft
+// (zero loss), else the least-recently-viewed. The session itself is never lost — only its tab; it stays on disk
+// and one click away in the sidebar, exactly as when the old path re-pointed a tab out from under you.
+function reclaimTabSlot() {
+  const safe = [];
+  for (const rec of tabs.values()) {
+    if (rec.tabId === activeTabId) continue;                          // never yank the tab you're looking at
+    if (rec.busy) continue;                                           // never kill a running turn
+    if (rec.tabId === sharedTabIdR) continue;                         // never end the live session for the guests
+    if (rec.kind === 'live') continue;                                // never silently leave a joined session
+    safe.push(rec);
+  }
+  if (!safe.length) return false;
+  const blank = safe.filter((r) => !r.started && (!r.session || r.session === 'new'));   // an untouched "New session" tab costs nothing to drop
+  const pool = blank.length ? blank : safe;
+  pool.sort((a, b) => (a.lastActive || 0) - (b.lastActive || 0));     // least-recently-viewed first
+  try { closeTab(pool[0].tabId); } catch { return false; }
+  return tabs.size < MAX_TABS;                                        // closeTab refuses on the last tab — report the truth
+}
 function openSessionInNewTab(wsId, id, label) {
-  if (tabs.size >= MAX_TABS) return false;
+  if (tabs.size >= MAX_TABS && !reclaimTabSlot()) return false;       // at the cap, reclaim before refusing (see above)
   const tabId = newTabId();
   const rec = makeTab(tabId, wsId || activeWsId, id);
   if (rec && label) { rec.label = label; rec.curSessionLabel = label; }   // display only — no pendingTitle (see above)

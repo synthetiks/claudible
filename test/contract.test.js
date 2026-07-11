@@ -285,7 +285,7 @@ none('renderer: orphanTab is never rendered',
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 13. Live-marker parity.
+// 13. Live-marker parity + the tab cap is never a dead end.
 //
 //   (a) BOTH row renderers must mark a session *I* am hosting. renderSessionRow (the active list) always did;
 //       renderWsSessionRow (the non-active expanded tree) never did — so the host's own Live marker vanished the
@@ -314,6 +314,23 @@ none('renderer: orphanTab is never rendered',
   none('the self-hosted marker is driven off livePeers (wiped on a non-repo ws — empty exactly when needed)',
     /isSharingSession\(s\.id\)\)\s*\{[^}]*peersForWs/.test(treeRow) ? ['self-hosted arm reads peersForWs'] : []);
 
+  none('openSessionInNewTab refuses at the cap without trying to reclaim (a guest on a live mirror is hard-stuck)',
+    /reclaimTabSlot\(\)/.test(bodyOf('openSessionInNewTab')) ? [] : ['no reclaimTabSlot() attempt before returning false']);
+
+  const reclaim = bodyOf('reclaimTabSlot');
+  none('reclaimTabSlot() does not exist', reclaim ? [] : ['helper missing']);
+  const mustExclude = [
+    ['the tab on screen', /rec\.tabId === activeTabId/],
+    ['a mid-turn (busy) tab — would kill a running Claude', /rec\.busy/],
+    ['the live-shared tab — would disconnect every guest', /rec\.tabId === sharedTabIdR/],
+    ['a joined live mirror — would silently leave someone’s session', /rec\.kind === 'live'/],
+  ];
+  none('reclaimTabSlot lost a safety exclusion (evicting one of these is data loss, not convenience)',
+    mustExclude.filter(([, re]) => !re.test(reclaim)).map(([why]) => why));
+  none('reclaimTabSlot evicts by something other than least-recently-viewed',
+    /lastActive/.test(reclaim) ? [] : ['no lastActive ordering']);
+  none('setActiveTab does not stamp lastActive (reclaim would evict by an undefined ordering)',
+    /rec\.lastActive = Date\.now\(\);/.test(bodyOf('setActiveTab')) ? [] : ['setActiveTab does not stamp lastActive']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
