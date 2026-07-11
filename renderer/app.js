@@ -3846,14 +3846,30 @@ function renderWsSessionRow(w, s) {
   row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s, w.id); p.title = p.textContent;   // shared names from THIS row's workspace cache, not the active one's
   const m = document.createElement('div'); m.className = 'sess-meta'; const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = relTime(s.used || s.mtime); m.appendChild(mt);   // last-USED (see renderSessionRow) — file mtime is security-aged for imports
-  // live indicator — parity with the active list (this row generation predated the redesign and never got it,
-  // which read as "the old deprecated style"): a collaborator live on this session shows the same green bar +
-  // Join badge here as it would in the active workspace's list.
-  // Scoped to THIS row's workspace, not the active one. livePeers only ever holds peers for the project the last
-  // poll ran in, so a non-active tree legitimately shows no Join badge — "we never asked", not "nobody is live".
-  // Reading it unscoped is how another project's peer could leak into this tree (same defect as the sidebar row).
-  const _lp = peersForWs(w.id).find((x) => x.session === s.id);
-  if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s, w.id))); }
+  // Live indicator — FULL parity with the active list (renderSessionRow), BOTH arms:
+  //
+  //  1. A session *I* am hosting. This arm was missing entirely, so the instant the host clicked into another
+  //     project their own live session lost its marker and read as "it ended" — undoing, at the last render
+  //     step, the whole point of welding the share to sharedWsId ("browsing elsewhere later must not drop it").
+  //     It CANNOT be driven off livePeers: pollLivePeers WIPES that list whenever the active workspace is not a
+  //     repo, so it is empty in exactly the case this arm exists for. sharedSessionId survives the switch, so it
+  //     is the only correct source. Deliberately NOT gated on w.id === sharedWsId: session ids are UUIDs
+  //     (globally unique — no cross-project false match is possible), while sharedWsId is null for a
+  //     web-link-only share, so gating on it would be a false NEGATIVE. Non-clickable, like the active list —
+  //     makeLiveBadge is a <button> that opens a JOIN tab, and you cannot join your own session.
+  //  2. A session a COLLABORATOR is hosting → the same green bar + "Join →" badge the active list shows, scoped
+  //     to THIS row's workspace: livePeers only speaks for the project the last poll ran in, so a non-active tree
+  //     legitimately shows no Join badge — "we never asked", not "nobody is live". Reading it unscoped is how
+  //     another project's peer leaked into this tree.
+  if (isSharingSession(s.id)) {
+    row.classList.add('sess-live-row');                              // green left accent bar — you're sharing this live
+    const lv = document.createElement('span'); lv.className = 'sess-live-ind';
+    lv.innerHTML = '<span class="live-dot"></span><span class="liw">Live</span>'; lv.title = 'You are sharing this session live';
+    m.appendChild(lv);
+  } else {
+    const _lp = peersForWs(w.id).find((x) => x.session === s.id);
+    if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s, w.id))); }
+  }
   row.appendChild(p); row.appendChild(m);
   appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
   const go = () => { openWsSessionInTab(w, s); };   // open that project's session in its OWN tab (the tab you're on keeps running)

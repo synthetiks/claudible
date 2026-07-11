@@ -284,5 +284,37 @@ none('renderer: orphanTab is never rendered',
     /rec\.peerWsId = peer\.wsId \|\| activeWsId;/.test(appNoComments) ? [] : ['peerWsId not taken from peer.wsId']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 13. Live-marker parity.
+//
+//   (a) BOTH row renderers must mark a session *I* am hosting. renderSessionRow (the active list) always did;
+//       renderWsSessionRow (the non-active expanded tree) never did — so the host's own Live marker vanished the
+//       instant they clicked into another project, and read as "the session ended". It must key off
+//       isSharingSession (sharedSessionId, which SURVIVES a workspace switch), never off livePeers — pollLivePeers
+//       WIPES that list whenever the active workspace is not a repo, i.e. it is empty in exactly the case this
+//       arm exists for.
+//   (b) The self-hosted arm must NOT use makeLiveBadge: that is a <button> wired to openLiveTab, so it would
+//       offer a "Join →" on your own session.
+//   (c) openSessionInNewTab must attempt reclaimTabSlot() at the cap. Every session-opening path funnels through
+//       it, and two of them (a guest on an immutable live mirror; a click in another project's tree) had NO
+//       recovery at all — a hard "Tab limit reached (8)" with nothing the user could do from there.
+//   (d) reclaimTabSlot must keep all four safety exclusions. Dropping any one turns a convenience into data loss:
+//       evicting a busy tab kills a running Claude; evicting sharedTabIdR disconnects every guest; evicting a live
+//       mirror silently leaves someone's session; evicting activeTabId yanks the screen out from under the user.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const appNoComments = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bodyOf = (name) => (appNoComments.match(new RegExp('function ' + name + '\\([\\s\\S]*?(?=\\nfunction |\\nconst |\\nlet )')) || [''])[0];
+
+  const treeRow = bodyOf('renderWsSessionRow');
+  none('the non-active tree row does not mark a session I am hosting (host loses their own Live marker on switch)',
+    /isSharingSession\(s\.id\)/.test(treeRow) ? [] : ['renderWsSessionRow lacks an isSharingSession branch']);
+  none('the tree row offers a Join button on the host’s OWN session (makeLiveBadge in the self-hosted arm)',
+    /isSharingSession\(s\.id\)\)\s*\{[^}]*makeLiveBadge/.test(treeRow) ? ['self-hosted arm uses makeLiveBadge'] : []);
+  none('the self-hosted marker is driven off livePeers (wiped on a non-repo ws — empty exactly when needed)',
+    /isSharingSession\(s\.id\)\)\s*\{[^}]*peersForWs/.test(treeRow) ? ['self-hosted arm reads peersForWs'] : []);
+
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
