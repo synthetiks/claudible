@@ -331,6 +331,16 @@ none('renderer: orphanTab is never rendered',
     /lastActive/.test(reclaim) ? [] : ['no lastActive ordering']);
   none('setActiveTab does not stamp lastActive (reclaim would evict by an undefined ordering)',
     /rec\.lastActive = Date\.now\(\);/.test(bodyOf('setActiveTab')) ? [] : ['setActiveTab does not stamp lastActive']);
+
+  // (e) newBlankTab is the OTHER door to the cap — "+ New Session", and every workspace switch whose current tab
+  //     cannot be reused (mid-turn / live-shared / kept by main). Those are exactly the cases where "just recycle
+  //     this tab" is unavailable, i.e. the same wall by a different door. It must reclaim too, and it must report
+  //     failure rather than toast, so each caller keeps its own specific message instead of double-toasting.
+  none('newBlankTab hard-refuses at the cap without trying to reclaim (New Session / project switch dead-end)',
+    /reclaimTabSlot\(\)/.test(bodyOf('newBlankTab')) ? [] : ['newBlankTab never attempts reclaimTabSlot()']);
+  none('a caller still pre-guards newBlankTab with the raw cap (its reclaim can then never run)',
+    /if \(tabs\.size < MAX_TABS\)\s*\{?\s*(setWsExpanded\([^)]*\);\s*)?newBlankTab\(/.test(appNoComments)
+      ? ['a `if (tabs.size < MAX_TABS) newBlankTab(...)` pre-guard survives'] : []);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

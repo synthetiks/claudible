@@ -307,12 +307,18 @@ function setActiveTab(tabId) {
   setTimeout(() => { if (term) term.focus(); }, 0);
 }
 // Open a brand-new session in a NEW tab (the current tab keeps running in the background).
+// → true if a tab was made. At the cap, reclaim a background tab first (reclaimTabSlot) rather than dead-ending:
+// the callers below reach here exactly when the CURRENT tab cannot be reused (it's mid-turn, or live-shared, or
+// main kept it) — i.e. the one case where "just recycle this tab" is unavailable, which is precisely how the cap
+// became a wall. Deliberately does NOT toast: every caller has a more specific message than "Tab limit reached",
+// and toasting here too would double up. Below the cap this is byte-identical to before.
 function newBlankTab(wsId, session, name) {
-  if (tabs.size >= MAX_TABS) { toast('Tab limit reached (' + MAX_TABS + ')'); return; }
+  if (tabs.size >= MAX_TABS && !reclaimTabSlot()) return false;
   const id = newTabId();
   const rec = makeTab(id, wsId || activeWsId, session || 'new');
   if (name && rec) { rec.label = name; rec.curSessionLabel = name; rec.pendingTitle = name; }   // named up front → show it now + persist once the session gets its real id (onStatus reconcile)
   setActiveTab(id);                                // activating fits + starts its pty
+  return true;
 }
 function closeTab(tabId) {
   const rec = tabs.get(tabId); if (!rec || tabs.size <= 1) return;   // never close the last tab
@@ -3813,7 +3819,7 @@ async function openSession(id, label, opts) {
   // so if this tab is BUSY (Claude is working), open the clicked session in a NEW background tab instead — the
   // running one keeps going untouched. (An idle tab is safe to recycle — there's no live process to lose.)
   if (t.busy && t.session !== id) {
-    if (tabs.size < MAX_TABS) { newBlankTab(activeWsId, id); return; }
+    if (newBlankTab(activeWsId, id)) return;                                 // reclaims a background tab at the cap
     toast('That session is still running — finish it or close a tab before switching'); return;
   }
   // Ask main to re-point this tab's pty FIRST — main is authoritative on busy (its rec.busy comes straight
@@ -3824,8 +3830,7 @@ async function openSession(id, label, opts) {
   // attempt to re-point the pinned tab; this one it allows, freezing the mirror first.
   let r = null; try { r = await claudible.sessionOpen(t.tabId, id, opts && opts.endShare); } catch {}
   if (r && r.ok === false) {   // main refused: this pty is genuinely mid-turn → open the click in a NEW tab, leave this one running + on screen
-    if (tabs.size < MAX_TABS) newBlankTab(activeWsId, id);
-    else toast('That session is still running — finish it or close a tab before switching');
+    if (!newBlankTab(activeWsId, id)) toast('That session is still running — finish it or close a tab before switching');
     return;
   }
   t.session = id; t.wsId = activeWsId; t.pendingTitle = null;   // re-pointing to another session drops any name typed for a not-yet-resolved new session (else it leaks onto THIS one)
@@ -4533,9 +4538,11 @@ async function switchWorkspace(id, targetSession) {
     }
     const tws = workspaces.find((w) => w.id === id);
     if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
-    if (tabs.size < MAX_TABS) { setWsExpanded(id, true); newBlankTab(id, targetSession || 'new'); }   // expand it like the normal switch does, so its sessions are right there
-    else if (t.busy) toast('That session is still running — finish it or close a tab before switching');
-    else toast('This tab is live-shared — close a tab to open that project beside it');
+    setWsExpanded(id, true);                                                  // expand it like the normal switch does, so its sessions are right there
+    if (!newBlankTab(id, targetSession || 'new')) {
+      if (t.busy) toast('That session is still running — finish it or close a tab before switching');
+      else toast('This tab is live-shared — close a tab to open that project beside it');
+    }
     return;
   }
   const sess = targetSession || '';                 // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
@@ -4559,8 +4566,7 @@ async function switchWorkspace(id, targetSession) {
     // reached us yet. Its pty never moved, so put the RECORD back (a tab claiming a workspace its process isn't in
     // orphans the sidebar highlight forever) and give the project a tab of its own, exactly like the guards above.
     Object.assign(t, prev);
-    if (tabs.size < MAX_TABS) newBlankTab(id, sess || 'new');
-    else toast('That session is still running — close a tab to open that project beside it');
+    if (!newBlankTab(id, sess || 'new')) toast('That session is still running — close a tab to open that project beside it');
     return;                                        // newBlankTab → setActiveTab already refreshed + focused
   }
   if (!failed) { t.term.reset(); resetStats(t); }  // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
@@ -4628,8 +4634,7 @@ async function createWorkspace() {
     activeWsId = newWsId;
     await refreshWorkspaces();
     if (r.keptTab) {
-      if (tabs.size < MAX_TABS) newBlankTab(newWsId, 'new');
-      else toast('Project added — close a tab to open it (this one is still running)');
+      if (!newBlankTab(newWsId, 'new')) toast('Project added — close a tab to open it (this one is still running)');
     }
     refreshSessions();
     return;
@@ -4741,7 +4746,7 @@ $('sidebar-close').addEventListener('click', () => openSidebar(false));
 $('new-session').addEventListener('click', async () => {                            // a NEW tab — never clears the current session
   const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
   if (name === null) return;                                                         // Cancel / Esc → don't create
-  newBlankTab(activeWsId, 'new', name || '');                                        // empty (just hit Create) → unnamed, like before
+  if (!newBlankTab(activeWsId, 'new', name || '')) toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');   // empty (just hit Create) → unnamed, like before
 });
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
