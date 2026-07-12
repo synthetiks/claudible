@@ -415,5 +415,41 @@ none('renderer: orphanTab is never rendered',
     /refreshExpandedTrees\(\)/.test(bodyOf('pollLivePeers')) ? [] : ['pollLivePeers never calls refreshExpandedTrees()']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 15. RAILS ARE EXTINCT. No session row may ever carry a coloured left bar again, in ANY state.
+//
+//   The rail + wash grammar IS the deprecated selected look. Ten reports of "the old selection styling came
+//   back" were stale-state bugs wearing live CSS (check 14 killed the staleness) — but the ELEVENTH was a
+//   genuinely-live row: its base style was still rail+wash, so it dressed as the old bug whenever it wasn't
+//   selected. The vocabulary is now: soft tinted boxes; state via ● LIVE pill / draft dot+text / red title
+//   (mid-turn) / green title pulse (done-while-away). This check makes a coloured rail a red build.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const styleBlk = (HTML.match(/<style>[\s\S]*?<\/style>/) || [''])[0];
+  // Keyframes first (they nest braces, so strip them before the flat rule scan) — and the old done-pulse drew a
+  // rail-shaped `inset 2px` shadow inside its frames, which the flat scan would never see.
+  const doneKf = (styleBlk.match(/@keyframes sess-done-pulse\{[\s\S]*?\}\s*\}/) || [''])[0];
+  none('the done-pulse keyframes draw a rail again (inset shadow on the left edge)',
+    doneKf && !/inset/.test(doneKf) ? [] : [doneKf ? 'sess-done-pulse contains an inset shadow' : 'sess-done-pulse keyframes missing']);
+  const flat = styleBlk.replace(/@keyframes[\s\S]*?\}\s*\}/g, '');
+  const offenders = [];
+  flat.split('}').forEach((chunk) => {
+    const [sel, body] = chunk.split('{');
+    if (!sel || !body || !/\.sess(?![a-z-]*list)/.test(sel) || /\.ws-children/.test(sel)) return;
+    const m = body.match(/border-left(?:-color)?\s*:\s*([^;]+)/);
+    if (m && !/transparent/.test(m[1])) offenders.push(sel.trim().slice(0, 60) + ' → border-left ' + m[1].trim());
+  });
+  none('a .sess rule paints a coloured left rail (the deprecated selected grammar)', offenders);
+  // Non-vacuous + the replacement styling is really there:
+  none('live rows lost the calm flat tint (the 13:05 look) that replaced the rail',
+    /\.sess\.sess-live-row,\.sess\.sess-peer-live\{[^}]*background-color:color-mix\(in srgb,var\(--ok\)/.test(flat) ? [] : ['live rows have no flat --ok background']);
+  none('the mid-turn state lost its railless indicator (red title)',
+    /\.sess\.busy \.sess-prev\{color:var\(--live\)\}/.test(flat) ? [] : ['no .sess.busy .sess-prev red-title rule']);
+  // Cascade order is load-bearing: equal specificity means LAST wins, and "it started working again" must win.
+  const gi = flat.indexOf('.sess.sess-done .sess-prev'), bi = flat.indexOf('.sess.busy .sess-prev');
+  none('busy’s red title no longer beats done’s green title (cascade order regressed)',
+    gi >= 0 && bi > gi ? [] : ['.sess.busy .sess-prev must come AFTER .sess.sess-done .sess-prev']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

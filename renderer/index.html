@@ -254,12 +254,15 @@
       overflow:hidden;text-overflow:ellipsis}
     .typist-chip.show{opacity:1}
     /* a joined peer's session, pinned atop the sidebar list */
-    .sess-joined-live{border-left:2px solid var(--ok,#5fb487)}
+    .sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}   /* calm flat tint — NO rail (see the rails-are-extinct note below) */
     .sess-joined-live .sess-prev{color:#cfe8da}
-    /* NO "already open in a tab" left accent. It was a NEUTRAL steel rail meant to say "still open in the
-       background", but on the row you'd just switched AWAY from it read exactly like a stale SELECTED highlight
-       (the deprecated pre-redesign look) — reported repeatedly. A session's sidebar row now carries only the
-       vocabulary we actually use: green for live, amber for draft/unsaved, the orange wash for the selected row. */
+    /* RAILS ARE EXTINCT — no session row ever has a coloured left bar, in ANY state. The steel open-in-tab
+       rail went first (it read as a stale selection); then the green live rail went the same way: rail + wash is
+       structurally the deprecated selected look, so a genuinely-live row "wore the old bug" whenever it wasn't
+       selected — reported ten times as a styling regression. One visual grammar now: soft tinted boxes.
+       State is carried by pills/text/dots: ● LIVE pill (green tint), 'draft · unsaved' (amber dot+text),
+       red title while a turn runs, green title pulse for finished-while-away. Guarded by contract check 15:
+       a coloured border-left on a .sess rule fails the build. */
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
@@ -523,11 +526,11 @@
       background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
     .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .17s cubic-bezier(.2,.7,.15,1);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
-    .sess.active{background-color:color-mix(in srgb,var(--live) 5%,transparent);box-shadow:inset 0 1px 0 var(--sheen);border-left-color:transparent!important}    /* selected session → workspace-style wash (tint + ::before gradient + top sheen), NO left-corner rail; the !important neutralises the busy rail that can also land on the active row */
+    .sess.active{background-color:color-mix(in srgb,var(--live) 5%,transparent);box-shadow:inset 0 1px 0 var(--sheen)}    /* selected session → workspace-style wash (tint + ::before gradient + top sheen). No rail-neutraliser needed: rails are extinct */
     .sess.active::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 13%,transparent),transparent 46%)}    /* the directional gradient now carries the selection (mirrors .ws-chip.active) since the rail is gone */
     .sess.active::after{content:'';position:absolute;left:-9px;top:50%;width:9px;height:1px;background:rgba(217,119,87,.24);transform:translateY(-50%);pointer-events:none}    /* horizontal CONNECTOR elbow (~10% brighter): same Claude-orange as the .ws-children vertical guide, branching off it to touch the active session row (tree-style ├──) */
     .sess.active.sess-live-row,.sess.active.sess-peer-live,.sess.active.sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* an ACTIVE session that's LIVE (sharing, peer-live, OR a joined tab) → GREEN wash only (its ::before is green below); overrides the active tint so it's never an orange/green MIX. A not-live active session keeps the single-colour tint above. */
-    .sess.sess-live-row,.sess.sess-peer-live{box-shadow:inset 0 1px 0 var(--sheen);border-left-color:var(--ok,#5fb487)}    /* live row: green directional wash (on ::before) + lift */
+    .sess.sess-live-row,.sess.sess-peer-live{box-shadow:inset 0 1px 0 var(--sheen);background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* live row: the SAME calm box selected+live gets (flat 5% green + sheen + the green ::before wash) — identical whether or not it's selected, so clicking away never changes its costume. NO rail */
     .sess.sess-live-row::before,.sess.sess-peer-live::before,.sess.sess-joined-live::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%)}
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
@@ -535,21 +538,20 @@
     /* draft (unsaved) session rows: an amber accent so they read as "not yet saved" — deliberately NOT the
        word/blue of anything "live": LIVE is the collab-share state (green, .sess-live-row family) and this
        indicator masquerading as "live" made brand-new sessions look shared for their first turn */
-    .sess.sess-draft{border-left-color:var(--warn)}    /* draft/unsaved → amber left accent bar */
     .sess.sess-draft .sess-meta{color:var(--warn)}
     .sess-livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#6aa6e0;
       margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px #6aa6e0}
     .sess-draftdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);
       margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px var(--warn)}
     .sess.busy .sess-livedot,.sess.busy .sess-draftdot{animation:ws-sync-pulse 1s ease-in-out infinite}
-    .sess.busy{border-left-color:var(--live)}   /* mid-turn accent — busy rows are always open in a tab, so this is the same rail the old .busy.open-in-tab painted, minus the now-removed open-in-tab dependency */
     /* DONE-WHILE-AWAY: a background session finished its turn. Green (success), pulsing until you open it —
        distinct from busy (red/live accent) and from draft (amber). Cleared on activation, so it never nags. */
-    .sess.sess-done{border-left-color:var(--ok);animation:sess-done-pulse 1.6s ease-in-out infinite}
+    .sess.sess-done{animation:sess-done-pulse 1.6s ease-in-out infinite}
     .sess.sess-done .sess-prev{color:var(--ok)}
-    .sess.sess-done.busy{animation:none;border-left-color:var(--live)}   /* it started working again → busy wins */
-    @keyframes sess-done-pulse{0%,100%{box-shadow:inset 2px 0 0 0 var(--ok),0 0 0 0 rgba(79,190,138,.28)}
-      50%{box-shadow:inset 2px 0 0 0 var(--ok),0 0 7px 1px rgba(79,190,138,0)}}
+    .sess.busy .sess-prev{color:var(--live)}   /* mid-turn → red title (rails are extinct). Placed AFTER .sess-done's green title on purpose: "it started working again" must win */
+    .sess.sess-done.busy{animation:none}   /* it started working again → busy wins (red title, rule below) */
+    @keyframes sess-done-pulse{0%,100%{background-color:transparent}
+      50%{background-color:color-mix(in srgb,var(--ok) 8%,transparent)}}   /* railless glow — the old frames drew an inset 2px rail-shaped shadow */
     @media (prefers-reduced-motion:reduce){.sess.sess-done{animation:none}}
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
