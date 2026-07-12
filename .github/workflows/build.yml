@@ -94,11 +94,14 @@ jobs:
         shell: bash
         run: |
           ver="${GITHUB_REF_NAME#v}"
+          # `|| true`: GHA runs steps under `bash -eo pipefail`, so an unreadable CHANGELOG.md would make awk exit
+          # non-zero, ABORT this step, and skip the publish step below it — turning a cosmetic notes problem into
+          # "the installer never got attached to the release". Notes may degrade; the release may not fail.
           awk -v v="$ver" '
             $0 ~ "^## \\[" v "\\]" { inside = 1; print; next }
             inside && /^## \[/     { exit }
             inside                 { print }
-          ' CHANGELOG.md > RELEASE_NOTES.md
+          ' CHANGELOG.md > RELEASE_NOTES.md || true
           if [ ! -s RELEASE_NOTES.md ]; then
             printf '%s\n' "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)." > RELEASE_NOTES.md
           fi

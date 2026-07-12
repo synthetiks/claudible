@@ -14,8 +14,9 @@
 # `claude` holds the old session id open, which forces Claude Code to FORK on the next resume — the "(empty
 # session)" stubs. `ps -o lstart=` is the portable answer: an absolute start time that survives session.sh's
 # `exec claude` (same process, so same start time — a cmdline check would not survive it), and that differs for a
-# recycled pid. Squeezed to a whitespace-free token, because boot.pid is read back with a plain `read PID STIME`
-# and a token containing spaces would be truncated at its first word.
+# recycled pid. Squeezed to a whitespace-free token so boot.pid stays a clean two-field line: `read -r PID STIME`
+# would actually hand the whole remainder to STIME, so a spaced token round-trips — but only by accident of read's
+# last-variable rule, and any future field appended to that line would then silently land inside STIME. One word.
 #
 # Resolution, stated honestly: Linux's token is clock ticks since boot; macOS's `lstart` is only 1-second precise.
 # That is not a weakness here, because the guard only ever compares ONE pid's recorded start-time against THAT SAME

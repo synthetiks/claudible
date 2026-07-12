@@ -12,8 +12,10 @@
 // account name may legally contain an apostrophe, and interpolating it raw CLOSED the quote: `bash '/home/O'Brien/
 // claudible/wsl/session.sh'` re-parses to /home/OBrien/…, a path that does not exist. Every session, workspace,
 // diff and clone command silently pointed at nothing, and the only symptom was a generic "node-pty unavailable".
-// runners/win.js already used exactly this escape for its cygpath calls; this is that escape, in one place, for
-// everyone. Keep it the SINGLE definition — the bug was two implementations of the same idea, one of them absent.
+// runners/win.js already used exactly this escape inline for its own cygpath calls; this is that escape, hoisted
+// so the command BUILDERS below share one copy. (win.js still inlines it at its three cygpath sites — same escape,
+// and those are host→guest path translation rather than command construction. If you harden the escape, harden it
+// there too.) The bug was two implementations of one idea, with the second one simply absent.
 function shq(s) { return String(s == null ? '' : s).replace(/'/g, "'\\''"); }
 
 // Env prefix the wsl/*.sh scripts read to run in the active workspace's cwd. slug re-sanitized

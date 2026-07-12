@@ -447,9 +447,16 @@ none('renderer: orphanTab is never rendered',
   // post-rail attempt recoloured the whole title red, which shouted (and put a red title beside the green ● LIVE
   // pill on a live row — two contradictory claims on one row). The dot is the vocabulary the row already had.
   none('the mid-turn state lost its railless indicator (the pulsing busy dot)',
-    /\.sess\.busy \.sess-meta::before\{[^}]*background:var\(--live\)/.test(flat) ? [] : ['no .sess.busy .sess-meta::before busy-dot rule']);
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-meta::before\{[^}]*background:var\(--live\)/.test(flat) ? [] : ['no .sess.busy .sess-meta::before busy-dot rule']);
   none('…and the busy dot must actually pulse (a static dot reads as decoration, not activity)',
-    /\.sess\.busy \.sess-meta::before\{[^}]*animation:ws-sync-pulse/.test(flat) ? [] : ['the busy dot has no ws-sync-pulse animation']);
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-meta::before\{[^}]*animation:ws-sync-pulse/.test(flat) ? [] : ['the busy dot has no ws-sync-pulse animation']);
+  // A DRAFT row builds its OWN .sess-draftdot span and the rule above already pulses it when .busy is set. If the
+  // busy dot stops excluding draft rows, a busy draft wears TWO dots — a red one and an amber one, side by side.
+  // That shipped for one commit; it must not ship twice.
+  none('the busy dot no longer excludes draft rows (a busy draft would wear two dots)',
+    /\.sess\.busy(?!:not\(\.sess-draft\))[^{,]*\.sess-meta::before/.test(flat) ? ['.sess.busy .sess-meta::before is not :not(.sess-draft)-guarded'] : []);
+  none('…and draft rows must still pulse their OWN dot while busy (the indicator they already had)',
+    /\.sess\.busy \.sess-draftdot\{[^}]*animation:ws-sync-pulse/.test(flat.replace(/\.sess\.busy \.sess-livedot,/, '.sess.busy ')) ? [] : ['.sess.busy .sess-draftdot lost its pulse']);
   // The title is NOT a busy channel. Red-on-title is the regression this replaced; it must not come back.
   none('mid-turn repaints the session TITLE again (the loud look CrazyDev rejected)',
     /\.sess\.busy[^{]*\.sess-prev\{[^}]*color:var\(--live\)/.test(flat) ? ['.sess.busy .sess-prev sets a red title'] : []);

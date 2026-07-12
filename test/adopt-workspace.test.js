@@ -277,7 +277,9 @@ for (const s of shFiles) {
   ok(`${s}: runs git → must source _git-safe.sh (a hostile .git/config runs config VALUES as commands)`,
     /^\s*\.\s+"\$HERE\/_git-safe\.sh"/m.test(raw));
 }
-ok('…and the sweep reached every git-touching script we know of (9 today)', swept >= 9);
+// Non-vacuity: if the detector regex ever stops matching, every check above passes by finding nothing to check.
+// 11 today = 9 that must source the neutralizer + the 2 written exemptions.
+ok('…and the sweep actually reached the git-touching scripts (11 today: 9 guarded + 2 exempt)', swept >= 11);
 if (HAS_BASH) {
   // Run the SHIPPED sanitizer line against real inputs. `$(printf '\n')` inside a case pattern is the empty
   // string (command substitution strips trailing newlines) → the pattern `*""*` matches everything → GH="" →
