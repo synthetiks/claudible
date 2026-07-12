@@ -71,7 +71,8 @@ function runScript(name, argStr = '', opts = {}) {
 // Voice services natively (services.sh runs on Linux/macOS — same script; binds loopback on a single host).
 function startVoiceServices() {
   try {
-    cp.execFile('bash', ['-lc', `bash '${APP_ROOT}/wsl/services.sh'`],
+    // via scriptCmd, not a hand-rolled string: it is the ONE builder that escapes the app dir (see _shared.js shq).
+    cp.execFile('bash', ['-lc', shared.scriptCmd(APP_ROOT, 'services.sh')],
       (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh:', err.message, stderr || ''); });
   } catch (e) { console.error('[claudible] failed to start voice services:', e.message); }
 }

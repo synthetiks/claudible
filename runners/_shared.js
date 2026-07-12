@@ -5,8 +5,22 @@
 // so the two backends can never drift. The Windows-native backend has no bash and does NOT use these
 // (see runners/win.js). All three are validated against runners/runner.js's contract.
 
+// Quote a string for safe interpolation INSIDE a single-quoted bash argument ('…' → '\'' … '\'').
+//
+// The one string that must go through this is the app's own install dir. It is NOT a user-picked path (those are
+// rejected outright by lib/pathSafe.js) — it is wherever the installer landed, e.g. C:\Users\O'Brien\… . An OS
+// account name may legally contain an apostrophe, and interpolating it raw CLOSED the quote: `bash '/home/O'Brien/
+// claudible/wsl/session.sh'` re-parses to /home/OBrien/…, a path that does not exist. Every session, workspace,
+// diff and clone command silently pointed at nothing, and the only symptom was a generic "node-pty unavailable".
+// runners/win.js already used exactly this escape for its cygpath calls; this is that escape, in one place, for
+// everyone. Keep it the SINGLE definition — the bug was two implementations of the same idea, one of them absent.
+function shq(s) { return String(s == null ? '' : s).replace(/'/g, "'\\''"); }
+
 // Env prefix the wsl/*.sh scripts read to run in the active workspace's cwd. slug re-sanitized
 // (defense in depth — it's interpolated into bash); custom path must be single-quote-free.
+// NOTE: `p` deliberately keeps its REJECT-on-quote rule rather than moving to shq() — a workspace path also has to
+// round-trip back out through the scripts' `printf '…"path":"%s"…'` JSON, which escaping here would not fix. That
+// rejection is lib/pathSafe.js's job and it happens at pick time; this is its defense-in-depth copy.
 function wsEnv(ws) {
   const kind = ws && ['local', 'repo', 'legacy'].includes(ws.kind) ? ws.kind : 'legacy';
   const slug = String((ws && ws.slug) || '').replace(/[^A-Za-z0-9-]/g, '');
@@ -32,7 +46,7 @@ function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy
   // CLAUDE_CODE_SUBAGENT_MODEL. Allowlist inline: only the one known value ever reaches the bash string.
   const strat = modelStrategy === 'planBigExecSmall' ? ` CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall'` : '';
   const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + strat + ' ' + wsEnv(ws) + ' ';
-  return `${prefix}bash '${appdir}/wsl/session.sh' '${appdir}'`;
+  return `${prefix}bash '${shq(appdir)}/wsl/session.sh' '${shq(appdir)}'`;
 }
 
 // The wsl/<name> invocation tail (appdir injected). Each call site passes its EXACT arg string verbatim,
@@ -41,7 +55,7 @@ function scriptCmd(appdir, name, argStr = '', opts = {}) {
   const env = opts.extraEnv ? String(opts.extraEnv) : '';
   const wsp = opts.ws ? wsEnv(opts.ws) + ' ' : '';
   const tail = String(argStr || '').trim();
-  return `${env}${wsp}bash '${appdir}/wsl/${name}'${tail ? ' ' + tail : ''}`;
+  return `${env}${wsp}bash '${shq(appdir)}/wsl/${name}'${tail ? ' ' + tail : ''}`;
 }
 
-module.exports = { wsEnv, bootStr, scriptCmd };
+module.exports = { shq, wsEnv, bootStr, scriptCmd };

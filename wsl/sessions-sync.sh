@@ -18,7 +18,9 @@
 # Env: CLAUDIBLE_WS_KIND=repo, CLAUDIBLE_WS_SLUG=<slug>, CLAUDIBLE_LIVE_SESSION=<id-to-skip-on-push|''>
 # Emits ONE JSON line on stdout for the renderer; all git chatter is muted.
 set -u
-. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it (title read/write)
+HERE="$(cd "$(dirname "$0")" && pwd)"                  # absolute, so the sources below survive any later cd
+. "$HERE/node-path.sh" 2>/dev/null || true             # nvm's node isn't on PATH for non-interactive shells → resolve it (title read/write)
+. "$HERE/_git-safe.sh"                                 # 22 git calls in a workspace repo. It's a repo WE cloned, so the config is ours — but that's an assumption about the caller, and this file is the one place it would cost nothing to stop assuming. Enforced tree-wide by test/adopt-workspace.test.js.
 
 emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }

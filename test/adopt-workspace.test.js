@@ -242,10 +242,42 @@ ok('_git-safe.sh: neutralizes core.fsmonitor (fires on git diff → the 4s poll)
 ok('_git-safe.sh: blocks the ext transport (arbitrary command)', /protocol\.ext\.allow[^\n]*never/.test(GITSAFE));
 ok('_git-safe.sh: uses git\'s env-var config so it applies to EVERY git call in the process',
   /GIT_CONFIG_COUNT=/.test(GITSAFE) && /GIT_CONFIG_KEY_0/.test(GITSAFE));
-for (const s of ['diff.sh', 'diff-apply.sh', 'checkpoint.sh']) {
-  ok(`${s}: sources _git-safe.sh (runs git in a possibly-adopted repo)`,
-    /_git-safe\.sh/.test(fs.readFileSync(path.join(ROOT, 'wsl', s), 'utf8')));
+// TREE-WIDE, not an allowlist. The previous version of this guard named three scripts BY HAND — and that is exactly
+// how adopt-workspace.sh, the single most exposed script in the app (SEVEN git commands against a folder the user
+// just picked in a native dialog, whose .git/config is entirely attacker-controlled), went a whole release without
+// the neutralizer while the check right above it passed cheerfully. A hand-maintained list of the files that must
+// be safe is really a list of the files somebody remembered. So: enumerate wsl/*.sh, find every script that actually
+// INVOKES git, and require each to source _git-safe.sh — or to be exempted here, in writing, with a reason. Fail
+// closed: a new git-touching script breaks the build until someone makes that choice on purpose.
+const EXEMPT_FROM_GIT_SAFE = {
+  // session.sh EXECs claude. Sourcing the neutralizer here would export GIT_CONFIG_* into the user's own Claude Code
+  // process, silently disabling THEIR core.sshCommand and terminal credential prompts for every git command they run
+  // in-session. Its only git call is `git config user.name/user.email` — a config READ, which executes nothing.
+  // The correct answer here is the exemption, not the source line.
+  'session.sh': "execs claude (the exports would leak into the user's own git); only READS git config",
+  // provision.sh installs the git PACKAGE. It runs no git subcommand — the match is the `git)` case label and the
+  // words "git still missing" inside an error string.
+  'provision.sh': 'installs the git package; runs no git subcommand',
+};
+// A real invocation is `git` followed by a subcommand or a flag. Deliberately NOT a bare /git/ — that would also
+// match `.git/config`, the filename `git-fetch.sh` and the string `_git-safe.sh`. Deliberately over- rather than
+// under-sensitive: it fires on a git-shaped string inside a quoted message too, and the remedy for that is an
+// exemption with a reason — which is the outcome we want. Comments are stripped first (a comment runs nothing).
+const stripShComments = (s) => s.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '$1')).join('\n');
+const GIT_INVOCATION = /(^|[^\w./-])git\s+(-\S+|[a-z][a-z-]+)/;
+const shFiles = fs.readdirSync(path.join(ROOT, 'wsl')).filter((f) => f.endsWith('.sh')).sort();
+ok('the wsl/ sweep actually found scripts (a broken glob would silently pass every check below it)', shFiles.length > 10);
+let swept = 0;
+for (const s of shFiles) {
+  if (s === '_git-safe.sh') continue;                                        // it IS the neutralizer
+  const raw = fs.readFileSync(path.join(ROOT, 'wsl', s), 'utf8');
+  if (!GIT_INVOCATION.test(stripShComments(raw))) continue;                  // runs no git → nothing to neutralize
+  swept++;
+  if (EXEMPT_FROM_GIT_SAFE[s]) { ok(`${s}: exempt from _git-safe.sh, on purpose — ${EXEMPT_FROM_GIT_SAFE[s]}`, true); continue; }
+  ok(`${s}: runs git → must source _git-safe.sh (a hostile .git/config runs config VALUES as commands)`,
+    /^\s*\.\s+"\$HERE\/_git-safe\.sh"/m.test(raw));
 }
+ok('…and the sweep reached every git-touching script we know of (9 today)', swept >= 9);
 if (HAS_BASH) {
   // Run the SHIPPED sanitizer line against real inputs. `$(printf '\n')` inside a case pattern is the empty
   // string (command substitution strips trailing newlines) → the pattern `*""*` matches everything → GH="" →

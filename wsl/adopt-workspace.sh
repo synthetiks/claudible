@@ -8,6 +8,12 @@
 # Args: $1 = the folder's absolute path (already converted to a guest path by the app).
 # Emits one JSON line: {ok:true,path,name,repo,claudeTracked,excluded} | {ok:false,error}
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # absolute BEFORE the `cd "$dir"` below (else it resolves against the adopted folder)
+# THE reason _git-safe.sh exists: an adopted folder's .git/config is entirely attacker-controlled (a "starter
+# template" zip can ship a poisoned .git/), and git runs several config VALUES as shell commands during ordinary
+# operations — core.fsmonitor fires on the `git ls-files` / `git check-ignore` calls below. This is the FIRST
+# thing a stranger does with the app, and it happens before any trust decision is surfaced. Neutralize first.
+. "$HERE/_git-safe.sh"
 
 dir="${1:-}"
 [ -n "$dir" ] || { printf '{"ok":false,"error":"no folder given"}'; exit 0; }

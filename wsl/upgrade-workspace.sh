@@ -6,6 +6,8 @@
 # .claude/ runtime is gitignored; transcripts sync separately on the claudible/sessions branch once sync is on.
 # Args: $1 = slug (strict [A-Za-z0-9-]), $2 = the workspace's absolute dir. Emits one JSON line.
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # absolute BEFORE the `cd "$dir"` below (see diff.sh)
+. "$HERE/_git-safe.sh"                                  # this path refuses ADOPTED workspaces today, so the config is ours — but that's a caller-side guarantee, and the neutralizer is what makes it a script-side one too (enforced tree-wide by test/adopt-workspace.test.js)
 slug="${1:-}"
 dir="${2:-}"
 case "$slug" in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad slug"}'; exit 0 ;; esac

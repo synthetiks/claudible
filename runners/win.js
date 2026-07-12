@@ -428,7 +428,8 @@ function startVoiceServices() {
   if (!bash || !appdir) { console.error('[claudible] voice not started: git-bash unavailable (Windows)'); return; }
   const env = Object.assign({}, process.env, { MSYS_NO_PATHCONV: '1', CLAUDIBLE_BIND_HOST: '127.0.0.1' });
   try {
-    cp.execFile(bash, ['-lc', `bash '${appdir}/wsl/services.sh'`], { encoding: 'utf8', env },
+    // via scriptCmd, not a hand-rolled string: it is the ONE builder that escapes the app dir (see _shared.js shq).
+    cp.execFile(bash, ['-lc', shared.scriptCmd(appdir, 'services.sh')], { encoding: 'utf8', env },
       (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh (win):', err.message, stderr || ''); });
   } catch (e) { console.error('[claudible] services.sh (win):', e.message); }
 }

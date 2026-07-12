@@ -7,6 +7,8 @@
 # Owner is resolved at runtime (gh api user) — never hardcoded — and the .claude/ runtime is kept
 # OUT of repos so transcripts/secrets are never committed.
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # absolute BEFORE any cd (see diff.sh)
+. "$HERE/_git-safe.sh"                                  # defense in depth: this repo is one WE create, so its config is ours — but no script may run git in a workspace without the neutralizer. Enforced tree-wide by test/adopt-workspace.test.js so the next git-touching script can't silently skip it.
 
 kind="${1:-}"
 slug="${2:-}"

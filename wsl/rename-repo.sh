@@ -8,6 +8,7 @@
 # folder's `origin` URL so sync stops depending on GitHub's (squatting-fragile) redirect. Emits one JSON line.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/_git-safe.sh"                                  # neutralize command-executing .git/config keys before the `git remote set-url` below (tree-wide invariant — see test/adopt-workspace.test.js)
 . "$HERE/_ws-dir.sh"                                    # defines WS_KIND / WS_SLUG / SDIR — the one workspace-dir resolution
 
 owner="${1:-}"

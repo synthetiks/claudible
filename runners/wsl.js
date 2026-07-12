@@ -110,7 +110,8 @@ function startVoiceServices() {
   const appdir = appDirGuest();
   if (!appdir) return;
   try {
-    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', `bash '${appdir}/wsl/services.sh'`],
+    // via scriptCmd, not a hand-rolled string: it is the ONE builder that escapes the app dir (see _shared.js shq).
+    cp.execFile('wsl.exe', ['-e', 'bash', '-lc', shared.scriptCmd(appdir, 'services.sh')],
       (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh:', err.message, stderr || ''); });
   } catch (e) { console.error('[claudible] failed to start voice services:', e.message); }
 }
