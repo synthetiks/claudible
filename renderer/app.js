@@ -1451,7 +1451,7 @@ function endLiveNow(msg) {
   if (sharedSessionId) { sharedSessionId = null; sharedWsId = null; }
   if (webShare) { webShare = false; webShareUI(false); }
   guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
-  updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions();   // updateCollab→ensureTunnel drops the tunnel (closes guests)
+  updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions(); refreshExpandedTrees();   // updateCollab→ensureTunnel drops the tunnel (closes guests). refreshSessions is ACTIVE-LIST-ONLY — without refreshExpandedTrees the ended session keeps its green rail + Live badge in any other project's open tree
   toast(msg);
 }
 // The shared thing was destroyed — its project deleted, or its tab closed. Main has already frozen the mirror.
@@ -1510,7 +1510,7 @@ claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped m
 });
 if (claudible.onAdvertiseLost) claudible.onAdvertiseLost((p) => {   // the presence heartbeat lost the one-host-per-session claim (our presence went stale — sleep/outage — and a collaborator went live on the same session) → stop claiming to share
   sharedSessionId = null; sharedWsId = null; advertisedSession = null;
-  updateCollab(); updateAdvertise(); refreshSessions();
+  updateCollab(); updateAdvertise(); refreshSessions(); refreshExpandedTrees();
   toast(((p && p.by) || 'A collaborator') + ' went live on this session while you were away — you’re no longer sharing it. Use Join to hop into theirs.');
 });
 
@@ -2729,7 +2729,7 @@ function updateAdvertise() {
           // would leave the UI saying "sharing" while nothing is advertised.
           if (sharedSessionId === want) { sharedSessionId = null; sharedWsId = null; }
           advertisedSession = null;
-          updateCollab(); refreshSessions();
+          updateCollab(); refreshSessions(); refreshExpandedTrees();
           toast((r.by || 'A collaborator') + ' went live on this session first — use Join to hop in instead');
           return;
         }
@@ -2781,7 +2781,7 @@ function toggleShareSession(s) {
   if (!s || !s.id) return;
   if (sharedSessionId === s.id) {
     sharedSessionId = null; sharedWsId = null;
-    updateCollab(); updateAdvertise(); refreshSessions();
+    updateCollab(); updateAdvertise(); refreshSessions(); refreshExpandedTrees();   // …and drop the green rail + badge from every other project's open tree
     toast('Stopped sharing this session');
   } else {
     // ONE live host per session: if a collaborator is already live on this session (their fresh presence is
@@ -2795,7 +2795,7 @@ function toggleShareSession(s) {
     // openSession focuses its existing tab, or opens one — either way that tab is foregrounded before
     // updateCollab→ensureTunnel→shareStart runs (tabForeground and shareStart are ordered on the same IPC channel).
     if (activeSession !== s.id) openSession(s.id, sessTitle(s));
-    updateCollab(); updateAdvertise(); refreshSessions();
+    updateCollab(); updateAdvertise(); refreshSessions(); refreshExpandedTrees();   // symmetric: a tree must GAIN the marker too, not only lose it
     toast('Sharing live — collaborators can now Join');
   }
 }
@@ -2847,7 +2847,7 @@ async function pollLivePeers() {
   peers.forEach((p) => { p.wsId = myWs; });                         // STAMP: every reader filters on this, so a peer can never speak for a project it wasn't discovered in
   const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session]]).sort());   // include local-presence so the Join badge re-renders the moment the host's session syncs into our list — not only when a peer changes (fixes "Join only shows when I click around")
   if (sig === livePeersSig) return;
-  livePeersSig = sig; livePeers = peers; refreshSessions(); reconcileJoinedTabs(pollOk);   // host URL rotated? auto-reconnect dead joined tabs · host ended? auto-leave to single view
+  livePeersSig = sig; livePeers = peers; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(pollOk);   // refreshSessions is active-list-only: a peer going live/offline would otherwise strand a Join badge in another project's open tree   // host URL rotated? auto-reconnect dead joined tabs · host ended? auto-leave to single view
 }
 setInterval(pollLivePeers, 10000);
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
@@ -3413,7 +3413,7 @@ async function deleteSession(id, scope) {
   // guests were watching is about to be trashed, and its pinned tab has already been frozen (endShare, above).
   if (sharedSessionId === id) {
     sharedSessionId = null; sharedWsId = null;
-    updateCollab(); updateAdvertise();                 // ensureTunnel → shareStop: guests are told, tunnel closes
+    updateCollab(); updateAdvertise(); refreshExpandedTrees();   // ensureTunnel → shareStop: guests are told, tunnel closes
     toast('That session was shared — the live session ended with it');
   }
   setOrder(order);
@@ -3611,6 +3611,7 @@ async function refreshSessions() {
       if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('sess-done', sessionNeedsAttention(sid)); row.classList.toggle('busy', sessionBusyInTab(sid)); }
       if (tb || lv) row.classList.toggle('active', (tb || lv) === activeTabId);
     });
+    syncRowFlairs();                                                                // …and reconcile the non-active trees' rails, which this early return would otherwise skip
     updateCollab(); pollTitles(); return;
   }
   _sessSig = sig;
@@ -3631,6 +3632,7 @@ async function refreshSessions() {
   peersForWs(activeWsId).forEach((p) => { if (shown.has(p.session)) return; shown.add(p.session); sessListEl.appendChild(renderLivePeerRow(p)); });   // a collaborator live in a session not already shown (folds in the old _localIds check). SCOPED — an unscoped read here painted a repo project's live peer into a LOCAL project's sidebar
   const activeLive = sessListEl.querySelector('.sess.sess-draft.active');             // a just-created session sits at the bottom → bring it into view
   if (activeLive) { try { activeLive.scrollIntoView({ block: 'nearest' }); } catch {} }
+  syncRowFlairs();                                                                  // the active list is fresh by construction; this reconciles the non-active trees' busy/done rails
   updateCollab();                                                                   // synced repo session → tunnel up so a peer can Join live (no bottom-left indicator)
   pollTitles();                                                                     // refresh workspace-shared names (throttled inside)
 }
@@ -3691,14 +3693,65 @@ function startLiveRename(row, p, rec) {
 }
 // Cheap in-place busy toggle on a tab's sidebar row (no disk re-read): live row by tab id, or saved row by session id.
 function markTabBusy(tabId, busy) {
-  const rec = tabs.get(tabId); if (!rec || !sessListEl) return;
-  const row = tabRow(rec);
-  if (!row) return;
-  row.classList.toggle('busy', !!busy);
-  if (row.classList.contains('sess-draft')) {
-    const meta = row.querySelector('.sess-meta');
-    if (meta) meta.innerHTML = '<span class="sess-draftdot"></span>' + (busy ? 'working…' : 'draft · unsaved');
+  const rec = tabs.get(tabId);
+  if (rec && sessListEl) {
+    const row = tabRow(rec);
+    if (row && row.classList.contains('sess-draft')) {   // the draft row's meta line is per-tab text, not a flair
+      const meta = row.querySelector('.sess-meta');
+      if (meta) meta.innerHTML = '<span class="sess-draftdot"></span>' + (busy ? 'working…' : 'draft · unsaved');
+    }
   }
+  syncRowFlairs();   // authority: recomputes EVERY row, so a rail can't be orphaned by a closed/re-pointed tab
+}
+// The workspace a rendered row belongs to. The ACTIVE list (#sess-list) is re-parented INSIDE its project's
+// .ws-children, so test it FIRST — otherwise an active row would resolve to its own chip and mean the same thing
+// by luck, but a draft/live row (no chip ancestor) would not.
+function rowWsId(row) {
+  if (sessListEl && sessListEl.contains(row)) return activeWsId;
+  const kids = row.closest ? row.closest('.ws-children') : null;
+  const chip = kids && kids.previousElementSibling;
+  return (chip && chip.dataset && chip.dataset.id) || activeWsId;
+}
+// THE authority on the state flairs (busy rail / done pulse). PULL, not push: it recomputes every row on screen
+// from the tabs Map, so a flair can never outlive the state that caused it.
+//
+// This is the bug that kept coming back. markTabBusy/markTabAttention PUSH a class onto one row, found via the
+// tab's CURRENT session id — so the class is orphaned FOREVER whenever that (tab → row) link breaks:
+//   * the busy tab is CLOSED           → markTabBusy bails at `tabs.get(tabId)` and the red rail is never removed
+//   * the busy tab is RE-POINTED       → onStatus reassigns rec.session with no busy guard, so tabRow now finds
+//                                        the NEW session's row and the OLD row keeps the rail forever
+//   * the row wasn't painted yet       → the toggle is a silent no-op and nothing ever retries
+// A non-active project's tree is painted once and deliberately never repainted (reconcileWsChips), so an orphan
+// there is permanent — which is exactly the "random orange flair on a session that isn't running" report. Nine
+// previous fixes deleted RAILS; the rails were right, the state behind them was dead.
+//
+// Cheap enough to run on every state change: class toggles only — no rebuild, no refetch, no flicker.
+// NB: deliberately does NOT touch sess-live-row. Live state also owns a DOM CHILD (the Live pill / Join badge),
+// so removing the class alone would strand the badge — live changes go through refreshExpandedTrees() instead.
+function syncRowFlairs() {
+  if (!bodyEl) return;
+  try {
+    bodyEl.querySelectorAll('.sess[data-id]').forEach((row) => {          // saved rows — keyed by session id
+      const sid = row.dataset.id; if (!sid) return;
+      const ws = rowWsId(row);
+      row.classList.toggle('busy', sessionBusyInTab(sid, ws));
+      row.classList.toggle('sess-done', sessionNeedsAttention(sid, ws));
+    });
+    bodyEl.querySelectorAll('.sess[data-tab]').forEach((row) => {         // draft rows — no session id yet, keyed by tab
+      const rec = tabs.get(row.dataset.tab);
+      row.classList.toggle('busy', !!(rec && rec.busy));
+      row.classList.toggle('sess-done', !!(rec && rec.attention));
+    });
+  } catch (e) {}
+}
+// Repaint every EXPANDED, NON-ACTIVE project's tree. reconcileWsChips deliberately leaves a populated non-active
+// tree untouched (anti-flicker), and every share-end path (endLiveNow / toggleShareSession / onAdvertiseLost /
+// the already-live rollback / deleteSession) calls only refreshSessions(), which touches ONLY the active list. So
+// a row painted while its session was live kept its GREEN rail *and its Live/Join badge* forever — the "stale
+// green flair on a session that stopped being live" report. Live-state changes are rare, so a real repaint here
+// is cheap, and unlike a class toggle it also removes the badge.
+function refreshExpandedTrees() {
+  try { workspaces.forEach((w) => { if (w.id !== activeWsId && isWsExpanded(w.id)) refreshWsSubtree(w.id); }); } catch (e) {}
 }
 // Row locator shared by the busy dot + the done-pulse: a draft row is keyed by tab, a saved row by session id.
 function tabRow(rec) {
@@ -3712,10 +3765,11 @@ function tabRow(rec) {
   return row;
 }
 // "Something finished here while you were looking elsewhere" — pulse the session's sidebar row until you open it.
-function markTabAttention(tabId, on) {
-  const rec = tabs.get(tabId); if (!rec) return;
-  const row = tabRow(rec); if (!row) return;                  // row not painted (other workspace / list not built) — the tab flag still carries it
-  row.classList.toggle('sess-done', !!on);
+// Args intentionally ignored: every caller sets rec.attention/rec.busy FIRST, and the sweep reads that truth — which
+// is the whole point. A push-patch aimed at ONE row strands the flair whenever the row isn't painted or the tab is
+// gone; a pull recomputes every row on screen and cannot orphan anything.
+function markTabAttention() {
+  syncRowFlairs();
 }
 // Clear the pulse when the user actually looks at that session (called from setActiveTab).
 function clearTabAttention(tabId) {

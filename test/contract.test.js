@@ -343,5 +343,77 @@ none('renderer: orphanTab is never rendered',
       ? ['a `if (tabs.size < MAX_TABS) newBlankTab(...)` pre-guard survives'] : []);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 14. State flairs may never outlive their state. THE bug that came back ten times.
+//
+//   The left rails are CORRECT css (red = mid-turn, green = live, amber = draft). Nine previous fixes deleted
+//   RAILS; the rails were never the bug — the STATE behind them was orphaned, and a dead rail on an unselected
+//   row reads exactly like the old "selected" look, so it kept getting reported as a styling regression.
+//
+//   Two orphaning mechanisms, both closed here:
+//   (a) BUSY / DONE were PUSHED onto one row, located via the tab's CURRENT session id. The class is stranded
+//       forever whenever that (tab → row) link breaks: the tab is closed (markTabBusy bails on tabs.get), the tab
+//       is re-pointed (onStatus reassigns rec.session with no busy guard), or the row isn't painted yet. They are
+//       now PULLED: syncRowFlairs() recomputes every row on screen from the tabs Map, so nothing can orphan.
+//   (b) LIVE state (sess-live-row + its Live/Join badge) lives on rows in NON-ACTIVE project trees, which
+//       reconcileWsChips deliberately never repaints — while every share-end path called only refreshSessions(),
+//       which touches the ACTIVE LIST ONLY. So the green rail AND the badge survived the share forever. Every
+//       live-state transition must now also refreshExpandedTrees(). A class toggle is NOT enough there: the badge
+//       is a DOM child, so the tree needs a real repaint.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const appNoComments = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bodyOf = (name) => (appNoComments.match(new RegExp('function ' + name + '\\([\\s\\S]*?(?=\\nfunction |\\nconst |\\nlet )')) || [''])[0];
+
+  none('syncRowFlairs() does not exist (busy/done rails can orphan again)',
+    /function syncRowFlairs\(\)/.test(appNoComments) ? [] : ['helper missing']);
+  none('refreshExpandedTrees() does not exist (a non-active tree can keep a dead live rail + badge)',
+    /function refreshExpandedTrees\(\)/.test(appNoComments) ? [] : ['helper missing']);
+
+  // The sweep must be a PULL: it has to read the predicates, and it has to reach rows OUTSIDE the active list.
+  const sweep = bodyOf('syncRowFlairs');
+  none('syncRowFlairs does not recompute busy from sessionBusyInTab (it would not be a pull)',
+    /sessionBusyInTab\(/.test(sweep) ? [] : ['does not call sessionBusyInTab']);
+  none('syncRowFlairs does not recompute the done-pulse from sessionNeedsAttention',
+    /sessionNeedsAttention\(/.test(sweep) ? [] : ['does not call sessionNeedsAttention']);
+  none('syncRowFlairs only looks inside the active list — a non-active tree row would keep its stale rail',
+    /bodyEl\.querySelectorAll/.test(sweep) ? [] : ['sweep is scoped to sessListEl, not the whole sidebar']);
+
+  // The push-patchers must defer to the sweep, or a closed/re-pointed tab strands its rail again.
+  none('markTabBusy does not run the sweep (a closed or re-pointed busy tab strands its red rail)',
+    /syncRowFlairs\(\)/.test(bodyOf('markTabBusy')) ? [] : ['markTabBusy never calls syncRowFlairs()']);
+  none('markTabAttention does not run the sweep (an unpainted row strands the done-pulse)',
+    /syncRowFlairs\(\)/.test(bodyOf('markTabAttention')) ? [] : ['markTabAttention never calls syncRowFlairs()']);
+
+  // refreshSessions is ACTIVE-LIST-ONLY. Both of its exits must still reconcile the trees.
+  const refresh = bodyOf('refreshSessions');
+  none('refreshSessions never reconciles the non-active trees (its smooth path early-returns past them)',
+    (refresh.match(/syncRowFlairs\(\)/g) || []).length >= 2
+      ? [] : ['refreshSessions must call syncRowFlairs() on BOTH the smooth path and the full rebuild']);
+
+  // EVERY live-state transition must repaint the trees — the badge is a DOM CHILD, so a class toggle cannot
+  // remove it. Asserted PER SITE, not by counting and not by proximity: a count guard passes while one transition
+  // quietly loses its repaint, and a proximity window leaks into the neighbouring branch and "finds" ITS repaint.
+  // Both weaker forms were tried here and both let a real regression through in mutation testing.
+  const liveSites = [
+    ['endLiveNow (host ends / force-end / shared tab closed)', bodyOf('endLiveNow')],
+    ['deleteSession (the share dies with the session)', bodyOf('deleteSession')],
+    ['pollLivePeers (a peer goes offline → stale Join badge elsewhere)', bodyOf('pollLivePeers')],
+    ['onAdvertiseLost (a collaborator claimed the session)',
+      (appNoComments.match(/onAdvertiseLost\([\s\S]{0,700}/) || [''])[0]],
+    ['the already-live rollback (a collaborator beat us to the claim)',
+      (appNoComments.match(/error === 'already-live'\)[\s\S]{0,500}/) || [''])[0]],
+  ];
+  none('a live-state transition does not repaint the non-active trees (stale green rail + Join badge)',
+    liveSites.filter(([, body]) => !/refreshExpandedTrees\(\)/.test(body)).map(([who]) => who));
+  // toggleShareSession owns BOTH arms — a tree must LOSE the marker on stop and GAIN it on start.
+  const tog = bodyOf('toggleShareSession');
+  none('toggleShareSession does not repaint the trees on BOTH arms (start and stop)',
+    (tog.match(/refreshExpandedTrees\(\)/g) || []).length >= 2
+      ? [] : ['needs a refreshExpandedTrees() in the stop arm AND the start arm']);
+  none('the peer poll does not repaint the trees (a peer going offline strands a Join badge elsewhere)',
+    /refreshExpandedTrees\(\)/.test(bodyOf('pollLivePeers')) ? [] : ['pollLivePeers never calls refreshExpandedTrees()']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
