@@ -133,7 +133,7 @@ npm install            # builds node-pty for Linux (needs build-essential + pyth
 bash setup/setup.sh    # whisper.cpp + Kokoro (~480 MB models on first run)  ·  NOT `npm run setup` (that's the Windows→WSL wrapper)
 npm start              # auto-selects the native Linux backend (no WSL involved)
 ```
-Packaged installers build with `npm run dist:linux` (AppImage + `.deb`); the 0.6.0 AppImage is built and boot-verified. The native backend (`runScript` + a real node-pty spawn) is live-tested.
+Packaged installers build with `npm run dist:linux` (AppImage + `.deb`). The native backend (`runScript` + a real node-pty spawn) is live-tested, and the dev path above (`npm start`) is the one most testers use.
 </details>
 
 <details><summary><h3>🍎 macOS · new</h3></summary>
@@ -192,6 +192,15 @@ anyone who held it.
 > network/ISP/VPN — or Cloudflare's own edge — can occasionally block or rate-limit it. That's a *network* issue,
 > not your session or their identity. Fix: have them try a **different network** (a phone hotspot is the quickest
 > test) or send a **fresh link**. Only people you explicitly approve ever get in, so opening it up that way is safe.
+
+**One thing worth knowing about "Share live".** In a *synced project* (one backed by a GitHub repo), the **Share
+live** action in a session's `▾` menu doesn't only mint a link for you to paste — it also **advertises** that
+session to your collaborators, by writing the invite URL and its join token to `live/<your-login>.json` on the
+project's shared `claudible/sessions` branch. That's the feature: it's how a teammate sees a **● LIVE** badge
+appear on your session and can click **Join** without you sending them anything. It also means **anyone with git
+access to that repo can read the link.** They still can't get in unseen — every guest waits in the lobby for your
+by-name approval — but if you want a session shared with exactly one person and nobody else, use the plain
+**Share** button and send the link yourself. Ending the share clears the advertisement.
 
 ## Security & privacy
 - **Permissions are yours to set.** By default the embedded Claude Code **prompts before running tools**, exactly like the normal CLI. In **Settings** you can pick a remembered mode: **Accept edits**, or **Bypass permissions** (`--dangerously-skip-permissions --add-dir $HOME`) for a frictionless one-click/voice flow — that's powerful, so only use it on a machine you trust. A session **synced from a collaborator is ALWAYS sandboxed** (normal prompting, no `--add-dir`, never auto-resumed) regardless of your setting, so an untrusted transcript can't drive tools with full `$HOME` access.

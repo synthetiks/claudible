@@ -20,6 +20,13 @@ have real network surface when you use certain features — here is the honest m
   keyboard, so grant that only to people you trust. The link dies when you stop sharing; **New link**
   revokes everyone who held the old one. Guest resume tokens are single-use and IP-bound; a kicked guest's
   tokens are invalidated.
+- **"Share live" advertises the link to your repo collaborators.** In a *synced project*, the **Share live**
+  action in a session's `▾` menu (not the plain **Share** button) additionally publishes the invite URL and
+  its join token to `live/<your-login>.json` on the project's shared `claudible/sessions` branch. That is the
+  point of it — it's how a teammate sees the **● LIVE** badge and can click **Join** unprompted — but it does
+  mean **anyone with git access to that repo can read the link**. They still cannot enter unseen: every guest
+  waits for your by-name lobby approval. Ending the share clears the advertisement. To share with exactly one
+  person, use the plain **Share** button and hand them the link yourself.
 - **The voice services (Whisper :2022, Kokoro :8880) bind `0.0.0.0`** so the Windows app can reach them
   across the WSL2 NIC. On WSL2's default NAT networking they are not exposed to your LAN. If you enable
   WSL2 *mirrored* networking they become reachable from the host's interfaces — don't run mirrored

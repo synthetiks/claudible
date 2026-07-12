@@ -62,11 +62,13 @@ if [ ! -d "$SDIR" ]; then
   echo "" >&2
 fi
 mkdir -p "$SDIR/.claude" "$RT" || { echo "[claudible] FATAL: could not create the session dir ($SDIR) or runtime dir ($RT) — aborting instead of launching Claude in the wrong place." >&2; exit 1; }
-# Our pid + kernel start-time, so killtree.sh can reap this generation's whole tree (ConPTY kills never reach
-# the WSL side). Start-time (field 22 of /proc/self/stat; field 20 after stripping "pid (comm) ") makes the
-# pidfile recycle-proof — and unlike a cmdline check it survives the FRESH branch's exec into claude (exec
-# keeps pid AND start-time). comm can contain spaces/parens, hence the strip-past-last-')' dance.
-printf '%s %s\n' "$$" "$(sed 's/.*) //' "/proc/$$/stat" 2>/dev/null | awk '{print $20}' || echo 0)" > "$RT/boot.pid"
+# Our pid + start-time, so killtree.sh can reap this generation's whole tree (ConPTY kills never reach the WSL
+# side). The start-time makes the pidfile recycle-proof, and unlike a cmdline check it survives the FRESH branch's
+# exec into claude (exec keeps pid AND start-time). It is read through proc_stime(), which is /proc on Linux/WSL
+# and `ps -o lstart=` on macOS — where /proc does not exist and this line used to write an EMPTY start-time, which
+# made killtree.sh decline to kill ANYTHING, on every tab close, forever. See wsl/_proc-stime.sh.
+. "$HERE/_proc-stime.sh"
+printf '%s %s\n' "$$" "$(proc_stime "$$")" > "$RT/boot.pid"
 : > "$HOOKS"            # fresh hook stream for THIS tab per launch (other tabs' files untouched)
 printf '{}' > "$STATUS" # clear stale status so the meter starts blank, not on last session's numbers
 

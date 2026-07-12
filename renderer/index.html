@@ -548,8 +548,17 @@
        distinct from busy (red/live accent) and from draft (amber). Cleared on activation, so it never nags. */
     .sess.sess-done{animation:sess-done-pulse 1.6s ease-in-out infinite}
     .sess.sess-done .sess-prev{color:var(--ok)}
-    .sess.busy .sess-prev{color:var(--live)}   /* mid-turn → red title (rails are extinct). Placed AFTER .sess-done's green title on purpose: "it started working again" must win */
-    .sess.sess-done.busy{animation:none}   /* it started working again → busy wins (red title, rule below) */
+    /* MID-TURN. Rails are extinct, so busy needed a new home — but recolouring the whole TITLE red (the first
+       attempt) shouted: two red titles in a four-row list, and the live row wore a red title next to its green
+       ● LIVE pill, saying "on fire" and "healthy and live" at once. The row already has a quiet vocabulary for
+       exactly this — the 6px pulsing dot of .sess-livedot / .sess-draftdot — it just never existed on ordinary
+       rows. So: the SAME dot, in the busy red, on every row. ::before on the meta line, which is already a flex
+       container on all five row-render paths, so it needs no markup and reaches rows built by any of them.
+       Red stays reserved for busy/error (the standing rule); the title stays neutral. */
+    .sess.busy .sess-meta::before{content:'';flex:none;width:6px;height:6px;border-radius:50%;
+      background:var(--live);box-shadow:0 0 6px -1px var(--live);animation:ws-sync-pulse 1s ease-in-out infinite}
+    .sess.sess-done.busy{animation:none}   /* it started working again → busy wins: the done-glow stops, the busy dot appears */
+    .sess.sess-done.busy .sess-prev{color:var(--ink)}   /* …and the done-green title reverts to neutral, so a row that resumed work isn't still wearing "finished" */
     @keyframes sess-done-pulse{0%,100%{background-color:transparent}
       50%{background-color:color-mix(in srgb,var(--ok) 8%,transparent)}}   /* railless glow — the old frames drew an inset 2px rail-shaped shadow */
     @media (prefers-reduced-motion:reduce){.sess.sess-done{animation:none}}

@@ -1089,9 +1089,17 @@ const pushTimers = new Map();                 // per-workspace debounced push ti
 // Turn busy/idle is tracked PER TAB (rec.busy) so concurrent sessions never cross-gate each other's sync:
 // one tab mid-turn must neither block nor prematurely release auto-sync for another tab's workspace. A
 // watchdog per tab self-heals a missed Stop (interrupted turn) so it can't wedge that tab busy forever.
+// THE one writer of per-tab turn-busy. The renderer used to keep its OWN copy, armed by the UserPromptSubmit hook
+// and disarmed ONLY by the Stop hook — so any turn that ended without a clean Stop (the pty died, the user hit esc,
+// Claude Code crashed) left the sidebar row wearing a "working" flair FOREVER. That is the flair bug we chased for
+// ten rounds: the flair was a faithful mirror of a tab record that was lying. Meanwhile THIS flag already had every
+// clear the renderer lacked — pty exit, session switch, tab close, and the quiet-pty self-heal below — because the
+// rest of the app (delete/switch/auto-sync gating) depends on it being true. So there is exactly one fix: the
+// renderer stops deriving busy and MIRRORS this. Every path that clears it now tells the renderer, including heal.
 function setGenBusy(tabId, v) {
   const rec = ptys.get(tabId); if (!rec) return;
   rec.busy = v;
+  try { winSend('tab:busy', { tabId, busy: !!v }); } catch {}
   if (rec.busyTimer) { clearTimeout(rec.busyTimer); rec.busyTimer = null; }
   if (!v) return;
   // Self-heal a missed Stop — but only once the pty has actually gone QUIET. The old blind 30-minute timer
@@ -1103,7 +1111,8 @@ function setGenBusy(tabId, v) {
     rec.busyTimer = null;
     if (ptys.get(tabId) !== rec || !rec.busy) return;                     // tab respawned/closed or the turn ended properly
     if (Date.now() - (rec.lastData || 0) < 180000) { rec.busyTimer = setTimeout(heal, 300000); return; }   // pty spoke within 3min → still a real turn
-    rec.busy = false; schedulePush(rec.ws);
+    rec.busy = false; try { winSend('tab:busy', { tabId, busy: false }); } catch {}   // the heal must reach the sidebar too, or the flair outlives the flag it mirrors
+    schedulePush(rec.ws);
   };
   rec.busyTimer = setTimeout(heal, 1800000);
 }
@@ -1269,6 +1278,35 @@ function backfillRepoIdentity(ws) {
     });
   });
 }
+// The keys a deleted repo workspace is tombstoned under, so discovery can never resurrect it.
+//
+// This used to be the single string `owner + '/' + ws.slug` — and that quietly could not work for a renamed repo.
+// The in-app rename DELIBERATELY freezes ws.slug (it names ~/.claudible/repos/<slug> and, through it, every Claude
+// transcript for the project) and records the new GitHub name in ws.repoName. Discovery, meanwhile, lists the repo
+// under its CURRENT name. So delete wrote `owner/old-name`, discovery asked about `owner/new-name`, the strings
+// never met, and the workspace the user had just deleted reappeared as a fresh "clone me" invite on the next
+// launch. Deterministic — rename, then delete — not a race.
+//
+// So key on identity, not on a name that is allowed to change: ghId is GitHub's stable repo id and survives a
+// rename. Keep the name-form key too (under the CURRENT name, which is what discovery reports) so a workspace
+// whose ghId backfill never landed is still tombstoned. Deliberately NOT the stale slug: a different repo could
+// later take that freed-up name, and suppressing THAT would be a fresh bug — lib/discovery.js guards the same
+// hijack for the same reason.
+function repoTombstoneKeys(ws) {
+  const keys = [];
+  if (ws && Number.isFinite(ws.ghId)) keys.push('gh:' + ws.ghId);
+  const name = ws && (ws.repoName || ws.slug);
+  if (ws && ws.owner && name) keys.push(ws.owner + '/' + name);
+  return keys;
+}
+// Is a repo discovery just surfaced one the user deleted here? Matches EITHER key form.
+function isRepoDismissed(registry_, owner, slug, ghId) {
+  const dis = (registry_ && registry_.dismissedRepos) || [];
+  if (!dis.length) return false;
+  if (Number.isFinite(ghId) && dis.includes('gh:' + ghId)) return true;
+  return dis.includes(owner + '/' + slug);
+}
+
 // ONE-TIME identity backfill for repo workspaces that predate stable-id storage. Without it, a repo renamed on
 // GitHub OUTSIDE Claudible can never be matched by discovery (its slug, its `repo-<slug>` id and its owner+name
 // are all stale) and is re-added as a phantom "clone me" duplicate on every launch — a bug that predates the
@@ -1310,7 +1348,7 @@ async function discoverWorkspaces() {
             if (c) { Object.assign(existing, patch); changed = true; }
             continue;
           }
-          if ((registry.dismissedRepos || []).includes(owner + '/' + slug)) continue;   // the user DELETED this repo workspace here — discovery must not resurrect it as a fresh invite every launch (deliberately re-adding it clears the tombstone)
+          if (isRepoDismissed(registry, owner, slug, ghId)) continue;   // the user DELETED this repo workspace here — discovery must not resurrect it as a fresh invite every launch. Matched by stable ghId as well as by name, so a RENAMED repo stays deleted too (deliberately re-adding it clears the tombstone).
           const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoName: slug, repoUrl, ghId: ghId != null ? ghId : undefined, createdAt: Date.now(), needsClone: true };
           registry.workspaces.push(ws); added.push(ws);
         }
@@ -1495,6 +1533,11 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
           const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
             repoUrl: repoUrl || undefined, owner: owner || undefined, path: wsPath || undefined, createdAt: Date.now() };
           if (kind === 'repo' && owner && Array.isArray(registry.dismissedRepos)) {   // deliberately (re-)adding a repo clears its delete-tombstone so discovery works normally again
+            // Only the name-form key can be cleared here: this fresh workspace does not know its ghId yet (the
+            // backfill sets it later), so there is no `gh:<id>` to match on. That is fine, and not a leak: a
+            // re-added workspace IS in the registry, so discovery matches it as `existing` and `continue`s well
+            // BEFORE it reaches the tombstone check (see discoverWorkspaces). A leftover `gh:<id>` key can only
+            // ever suppress a repo that has no workspace — which is exactly what a tombstone is for.
             registry.dismissedRepos = registry.dismissedRepos.filter((k) => k !== owner + '/' + slug);
           }
           registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
@@ -1680,7 +1723,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   // re-register it as a fresh invite on the very next launch — 'deleted workspaces come back' — because the
   // GitHub repo (intentionally) still exists. Deliberately re-adding it (workspace:create / re-clone) clears it.
   if (ws.kind === 'repo' && ws.owner && ws.slug) {
-    registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ws.owner + '/' + ws.slug]));
+    registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ...repoTombstoneKeys(ws)]));
   }
   saveRegistry();
   // Deleting the workspace the LIVE session runs in is the one navigation a share cannot survive: its folder is

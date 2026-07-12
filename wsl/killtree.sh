@@ -10,16 +10,20 @@
 # $1 = the tab GENERATION id (runtime/tabs/<id>/ — strict [A-Za-z0-9-]). session.sh wrote its own PID to
 # boot.pid in that dir at boot; we kill that pid's whole descendant tree, deepest-first.
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/_proc-stime.sh"                             # portable start-time: /proc on Linux/WSL, `ps -o lstart=` on macOS
 TAB="${1:-}"
 case "$TAB" in '' | *[!A-Za-z0-9-]*) exit 0 ;; esac
 PIDFILE="$(cd "$(dirname "$0")/.." && pwd)/runtime/tabs/$TAB/boot.pid"
 [ -f "$PIDFILE" ] || exit 0
 read -r PID STIME < "$PIDFILE" 2>/dev/null || true   # `read` exits nonzero on a newline-less file but still fills the vars — don't bail on that
 case "$PID" in '' | *[!0-9]*) exit 0 ;; esac
-# Recycled-pid guard: the pidfile carries the bootstrap's kernel START-TIME; only kill if the pid's current
-# start-time still matches. Stronger than a cmdline check (survives session.sh's `exec claude` — same pid,
-# same start-time) and a crash-leftover pidfile whose pid was recycled can never take an innocent process down.
-NOW_STIME="$(sed 's/.*) //' "/proc/$PID/stat" 2>/dev/null | awk '{print $20}')"
+# Recycled-pid guard: the pidfile carries the bootstrap's START-TIME; only kill if the pid's current start-time
+# still matches. Stronger than a cmdline check (survives session.sh's `exec claude` — same pid, same start-time),
+# and a crash-leftover pidfile whose pid was recycled can never take an innocent process down.
+# This read USED to be a bare /proc/$PID/stat — which does not exist on macOS, so NOW_STIME came back empty and the
+# guard below took its give-up branch on EVERY tab close, on every Mac: the process tree was never reaped at all.
+NOW_STIME="$(proc_stime "$PID")"
 [ -n "$NOW_STIME" ] && [ "$NOW_STIME" = "${STIME:-}" ] || { rm -f "$PIDFILE" 2>/dev/null; exit 0; }
 kill_tree() {
   local c

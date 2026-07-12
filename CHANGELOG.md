@@ -2,6 +2,26 @@
 
 All notable changes to Claudible are documented here.
 
+## [0.8.1] — 2026-07-12
+
+Two security fixes you should take, and the end of a sidebar bug we chased for ten rounds.
+
+### Security
+- **Adopting a folder could run code from that folder.** When you point Claudible at a project you already have, it inspects the folder with `git`. Git can be configured — *by the folder itself*, in a file that travels inside it — to run a command of its choosing during ordinary, read-only-looking operations. Claudible already had a neutralizer for exactly this, and already used it everywhere else it touched git; the "adopt a folder" path was the one place it was missing, which is also the most likely place for a folder you didn't create to arrive. It's now applied there, and in every other script that runs git. **If you've adopted a folder you got from someone else — a template, a zip, a repo you cloned from anywhere you don't fully trust — this is the fix to take.**
+- The invariant is now enforced by the test suite across the whole tree, rather than by a hand-written list of scripts to remember. A hand-written list is how the gap happened.
+
+### Fixed
+- **An apostrophe in your Windows or Linux account name broke every session.** If your user folder was something like `C:\Users\O'Brien\`, Claudible couldn't launch a single Claude session — and said only "node-pty unavailable", which pointed nowhere. Every session, project, diff and clone command was silently aimed at a path that didn't exist.
+- **A session could sit in the sidebar wearing a "working" marker forever.** If a turn ended in any way other than finishing cleanly — you pressed <kbd>esc</kbd>, the session died, Claude Code crashed — the sidebar never found out, and the row kept telling you it was busy indefinitely. The app's *actual* record of what's running always knew better (it's what stops a busy session being deleted or synced mid-turn); the sidebar simply kept its own, weaker copy. Now there is one record, and the sidebar reads it.
+- **The mid-turn marker is quiet again.** A running session is marked with the small pulsing dot the sidebar already used elsewhere, instead of repainting the whole session title red — which shouted, and which put a red title next to a green **● LIVE** badge on the same row.
+- **A project you renamed and then deleted came back.** Deleting a project remembers it by GitHub's permanent id now, not by the name it had before you renamed it — which is a name GitHub no longer reports, so the two never matched and the project reappeared as a fresh invite on the next launch.
+- **macOS: closing a tab left the session running.** The guard that stops Claudible killing an unrelated process reads a file that only exists on Linux, so on a Mac it never confirmed the process and never cleaned anything up — on every tab close and every tab switch. A leftover session holds its conversation open and forces the next resume to fork it, which is where "(empty session)" entries come from. *(Fixed in code; still unverified on real Mac hardware.)*
+- A deleted project's sync state is now dropped from memory along with its other caches.
+
+### Docs
+- **"Share live" tells your collaborators, and now the docs say so.** In a synced project, sharing a session live also publishes the invite link to the project's shared branch — that's how a teammate sees the **● LIVE** badge and can click **Join** without you sending anything. It also means anyone with git access to that repo can read the link. Nobody gets in without your by-name approval, but you should know it's there. To share with exactly one person, use **Share** and hand them the link yourself.
+- Releases now carry their changelog section as release notes, instead of publishing an empty body.
+
 ## [0.8.0] — 2026-07-10
 
 A hardening pass with **one new behavior**: renaming a project now renames its GitHub repo. Everything else is a lot of quietly-wrong things made right — the sidebar in particular now tells the truth. Every change ships with an executable test, and the whole tree has an ESLint + shellcheck gate, a real-Electron boot smoke test, and a per-OS packaging check running in CI on every push.

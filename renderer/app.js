@@ -958,17 +958,33 @@ new ResizeObserver(cmdEdges).observe(cmdscroll);              // recompute on wi
 // The context meter is display-only — clicking it must NOT auto-compact (removed by request).
 
 // ---------- Claude's reply -> VOICE OUT + Agents (fed by the PER-TAB hook stream) ----------
+// TURN-BUSY, MIRRORED FROM MAIN — never derived here. main.js's setGenBusy is the one writer: it arms on
+// UserPromptSubmit and disarms on Stop, on pty exit, on a session switch, on tab close, and on a self-heal once a
+// wedged pty has gone quiet. The renderer used to keep its own copy that ONLY a Stop hook could clear — so a turn
+// killed by esc, a dead pty, or a crashed Claude left the row "working" forever, and every sidebar rebuild
+// faithfully repainted that lie. syncRowFlairs was never the bug; the record it mirrors was.
+claudible.onTabBusy((tabId, busy) => {
+  const t = tabs.get(tabId); if (!t) return;
+  if (t.busy === busy) return;                          // idempotent: main re-sends on every hook; don't repaint for a no-op
+  t.busy = busy;
+  // markTabBusy → syncRowFlairs(), which recomputes EVERY .sess row in the sidebar from truth — including the rows
+  // inside an expanded non-active workspace's subtree. Deliberately NOT refreshExpandedTrees(): that re-RENDERS the
+  // subtrees, and doing that on every turn start/stop is exactly the repaint-churn the anti-flicker work removed.
+  markTabBusy(tabId, busy);
+});
+
 claudible.onHookLine((tabId, line) => {
   const t = tabs.get(tabId); if (!t) return;            // route every hook to the tab it came from
   let o; try { o = JSON.parse(line); } catch { return; }
   if (o.hook_event_name === 'UserPromptSubmit') {
-    t.busy = true; markTabBusy(t.tabId, true);
+    // NOT `t.busy = true` — main owns that flag and has already sent tab:busy for this very hook line (handleHook
+    // runs before the raw line is forwarded), so t.busy is correct by the time we get here. See onTabBusy below.
     if (o.prompt) {
       try { claudible.historyAppend(String(o.prompt), (t.session && t.session !== 'new') ? t.session : '', t.wsId || '', t.tabId); } catch {}   // session-history: no-op unless the setting is on (main gates + stamps + persists). Pass the SUBMITTING tab's workspace + tabId so main can write to the right file AND attribute a co-drive prompt to the foreground guest.
       if (typeof refreshHistoryFeed === 'function' && $('diffpanel') && $('diffpanel').classList.contains('open')) setTimeout(refreshHistoryFeed, 120);   // live-update the feed ONLY when its drawer is actually open (else it's a wasted historyLoad + off-screen DOM rebuild every prompt)
     }
   } else if (o.hook_event_name === 'Stop') {
-    t.busy = false; markTabBusy(t.tabId, false);
+    // Likewise: main already cleared busy for this Stop. What's OURS is the attention flag below.
     // DONE-WHILE-YOU-WERE-AWAY: a BACKGROUND tab finished its turn. Flag it so its sidebar row pulses — with
     // several sessions running at once the only other cue was the row's busy dot silently going out. The flag
     // lives on the tab record (so a sidebar rebuild can't lose it) and clears when you activate that tab.
@@ -2555,6 +2571,7 @@ function forgetSessionTitle(id) {
 // workspace later re-created with the same id.
 function forgetWorkspaceCaches(wsId) {
   try { _wsSessCache.delete(wsId); } catch {}
+  try { delete wsSyncState[wsId]; } catch {}   // the sync badge's per-ws state was the one cache this never dropped — pure growth, and a workspace id CAN recur (ws.id is `<kind>-<slug>`, not a uuid), which would show a re-created workspace the dead one's sync status
   const p = loadPrefs();
   const c = p.remoteTitlesCache || {};
   if (!(wsId in c)) return;

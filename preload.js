@@ -92,6 +92,10 @@ contextBridge.exposeInMainWorld('claudible', {
   tts: (text, voice) => ipcRenderer.invoke('tts', text, voice),
   // hooks + tracker
   onHookLine: (cb) => ipcRenderer.on('hook:line', (_e, { tabId, line }) => cb(tabId, line)),
+  // Per-tab turn-busy, decided by main (the ONE writer — see setGenBusy). The renderer mirrors it and must never
+  // derive its own: main clears busy on pty exit / session switch / tab close / a quiet-pty self-heal, and a
+  // renderer copy armed by hooks alone can only ever be disarmed by a Stop that may never come.
+  onTabBusy: (cb) => ipcRenderer.on('tab:busy', (_e, { tabId, busy }) => cb(tabId, !!busy)),
   onWorkflowAgents: (cb) => ipcRenderer.on('workflow:agents', (_e, { tabId, workflows }) => cb(tabId, workflows)),
   onAgentTokens: (cb) => ipcRenderer.on('agent-tokens', (_e, { tabId, agentTok }) => cb(tabId, agentTok)),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),   // s carries s.tabId

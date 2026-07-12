@@ -443,12 +443,53 @@ none('renderer: orphanTab is never rendered',
   // Non-vacuous + the replacement styling is really there:
   none('live rows lost the calm flat tint (the 13:05 look) that replaced the rail',
     /\.sess\.sess-live-row,\.sess\.sess-peer-live\{[^}]*background-color:color-mix\(in srgb,var\(--ok\)/.test(flat) ? [] : ['live rows have no flat --ok background']);
-  none('the mid-turn state lost its railless indicator (red title)',
-    /\.sess\.busy \.sess-prev\{color:var\(--live\)\}/.test(flat) ? [] : ['no .sess.busy .sess-prev red-title rule']);
-  // Cascade order is load-bearing: equal specificity means LAST wins, and "it started working again" must win.
-  const gi = flat.indexOf('.sess.sess-done .sess-prev'), bi = flat.indexOf('.sess.busy .sess-prev');
-  none('busy’s red title no longer beats done’s green title (cascade order regressed)',
-    gi >= 0 && bi > gi ? [] : ['.sess.busy .sess-prev must come AFTER .sess.sess-done .sess-prev']);
+  // Mid-turn must still SHOW — but as the row's quiet 6px pulsing dot, not by repainting the title. The first
+  // post-rail attempt recoloured the whole title red, which shouted (and put a red title beside the green ● LIVE
+  // pill on a live row — two contradictory claims on one row). The dot is the vocabulary the row already had.
+  none('the mid-turn state lost its railless indicator (the pulsing busy dot)',
+    /\.sess\.busy \.sess-meta::before\{[^}]*background:var\(--live\)/.test(flat) ? [] : ['no .sess.busy .sess-meta::before busy-dot rule']);
+  none('…and the busy dot must actually pulse (a static dot reads as decoration, not activity)',
+    /\.sess\.busy \.sess-meta::before\{[^}]*animation:ws-sync-pulse/.test(flat) ? [] : ['the busy dot has no ws-sync-pulse animation']);
+  // The title is NOT a busy channel. Red-on-title is the regression this replaced; it must not come back.
+  none('mid-turn repaints the session TITLE again (the loud look CrazyDev rejected)',
+    /\.sess\.busy[^{]*\.sess-prev\{[^}]*color:var\(--live\)/.test(flat) ? ['.sess.busy .sess-prev sets a red title'] : []);
+  // Cascade order is load-bearing: equal specificity means LAST wins, and "it started working again" must win —
+  // a row that resumed work may not still wear done's green title.
+  const gi = flat.indexOf('.sess.sess-done .sess-prev'), bi = flat.indexOf('.sess.sess-done.busy .sess-prev');
+  none('a resumed row still wears done’s green title (cascade order regressed)',
+    gi >= 0 && bi > gi ? [] : ['.sess.sess-done.busy .sess-prev must come AFTER .sess.sess-done .sess-prev']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 16. TURN-BUSY HAS EXACTLY ONE WRITER (main.js). The renderer kept its own copy, armed by the UserPromptSubmit
+//   hook and disarmed ONLY by Stop — so a turn ended by esc, a dead pty or a crashed Claude left the sidebar row
+//   "working" forever, and every rebuild faithfully repainted that lie. main.js's setGenBusy already had every
+//   clear the renderer lacked (pty exit, session switch, tab close, quiet-pty self-heal) because delete/switch/
+//   auto-sync gating depends on it. The renderer must MIRROR it and never derive it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('main.js: setGenBusy does not tell the renderer (the sidebar would keep guessing)',
+    /function setGenBusy[\s\S]{0,240}?winSend\('tab:busy'/.test(MAIN) ? [] : ['setGenBusy sends no tab:busy']);
+  none('main.js: the quiet-pty self-heal clears busy without telling the renderer (flair outlives the flag)',
+    /rec\.busy = false;[^\n]*winSend\('tab:busy',\s*\{\s*tabId,\s*busy:\s*false\s*\}\)/.test(MAIN) ? [] : ['the heal path sends no tab:busy']);
+  none('preload.js: the tab:busy channel is not exposed',
+    /onTabBusy:\s*\(cb\)\s*=>\s*ipcRenderer\.on\('tab:busy'/.test(PRELOAD) ? [] : ['no onTabBusy bridge']);
+  none('renderer: does not subscribe to tab:busy (it would have nothing to mirror)',
+    /claudible\.onTabBusy\(/.test(APP) ? [] : ['renderer never calls onTabBusy']);
+  // THE invariant: main is the only writer. A `t.busy = …` / `rec.busy = …` anywhere in the renderer OUTSIDE the
+  // onTabBusy handler is the bug coming back — a second, weaker copy that only a Stop hook can ever clear.
+  // Strip `//` comments FIRST. Comment-blind matching is what let two earlier grep guards pass on prose — and the
+  // comments around this very fix say the words "t.busy" out loud. `[^:]` keeps `https://` intact.
+  const codeOnly = (l) => l.replace(/(^|[^:])\/\/.*$/, '$1');
+  const busyWrites = [];
+  APP.split('\n').forEach((l, i) => {
+    const code = codeOnly(l);
+    if (!/\b(t|rec|tab)\.busy\s*=(?!=)/.test(code)) return;
+    busyWrites.push(`renderer/app.js:${i + 1}: ${code.trim().slice(0, 62)}`);
+  });
+  // Exactly one write is allowed: `t.busy = busy;` inside the onTabBusy mirror.
+  none('the renderer writes turn-busy itself instead of mirroring main (the 10-round flair bug)',
+    busyWrites.length === 1 && /\bt\.busy = busy;/.test(busyWrites[0]) ? [] : busyWrites.length ? busyWrites : ['no t.busy = busy mirror found at all']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
