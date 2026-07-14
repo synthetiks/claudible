@@ -9,8 +9,27 @@ dep="$1"
 ok()  { printf '{"ok":true}\n'; exit 0; }
 err() { printf '{"ok":false,"error":"%s"}\n' "$(printf '%s' "$1" | tr -d '\000-\037"\\')"; exit 0; }
 have() { command -v "$1" >/dev/null 2>&1; }
-pkg() {   # install system packages via apt (Debian/WSL) or brew (macOS); fail if neither exists
-  if have apt-get; then sudo apt-get update -y >/dev/null 2>&1; sudo apt-get install -y "$@" >/dev/null 2>&1
+# Run a command with root privileges — directly if we already ARE root, else via sudo, but ONLY if sudo can run
+# WITHOUT a password. This script is invoked through runScript() with NO TTY and NO stdin (wsl.js: cp.execFile
+# 'wsl.exe' '-e' 'bash' '-lc'), so a sudo that needs a password can never succeed — it fails instantly. When that
+# is the case as_root returns the sentinel 2, so callers can report the accurate "run this yourself" message
+# instead of the misleading "no apt/brew" one the old code emitted for what is really a permissions problem.
+as_root() {
+  if [ "$(id -u)" = 0 ]; then "$@"; return $?; fi
+  sudo -n true 2>/dev/null || return 2
+  sudo "$@"
+}
+pkg_err() {   # $1 = dep, $2 = the failing pkg() exit code → the accurate, actionable error
+  case "$2" in
+    2) err "installing $1 needs admin rights, and this installer has no way to prompt for your password — open your WSL/Linux terminal and run:  sudo apt-get install -y $1" ;;
+    1) err "no package manager (apt or brew) found — install $1 manually, then retry" ;;
+    *) err "$1 could not be installed automatically — install it manually, then retry" ;;
+  esac
+}
+pkg() {   # install system packages via apt (Debian/WSL, needs root) or brew (macOS, no root); distinct exit codes
+  if have apt-get; then
+    as_root true || return 2                                       # can't get root non-interactively → tell the truth
+    as_root apt-get update -y >/dev/null 2>&1; as_root apt-get install -y "$@" >/dev/null 2>&1
   elif have brew; then brew install "$@" >/dev/null 2>&1
   else return 1; fi
 }
@@ -21,13 +40,19 @@ case "$dep" in
     # VERSION (not just `have node`) so the System-check wizard can actually self-heal an outdated node.
     nok() { have node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' >/dev/null 2>&1; }
     nok && ok
-    if have apt-get; then curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/dev/null 2>&1; sudo apt-get install -y nodejs >/dev/null 2>&1
+    if have apt-get; then
+      as_root true || err "installing Node needs admin rights, and this installer has no way to prompt for your password — open your WSL/Linux terminal and run:  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -  &&  sudo apt-get install -y nodejs"
+      if [ "$(id -u)" = 0 ]; then curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+      else curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/dev/null 2>&1; fi
+      as_root apt-get install -y nodejs >/dev/null 2>&1
     elif have brew; then brew install node@22 >/dev/null 2>&1; brew link --overwrite --force node@22 >/dev/null 2>&1
     else err "no apt/brew to install node"; fi
     nok && ok || err "node is still older than 22.12 — upgrade from https://nodejs.org"
     ;;
-  git)         have git && ok;  pkg git        || err "no apt/brew to install git";  have git && ok  || err "git still missing" ;;
-  gh)          have gh && ok;   pkg gh         || err "could not install gh (see https://cli.github.com)"; have gh && ok || err "gh still missing" ;;
+  git)         have git && ok;  pkg git; rc=$?; have git && ok;  pkg_err git "$rc" ;;
+  gh)          have gh && ok;   pkg gh;  rc=$?; have gh && ok
+               [ "$rc" = 2 ] && err "installing gh needs admin rights, and this installer can't prompt for your password — open your WSL/Linux terminal and run:  sudo apt-get install -y gh  (or see https://cli.github.com)"
+               err "could not install gh automatically — see https://cli.github.com" ;;
   cloudflared)
     have cloudflared && ok
     pkg cloudflared && { have cloudflared && ok; }   # brew (macOS) / apt (rare on stock WSL) → else fall back to Cloudflare's official release below

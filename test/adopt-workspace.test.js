@@ -255,9 +255,10 @@ const EXEMPT_FROM_GIT_SAFE = {
   // in-session. Its only git call is `git config user.name/user.email` — a config READ, which executes nothing.
   // The correct answer here is the exemption, not the source line.
   'session.sh': "execs claude (the exports would leak into the user's own git); only READS git config",
-  // provision.sh installs the git PACKAGE. It runs no git subcommand — the match is the `git)` case label and the
-  // words "git still missing" inside an error string.
-  'provision.sh': 'installs the git package; runs no git subcommand',
+  // NB: provision.sh used to need an exemption here (its "git still missing" error string was git-shaped), but that
+  // string is gone, so it no longer matches GIT_INVOCATION and correctly drops out of the sweep. It is deliberately
+  // NOT re-added: it genuinely runs no git subcommand today, and a standing exemption would WRONGLY wave it through
+  // if a future edit ever gave it one. If provision.sh ever runs git, the sweep must catch it.
 };
 // A real invocation is `git` followed by a subcommand or a flag. Deliberately NOT a bare /git/ — that would also
 // match `.git/config`, the filename `git-fetch.sh` and the string `_git-safe.sh`. Deliberately over- rather than
@@ -278,8 +279,8 @@ for (const s of shFiles) {
     /^\s*\.\s+"\$HERE\/_git-safe\.sh"/m.test(raw));
 }
 // Non-vacuity: if the detector regex ever stops matching, every check above passes by finding nothing to check.
-// 11 today = 9 that must source the neutralizer + the 2 written exemptions.
-ok('…and the sweep actually reached the git-touching scripts (11 today: 9 guarded + 2 exempt)', swept >= 11);
+// 10 today = 9 that must source the neutralizer + 1 written exemption (session.sh).
+ok('…and the sweep actually reached the git-touching scripts (10 today: 9 guarded + 1 exempt)', swept >= 10);
 if (HAS_BASH) {
   // Run the SHIPPED sanitizer line against real inputs. `$(printf '\n')` inside a case pattern is the empty
   // string (command substitution strips trailing newlines) → the pattern `*""*` matches everything → GH="" →
