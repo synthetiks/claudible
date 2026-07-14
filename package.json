@@ -96,7 +96,9 @@
       "!**/.git*",
       "!**/.DS_Store",
       "!**/*.{o,obj,gyp,gypi}",
-      "!**/node_modules/.cache/**"
+      "!**/node_modules/.cache/**",
+      "LICENSE",
+      "THIRD-PARTY-LICENSES.md"
     ],
     "win": {
       "target": [
