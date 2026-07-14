@@ -228,6 +228,16 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   // Start streaming to a guest. Fresh 'link' joins mint a private resume token + announce them.
   function admit(ws, mode, name, resumeTok) {
     if (ws.readyState !== ws.OPEN) return;
+    // Re-check the guest cap HERE, not only at connect (the check at the bottom of onConnection). With approval
+    // ON (the default), a fresh joiner waits in `pending` — bounded by MAX_PENDING(16), not MAX_GUESTS(8) —
+    // between that connect-time check and this admission, so a backlog of approvals could otherwise seat more
+    // than MAX_GUESTS. Only a fresh `link` join grows the room: a `resume` reclaims a slot it already counts
+    // against, and its supersede path closes its own ghost before this, so it never nets an extra seat.
+    if (mode === 'link' && clients.size >= MAX_GUESTS) {
+      try { ws.send(JSON.stringify({ type: 'denied', reason: 'full' })); } catch {}
+      try { ws.close(); } catch {}
+      return;
+    }
     // Look up the returning guest's grace-window record FIRST — it's the SERVER's record of the exact name they
     // dropped under, and the roster identity below is resolved from it (not the client's ?n=).
     const back = (mode === 'resume' && resumeTok) ? pendingDrops.get(resumeTok) : null;

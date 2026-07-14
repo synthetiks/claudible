@@ -499,5 +499,40 @@ none('renderer: orphanTab is never rendered',
     busyWrites.length === 1 && /\bt\.busy = busy;/.test(busyWrites[0]) ? [] : busyWrites.length ? busyWrites : ['no t.busy = busy mirror found at all']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 17. THIRD-PARTY ATTRIBUTION. asar:false + no node_modules exclusion means the MIT deps (ws, node-pty, xterm,
+//   addon-fit) are PHYSICALLY bundled in the installer, so their license text must be redistributed. The
+//   attribution file must exist, name every bundled dep, and actually SHIP — build.files excludes `**/*.md`, so
+//   it must be re-included AFTER that exclusion or it silently never reaches the installer.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const pkg = JSON.parse(read('package.json'));
+  let tpl = '';
+  try { tpl = read('THIRD-PARTY-LICENSES.md'); } catch {}
+  none('THIRD-PARTY-LICENSES.md is missing (the bundled MIT deps are unattributed)', tpl ? [] : ['file absent']);
+  const bundled = ['ws', 'node-pty', '@xterm/xterm', '@xterm/addon-fit'];
+  none('the attribution file does not name every bundled dependency',
+    bundled.filter((d) => !tpl.includes(d)));
+  const files = (pkg.build && pkg.build.files) || [];
+  none('THIRD-PARTY-LICENSES.md is not in build.files (it would be excluded by `!**/*.md` and never ship)',
+    files.includes('THIRD-PARTY-LICENSES.md') ? [] : ['not listed in build.files']);
+  // Order matters: the re-include must come AFTER `!**/*.md`, else the exclusion wins and it never ships.
+  const mdExcl = files.indexOf('!**/*.md'), tplInc = files.indexOf('THIRD-PARTY-LICENSES.md');
+  none('the attribution file is re-included BEFORE the `!**/*.md` exclusion (exclusion would win → never ships)',
+    mdExcl >= 0 && tplInc > mdExcl ? [] : ['THIRD-PARTY-LICENSES.md must be listed after !**/*.md in build.files']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 18. GUEST CAP IS ENFORCED AT ADMISSION, not only at connect. With approval on (the default), a joiner waits
+//   in `pending` (bounded by MAX_PENDING=16, not MAX_GUESTS=8) between the connect-time check and admit(), so
+//   the cap MUST be re-checked inside admit() for a fresh `link` join or a backlog of approvals seats > 8.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const server = read('share/server.js');
+  const admitBody = (server.match(/function admit\(ws, mode, name, resumeTok\)\s*\{[\s\S]*?\n  \}/) || [''])[0];
+  none('share/server.js: admit() does not re-check MAX_GUESTS for a fresh link join (cap enforced only at connect)',
+    /mode === 'link' && clients\.size >= MAX_GUESTS/.test(admitBody) ? [] : ['admit() lacks the link-mode MAX_GUESTS re-check']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
