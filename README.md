@@ -202,6 +202,14 @@ access to that repo can read the link.** They still can't get in unseen — ever
 by-name approval — but if you want a session shared with exactly one person and nobody else, use the plain
 **Share** button and send the link yourself. Ending the share clears the advertisement.
 
+**And about turning on collaboration itself.** Enabling **Collaborate in Claudible** / session sync on a
+repo-backed project commits each session's **full transcript** — prompts, code, tool output, anything Claude
+read (file contents, secrets, command output), plus a small per-turn block with your name, `gh` login, git
+email and machine — into that **private** repo's history, where every collaborator with git access can read
+it. That's how a shared conversation shows up on everyone's machine. It's disclosed in-app before you switch
+it on and stays on until you switch it off; nothing goes to a third party, but don't enable it on a repo whose
+collaborators shouldn't see a given session. See [SECURITY.md](SECURITY.md).
+
 ## Security & privacy
 - **Permissions are yours to set.** By default the embedded Claude Code **prompts before running tools**, exactly like the normal CLI. In **Settings** you can pick a remembered mode: **Accept edits**, or **Bypass permissions** (`--dangerously-skip-permissions --add-dir $HOME`) for a frictionless one-click/voice flow — that's powerful, so only use it on a machine you trust. A session **synced from a collaborator is ALWAYS sandboxed** (normal prompting, no `--add-dir`, never auto-resumed) regardless of your setting, so an untrusted transcript can't drive tools with full `$HOME` access.
 - **Voice is local; Claude Code is not.** Speech-to-text (Whisper) and text-to-speech (Kokoro) run entirely on your machine, and Claudible sends no telemetry. The embedded **Claude Code** sends your prompts and code to Anthropic exactly as the normal CLI does — Claudible doesn't change that.
@@ -219,8 +227,25 @@ by-name approval — but if you want a session shared with exactly one person an
 The script fleet is **Python-free** (the JSON transforms were ported to Node, byte-parity proven), so the only
 per-OS runtime is Node + a shell. See [docs/OS-CONVERSION-PLAN.md](docs/OS-CONVERSION-PLAN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Uninstalling
+On **Windows**, uninstall from *Settings → Apps* (or the Start-menu uninstaller); that removes the app and its
+shortcuts. A few things are **intentionally left behind** so a reinstall or upgrade keeps your work — remove
+them by hand if you want to reclaim the space fully:
+
+- **Your projects & settings:** `~/.claudible/` on the Windows side (`workspaces.json`, `runtime/`, logs). Kept
+  on purpose so reinstalling doesn't wipe your workspaces.
+- **The voice models & build** (several hundred MB): `~/.claudible/voice/` on the **WSL/Linux** side —
+  whisper.cpp's build plus the Kokoro clone and downloaded model weights. Delete this folder to reclaim it.
+- **Background voice services:** the Whisper (`:2022`) and Kokoro (`:8880`) helpers can keep running after you
+  quit or uninstall. Stop them from your WSL/Linux terminal, e.g. `pkill -f whisper-server; pkill -f kokoro`
+  (or just close the WSL session / reboot).
+
+On **Linux/macOS** (dev install), delete the cloned repo, `~/.claudible/`, and — if you ran the voice setup —
+`~/.claudible/voice/`, and stop the voice services as above.
+
 ## License
-[MIT](LICENSE).
+[MIT](LICENSE). Third-party components bundled in the installer are listed in
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 
 ---
 

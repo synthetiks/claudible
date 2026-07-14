@@ -13,6 +13,15 @@ have real network surface when you use certain features — here is the honest m
 - **A session synced from a collaborator is ALWAYS sandboxed**, regardless of your permission setting: it
   resumes in normal ask-first mode, without `--add-dir`, and is never auto-resumed. An untrusted transcript
   can never drive tools with your home-directory access.
+- **Turning on collaboration syncs your full transcripts to the repo.** When you enable "Collaborate in
+  Claudible" / session sync on a repo-backed project, each session's **complete transcript** — your prompts,
+  the code and tool output, **anything Claude read during the session (file contents, secrets, command
+  output)**, and a small per-turn identity block (your display name, `gh` login, git email, and machine
+  name) — is committed to the private repo's history on the `claudible/sessions` branch, where every
+  collaborator with git access can read it. This is how shared sessions appear on everyone's machine. It is
+  disclosed in-app before you turn it on, stays on until you turn it off, and only ever writes to the
+  **private** repo you chose — nothing leaves for a third party. Don't enable it on a repo whose collaborators
+  shouldn't see a given session's contents.
 - **Live share opens network surface — only while you use it.** Clicking **Share** starts a WebSocket
   server on your machine (loopback) and, if `cloudflared` is installed, a public-but-unguessable
   `https://*.trycloudflare.com` quick-tunnel that connects *outward* from your machine. Nobody sees or
