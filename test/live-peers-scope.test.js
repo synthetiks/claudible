@@ -1,10 +1,10 @@
 // test/live-peers-scope.test.js — executes the REAL peersForWs() lifted out of renderer/app.js.
 //
-// livePeers is module-global, is never cleared on a workspace switch, and only ever holds peers for the project
-// the last poll ran in. Rendered unfiltered, a repo project's live collaborator appeared as a "Live session" row
-// inside a LOCAL project's sidebar until the next 10s poll tick — and clicking that ghost stamped the joined tab
-// with the wrong project forever. peersForWs() is the single choke point every read now goes through; this proves
-// it is a real filter (not a pass-through), and that an unstamped peer is inert rather than "probably fine".
+// Live peers are cached PER WORKSPACE (livePeersByWs: wsId -> peers[]). Rendered unscoped, a repo project's live
+// collaborator appeared as a "Live session" row inside a LOCAL project's sidebar — and clicking that ghost stamped
+// the joined tab with the wrong project forever. peersForWs() is the single choke point every read goes through;
+// this proves it is a real filter (bucket key + per-peer stamp), that an unstamped peer is inert rather than
+// "probably fine", and that a session the joined socket proved dead (deadPeerSessions, Fix 3) is suppressed.
 // Run: node test/live-peers-scope.test.js
 'use strict';
 const fs = require('fs');
@@ -18,19 +18,29 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'u
 const src = (APP.match(/function peersForWs\(wsId\) \{.*\n?/) || [''])[0];
 ok('peersForWs() found in app.js', !!src.trim());
 
-// Real function, with `livePeers` bound to a scope we control.
-const make = (peers) => new Function('livePeers', `${src}\nreturn peersForWs;`)(peers);
+// Real function, with the per-ws cache (a Map) + the dead-set bound to a scope we control. The test passes a flat
+// array of peers for convenience; we bucket it by wsId exactly as pollLivePeers does.
+const make = (peers, dead) => {
+  const map = new Map();
+  (peers || []).forEach((p) => { const k = p && p.wsId; if (!map.has(k)) map.set(k, []); map.get(k).push(p); });
+  return new Function('livePeersByWs', 'deadPeerSessions', `${src}\nreturn peersForWs;`)(map, new Set(dead || []));
+};
 
 const REPO = 'repo-mk-crazy', LOCAL = 'local-scratch';
 const peer = (session, wsId) => ({ session, wsId, url: 'https://x.trycloudflare.com', token: 't', ts: 1 });
 
 // ---- the exact reported bug: a repo peer must be invisible from a LOCAL project --------------------------
 {
-  const livePeers = [peer('s-crazy', REPO)];
-  const f = make(livePeers);
+  const f = make([peer('s-crazy', REPO)]);
   eq('the repo project sees its own live peer', f(REPO).map((p) => p.session), ['s-crazy']);
   eq('the LOCAL project sees nothing (no phantom "Live session" row)', f(LOCAL), []);
-  ok('…and the underlying list was NOT mutated (switching must not need a clear)', livePeers.length === 1);
+  eq('…repeated reads are stable (peersForWs is a pure read, not a mutation)', f(REPO).map((p) => p.session), ['s-crazy']);
+}
+
+// ---- Fix 3: a session the joined socket proved offline is suppressed even while git presence still lists it ---
+{
+  const f = make([peer('s-dead', REPO), peer('s-alive', REPO)], ['s-dead']);
+  eq('a socket-proved-dead session is hidden from the badge immediately', f(REPO).map((p) => p.session), ['s-alive']);
 }
 
 // ---- two repos: peers never cross ---------------------------------------------------------------------------

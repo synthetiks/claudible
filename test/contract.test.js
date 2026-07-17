@@ -256,32 +256,47 @@ none('renderer: orphanTab is never rendered',
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 12. livePeers is workspace-scoped. It is module-global, is NOT cleared on a workspace switch, and only ever
-//     holds peers for the project the last poll ran in. Reading it unscoped painted a repo project's live peer
-//     as a "Live session" row inside a LOCAL project's sidebar. Every read must go through peersForWs(wsId);
-//     the poll must stamp each peer and must re-check the workspace after its await; and openLiveTab must take
-//     the tab's peerWsId from the PEER, never from ambient activeWsId (that made the mis-pin permanent).
+// 12. Live peers are workspace-scoped. They live in a per-workspace cache (livePeersByWs: wsId -> peers[]) so a
+//     repo project's live collaborator can never paint as a "Live session" row inside another project's sidebar,
+//     AND presence is held for the active project PLUS every expanded one (polling only the active project froze a
+//     non-active project's badge until it was clicked). peersForWs(wsId) is the ONE scoped reader (bucket + the
+//     per-peer wsId stamp); pollLivePeers is the ONE writer; it must fetch each target with its own wsId, stamp
+//     each peer with the ws it was fetched for, and include expanded projects; openLiveTab must take peerWsId from
+//     the PEER, never ambient activeWsId (that made the mis-pin permanent).
 // ---------------------------------------------------------------------------------------------------------
 {
   const appNoComments = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  // peersForWs's own body is the ONE sanctioned reader — everything else must go through it.
-  const bareReads = appNoComments.split('\n')
-    .map((l, i) => [i + 1, l])
-    .filter(([, l]) => /\blivePeers\.(find|some|forEach|map|filter|reduce)\(/.test(l) && !/function peersForWs\(/.test(l))
-    .map(([n]) => 'app.js:' + n);
-  none('livePeers is read without peersForWs() (a project’s peers can leak into another project’s sidebar)', bareReads);
   none('peersForWs() does not exist', /function peersForWs\(/.test(appNoComments) ? [] : ['helper missing']);
+  none('peersForWs() no longer filters by the per-peer wsId stamp (the scoping guarantee at the reader)',
+    /function peersForWs\(wsId\)[^\n]*p\.wsId === wsId/.test(appNoComments) ? [] : ['peersForWs does not filter by p.wsId === wsId']);
   const poll = (appNoComments.match(/async function pollLivePeers\(\)[\s\S]*?\n\}/) || [''])[0];
-  none('pollLivePeers does not pin its workspace before the await', /const myWs = activeWsId;/.test(poll) ? [] : ['missing `const myWs = activeWsId;`']);
-  none('pollLivePeers does not pass its workspace to the IPC (main would poll its own ambient one)',
-    /claudible\.livePeers\(myWs\)/.test(poll) ? [] : ['livePeers() called without myWs']);
-  none('pollLivePeers does not re-check the workspace after the await (stale peers get published)',
-    /if \(myWs !== activeWsId\) return;/.test(poll) ? [] : ['missing post-await staleness guard']);
-  none('pollLivePeers does not stamp peers with their workspace', /p\.wsId = myWs/.test(poll) ? [] : ['peers never stamped with wsId']);
+  // Only the declaration, peersForWs (reader) and pollLivePeers (writer + keep-last-known fallback) may name the
+  // cache. A render path touching livePeersByWs directly is the unscoped-read bug.
+  const cacheHits = appNoComments.split('\n')
+    .map((l, i) => [i + 1, l])
+    .filter(([, l]) => /\blivePeersByWs\b/.test(l) && l.trim()
+      && !/function peersForWs\(/.test(l)
+      && !/let livePeersByWs =/.test(l)
+      && !poll.includes(l.trim()))
+    .map(([n]) => 'app.js:' + n);
+  none('livePeersByWs is touched outside peersForWs()/pollLivePeers() (a project’s peers can leak into another)', cacheHits);
+  none('pollLivePeers does not stamp peers with the ws they were FETCHED for',
+    /p\.wsId = wsId/.test(poll) ? [] : ['peers never stamped with their fetched wsId']);
+  none('pollLivePeers does not fetch per-workspace (main would poll its own ambient one)',
+    /claudible\.livePeers\(wsId\)/.test(poll) ? [] : ['livePeers() not called with each target wsId']);
+  none('pollLivePeers no longer polls EXPANDED projects (a non-active project’s badge would freeze until clicked)',
+    /isWsExpanded\(/.test(poll) ? [] : ['poll does not include expanded workspaces']);
   none('live:peers IPC ignores the workspace argument (ambient activeWorkspace again)',
     /ipcMain\.handle\('live:peers', \(e, wsId\)[\s\S]{0,240}?_wsById\(wsId\)/.test(MAIN) ? [] : ['main.js live:peers does not honor wsId']);
   none('openLiveTab stamps peerWsId from ambient activeWsId instead of the peer',
     /rec\.peerWsId = peer\.wsId \|\| activeWsId;/.test(appNoComments) ? [] : ['peerWsId not taken from peer.wsId']);
+  // Fix 3: a joined tab's socket-proved-offline suppression must be consulted by the reader and self-cleaned by the poll.
+  none('peersForWs() does not suppress socket-proved-dead sessions (Fix 3 badge would lag the git poll)',
+    /function peersForWs\(wsId\)[^\n]*!deadPeerSessions\.has\(p\.session\)/.test(appNoComments) ? [] : ['peersForWs ignores deadPeerSessions']);
+  none('pollLivePeers never self-cleans deadPeerSessions (the suppression set would grow forever)',
+    /deadPeerSessions\.delete\(/.test(poll) ? [] : ['poll does not prune deadPeerSessions']);
+  none('setLiveState does not feed deadPeerSessions on offline (the instant signal is dropped)',
+    /rec\.liveState === 'offline'\) deadPeerSessions\.set/.test(appNoComments) ? [] : ['setLiveState does not add to deadPeerSessions on offline']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

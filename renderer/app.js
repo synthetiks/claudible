@@ -85,14 +85,23 @@ let tabSeq = 0;
 const newTabId = () => 'tab-' + (++tabSeq);
 // Declared here (not in the sessions section) so the tab-strip boot below can reference them safely:
 let activeSession = null;                       // the ACTIVE tab's session id (mirrors AT().session) — drives sidebar row highlight
-// Collaborators live in a repo workspace + my own advertised session. EVERY entry is stamped with the `wsId`
-// whose presence branch it came from (pollLivePeers), and EVERY read goes through peersForWs() — because this
-// list is module-global, is not cleared on a workspace switch, and used to be rendered unfiltered: a repo
-// project's live peer got painted as a "Live session" row inside a LOCAL project's sidebar until the next 10s
-// poll tick. Never read livePeers directly; contract check 12 enforces it.
-let livePeers = [], livePeersSig = '', advertisedSession = null;
-// The peers that legitimately speak for `wsId` — an unstamped/foreign entry is inert, never merely "probably fine".
-function peersForWs(wsId) { return wsId ? livePeers.filter((p) => p && p.wsId === wsId) : []; }
+// Collaborators' live sessions, cached PER WORKSPACE: wsId -> peers[]. Keyed by project so (a) a peer can never be
+// read for a project it wasn't discovered in — the phantom "Live session in a LOCAL project" bug — and (b) we can
+// hold presence for SEVERAL projects at once: the active one AND every expanded one. Polling only the active
+// project was why a collaborator going live/offline in a project you were merely looking at (not active in) froze
+// on screen until you clicked into it. pollLivePeers is the ONE writer; peersForWs the ONE reader; contract check
+// 12 enforces both. The per-peer wsId stamp is kept as belt-and-suspenders so a mis-bucketed entry is still inert.
+let livePeersByWs = new Map(), livePeersSig = '', advertisedSession = null;
+const LIVE_TTL_S = 120;   // a stamp older than this is aged out (host re-stamps every ~45s); MUST match wsl/sessions-sync-tool.js LIVE_TTL
+// Sessions a JOINED tab's OWN socket already proved offline (the host ended). Suppressed from the badge instantly,
+// ahead of the ~10s git poll / TTL — see setLiveState. Value = when it was marked (ms): the suppression self-clears
+// once git presence ALSO shows the session gone, and — as a guaranteed exit — after DEAD_SUPPRESS_MS regardless,
+// so a session that is genuinely re-hosted with the same handle (git never drops it) can never stay hidden forever.
+const deadPeerSessions = new Map();
+const DEAD_SUPPRESS_MS = 30000;   // ≥ the host's clear-retry window (~30s), so the git-absence path normally wins first
+// The peers that legitimately speak for `wsId` — bucketed by project AND filtered by the per-peer stamp; a session
+// our own socket proved dead is hidden even if lagging git presence still lists it. Unstamped/foreign = inert.
+function peersForWs(wsId) { return wsId ? (livePeersByWs.get(wsId) || []).filter((p) => p && p.wsId === wsId && !deadPeerSessions.has(p.session)) : []; }
 let remoteTitles = {}, titlesSig = '', lastTitlePoll = 0;   // session names shared across the project (id -> {n,ts} since the newest-wins upgrade; legacy caches may still hold bare strings), polled from the branch
 // The shared-title maps carry {n,ts} (new) or a bare string (legacy cache) — read through these everywhere.
 const titleVal = (v) => (v && typeof v === 'object') ? (v.n || '') : (v || '');
@@ -2834,11 +2843,11 @@ function reconcileJoinedTabs(pollOk) {
       // single-person view instead of sitting on a dead "ended" tab. pollOk guards a transient fetch error;
       // the close is DEFERRED so we never mutate `tabs` mid-iteration.
       //
-      // …but `livePeers` only ever speaks for the workspace the last poll ran in (pollLivePeers reads the ACTIVE
-      // project's presence branch). While its owner browses a DIFFERENT project, this list cannot see the host at
-      // all — "absent from the list" means "never asked", not "they ended it". Without the peerWsId check, a
-      // joiner who clicked onto another project and whose socket then blipped to `reconnecting` had their live
-      // tab closed out from under them, reported as "Host ended the live session".
+      // The peerWsId===activeWsId guard stays deliberately conservative: we AUTO-CLOSE a joined tab only for the
+      // project you're actively in. (The poll now covers expanded projects too, but a joined tab's own socket is
+      // the authoritative "host ended" signal for it — Fix 3 — so we don't need reconcile to reach across projects
+      // to close it; doing so risked closing a tab out from under a joiner who'd merely clicked onto another
+      // project and whose socket then blipped to `reconnecting`.) pollOk guards a transient active-ws fetch error.
       if (pollOk && rec.peerWsId === activeWsId && LIVE_RECONNECTABLE.has(rec.liveState)) ended.push(rec.tabId);
       continue;
     }
@@ -2853,18 +2862,45 @@ function reconcileJoinedTabs(pollOk) {
   }
   if (ended.length) { toast('Host ended the live session'); ended.forEach((id) => { try { closeTab(id); } catch {} }); }
 }
+let _pollLiveInFlight = false;
 async function pollLivePeers() {
-  const myWs = activeWsId;                                          // pin the workspace this poll speaks for, BEFORE the await
-  const aw = workspaces.find((w) => w.id === myWs);
-  if (!(aw && aw.kind === 'repo')) { if (livePeers.length) { livePeers = []; livePeersSig = ''; refreshSessions(); } return; }
-  let peers = [], pollOk = false; try { peers = await claudible.livePeers(myWs); pollOk = true; } catch (e) {}
-  if (myWs !== activeWsId) return;                                  // switched projects mid-fetch → these peers speak for the OLD one; publishing them is the phantom-row bug (same guard refreshSessions/pollTitles use)
-  const now = Date.now() / 1000;
-  peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < 300));   // drop stale (>5 min; a live host re-stamps every ~2 min)
-  peers.forEach((p) => { p.wsId = myWs; });                         // STAMP: every reader filters on this, so a peer can never speak for a project it wasn't discovered in
-  const sig = JSON.stringify(peers.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session]]).sort());   // include local-presence so the Join badge re-renders the moment the host's session syncs into our list — not only when a peer changes (fixes "Join only shows when I click around")
-  if (sig === livePeersSig) return;
-  livePeersSig = sig; livePeers = peers; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(pollOk);   // refreshSessions is active-list-only: a peer going live/offline would otherwise strand a Join badge in another project's open tree   // host URL rotated? auto-reconnect dead joined tabs · host ended? auto-leave to single view
+  // Refresh presence for every repo project whose live badge is currently VISIBLE — the active one PLUS every
+  // expanded one — so a collaborator going live/offline in a project you're looking at (but not active in)
+  // repaints on the next tick instead of freezing until you click into it. Each project is fetched with ITS OWN
+  // wsId and bucketed under it, so peers can never cross projects. (Cost: one presence fetch per visible repo per
+  // 10s; bounded by what the user has open. A clean End clears instantly via the host's retrying clear anyway.)
+  if (_pollLiveInFlight) return;                                    // a prior tick's fan-out is still running (slow wsl pipe) — skip rather than pile up overlapping git fetches
+  _pollLiveInFlight = true;
+  try {
+    const targets = workspaces.filter((w) => w && w.kind === 'repo' && (w.id === activeWsId || isWsExpanded(w.id))).map((w) => w.id);
+    const now = Date.now() / 1000;
+    let activeOk = true;                                            // did the ACTIVE ws fetch succeed? (reconcileJoinedTabs only acts on the active ws, so that's the freshness signal it needs)
+    const fetched = new Map();
+    await Promise.all(targets.map(async (wsId) => {
+      let peers = null;
+      try { peers = await claudible.livePeers(wsId); }
+      catch (e) { if (wsId === activeWsId) activeOk = false; return; }   // fetch failed → keep this ws's LAST-KNOWN bucket below (a blip must not drop live rows)
+      peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < LIVE_TTL_S));
+      peers.forEach((p) => { p.wsId = wsId; });                     // STAMP with the ws it was FETCHED for — immune to an active-project switch mid-fetch (we bucket by request, not by ambient active)
+      fetched.set(wsId, peers);
+    }));
+    // Rebuild the cache to exactly the currently-visible repos. A target we failed to fetch this round keeps its
+    // previous bucket (don't flap a live row on a transient error); a project no longer visible simply drops out.
+    const next = new Map();
+    for (const wsId of targets) next.set(wsId, fetched.has(wsId) ? fetched.get(wsId) : (livePeersByWs.get(wsId) || []));
+    livePeersByWs = next;
+    // Self-clean the socket-proved-dead set: drop a suppression once git presence ALSO no longer lists the session
+    // (git caught up — the normal, fast path), OR after DEAD_SUPPRESS_MS as a guaranteed exit so a session re-hosted
+    // with the same handle (which git never drops, and whose re-arm skips setLiveState) can't stay hidden forever.
+    if (deadPeerSessions.size) {
+      const live = new Set(); next.forEach((ps) => ps.forEach((p) => live.add(p.session)));
+      const nowMs = Date.now();
+      [...deadPeerSessions].forEach(([sid, at]) => { if (!live.has(sid) || nowMs - at > DEAD_SUPPRESS_MS) deadPeerSessions.delete(sid); });
+    }
+    const sig = JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));
+    if (sig === livePeersSig) return;
+    livePeersSig = sig; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(activeOk);   // repaint the active list AND every expanded tree · re-arm/auto-leave joined tabs
+  } finally { _pollLiveInFlight = false; }
 }
 setInterval(pollLivePeers, 10000);
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
@@ -2965,6 +3001,17 @@ function setLiveState(rec, state, detail) {
   if (!rec || rec.kind !== 'live') return;
   rec.liveState = state || '';
   rec.liveReason = detail || rec.liveReason || '';
+  // INSTANT SIGNAL (Fix 3): the joined tab's own socket knows the host ended ~1-2s after it happens — long before
+  // the ~10s git-presence poll / TTL. When it settles to 'offline', suppress that session from the sidebar badge
+  // NOW so a joined guest doesn't keep seeing "● LIVE" on a session they can see is over. Re-joining (connecting/
+  // live) lifts the suppression. pollLivePeers self-cleans the set once git presence agrees the host is gone.
+  const sid = rec.peer && rec.peer.session;
+  if (sid) {
+    const was = deadPeerSessions.has(sid);
+    if (rec.liveState === 'offline') deadPeerSessions.set(sid, Date.now());
+    else if (rec.liveState === 'connecting' || rec.liveState === 'live' || rec.liveState === '') deadPeerSessions.delete(sid);
+    if (deadPeerSessions.has(sid) !== was) { try { livePeersSig = ''; refreshSessions(); refreshExpandedTrees(); } catch (e) {} }   // force the badge to recompute through peersForWs on the next paint
+  }
   const meta = document.querySelector('[data-livetab="' + rec.tabId + '"] .sess-meta');
   if (meta) {   // build via text nodes — rec.liveReason is a host-controlled ('denied') string; textContent escapes it (CSP is not the only XSS guard)
     meta.textContent = '';
@@ -3972,9 +4019,10 @@ function renderWsSessionRow(w, s) {
   //     web-link-only share, so gating on it would be a false NEGATIVE. Non-clickable, like the active list —
   //     makeLiveBadge is a <button> that opens a JOIN tab, and you cannot join your own session.
   //  2. A session a COLLABORATOR is hosting → the same green bar + "Join →" badge the active list shows, scoped
-  //     to THIS row's workspace: livePeers only speaks for the project the last poll ran in, so a non-active tree
-  //     legitimately shows no Join badge — "we never asked", not "nobody is live". Reading it unscoped is how
-  //     another project's peer leaked into this tree.
+  //     to THIS row's workspace via peersForWs(w.id). The poll now covers EXPANDED projects (not just the active
+  //     one), so an expanded non-active tree gets real Join badges without being clicked into; a COLLAPSED
+  //     non-active project simply isn't polled, so it shows none — "we never asked", not "nobody is live". Reading
+  //     the cache unscoped (bypassing peersForWs) is how another project's peer used to leak into this tree.
   if (isSharingSession(s.id)) {
     row.classList.add('sess-live-row');                              // green left accent bar — you're sharing this live
     const lv = document.createElement('span'); lv.className = 'sess-live-ind';
