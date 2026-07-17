@@ -452,15 +452,15 @@ function presenceFilter() {
 // Prints a COMPLETE presence-set refusal line ({"ok":false,...,"error":"already-live","by":...}) when
 // another author holds a FRESH claim on the session and I don't win it — or prints NOTHING when the
 // claim may proceed. Rules:
-//   · my own fresh claim on the session → proceed (the ~2-min heartbeat re-stamps; never self-refuse)
-//   · another author's claim is fresh (ts within LIVE_TTL, same 300s the renderer's Join badge uses;
-//     a crashed host goes stale and stops blocking) → refuse…
+//   · my own fresh claim on the session → proceed (the ~45s heartbeat re-stamps; never self-refuse)
+//   · another author's claim is fresh (ts within LIVE_TTL, the SAME window the renderer's Join badge uses —
+//     renderer LIVE_TTL_S; a crashed host goes stale and stops blocking) → refuse…
 //   · …UNLESS my own fresh claim ALSO exists (the post-write push-retry re-check: both of us pushed in
 //     the same race window — per-author files merge cleanly, so git ordering alone can't arbitrate) and
 //     I WIN the deterministic tie-break: earlier ts first (first click wins), login ascending on a tie.
 //     Exactly one side wins on identical inputs, so one host yields instead of both (or neither).
 // Corrupt/unparseable peer files are ignored (like presence-filter) — junk must never lock a session.
-const LIVE_TTL = 300;
+const LIVE_TTL = 120;   // a live host re-stamps every ~45s (main.js heartbeat); 120s = ~2.6 missed beats of slack before a genuinely-crashed host's claim ages out. MUST match the renderer's LIVE_TTL_S.
 function liveHolder() {
   const dir = process.env.CL_DIR || '';
   const sid = process.env.CL_SID || '';

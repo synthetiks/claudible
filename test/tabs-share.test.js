@@ -135,16 +135,16 @@ ok('main.js: syncShare cannot un-freeze the mirror',
   /if \(tabId === mirrorTabId\(\) && !freezeMirror\) syncShare\(\);/.test(MAIN));
 ok('main.js: the workspace-granular pause never overrides the freeze',
   /share\.status\(\)\.running && !freezeMirror/.test(MAIN));
-ok('main.js: workspace:delete freezes before the respawn (covers a web-share pinned to a session-less tab)',
-  /if \(sharedHere\) \{[\s\S]{0,700}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,200}?winSend\('share:force-end'/.test(MAIN));
+ok('main.js: workspace:delete freezes AND stops advertising before the respawn (covers a web-share pinned to a session-less tab)',
+  /if \(sharedHere\) \{[\s\S]{0,700}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,300}?stopAdvertising\(\);[\s\S]{0,300}?winSend\('share:force-end'/.test(MAIN));
 // …and syncShare() must NOT run in that branch: every tab already points at `fallback`, so it would re-derive the
 // pause from a workspace the guests were never granted and un-freeze the mirror it just froze.
 ok('main.js: workspace:delete skips syncShare when the shared tab is one of the moved ones',
   /\} else \{\s*\n\s*syncShare\(\);   \/\/ refresh the granted library for guests/.test(MAIN));
 // Closing the shared tab is the OTHER way a live pty dies — respawnPty never sees it. Pausing alone left a zombie:
 // tunnel up, host UI saying "live", guests frozen on a dead process.
-ok('main.js: closing the shared tab ends the share for real, not just pauses it',
-  /if \(sharedTabId === tabId\) \{[\s\S]{0,300}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,120}?winSend\('share:force-end', \{ reason: 'tab-closed' \}\)/.test(MAIN));
+ok('main.js: closing the shared tab ends the share for real (pause + stop advertising), not just pauses it',
+  /if \(sharedTabId === tabId\) \{[\s\S]{0,300}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,300}?stopAdvertising\(\);[\s\S]{0,300}?winSend\('share:force-end', \{ reason: 'tab-closed' \}\)/.test(MAIN));
 ok('app.js: …and the host is asked first (the Command Center ✕ had no confirm at all)',
   /if \(tabId === sharedTabIdR && !confirm\(/.test(APP));
 ok('main.js: the dead share:session-moved channel is gone (nothing moves the pinned tab any more)',

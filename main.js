@@ -705,6 +705,7 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   // dead id (never fall back to the host's private foreground) and tell the renderer to end the share for real.
   if (sharedTabId === tabId) {
     try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    stopAdvertising();                                                 // stop re-stamping + clear presence NOW, not after the renderer round-trip (else the heartbeat keeps advertising an ended session for seconds)
     try { winSend('share:force-end', { reason: 'tab-closed' }); } catch {}
   }
   if (fgTabId === tabId) fgTabId = ptys.keys().next().value || null;   // renderer will foreground the next tab explicitly
@@ -908,27 +909,51 @@ function runPresence(args, cb, ws) {
       cb && cb(r);
     });
 }
-// Keep my presence fresh while I'm hosting. Peers ignore advertisements older than a few minutes (so a crashed
-// host stops showing as "live"), so a still-live host must re-stamp its ts periodically. The timer lives in MAIN
-// on purpose — renderer timers get throttled when the window is backgrounded, which is exactly when we must NOT
-// silently go stale. Each beat is one tiny presence-set commit; a ~2 min cadence keeps the git noise low.
+// Keep my presence fresh while I'm hosting. Peers age out an advertisement after LIVE_TTL (120s), so a still-live
+// host must re-stamp its ts well within that. The timer lives in MAIN on purpose — renderer timers get throttled
+// when the window is backgrounded, which is exactly when we must NOT silently go stale. Each beat is one tiny
+// presence-set commit; a 45s cadence (vs the old 120s) means a CRASHED host — the only case a clean presence-clear
+// can't cover — stops showing as "live" within ~120s instead of ~5 min, at the cost of a bit more git presence
+// traffic. A clean End/quit clears instantly regardless (stopAdvertising, with retry), so the TTL only governs crashes.
 // advertisedWs = the workspace we advertised ON (its live/<login>.json lives on THAT repo's sessions branch). Pinned
 // here so a later presence-set/clear targets it even after the user switches the cockpit to another workspace — else
-// the clear runs against the new active ws (nothing there) and the OLD ws stays "live" until its ~5-min TTL expires.
+// the clear runs against the new active ws (nothing there) and the OLD ws stays "live" until its ~2-min TTL expires.
 let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '', advertisedWs = null;
 function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; advertisedWs = null; }
-// THE full live-hosting teardown: heartbeat off, presence pulled off the branch, share server down. Called from
-// share:stop (the button) and window-all-closed (quit) — the ONLY two ways hosting ends. It existed twice before,
-// and the copies drifted: the quit path called stopAdvertiseHeartbeat() then share.stop() but never cleared
-// presence — worse, stopping the heartbeat FIRST nulls advertisedWs, destroying the very reference a clear needs.
-// So quitting the app left live/<login>.json on the branch and peers saw "live · Join" for up to 5 more minutes
-// (TTL 300s, heartbeat 120s) on a session whose tunnel was already dead. The capture-BEFORE-stop ordering below is
-// the load-bearing part; test/live-teardown.test.js executes this function and fails if it's reordered.
-// (presence-clear's spawned wsl.exe outlives app exit — the same guarantee the pty reaper relies on.)
-function stopLiveSharing() {
+// Pull our live/<login>.json off the branch, RETRYING until it lands. presence-clear's own script already retries
+// its git push 3x internally, but if a transient outage spans all three (a network blip exactly at End-live), it
+// returns {ok:false} and — before this — nothing re-attempted, because the heartbeat that might have is already
+// stopped. The stale entry then sat on the branch and peers saw us "live" until the TTL: the exact reported bug.
+// Bounded (a genuinely-offline host can't push at all — the peer TTL is the final backstop for that case).
+function clearPresenceWithRetry(ws, attempt) {
+  if (!ws) return;
+  attempt = attempt || 0;
+  runPresence('presence-clear', (r) => {
+    if (r && r.ok) return;                                         // landed on the branch → done
+    if (attempt >= 5) { console.error('[live] presence-clear did not land after retries — peers fall back to the', 120, 's TTL'); return; }
+    const t = setTimeout(() => clearPresenceWithRetry(ws, attempt + 1), 2000 * (attempt + 1));   // 2s,4s,6s,8s,10s
+    if (t.unref) t.unref();
+  }, ws);
+}
+// Stop re-stamping presence AND pull our live/<login>.json off the branch. The load-bearing part is the ordering:
+// capture advertisedWs/advertisedSid BEFORE stopAdvertiseHeartbeat() nulls them, or the clear runs with ws=null —
+// clearing the wrong (or no) repo and leaving us "live" on the branch (the "MK still sees me after I quit" bug).
+// test/live-teardown.test.js executes THIS function and fails if the capture is reordered. Extracted so every end
+// path (the End button, quit, closing the shared tab, deleting the shared workspace) tears presence down the SAME
+// way instead of the copies drifting. Idempotent: a second call after advertisedSid is null does nothing.
+function stopAdvertising() {
   const advWs = advertisedWs, wasAdvertising = !!advertisedSid;   // capture BEFORE stopAdvertiseHeartbeat nulls them
   stopAdvertiseHeartbeat();                                       // no longer hosting → stop re-stamping presence
-  if (wasAdvertising) runPresence('presence-clear', () => {}, advWs);   // pull live/<login>.json off the advertised repo's branch now, not at TTL
+  if (wasAdvertising) clearPresenceWithRetry(advWs);             // pull live/<login>.json off the branch now, not at TTL
+}
+// THE full live-hosting teardown: presence down (above) + share server down. Called from share:stop (the button)
+// and window-all-closed (quit). The two OTHER end paths — closing the shared tab, deleting the shared workspace —
+// call stopAdvertising() directly too (they used to only freeze the local mirror and lean on an async renderer
+// round-trip to eventually reach here, during which share.status().running stayed true and the heartbeat kept
+// RE-STAMPING presence — so an "ended" session could keep advertising itself for seconds).
+// (presence-clear's spawned wsl.exe outlives app exit — the same guarantee the pty reaper relies on.)
+function stopLiveSharing() {
+  stopAdvertising();
   share.stop();
 }
 function startAdvertiseHeartbeat(sid, ws) {
@@ -940,14 +965,14 @@ function startAdvertiseHeartbeat(sid, ws) {
     if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
     runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
       // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
-      // sleep past the 5-min TTL, network outage). ONE host per session — stand down instead of stamping a
+      // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
       // duplicate, and tell the renderer so the UI stops saying "sharing" (it clears sharedSessionId + toasts).
       if (r && r.error === 'already-live') {
         stopAdvertiseHeartbeat();
         try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
       }
     }, advertisedWs);
-  }, 120000);
+  }, 45000);   // re-stamp cadence — must stay well under LIVE_TTL (120s) so a live host never ages out between beats
   if (advertiseTimer.unref) advertiseTimer.unref();
 }
 ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
@@ -1739,6 +1764,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
     // (Nothing can interleave before the freeze today — JS is single-threaded and there's no await — but the
     // ordering must not depend on that.) The renderer's force-end drops the tunnel a beat later.
     try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    stopAdvertising();                                                 // stop re-stamping + clear presence NOW (parity with tab-close) rather than waiting on the renderer's force-end round-trip
     try { winSend('share:force-end', { reason: 'workspace-deleted' }); } catch {}
   } else {
     syncShare();   // refresh the granted library for guests (the deleted ws drops out of grantedList)
