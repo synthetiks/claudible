@@ -534,5 +534,27 @@ none('renderer: orphanTab is never rendered',
     /mode === 'link' && clients\.size >= MAX_GUESTS/.test(admitBody) ? [] : ['admit() lacks the link-mode MAX_GUESTS re-check']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 13. One kind of project at creation time — and the repo plumbing must OUTLIVE its removal from the modal.
+//     The New-project modal deliberately no longer offers "Shared repo project": every project starts plain and
+//     becomes synced later via the consented ▾-menu flows. Two failure modes, both pinned:
+//     (a) the tile creeping back (someone "restores" the choice and re-forks the UX);
+//     (b) someone garbage-collecting the now-UI-unreachable repo-creation path — which invites, discovery and
+//         upgrade still depend on. Deleting it would break accepting an invite, the exact kind of "cleanup"
+//         a dead-code sweep would suggest.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the New-project modal grew a repo tile back', /ch-repo|Shared repo project/.test(HTML) ? ['index.html contains the repo tile again'] : []);
+  none('the modal path can reach workspaceCreate with kind repo again',
+    /const WS_KINDS = \['local', 'adopt'\]/.test(APP) && !/creating private repo on GitHub/.test(APP) ? [] : ['WS_KINDS regrew repo (or its busy text returned)']);
+  // ^\s*repo\)\s*$ = the actual case label. A bare /repo\)/ was satisfied by the header comment
+  // "kind (local|repo)," — the comment-blindness trap that has now bitten this repo's guards three times.
+  none('the repo-creation plumbing was garbage-collected (invites/discovery/upgrade still need it)',
+    /^\s*repo\)\s*$/m.test(read('wsl/create-workspace.sh')) && /workspace:create/.test(MAIN) && /upgrade-workspace\.sh/.test(MAIN) ? [] : ['create-workspace.sh repo branch / workspace:create / upgrade path missing']);
+  // The deferred flows the modal now leans on must all still exist in the renderer.
+  const deferred = ['upgradeWorkspace(', 'inviteToLocal(', 'openSyncModal('].filter((f) => !APP.includes(f));
+  none('a deferred sync/share flow the modal copy promises is gone', deferred);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

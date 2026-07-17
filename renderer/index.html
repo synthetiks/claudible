@@ -1372,23 +1372,19 @@
   <div class="approve" id="ws-modal">
     <div class="box">
       <h3>New project</h3>
-      <p>A project points Claude at a folder — it works inside those files, and you review &amp; revert its changes there. (<b>My Sessions</b> is the default, with no project folder.)</p>
+      <p>A project points Claude at a folder — it works inside those files, and you review &amp; revert its changes there. Private to you: sync it across your devices or share it with a teammate <b>later</b>, from the project’s ▾ menu.</p>
       <div class="choice-row">
         <div class="choice sel" id="ch-local" data-kind="local" role="radio" tabindex="0" aria-checked="true">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <div><div class="ct">Local project</div><div class="cd">Point Claude at a folder on your machine. Private to you.</div></div>
+          <div><div class="ct">Blank project</div><div class="cd">Start fresh — Claudible creates the folder for you.</div></div>
         </div>
         <div class="choice" id="ch-adopt" data-kind="adopt" role="radio" tabindex="0" aria-checked="false">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14l3-3 3 3"/></svg>
           <div><div class="ct">Add a folder I already have</div><div class="cd">Point Claudible at an existing folder — your repo, your code. Nothing is moved, copied, or published, and its commits show up in Project History.</div></div>
         </div>
-        <div class="choice" id="ch-repo" data-kind="repo" role="radio" tabindex="0" aria-checked="false">
-          <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-          <div><div class="ct">Shared repo project</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team, so you can build (and go live) together.</div></div>
-        </div>
       </div>
       <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dashes)" />
-      <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose a folder for it (local only — else it goes in ~/.claudible)</span></label>
+      <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose where its folder goes (else it goes in ~/.claudible)</span></label>
       <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
       <div class="ws-busy" id="ws-busy"></div>
       <div class="ws-invite-check">Been invited to a shared project? <button type="button" id="ws-discover" class="linkbtn">Check for invites</button></div>

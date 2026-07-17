@@ -4086,8 +4086,9 @@ function renderWsChips() {
     const chip = document.createElement('div');
     chip.className = 'ws-chip' + (w.id === activeWsId ? ' active' : '') + (isWsExpanded(w.id) ? ' expanded' : '');   // (the old ' shared' class lost its CSS in the redesign — the .ws-dot.live indicator carries screen-share state now)
     chip.title = w.kind === 'legacy' ? 'Default space — quick chats, not tied to a project folder'
-      : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — shared GitHub repo; sessions sync with your team')
-      : (w.label + ' — a project folder on your machine (private to you)');
+      : w.kind === 'repo' ? ((w.repoUrl || w.label) + ' — synced project; you and your team see its sessions and can Join live')
+      : w.adopted ? (w.label + ' — your own folder; Claudible works in it, nothing is moved or published')
+      : (w.label + ' — your project (private to this machine; sync or share it from the ▾ menu)');
     const cv = document.createElement('button'); cv.className = 'ws-caret'; cv.title = isWsExpanded(w.id) ? 'Collapse' : 'Expand';   // a real button → toggles THIS workspace's sessions independently, never triggers the chip's switch/drag
     cv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>';
     cv.addEventListener('click', (e) => { e.stopPropagation(); setWsExpanded(w.id, !isWsExpanded(w.id)); renderWsChips(); });
@@ -4646,7 +4647,11 @@ async function switchWorkspace(id, targetSession) {
 }
 // new-workspace chooser modal
 let wsChoiceKind = 'local';
-const WS_KINDS = ['local', 'adopt', 'repo'];                 // the New-project radiogroup, in DOM order
+// The New-project radiogroup, in DOM order. 'repo' was deliberately REMOVED as a creation-time choice: every
+// project starts plain, and becomes synced/shared later via the ▾ menu (upgradeWorkspace / inviteToLocal /
+// openSyncModal — all pre-existing, consented flows). The repo plumbing itself stays fully alive in main.js +
+// create-workspace.sh for invites, discovery, and the upgrade path; contract check 13 pins both halves.
+const WS_KINDS = ['local', 'adopt'];
 function selectWsKind(kind) {
   wsChoiceKind = kind;
   WS_KINDS.forEach((k) => {
@@ -4676,7 +4681,7 @@ async function createWorkspace() {
   const adopt = wsChoiceKind === 'adopt';
   if (!name && !adopt) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }   // adopt names itself from the folder
   const pick = wsChoiceKind === 'local' && $('ws-pick') && $('ws-pick').checked;   // custom folder (local only)
-  busy.textContent = (adopt || pick) ? 'choose a folder…' : (wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…');
+  busy.textContent = (adopt || pick) ? 'choose a folder…' : 'creating folder…';
   $('ws-create').disabled = true;
   let r = null;
   try { r = adopt ? await claudible.workspaceAdopt(name) : await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
@@ -4714,7 +4719,8 @@ async function createWorkspace() {
   activeSession = null;
   await refreshWorkspaces();
   // first-run: the workspace they just made replaces the auto-created "Local" placeholder — remove it now that
-  // another local exists (the >=1-local invariant still holds). A repo creation keeps the placeholder (still the only local).
+  // another local exists (the >=1-local invariant still holds). (Every modal creation is kind 'local' now — blank
+  // or adopted — so on first run this always applies; the guard stays because an invited-repo landing can't count.)
   if (wasFirstRun && workspaces.some((w) => w.id === 'local-local') && workspaces.filter((w) => w.kind === 'local').length >= 2) {
     try { await claudible.workspaceDelete('local-local'); await refreshWorkspaces(); } catch (e) {}
   }

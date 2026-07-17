@@ -4,6 +4,15 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+### One kind of project
+- **Creating a project no longer asks "local or shared repo?"** Every project starts as a plain private folder —
+  the "Shared repo project" tile is gone. When you actually want it on your other devices or want a teammate in,
+  use the project's ▾ menu (*Sync across my devices* / *Invite someone*): the same consented flow as before, with
+  the same "creates a **private** GitHub repo — your transcripts stay out" confirmation. Nothing is created on
+  GitHub until you say so, ever. Invites, discovery and already-synced projects behave exactly as before; folders
+  you *adopt* still never offer sync (publishing someone's existing repo is not our call to make).
+
+
 ### The model can no longer describe your repo from memory
 - **Claudible now injects the live git state of your project into the model's context on every prompt**: branch,
   short commit, `package.json` version, up-to-date/ahead/**behind-origin** status, and the last commit subject —
