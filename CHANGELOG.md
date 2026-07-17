@@ -2,7 +2,22 @@
 
 All notable changes to Claudible are documented here.
 
-## [Unreleased]
+## [0.8.2] — 2026-07-17
+
+A reliability release: live-session collaboration now shows the truth, quickly — plus the security and legal
+fixes from the pre-beta audit.
+
+### Live sessions show who's live, and clear the instant it ends
+- **When a teammate ends a live session, everyone sees it end — right away, and everywhere.** Before, the "● LIVE"
+  badge could linger for minutes after a host stopped, and only cleared when you clicked the session. Three
+  separate things were wrong: (1) the badge only tracked the project you were *actively* in, so a session going
+  live or ending in a project you were merely looking at froze until you clicked into it; (2) the host's "end"
+  could silently fail to publish — a network blip at the wrong moment left you advertised as live until a timeout,
+  and closing the shared tab or deleting the shared project didn't stop it cleanly; (3) if you'd *joined* the
+  session, your own connection knew the host was gone within a second or two, but the sidebar ignored that and
+  waited on the slow sync. All three are fixed: every open project's badge stays current, ending is reliable and
+  immediate, and a joined session clears in ~1–2 seconds. A hard crash (the one case nothing can clean up) now
+  clears in about two minutes instead of five.
 
 ### One kind of project
 - **Creating a project no longer asks "local or shared repo?"** Every project starts as a plain private folder —
@@ -23,6 +38,26 @@ All notable changes to Claudible are documented here.
   model remembers to check. Local-only git reads (never a fetch) — no network on the prompt hot path; when the
   local clone is behind origin, the line says so loudly and tells the model to `git fetch` before making claims.
   Commit subjects are collaborator-authored, so the line is sanitized like every other injected field.
+
+### Security & legal
+- **Third-party licenses now ship with the app.** The installer bundles a handful of MIT-licensed libraries
+  (ws, node-pty, xterm), and their licenses now travel with it in `THIRD-PARTY-LICENSES.md`, as those licenses
+  require. Enforced by the test suite so it can't silently fall out of the build.
+- **The live-session guest cap is now enforced at admission, not just at connect.** With approval on, a backlog of
+  approvals could seat more than the 8-guest limit; it's now re-checked the moment each guest is let in.
+
+### Fixed
+- **A clearer error when "Install" needs admin rights.** On first run, the System-check installer runs with no
+  terminal, so on a machine without passwordless `sudo` the package install failed and unhelpfully reported "no
+  apt/brew" — which was false. It now tells you exactly what to run yourself. The normal (passwordless / root)
+  path is unchanged.
+
+### Docs
+- **An "Uninstalling" section**, covering what a Windows uninstall intentionally leaves behind (your projects and
+  the voice models) and how to reclaim it, plus how to stop the background voice services.
+- **The full-transcript sync is now spelled out.** Turning on collaboration commits each session's entire
+  transcript — including anything Claude read — into the private repo's history for collaborators to see. The
+  in-app modal already said this; the README and SECURITY.md now do too.
 
 ## [0.8.1] — 2026-07-12
 
