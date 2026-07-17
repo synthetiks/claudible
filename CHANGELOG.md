@@ -2,6 +2,19 @@
 
 All notable changes to Claudible are documented here.
 
+## [Unreleased]
+
+### The model can no longer describe your repo from memory
+- **Claudible now injects the live git state of your project into the model's context on every prompt**: branch,
+  short commit, `package.json` version, up-to-date/ahead/**behind-origin** status, and the last commit subject —
+  with an explicit instruction to never state "which version / what's shipped / is it done" from memory or the
+  conversation summary. In a multi-machine, multi-collaborator, auto-syncing setup the repo genuinely moves under
+  a long session, and a model answering from a 50-turn-old snapshot confidently reported a *released* project as
+  having open bugs. Same cure as the machine-identity line: re-present the truth every turn instead of hoping the
+  model remembers to check. Local-only git reads (never a fetch) — no network on the prompt hot path; when the
+  local clone is behind origin, the line says so loudly and tells the model to `git fetch` before making claims.
+  Commit subjects are collaborator-authored, so the line is sanitized like every other injected field.
+
 ## [0.8.1] — 2026-07-12
 
 Two security fixes you should take, and the end of a sidebar bug we chased for ten rounds.

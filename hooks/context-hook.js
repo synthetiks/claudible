@@ -53,6 +53,38 @@ function ghLoginCached() {
   return login;
 }
 
+// REPO GROUND TRUTH — the live commit/version of the git repo at `cwd`, resolved fresh every turn. This is the
+// anti-stale-memory line: the model must NEVER state which version we're on, what's shipped/released, or whether
+// something is done from memory or the (portable, possibly-old, cross-machine-synced) conversation summary. Repos
+// move UNDER a session — a collaborator pushes, sessions sync across machines, a parallel session commits — so a
+// belief formed 50 turns ago is routinely wrong. Same failure class the machine-identity line already fixes.
+// Cost: 2 local git calls (NO network — never `git fetch`; the app's background sync keeps the upstream ref fresh,
+// so ahead/behind is accurate without one). sh() caps each at 1500ms; any failure returns null → the line is just
+// omitted (a non-git workspace, an empty repo, a detached HEAD with no upstream all degrade cleanly).
+function repoState(cwd) {
+  if (!cwd) return null;
+  const log = sh('git', ['-C', cwd, 'log', '-1', '--format=%h\x1f%D\x1f%s']);   // sha ␟ refnames ␟ subject — ONE call, also our "is this a repo with commits?" probe
+  if (!log) return null;
+  const a = log.indexOf('\x1f'), b = log.indexOf('\x1f', a + 1);
+  const sha = a >= 0 ? log.slice(0, a) : log;
+  const refs = (a >= 0 && b >= 0) ? log.slice(a + 1, b) : '';
+  const subject = b >= 0 ? log.slice(b + 1) : '';
+  const bm = refs.match(/HEAD -> ([^,]+)/);                                     // "HEAD -> main, origin/main, …" → branch; absent on a detached HEAD
+  const branch = bm ? bm[1].trim() : 'detached';
+  // behind/ahead vs the tracked upstream — LOCAL only. `rev-list` reads the already-fetched ref; no network.
+  let behind = 0, ahead = 0, hasUp = false;
+  const ba = sh('git', ['-C', cwd, 'rev-list', '--left-right', '--count', '@{u}...HEAD']);   // "<behind>\t<ahead>"; empty when the branch has no upstream
+  if (ba) { const m = ba.split(/\s+/); behind = parseInt(m[0], 10) || 0; ahead = parseInt(m[1], 10) || 0; hasUp = true; }
+  // version: the nearest package.json walking up from cwd (pure fs, no subprocess). Absent for non-JS repos → omitted.
+  let version = '';
+  let d = cwd;
+  for (let i = 0; i < 6 && d; i++) {
+    try { const pj = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')); if (pj && pj.version) { version = String(pj.version); break; } } catch {}
+    const up = path.dirname(d); if (up === d) break; d = up;
+  }
+  return { branch, sha, subject, behind, ahead, hasUp, version };
+}
+
 function main() {
   // The hook payload from Claude Code (JSON on stdin): carries hook_event_name, session_id, cwd, etc.
   let payload = {};
@@ -131,6 +163,23 @@ function main() {
   if (gitEmail) lines.push('Git identity here: ' + (gitName ? clean(gitName, 60) + ' <' + clean(gitEmail, 60) + '>' : clean(gitEmail, 60)));
   if (cwd) lines.push('Working directory: ' + clean(cwd, 200));
   if (app.workspace) lines.push('Claudible project: ' + clean(app.workspace, 120));
+  // Live repo state — trust this over ANY "what version / what's shipped / is it done or released" belief carried
+  // in the conversation. Every value is clean()'d (a synced commit subject is collaborator-authored → untrusted).
+  const rs = repoState(cwd);
+  if (rs) {
+    let r = 'Repo here (LIVE git state — never state which version, what is shipped/released, or whether something'
+      + ' is done from memory or the summary; this line is the truth, and you can git fetch/log for more): '
+      + clean(rs.branch, 60) + ' @ ' + clean(rs.sha, 16);
+    if (rs.version) r += ' · v' + clean(rs.version, 30);
+    if (rs.hasUp) {
+      if (rs.behind > 0) r += ' · LOCAL IS ' + rs.behind + ' COMMIT' + (rs.behind === 1 ? '' : 'S') + ' BEHIND origin'
+        + (rs.ahead > 0 ? ' and ' + rs.ahead + ' ahead' : '') + ' — run git fetch/log before saying anything about what is shipped';
+      else if (rs.ahead > 0) r += ' · ' + rs.ahead + ' commit' + (rs.ahead === 1 ? '' : 's') + ' ahead of origin (unpushed)';
+      else r += ' · up to date with origin';
+    }
+    if (rs.subject) r += ' · last commit: "' + clean(rs.subject, 72) + '"';
+    lines.push(r);
+  }
   // "Plan big, execute small" nudge (Anthropic cookbook pattern): the split only pays if the coordinator
   // actually delegates the token-heavy legs, so tell it its workers are cheap. Gated on an APP-SET env var
   // (exported by session.sh / injected by win.js — never collaborator data); the pushed text is a static
