@@ -29,6 +29,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R32 — launching Claudible twice can no longer race itself.** A double-clicked shortcut booted a second
+  full app — two voice-service owners fighting the ports, two sync engines on one branch. The second launch
+  now just brings the running window to the front.
 - **R22 — closing sessions on native-Windows installs reaps the whole process tree.** The Windows-native
   runner had no equivalent of the WSL tree-reaper, and the terminal's own kill can miss children — orphaned
   claude.exe processes piled up across restarts. Every kill now walks the tree at the OS level. (Needs the

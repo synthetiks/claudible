@@ -823,5 +823,14 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
     && /detached: true, stdio: 'ignore'/.test(WIN) ? [] : ['taskkill /T /F tree-reap missing from facade.kill']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 30. R32 — exactly one instance. A second launch used to boot a whole second app: two voice-service owners
+//     racing the ports (the double-spawn 59c407d closed, resurrected across processes), two pollers on one
+//     runtime dir, two sync engines on one branch. The second instance must defer and the first must surface.
+// ---------------------------------------------------------------------------------------------------------
+none('the single-instance lock is gone (a double-launch races voice/pollers/sync again)',
+  /if \(!app\.requestSingleInstanceLock\(\)\) \{\s*\n\s*app\.quit\(\);/.test(MAIN)
+  && /app\.on\('second-instance'/.test(MAIN) ? [] : ['requestSingleInstanceLock + second-instance focus required']);
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

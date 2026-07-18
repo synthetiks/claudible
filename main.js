@@ -2831,7 +2831,16 @@ function checkForUpdate() {
     req.on('timeout', () => { try { req.destroy(); } catch {} });
   } catch {}
 }
-app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 15000); });
+// R32: ONE instance. A second launch (double-clicked shortcut, a launcher retry) used to boot a full second
+// app: two voice-service owners racing the ports (the exact double-spawn 59c407d's single-owner rule closed —
+// resurrected between processes), two pollers over one runtime dir, two sync engines over one branch. The
+// second instance now defers to the first, which just re-surfaces its window.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { try { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } } catch {} });
+  app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 15000); });
+}
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
   try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the two self-rescheduling ones
