@@ -125,5 +125,53 @@ run_ids_case() (
 r=$(LOCAL_C="$LOCAL_C" FF_C="$FF_C" FORK_C="$FORK_C" run_ids_case)
 ok "$r" '["aa-new","bb-ff"] 1 1 1' "changed ids listed (import+ff), fork excluded"
 
+# --- Scenario 6 (R11): per-machine tags in the OWN author dir. "My login's branch copy differs from my
+# local" is only self-compaction when it came from THIS machine — a copy tagged by ANOTHER of my machines is
+# a real fork between my own two devices and must flag like any collaborator fork (it used to be silently
+# masked; last pusher overwrote the other device's turns). Untagged = legacy export → old rule (no re-nag
+# during transition).
+r=$(CLAUDIBLE_MACHINE_ID=machine-B LOCAL_C="$LOCAL_C" FORK_C="$FORK_C" run_case '
+  printf %s "$LOCAL_C" > "$PROJ/ID.jsonl"
+  mkdir -p "$WT/sessions/tester"
+  printf %s "$FORK_C" > "$WT/sessions/tester/ID.jsonl"
+  printf "ID machine-A\n" > "$WT/sessions/tester/.machine-tags"
+')
+ok "$r" "FLAGGED" "own-dir fork tagged by ANOTHER machine → flagged (R11)"
+
+r=$(CLAUDIBLE_MACHINE_ID=machine-A LOCAL_C="$LOCAL_C" FORK_C="$FORK_C" run_case '
+  printf %s "$LOCAL_C" > "$PROJ/ID.jsonl"
+  mkdir -p "$WT/sessions/tester"
+  printf %s "$FORK_C" > "$WT/sessions/tester/ID.jsonl"
+  printf "ID machine-A\n" > "$WT/sessions/tester/.machine-tags"
+')
+ok "$r" "CLEAR" "own-dir fork tagged by THIS machine → self-compaction, no nag (R11)"
+
+r=$(CLAUDIBLE_MACHINE_ID=machine-A LOCAL_C="$LOCAL_C" FORK_C="$FORK_C" run_case '
+  printf %s "$LOCAL_C" > "$PROJ/ID.jsonl"
+  mkdir -p "$WT/sessions/tester"
+  printf %s "$FORK_C" > "$WT/sessions/tester/ID.jsonl"
+')
+ok "$r" "CLEAR" "own-dir fork with NO tag (legacy export) → old rule kept (R11 transition)"
+
+# --- Scenario 7 (R11): export stamps the tag. After export_sessions, .machine-tags records id + this machine.
+run_tag_case() (
+  TMP="$(mktemp -d)"
+  export HOME="$TMP"
+  mkdir -p "$TMP/bin"
+  printf '#!/usr/bin/env bash\necho tester\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
+  export PATH="$TMP/bin:$PATH"
+  export CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws CLAUDIBLE_PROJ=testproj
+  export CLAUDIBLE_SYNC_MIN_AGE=0 CLAUDIBLE_MACHINE_ID=machine-A
+  mkdir -p "$TMP/.claudible/repos/testws/.git"
+  # shellcheck disable=SC1090
+  source "$SCRIPT" status >/dev/null 2>&1
+  mkdir -p "$PROJ"
+  printf %s "$LOCAL_C" > "$PROJ/EXP.jsonl"
+  export_sessions >/dev/null 2>&1
+  grep -cx "EXP machine-A" "$WT/sessions/tester/.machine-tags" 2>/dev/null || echo 0
+)
+r=$(LOCAL_C="$LOCAL_C" run_tag_case)
+ok "$r" "1" "export stamps the exporting machine's tag (R11)"
+
 echo "sessions-divergence: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

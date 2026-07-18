@@ -761,5 +761,22 @@ none('renderer: orphanTab is never rendered',
 none('the wizard create-step gate ignores firstRun again (step 3 is dead code for every user)',
   /hasWs = real\.length > \(\(wl && wl\.firstRun\) \? 1 : 0\);/.test(APP) ? [] : ['the firstRun-aware gate is gone']);
 
+// ---------------------------------------------------------------------------------------------------------
+// 26. R11 — per-machine tags. "My login's branch copy differs from my local" is self-compaction ONLY when it
+//     came from THIS machine; a copy exported by ANOTHER of the user's machines is a real fork and must hit
+//     the full divergence detection (it was silently masked — last pusher overwrote the other device). The
+//     behavioral proof lives in sessions-divergence scenarios 6-7; this pins the wiring so it can't be
+//     garbage-collected: MID resolution (env > file > generate), tag_write on export, tag_of in the _own gate.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SYNC = read('wsl/sessions-sync.sh');
+  none('the per-machine identity resolution is gone (R11)',
+    /MID="\$\{CLAUDIBLE_MACHINE_ID:-\}"/.test(SYNC) && /machine-id/.test(SYNC) ? [] : ['MID env>file>generate chain missing']);
+  none('exports no longer stamp their machine tag (R11)',
+    /&& tag_write "\$id"/.test(SYNC) ? [] : ['tag_write not called on export']);
+  none('the own-compaction gate ignores the machine tag again (R11 — own-device forks masked)',
+    /\[ "\$_own" -eq 1 \] && \{ _tid="\$\(tag_of "\$id"\)"; \[ -z "\$_tid" \] \|\| \[ "\$_tid" = "\$MID" \]; \}/.test(SYNC) ? [] : ['the _own gate must consult tag_of vs MID']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

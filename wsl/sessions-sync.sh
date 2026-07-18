@@ -110,8 +110,38 @@ command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed in W
 author="$(gh api user --jq .login 2>/dev/null)"
 case "$author" in '' | *[!A-Za-z0-9-]*) fail "gh is not authenticated — run: gh auth login" ;; esac
 
+# R11: a stable PER-MACHINE identity, so two of one user's machines exporting under the SAME author dir can be
+# told apart. Without it, "my login's branch copy differs from my local" was always read as this machine's own
+# compaction rewrite — so a real fork between the user's own two devices was silently masked, and whichever
+# machine pushed last overwrote the other's turns. Resolution: env override (tests) > persisted file >
+# generate-once. Metadata only, NOT a trust signal (any pusher can forge it) — it decides one thing: "is this
+# branch copy MY OWN machine's prior export".
+MID="${CLAUDIBLE_MACHINE_ID:-}"
+if [ -z "$MID" ]; then
+  _midf="$HOME/.claudible/machine-id"
+  MID="$(head -c 80 "$_midf" 2>/dev/null | tr -cd 'A-Za-z0-9-')"
+  if [ -z "$MID" ]; then
+    MID="$( { uuidgen 2>/dev/null || printf '%s-%s' "$(date +%s%N)" "$$"; } | tr -cd 'A-Za-z0-9-')"
+    mkdir -p "$HOME/.claudible" 2>/dev/null; printf '%s' "$MID" > "$_midf" 2>/dev/null
+  fi
+fi
+MID="$(printf '%s' "$MID" | head -c 64)"
+
 # git in the worktree with a stable identity (the user may not have configured git globally), no editor.
 gitwt() { GIT_EDITOR=true git -C "$WT" -c user.name="$author" -c user.email="$author@users.noreply.github.com" "$@"; }
+
+# R11 tag file: sessions/<login>/.machine-tags — one "id machineId" line per exported id, replaced on each
+# export. Import consults it ONLY for our own author dir: tag == this machine (or a legacy untagged row) →
+# the old own-compaction rule (local wins silently); tag = ANOTHER of my machines → fall through to the full
+# divergence detection, exactly like a collaborator's copy. Lives inside the author dir, so the disjoint-path
+# no-conflict invariant is untouched. PID-unique tmp, same as _rmline.
+TAGF="$WT/sessions/$author/.machine-tags"
+tag_write() {   # $1=id — record/replace this id's exporter as THIS machine
+  [ -n "$MID" ] || return 0
+  mkdir -p "$WT/sessions/$author" 2>/dev/null
+  { grep -v "^$1 " "$TAGF" 2>/dev/null || true; printf '%s %s\n' "$1" "$MID"; } > "$TAGF.tmp.$$" && mv -f "$TAGF.tmp.$$" "$TAGF" 2>/dev/null
+}
+tag_of() { grep -m1 "^$1 " "$TAGF" 2>/dev/null | cut -d' ' -f2; }
 
 # --- ensure the sessions worktree exists and tracks origin/claudible/sessions -----------------------------
 # R9: an interrupted git write — the runner SIGTERM-kills the wsl.exe wrapper on timeout (which never reaches
@@ -241,7 +271,7 @@ import_sessions() {
   [ -d "$WT/sessions" ] || return 0
   # _divset seeds the run-scoped guard read by clear_diverged_run: an id added here (a fork flagged, or a kept-local
   # ack) can no longer be cleared by a later author dir THIS pass, so a fork is flagged no matter the glob order.
-  local f id dest dsz _divset=" " _dl _dsz _rp _own
+  local f id dest dsz _divset=" " _dl _dsz _rp _own _tid
   _rp="$(for f in "$WT"/sessions/*/*.jsonl; do [ -e "$f" ] && printf '%s\n' "$f"; done | scan_real_prompts)"
   case "$_rp" in "#ok"*) ;; *) _rp="" ;; esac                       # no '#ok' header → node failed → per-file grep fallback
   for f in "$WT"/sessions/*/*.jsonl; do
@@ -283,8 +313,8 @@ import_sessions() {
       import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
       clear_diverged_run "$id"                                       # local is ahead of remote → our push handles it
-    elif [ "$_own" -eq 1 ]; then
-      clear_diverged_run "$id"                                       # our OWN prior export truly differing (compaction/rewrite) is not a competing copy: local wins, the next push overwrites the branch snapshot — flagging it "diverged" was the false-fork nag
+    elif [ "$_own" -eq 1 ] && { _tid="$(tag_of "$id")"; [ -z "$_tid" ] || [ "$_tid" = "$MID" ]; }; then
+      clear_diverged_run "$id"                                       # THIS MACHINE's own prior export truly differing (compaction/rewrite) is not a competing copy: local wins, the next push overwrites the branch snapshot. R11: a copy tagged by ANOTHER of my machines is NOT that — it falls through to the real fork handling below (untagged = legacy export, keeps the old rule during transition)
     elif is_acked "$id"; then
       _divset="$_divset$id "                                        # user chose KEEP-LOCAL: honor it AND protect the ack from a same-run clear by another author dir (don't re-nag)
     else
@@ -314,7 +344,7 @@ export_sessions() {
     [ "$age" -ge 0 ] && [ "$age" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ] && continue   # being written (~2s); ignore future mtimes (clock skew)
     has_real_prompt "$f" "$_rp" || continue                          # promptless stub (fork artifact / killed boot) — noise that must never spread to collaborators; it exports once it gains a real prompt (same definition the app's picker uses)
     dest="$WT/sessions/$author/$id.jsonl"
-    if ! cmp -s "$f" "$dest" 2>/dev/null; then cp -f "$f" "$dest" 2>/dev/null && PUSHED=$((PUSHED+1)); fi
+    if ! cmp -s "$f" "$dest" 2>/dev/null; then cp -f "$f" "$dest" 2>/dev/null && PUSHED=$((PUSHED+1)) && tag_write "$id"; fi   # R11: stamp which machine exported this id
   done
   return 0
 }
