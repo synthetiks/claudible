@@ -3057,19 +3057,16 @@ function fitLiveTab(rec) {
   const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
   const pw = rec.container.clientWidth - padX, ph = rec.container.clientHeight - padY;
   if (pw <= 0 || ph <= 0) return;
-  const wFont = pw / (cols * 0.6), hFont = ph / (rows * 1.18);       // largest font whose whole grid still fits
-  // GUEST-SIDE ONLY resize independence: the mirror used to shrink WITHOUT LIMIT to cram the host's grid into
-  // this window — the host going fullscreen made this side's text microscopic ("his resize zooms me out").
-  // The fit now stops at a readable floor; past it, the mirror keeps this viewer's size and the pane PANS
-  // (scrollbars) over the host's bigger screen instead — view-at-100% rather than zoom-to-fit. The host's
-  // terminal code is untouched by design (the previous, reverted attempt changed the host's side and broke
-  // rendering for both).
-  const FS_FLOOR = 9;
-  const fs = Math.max(FS_FLOOR, Math.min(30, Math.floor(Math.min(wFont, hFont))));
+  // GUEST-SIDE resize independence, locked-font edition: the fit-derived font made the mirror's text DANCE
+  // with every host resize (13→10→12…) — a "readable floor" only bounded the extreme, it didn't stop the
+  // motion. The mirror now ALWAYS renders at this viewer's own stock size; when the host's grid is bigger
+  // than this window, the pane PANS (scrollbars) over it — view-at-100%, never zoom-to-fit. The one thing a
+  // host resize still changes here is the content re-wrapping: that is Claude itself redrawing for the new
+  // width — the shared video changing — identical to what the host sees, and not removable viewer-side.
+  // The host's terminal code stays untouched by design (the reverted host-side attempt broke both parties).
+  const fs = TERM_OPTS.fontSize;
   try { if (rec.term.options.fontSize !== fs) rec.term.options.fontSize = fs; } catch {}
   try { rec.term.resize(cols, rows); } catch {}
-  // Panning engages only when the floored font genuinely can't fit the grid — otherwise the pane behaves
-  // exactly as before (no scrollbars, nothing new to see).
   const overflows = (fs * 0.6 * cols) > pw + 1 || (fs * 1.18 * rows) > ph + 1;
   try { rec.container.classList.toggle('live-pan', overflows); } catch {}
 }
