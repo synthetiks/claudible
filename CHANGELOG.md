@@ -2,6 +2,50 @@
 
 All notable changes to Claudible are documented here.
 
+## [Unreleased]
+
+The master-debug release: a 63-agent audit of the whole codebase confirmed 42 defects; this ships fixes for 39
+of them (2 were verified fine-as-designed; 3 remain owner decisions, below).
+
+### Session tabs tell the truth
+- **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or
+  failed switch now rolls everything back, not just the tab. This was the live root of "my project shows the
+  other repo's sessions".
+- **A failed session-list read no longer looks like "you have no sessions"** — the sidebar keeps the last good
+  list and retries instead of blanking (the "where are all my sessions" class, fixed at all three layers).
+- A guest clicking a project — or you clicking sign-in — can no longer kill a mid-turn Claude (the last two
+  unguarded respawn paths). Deleting a project mid-clone/rename no longer strands an orphaned GitHub repo.
+- Turn stats land on the right history entry (new-session tabs mis-attributed them cross-tab); fast turns no
+  longer drop their subagent tokens from the meter; Speak reads *this* tab's reply, never another tab's.
+- Orphaned Claude processes can't survive a tab close anymore (freeze-then-walk + session sweep), and the
+  scripts they ran on now use your real node, not a stale system one — together with the sync stub filter now
+  matching the app's own definition, this closes the "(empty session)" phantom-multiplication machinery.
+
+### Live sessions
+- **"End Session" reliably un-advertises** — the everyday end path skipped the retry-hardened teardown whenever
+  a share link was also on ("I ended it but they saw live for minutes", the surviving path).
+- **A joined live session can no longer vanish from the sidebar** while still streaming — it renders in its
+  home project's tree when you're working elsewhere.
+- Quitting while hosting really clears your presence now (the cleanup processes are detached — they used to be
+  an unenforced assumption). The guest cap can't be overflowed through the reconnect grace window. A hosted
+  session can no longer be overwritten or foreign-marked by a background sync mid-share.
+- Host/guest build skew is surfaced as a toast on join instead of failing as a mystery. The browser viewer's
+  scroll gutter finally pages the shared terminal. The sidebar no longer flickers on every 45s presence beat.
+- Ctrl+Shift+I opens DevTools again, so "clicking X does nothing" is self-diagnosable.
+
+### Install & voice
+- Model downloads verify their bytes (>100MB floors + wipe-and-retry) at every layer — a truncated download
+  used to read as "voice ready" forever with no recovery path. Voice installs take a lock so a relaunch can't
+  race an orphaned installer's cleanup. cloudflared is validated by actually running it.
+- The install one-liner stops blaming your antivirus for network/clone failures — each failure mode gets its
+  own message. Packaged builds now check GitHub for a newer release once per launch and tell you (notice-only).
+- Deleting a project trashes its whole footprint (transcripts + sync worktree included, all recoverable) —
+  they used to leak forever and haunt a re-created project at the same path.
+
+### Still owner decisions (not code)
+- No real auto-updater (the notice is the honest minimum); packaged-Windows always forces the native runner
+  even on a WSL-equipped machine; the Linux/macOS packaged runtime-dir landmine (neither installer ships yet).
+
 ## [0.8.2] — 2026-07-17
 
 A reliability release: live-session collaboration now shows the truth, quickly — plus the security and legal
