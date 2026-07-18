@@ -24,6 +24,11 @@ register; fixes land here one commit per register id, each pinned by a test.
 - **R8 — the wizard's voice Install now actually starts Whisper + Kokoro on WSL/Linux/macOS.** It downloaded and
   built everything, reported "ready" — and started nothing, so the first Talk failed with a raw fetch error
   until the next full relaunch. The install path now starts the services the moment the build succeeds.
+- **R5 (security) — the per-prompt context hook now neutralizes hostile `.git/config` values.** The app's shell
+  scripts already refuse to let an adopted repo's config run commands (`_git-safe.sh`); the identity/repo-state
+  hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
+  different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
+  hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
 
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or

@@ -24,8 +24,25 @@ const path = require('path');
 const cp = require('child_process');
 
 function readStdin() { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } }
+// wsl/_git-safe.sh, JS edition (R5): this hook runs `git -C <workspace cwd>` on EVERY prompt, and an ADOPTED
+// workspace's .git/config is attacker-controlled — git runs several config VALUES as shell commands during
+// ordinary reads (core.fsmonitor is the verified one; commit 0a6f35c proved the class live). GIT_CONFIG_KEY_n/
+// VALUE_n apply as `-c` overrides to every git call in the child, neutralizing exactly the command-executing
+// keys — same list, same values as the shell neutralizer. Unlike the scripts, this process execs nothing of the
+// user's afterwards, so a per-child env (never process.env mutation) can't leak into their own git.
+const GIT_SAFE_ENV = Object.assign({}, process.env, {
+  GIT_CONFIG_COUNT: '6',
+  GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: '',
+  GIT_CONFIG_KEY_1: 'core.sshCommand', GIT_CONFIG_VALUE_1: 'ssh',
+  GIT_CONFIG_KEY_2: 'core.alternateRefsCommand', GIT_CONFIG_VALUE_2: '',
+  GIT_CONFIG_KEY_3: 'core.gitProxy', GIT_CONFIG_VALUE_3: '',
+  GIT_CONFIG_KEY_4: 'protocol.ext.allow', GIT_CONFIG_VALUE_4: 'never',
+  GIT_CONFIG_KEY_5: 'protocol.git.allow', GIT_CONFIG_VALUE_5: 'never',
+  GIT_TERMINAL_PROMPT: '0', SSH_ASKPASS_REQUIRE: 'never',
+});
+delete GIT_SAFE_ENV.GIT_ASKPASS; delete GIT_SAFE_ENV.SSH_ASKPASS;
 function sh(cmd, args, timeout) {
-  try { return cp.execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: timeout || 1500 }).trim(); }
+  try { return cp.execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: timeout || 1500, env: GIT_SAFE_ENV }).trim(); }
   catch { return ''; }
 }
 // gh login is the strongest per-machine identity but a network/uncached `gh api user` can add latency to EVERY

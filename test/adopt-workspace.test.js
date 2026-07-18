@@ -281,6 +281,25 @@ for (const s of shFiles) {
 // Non-vacuity: if the detector regex ever stops matching, every check above passes by finding nothing to check.
 // 10 today = 9 that must source the neutralizer + 1 written exemption (session.sh).
 ok('…and the sweep actually reached the git-touching scripts (10 today: 9 guarded + 1 exempt)', swept >= 10);
+// The SAME sweep, hooks/*.js edition (R5). The shell sweep above is how the most exposed script in the app was
+// once missed by a hand-written list — and then the CLASS repeated: hooks/context-hook.js ran `git -C <cwd>` on
+// every prompt with no neutralization, invisible to a wsl/*.sh glob. Any hooks JS that invokes git must carry
+// the GIT_CONFIG_ hardening (the JS edition of git_safe_env) — and the detector must actually find the git use.
+{
+  const hookFiles = fs.readdirSync(path.join(ROOT, 'hooks')).filter((f) => f.endsWith('.js')).sort();
+  ok('the hooks/ sweep found files', hookFiles.length >= 2);
+  let jsSwept = 0;
+  const stripJsComments = (s) => s.split('\n').map((l) => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n');
+  for (const f of hookFiles) {
+    const raw = fs.readFileSync(path.join(ROOT, 'hooks', f), 'utf8');
+    const code = stripJsComments(raw);
+    if (!/execFileSync\(\s*'git'|spawnSync\(\s*'git'|execFile\(\s*'git'|spawn\(\s*'git'/.test(code) && !/sh\(\s*'git'/.test(code)) continue;
+    jsSwept++;
+    ok(`hooks/${f}: invokes git → must apply GIT_CONFIG_ neutralization to its child env`,
+      /GIT_CONFIG_COUNT/.test(raw) && /core\.fsmonitor/.test(raw) && /env:\s*GIT_SAFE_ENV/.test(raw));
+  }
+  ok('…and the hooks sweep actually reached a git-invoking hook (context-hook.js today)', jsSwept >= 1);
+}
 if (HAS_BASH) {
   // Run the SHIPPED sanitizer line against real inputs. `$(printf '\n')` inside a case pattern is the empty
   // string (command substitution strips trailing newlines) → the pattern `*""*` matches everything → GH="" →
