@@ -103,7 +103,8 @@ if command -v cygpath >/dev/null 2>&1; then
   WT="$(cygpath -m "$WT" 2>/dev/null || printf '%s' "$WT")"
 fi
 LIVE="${CLAUDIBLE_LIVE_SESSION:-}"
-case "$LIVE" in *[!A-Za-z0-9-]*) LIVE="" ;; esac     # only a clean id can name the live session
+case "$LIVE" in *[!A-Za-z0-9\ -]*) LIVE="" ;; esac   # a clean id — or a SPACE-SEPARATED list of them (R13: the hosted session AND a busy tab's session can both be live writers; excluding only one exported the other mid-write)
+is_live() { case " $LIVE " in *" $1 "*) return 0 ;; esac; return 1; }   # id ∈ the exclusion list
 
 command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed in WSL"
 author="$(gh api user --jq .login 2>/dev/null)"
@@ -234,7 +235,7 @@ import_sessions() {
     # Import is now symmetric with export's LIVE skip: the currently-live session's LOCAL file is mid-write
     # truth — comparing it against our own earlier branch snapshot falsely read as "forked"/"remote grew"
     # and could foreign-mark or overwrite a session that is being hosted RIGHT NOW.
-    [ "$id" = "$LIVE" ] && continue
+    is_live "$id" && continue
     tombstoned "$id" && continue                                    # deleted everywhere → never re-import
     # LOCAL delete marker (written by delete-session.sh): this machine deliberately trashed the transcript, so
     # the branch's identical copy must NOT resurrect it on the next pull. Only a remote copy that has GROWN
@@ -290,7 +291,7 @@ export_sessions() {
     [ -e "$f" ] || continue
     id="$(basename "$f" .jsonl)"
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac
-    [ "$id" = "$LIVE" ] && continue                                  # never sync the currently-live session
+    is_live "$id" && continue                                  # never sync the currently-live session
     tombstoned "$id" && continue                                    # deleted everywhere → never re-publish
     grep -qxF -- "$id" "$FSET" 2>/dev/null && continue              # imported (foreign) → never republish under our name
     m="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"; age=$(( $(date +%s) - m ))   # torn-write guard: skip a file still (GNU stat -c, BSD/macOS stat -f fallback)

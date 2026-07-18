@@ -1282,8 +1282,16 @@ function runSync(ws, op, opts) {
     // be exported mid-share — and import could compare our own earlier snapshot against its still-changing
     // local file (falsely foreign/diverged-marking the session being live-hosted RIGHT NOW). main knows exactly
     // which session it hosts (advertisedSid); thread it centrally instead of trusting each caller to remember.
-    const liveRaw = (opts && opts.live) || ((advertisedSid && advertisedWs && ws.id === advertisedWs.id) ? advertisedSid : '');
-    const live = (liveRaw && /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(liveRaw)) ? `CLAUDIBLE_LIVE_SESSION='${liveRaw}' ` : '';
+    // R13: the UNION of live writers, never a collapse. opts.live (the newest BUSY session, via liveIdNow) used
+    // to SUPPRESS the advertised-session fallback through `||` — so with a second tab mid-turn in the same
+    // project, a manual "Sync now" excluded that tab's session but exported the actually-HOSTED one while the
+    // host's Claude was appending to it. Both ids are live writers; both are excluded (the script takes a
+    // space-separated list now, each id charset-checked here before it can touch the shell line).
+    const _cands = [];
+    if (opts && opts.live) _cands.push(String(opts.live));
+    if (advertisedSid && advertisedWs && ws.id === advertisedWs.id) _cands.push(String(advertisedSid));
+    const liveRaw = [...new Set(_cands)].filter((x) => /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(x)).join(' ');
+    const live = liveRaw ? `CLAUDIBLE_LIVE_SESSION='${liveRaw}' ` : '';
     runner.runScript('sessions-sync.sh', `'${o}'`, { ws, extraEnv: live, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'sync could not run: ' + ((err && err.message) || err) }); }
         const raw = String(stdout).trim();

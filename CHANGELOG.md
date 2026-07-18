@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R13 — "Sync now" can no longer export the hosted session mid-write.** With a second tab mid-turn in the
+  same project, the busy tab's session id silently replaced the hosted session's in the sync exclusion — the
+  transcript guests were watching got copied to the branch while Claude was still appending to it. The
+  exclusion now takes every live writer at once.
 - **R16/R18/R30 — live-join and installer errors reach you as sentences, never internals.** A crashed join
   toasted the raw JS exception; two of the three install-error surfaces still showed the raw "Command failed:
   wsl.exe …" dump; a declined/dead joined row painted bare wire codes (" — full"). One shared filter now guards

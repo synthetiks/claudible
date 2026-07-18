@@ -672,5 +672,19 @@ none('renderer: orphanTab is never rendered',
     /function liveReasonText\(/.test(APP) && (APP.match(/liveReasonText\(rec\.liveReason\)/g) || []).length === 2 ? [] : ['both row sites must map through liveReasonText']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 19. R13 — the live-session sync exclusion takes the UNION of live writers. opts.live (newest busy session)
+//     must never SUPPRESS the advertised/hosted session: with a second tab mid-turn, "Sync now" exported the
+//     hosted transcript while Claude appended to it. main builds a deduped space-joined list (per-id charset
+//     check before the shell line); the script's is_live() matches against the list at BOTH skip sites.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SYNC = read('wsl/sessions-sync.sh');
+  none('doSync collapses the live ids with || again (the hosted session loses its exclusion)',
+    /new Set\(_cands\)/.test(MAIN) && /\.join\(' '\)/.test(MAIN) ? [] : ['no union build in doSync']);
+  none('sessions-sync.sh lost its list-aware live check (is_live), or a skip site bypasses it',
+    /is_live\(\) \{ case " \$LIVE " in \*" \$1 "\*\)/.test(SYNC) && (SYNC.match(/is_live "\$id" && continue/g) || []).length === 2 ? [] : ['is_live missing or not used at both import+export sites']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
