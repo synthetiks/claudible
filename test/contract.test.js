@@ -792,5 +792,22 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
     /backfillRepoIdentity\(snap\)\.then/.test(del) && /'gh:' \+ snap\.ghId/.test(del) ? [] : ['no snapshot backfill append']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 28. R10 — every sessions-branch operation rides ONE per-workspace chain (_syncQ). syncLock only guarded
+//     doSync against itself; presence/delete/resolve/title ran the same script concurrently and pull_branch's
+//     reset --hard could discard another op's commit. Every sessions-sync.sh invocation in main must run
+//     inside _syncQ.run — EXCEPT the detached quit-path clear (a queue dies with the process; R7).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const calls = (MAIN.match(/runner\.runScript\('sessions-sync\.sh'/g) || []).length;
+  const queued = (MAIN.match(/_syncQ\.run\([^\n]*runner\.runScript\('sessions-sync\.sh'/g) || []).length;
+  // runPresence wraps its single invocation in exec() — queued for every op, direct ONLY when opts.detach.
+  none('a sessions-sync.sh invocation escaped the per-ws serialization chain (R10)',
+    calls === queued + 1 && /if \(opts && opts\.detach\) \{ exec\(\); return; \}/.test(MAIN) ? []
+      : [`${calls} invocations, ${queued} queued — every site except runPresence's detach-guarded exec must go through _syncQ.run`]);
+  none('presence-beat coalescing lost its byte-identical guard (a re-share would advertise a stale handle)',
+    /_beatArgs\.get\(key\) === args\) return;/.test(MAIN) ? [] : ['coalescing must compare exact args']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

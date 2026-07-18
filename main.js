@@ -981,13 +981,35 @@ ipcMain.handle('share:approve', (e, arg) => ({ ok: share.decideApproval(arg && a
 // ---- Live sessions: advertise the session I'm hosting (presence on the shared branch) so a collaborator in
 // the same workspace can JOIN it natively — no link to paste. Joins run through liveConnect (a client
 // WebSocket mirrored into a cockpit tab), so it's "through Claudible", not an external browser. ----
+// R10: ONE serialization chain per workspace for every sessions-branch operation. syncLock only ever guarded
+// doSync against itself — presence beats (every 45s while hosting), delete-everywhere, resolveDiverged and
+// title-set all ran the same script CONCURRENTLY against the same branch, and pull_branch's fetch+reset
+// --hard could discard another op's just-committed work while both reported ok (how a delete-everywhere
+// tombstone could silently vanish). Reads ride the same chain too (presence-list/title-list also pull).
+// Keyed by ws.id — different projects stay fully parallel.
+const _syncQ = makeKeyedQueue();
+const _beatArgs = new Map();   // ws.id -> the args of a queued-but-not-started presence beat (coalescing)
 function runPresence(args, cb, ws, opts) {
   if (!APPDIR_WSL) return cb && cb(null);
-  runner.runScript('sessions-sync.sh', `${args}`, { ws: ws || activeWorkspace, timeout: 45000, detach: !!(opts && opts.detach) }).then(({ err, stdout }) => {   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
+  const w = ws || activeWorkspace;   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
+  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach) }).then(({ err, stdout }) => {
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
     });
+  // QUIT path (R7): the detached one-shot must never sit behind a queue that dies with the process.
+  if (opts && opts.detach) { exec(); return; }
+  const key = (w && w.id) || 'ws';
+  // Heartbeat COALESCING: a queued-but-not-started beat stamps its ts at RUN time, so it is exactly as fresh
+  // as this one — piling beats behind a long sync would only burn presence commits. Coalesce ONLY on byte-
+  // identical args: a re-share mints a new url/token, and dropping THAT beat would advertise a stale handle.
+  if (/^presence-set /.test(args)) {
+    if (_beatArgs.get(key) === args) return;
+    _beatArgs.set(key, args);
+    _syncQ.run(key, () => { if (_beatArgs.get(key) === args) _beatArgs.delete(key); return exec(); });
+    return;
+  }
+  _syncQ.run(key, exec);
 }
 // Keep my presence fresh while I'm hosting. Peers age out an advertisement after LIVE_TTL (120s), so a still-live
 // host must re-stamp its ts well within that. The timer lives in MAIN on purpose — renderer timers get throttled
@@ -1144,7 +1166,8 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
       let local = {}; try { local = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
       // also tombstone it on the shared sessions branch so a sync can never bring it back (for anyone)
-      runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws, timeout: 45000 }).then(({ err: err2, stdout: out2 }) => {
+      // R10: through the per-ws chain — racing a background sync could reset --hard the tombstone commit away
+      _syncQ.run((ws && ws.id) || 'ws', () => runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws, timeout: 45000 })).then(({ err: err2, stdout: out2 }) => {
           if (err2) { console.error('[claudible] delete-session everywhere:', err2.message); return resolve({ ok: false, error: 'exec', localDone: true }); }
           let r = {}; try { r = JSON.parse((out2 || '').trim() || '{}'); } catch {}
           resolve(r.ok ? { ok: true, everywhere: true } : { ok: false, error: (r.error || 'sync failed'), localDone: true });
@@ -1188,7 +1211,8 @@ ipcMain.handle('session:resolveDiverged', (e, arg) => new Promise((resolve) => {
     for (const rec of ptys.values()) if (rec.session === sid && rec.busy) return resolve({ ok: false, error: 'busy' });
   }
   const rws = _wsById(arg && arg.wsId) || activeWorkspace;
-  runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: rws, timeout: 45000 }).then(({ err, stdout }) => {
+  // R10: through the per-ws chain — a resolve replacing the transcript must never interleave with a sync pass
+  _syncQ.run((rws && rws.id) || 'ws', () => runner.runScript('sessions-sync.sh', `resolve '${sid}' ${strategy}`, { ws: rws, timeout: 45000 })).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] session:resolveDiverged:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let r = {}; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       // 'remote' replaced the transcript on disk — an open tab on this session must respawn to show it
@@ -1292,7 +1316,9 @@ function runSync(ws, op, opts) {
     if (advertisedSid && advertisedWs && ws.id === advertisedWs.id) _cands.push(String(advertisedSid));
     const liveRaw = [...new Set(_cands)].filter((x) => /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(x)).join(' ');
     const live = liveRaw ? `CLAUDIBLE_LIVE_SESSION='${liveRaw}' ` : '';
-    runner.runScript('sessions-sync.sh', `'${o}'`, { ws, extraEnv: live, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
+    // R10: full syncs join the same per-ws chain as presence/delete/resolve/title — syncLock (above doSync)
+    // still pre-empts a SECOND sync with an honest 'sync-busy'; this queue is the correctness net under it.
+    _syncQ.run((ws && ws.id) || 'ws', () => runner.runScript('sessions-sync.sh', `'${o}'`, { ws, extraEnv: live, timeout: 120000, maxBuffer: 8 * 1024 * 1024 })).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'sync could not run: ' + ((err && err.message) || err) }); }
         const raw = String(stdout).trim();
         try { resolve(JSON.parse(raw || '{}')); } catch { resolve({ ok: false, error: raw ? 'sync: ' + raw.slice(0, 300) : 'sync returned no output' }); }

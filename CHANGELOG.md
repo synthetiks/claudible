@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R10 — sync operations stop racing each other.** Presence beats, delete-everywhere, out-of-sync resolves,
+  title renames and full syncs all ran the sync script concurrently against the same branch — one operation's
+  pull could silently discard another's just-committed work while both reported success. Every operation now
+  rides one per-project chain (heartbeats coalesce instead of piling up).
 - **R15 — deleted projects stay deleted, in every shape.** Deleting an adopted project never recorded a
   tombstone (wrong kind), and deleting a repo before its stable GitHub id was known tombstoned by name only —
   either way the "deleted" project came back as a phantom invite. Tombstones are now kind-agnostic and
