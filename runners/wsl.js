@@ -98,9 +98,14 @@ function runScript(name, argStr = '', opts = {}) {
     const o = { encoding: 'utf8' };
     if (opts.timeout !== undefined) o.timeout = opts.timeout;
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
+    // detach: quit-path scripts (presence-clear, killtree) MUST survive app.quit(). "the execFile'd wsl.exe
+    // survives our exit" was an unenforced assumption — nothing prevented the child dying with the parent.
+    // detached+unref makes it a guarantee; results still resolve normally while the app is alive.
+    if (opts.detach) { o.detached = true; o.windowsHide = true; }
     try {
-      cp.execFile('wsl.exe', ['-e', 'bash', '-lc', cmd], o,
+      const child = cp.execFile('wsl.exe', ['-e', 'bash', '-lc', cmd], o,
         (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
+      if (opts.detach && child && child.unref) child.unref();
     } catch (e) { resolve({ err: e, stdout: '' }); }
   });
 }

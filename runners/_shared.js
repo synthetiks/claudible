@@ -55,9 +55,15 @@ function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy
 // so command text is unchanged from the original inline sites. env keeps its own trailing space.
 function scriptCmd(appdir, name, argStr = '', opts = {}) {
   const env = opts.extraEnv ? String(opts.extraEnv) : '';
+  // CLAUDIBLE_VOICE is a DOCUMENTED user override (README Configuration) consumed by preflight/services/
+  // setup inside the guest — but env vars don't cross the Windows→WSL boundary on their own, so under the
+  // WSL runner it silently did nothing. Inline it like every other CLAUDIBLE_* value. Same quote-reject rule
+  // as wsEnv's path (defense in depth: it's interpolated into a single-quoted bash string).
+  const vp = process.env.CLAUDIBLE_VOICE;
+  const voice = (vp && typeof vp === 'string' && !vp.includes("'")) ? `CLAUDIBLE_VOICE='${vp}' ` : '';
   const wsp = opts.ws ? wsEnv(opts.ws) + ' ' : '';
   const tail = String(argStr || '').trim();
-  return `${env}${wsp}bash '${shq(appdir)}/wsl/${name}'${tail ? ' ' + tail : ''}`;
+  return `${env}${voice}${wsp}bash '${shq(appdir)}/wsl/${name}'${tail ? ' ' + tail : ''}`;
 }
 
 module.exports = { shq, wsEnv, bootStr, scriptCmd };

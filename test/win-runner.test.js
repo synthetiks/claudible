@@ -161,5 +161,26 @@ ok('old node: installed but NOT ok (gates on 22.12)', oldNode.node.installed && 
 const noLogin = buildDepReport(fakeIO({ gitBash: true, present: { claude: '1.0.0' }, signedIn: { claude: false } }));
 ok('claude installed but not signed in (soft gate)', noLogin.claude.installed && !noLogin.claude.signedIn);
 
+// ---- shouldFallbackToFresh (F-LIFE-2 port: mirror of wsl/session.sh's resume-refusal fallback,
+//      lines 288-318) — a resume that exits almost instantly (< 4s) with a plain exit (no signal, not
+//      OUR kill) is a refusal, not a used-then-quit session; only a RESUME can ever fall back. ----
+const { shouldFallbackToFresh } = win._internals;
+const T0 = 1_000_000;
+// fast refusal: resume, exited quickly, no signal, we did not kill it -> fall back
+ok('fast refusal -> true', shouldFallbackToFresh(T0, T0 + 500, 1, undefined, false, true) === true);
+ok('fast refusal with exit code 0 -> still true (session.sh does not gate on the code value)',
+  shouldFallbackToFresh(T0, T0 + 10, 0, undefined, false, true) === true);
+// fast KILL (tab switch/close mid-resume): we killed it ourselves -> never a phantom fresh session
+ok('fast kill -> false', shouldFallbackToFresh(T0, T0 + 500, 1, undefined, true, true) === false);
+// slow exit: a real session that ran a while then quit normally -> not a refusal
+ok('slow exit -> false', shouldFallbackToFresh(T0, T0 + 5000, 0, undefined, false, true) === false);
+// this spawn was already a FRESH launch (not a resume) -> nothing to fall back from, ever
+ok('fresh spawn -> false', shouldFallbackToFresh(T0, T0 + 500, 1, undefined, false, false) === false);
+// died to a signal, not a plain exit -> treat like our-own-kill, never a refusal
+ok('signal exit -> false', shouldFallbackToFresh(T0, T0 + 500, null, 15, false, true) === false);
+// boundary: exactly 4000ms elapsed counts as "slow" (not a refusal) — matches session.sh's `-ge 4`
+ok('exactly-4000ms boundary counts as slow (not a refusal)', shouldFallbackToFresh(T0, T0 + 4000, 1, undefined, false, true) === false);
+ok('3999ms is still fast (a refusal)', shouldFallbackToFresh(T0, T0 + 3999, 1, undefined, false, true) === true);
+
 console.log(`\nwin-runner (pure core): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

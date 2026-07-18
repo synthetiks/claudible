@@ -163,17 +163,29 @@ function installHooks(sdir, tabRuntimeId) {
     }
     try { fs.writeFileSync(owned, ''); } catch {}
   }
-  fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js'));
-  fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js'));
+  // ATOMIC + skip-if-identical staging (mirrors wsl/session.sh's stage_hook): .claude is WORKSPACE-shared and
+  // every tab on this project respawns through here concurrently. A plain copy/write truncates-then-fills, so
+  // a sibling's Claude parsing a half-written hook/settings silently loses telemetry for its whole session.
+  const stage = (src, dest) => {
+    try { const a = fs.readFileSync(src), b = fs.readFileSync(dest); if (a.equals(b)) return true; } catch {}
+    const tmp = dest + '.cltmp.' + process.pid;
+    fs.copyFileSync(src, tmp); fs.renameSync(tmp, dest);
+    return true;
+  };
+  stage(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js'));
+  stage(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js'));
   // Stage the context hook too (additive; its absence in an older bundle just omits the identity injection).
   let hasContext = false;
-  try { fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'context-hook.js'), path.win32.join(cdir, 'context-hook.js')); hasContext = true; } catch {}
+  try { stage(path.join(APP_ROOT, 'hooks', 'context-hook.js'), path.win32.join(cdir, 'context-hook.js')); hasContext = true; } catch {}
   // MUST be a real node.exe, NOT process.execPath (= electron.exe under Electron, which won't run a .js
   // without ELECTRON_RUN_AS_NODE). Claudible's installer guarantees Windows Node 22.12+ on PATH.
   const nodeBin = whichNode();
-  // settings.json was snapshotted by the ownership block above, alongside the hook scripts. Safe to overwrite.
-  fs.writeFileSync(path.win32.join(cdir, 'settings.json'),
-    JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2));
+  // settings.json was snapshotted by the ownership block above, alongside the hook scripts. Safe to overwrite —
+  // atomically (tmp+rename), same concurrent-tabs reasoning as the hook staging above.
+  const settingsTxt = JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2);
+  const sPath = path.win32.join(cdir, 'settings.json');
+  let same = false; try { same = fs.readFileSync(sPath, 'utf8') === settingsTxt; } catch {}
+  if (!same) { const tmp = sPath + '.cltmp.' + process.pid; fs.writeFileSync(tmp, settingsTxt); fs.renameSync(tmp, sPath); }
   return { cdir, statusPath, hooksPath, contextPath };
 }
 
@@ -362,8 +374,31 @@ function spawnEnv(runtimeId, base, modelStrategy) {
   return Object.assign(defaults, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
 }
 
+// Resume-refusal fallback — mirror of wsl/session.sh's timing guard (lines 288-318): some claude builds
+// REFUSE to resume a given session (e.g. one that ended mid-tool-call) and exit almost immediately instead
+// of opening the TUI, while a real resumed session blocks until quit. session.sh detects that by timing the
+// attempt (< 4s = suspicious) and by RC>=128 (POSIX "died to a signal" — i.e. OUR OWN kill on a tab
+// switch/close, which must NOT trigger a phantom fresh session). node-pty hands both `signal` AND (via the
+// wrapping facade below) a direct `wasKilled` flag, so this is stricter than the RC>=128 heuristic — either
+// one blocks the fallback. PURE (no Date.now() inside) so it's unit-testable: test/win-runner.test.js drives
+// the full matrix. Exported via _internals.
+function shouldFallbackToFresh(spawnedAtMs, exitedAtMs, code, signal, wasKilled, wasResume) {
+  if (!wasResume) return false;                       // only a RESUME attempt can be "refused" — nothing to fall back from for a fresh launch
+  if (wasKilled) return false;                         // we killed it ourselves (tab switch/close) — a fresh respawn here would be an orphaned phantom
+  if (signal) return false;                            // died to a signal, not a plain exit — same "not a refusal" case
+  const elapsed = (exitedAtMs || 0) - (spawnedAtMs || 0);
+  return elapsed < 4000;                               // real interactive sessions run far longer than 4s; a near-instant return is a refusal
+}
+
 // 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
 // the Windows claude with WINDOWS-path args. ConPTY hosts a native console app fine (it hosts cmd/pwsh).
+//
+// Returns a STABLE facade object (not the raw node-pty handle): a refused `--resume` (shouldFallbackToFresh
+// above) transparently respawns ONCE with fresh-session argv on the same pty dimensions, swapping the facade's
+// inner process while main.js's onData/onExit/write/resize/kill callers keep the same reference throughout
+// (the `ptys.get(tabId)?.proc !== proc` guard in main.js's spawnPty depends on that object identity never
+// changing across a fallback). Contract-checked against main.js's spawnPty/respawnPty consumers: onData(cb),
+// onExit(cb), write(data), resize(cols,rows), kill(signal), .pid, .claudibleForeign — all present here.
 function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
@@ -380,19 +415,61 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
     try { fs.readFileSync(path.win32.join(pdir, '.claudible-foreign'), 'utf8').split(/\r?\n/).forEach((l) => l.trim() && foreign.add(l.trim())); } catch {}
   } catch {}
   const launch = pickResumeTarget(session, jsonl, foreign);
-  const argv = claudeArgv(launch, home, effort, permMode);
   const claude = whichClaude();
-  // node-pty + a .cmd shim: spawn via cmd /c so the shim resolves (the known ConPTY .cmd quirk).
+  const env = spawnEnv(runtimeId, undefined, modelStrategy);
+  const dims = { cols: cols || 120, rows: rows || 32 };
+  // node-pty + a .cmd shim: spawn via cmd /c so the shim resolves (the known ConPTY .cmd quirk). Same for
+  // both the initial launch and a fallback respawn (the claude binary/shim shape never changes mid-tab).
   const isCmd = /\.cmd$|\.bat$/i.test(claude) || claude === 'claude';
   const file = isCmd ? (process.env.COMSPEC || 'cmd.exe') : claude;
-  const args = isCmd ? ['/c', claude, ...argv] : argv;
-  const env = spawnEnv(runtimeId, undefined, modelStrategy);
-  const proc = pty.mod.spawn(file, args, { name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: sdir, env });
+  function spawnInner(l) {
+    const argv = claudeArgv(l, home, effort, permMode);
+    const args = isCmd ? ['/c', claude, ...argv] : argv;
+    return pty.mod.spawn(file, args, { name: 'xterm-256color', cols: dims.cols, rows: dims.rows, cwd: sdir, env });
+  }
+
+  let inner = spawnInner(launch);
+  const spawnedAtMs = Date.now();
+  const wasResume = launch.mode === 'resume';
+  let killedByUs = false;      // set by facade.kill() — distinguishes "we ended this pty" from a genuine refusal
+  let fallbackUsed = false;    // at most ONE fallback per spawn (loop guard)
+  let dataCb = null, exitCb = null, innerDataSub = null, innerExitSub = null;
+
+  function wireInner() {
+    innerDataSub = inner.onData((d) => { if (dataCb) dataCb(d); });
+    innerExitSub = inner.onExit((e) => onInnerExit(e || {}));
+  }
+  function onInnerExit(e) {
+    const exitedAtMs = Date.now();
+    if (!fallbackUsed && shouldFallbackToFresh(spawnedAtMs, exitedAtMs, e.exitCode, e.signal, killedByUs, wasResume)) {
+      fallbackUsed = true;
+      console.log('[claudible] win: resume refused (fast exit, not a kill) — falling back to a fresh session');
+      try { innerDataSub && innerDataSub.dispose(); } catch {}
+      try { innerExitSub && innerExitSub.dispose(); } catch {}
+      inner = spawnInner({ mode: 'fresh' });
+      wireInner();
+      return;
+    }
+    if (exitCb) exitCb(e);
+  }
+  wireInner();
+
+  const facade = {
+    get pid() { return inner.pid; },
+    onData(cb) { dataCb = cb; return { dispose() { if (dataCb === cb) dataCb = null; } }; },
+    onExit(cb) { exitCb = cb; return { dispose() { if (exitCb === cb) exitCb = null; } }; },
+    write(d) { try { inner.write(d); } catch {} },
+    resize(c, r) { dims.cols = c; dims.rows = r; try { inner.resize(c, r); } catch {} },
+    pause() { try { inner.pause(); } catch {} },
+    resume() { try { inner.resume(); } catch {} },
+    kill(signal) { killedByUs = true; try { inner.kill(signal); } catch {} },
+  };
   // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —
   // main injects the same line into the terminal when it sees this flag). Never weakens the guard: argv above
-  // already excluded the perm flags for a foreign resume.
-  if (proc && launch.foreign) { proc.claudibleForeign = true; console.log('[claudible] win: foreign (collaborator-synced) session — sandboxed regardless of permission-mode setting'); }
-  return proc;
+  // already excluded the perm flags for a foreign resume. Reflects the INITIAL decision only — a fallback
+  // (fresh) is never foreign, but by the time one could happen main.js has already read this synchronously.
+  if (launch.foreign) { facade.claudibleForeign = true; console.log('[claudible] win: foreign (collaborator-synced) session — sandboxed regardless of permission-mode setting'); }
+  return facade;
 }
 
 // 🟡 runScript — reuse the wsl/*.sh fleet UNCHANGED via git-bash. Same shared scriptCmd; the wrapper is
@@ -413,8 +490,11 @@ function runScript(name, argStr = '', opts = {}) {
     const o = { encoding: 'utf8', env };
     if (opts.timeout !== undefined) o.timeout = opts.timeout;
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
-    try { cp.execFile(bash, ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' })); }
-    catch (e) { resolve({ err: e, stdout: '' }); }
+    if (opts.detach) { o.detached = true; o.windowsHide = true; }   // quit-path scripts (presence-clear) must survive app.quit() — see wsl.js runScript
+    try {
+      const child = cp.execFile(bash, ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
+      if (opts.detach && child && child.unref) child.unref();
+    } catch (e) { resolve({ err: e, stdout: '' }); }
   });
 }
 
@@ -442,5 +522,5 @@ module.exports = {
   ptyInfo, spawnClaude, runScript,
   startVoiceServices,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh },
 };

@@ -62,8 +62,10 @@ function runScript(name, argStr = '', opts = {}) {
     const o = { encoding: 'utf8' };
     if (opts.timeout !== undefined) o.timeout = opts.timeout;
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
+    if (opts.detach) o.detached = true;   // quit-path scripts must survive app.quit() — see wsl.js runScript
     try {
-      cp.execFile('bash', ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
+      const child = cp.execFile('bash', ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
+      if (opts.detach && child && child.unref) child.unref();
     } catch (e) { resolve({ err: e, stdout: '' }); }
   });
 }
