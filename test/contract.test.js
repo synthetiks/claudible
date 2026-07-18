@@ -578,5 +578,19 @@ none('renderer: orphanTab is never rendered',
   none('a deferred sync/share flow the modal copy promises is gone', deferred);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 14. A wsl/posix voice install must START the services it installed (R8). deps.install only downloads/builds
+//     (provision.sh voice → setup.sh); the only other startVoiceServices callers are boot-path. Without this,
+//     the wizard reports "ready" while Whisper/Kokoro aren't running and the first Talk fails until a relaunch.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const pf = (MAIN.match(/ipcMain\.handle\('preflight:install'[\s\S]*?\n\}\);/) || [''])[0];
+  none('preflight:install does not start voice services after a successful non-win voice install (R8)',
+    /if \(id === 'voice'\) startVoiceServices\(\);/.test(pf) ? [] : ['no startVoiceServices() in the success path']);
+  // …and it must sit INSIDE the res.ok branch: starting services after a FAILED install would mask the failure.
+  none('the R8 service-start is reachable on failure (must be inside the res.ok branch)',
+    /if \(res\.ok\) \{[\s\S]*?if \(id === 'voice'\) startVoiceServices\(\);[\s\S]*?\n  \}/.test(pf) ? [] : ['startVoiceServices() is not inside the res.ok block']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

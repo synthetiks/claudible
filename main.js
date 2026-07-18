@@ -2303,6 +2303,12 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
     }
     await refreshWindowsPath();   // async: never block the main process (pty I/O + every poller) on a PowerShell spawn
     if (runner.id === 'win' && typeof runner.resetCaches === 'function') runner.resetCaches();   // re-resolve git-bash/app-dir next call
+    // R8: a wsl/posix voice install downloads+builds via setup.sh but starts NOTHING — the wizard row and the
+    // topbar chip then say "ready" while Whisper/Kokoro aren't running, and the first Talk/PTT fails with a raw
+    // fetch error until the next full relaunch (whose boot path is the only other startVoiceServices caller).
+    // Start them here, exactly like the win branch does via ensureVoiceProvisioned's exit handler. Idempotent:
+    // services.sh port-checks before spawning, so a re-install with services already up is a no-op.
+    if (id === 'voice') startVoiceServices();
   }
   return { ok: res.ok, error: res.error || '', restartRequired: !!res.restartRequired };
 });

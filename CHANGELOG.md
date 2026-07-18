@@ -21,6 +21,9 @@ register; fixes land here one commit per register id, each pinned by a test.
 - **R6 — a joined live session's row can no longer vanish sidebar-wide.** Clicking into another project while a
   joined tab stayed open left its home tree's stale paint in place (trees only refill when empty), erasing the
   session everywhere until a manual collapse/expand. Tab switches across a live tab now repaint the trees.
+- **R8 — the wizard's voice Install now actually starts Whisper + Kokoro on WSL/Linux/macOS.** It downloaded and
+  built everything, reported "ready" — and started nothing, so the first Talk failed with a raw fetch error
+  until the next full relaunch. The install path now starts the services the moment the build succeeds.
 
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or
