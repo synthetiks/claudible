@@ -728,5 +728,16 @@ none('renderer: orphanTab is never rendered',
     && !/catch \(err\) \{ return \{ error: String\(err\) \}; \}/.test(MAIN) ? [] : ['voiceErrText missing or a catch still returns String(err)']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 23. R20 — ending a live session releases the HOST's own voice-room membership. Every guest path already
+//     drops voice on leave (closeTab does it for joined tabs); the host's end paths never did — the mic stayed
+//     hot after "End Session" and the next share inherited a ghost member. endLiveNow is the ONE host-side
+//     teardown (check 10's singleton), so the leave belongs exactly there.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('endLiveNow does not release the host voice room (mic stays hot after End Session)',
+    /function endLiveNow\(msg\) \{[\s\S]{0,700}?hostVoice\.isJoined\(\)\) hostVoice\.leave\(\);/.test(APP) ? [] : ['no hostVoice.leave() in endLiveNow']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

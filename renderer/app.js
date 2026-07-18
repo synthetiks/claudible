@@ -1509,6 +1509,7 @@ async function terminateLive() {
 function endLiveNow(msg) {
   if (sharedSessionId) { sharedSessionId = null; sharedWsId = null; }
   if (webShare) { webShare = false; webShareUI(false); }
+  try { if (hostVoice && hostVoice.isJoined && hostVoice.isJoined()) hostVoice.leave(); } catch {}   // R20: the host's own voice-room membership outlived the share — mic stayed hot and the next share inherited a ghost member; every guest path already drops voice on leave, the HOST's end paths never did
   guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
   updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions(); refreshExpandedTrees();   // updateCollab→ensureTunnel drops the tunnel (closes guests). refreshSessions is ACTIVE-LIST-ONLY — without refreshExpandedTrees the ended session keeps its green rail + Live badge in any other project's open tree
   toast(msg);

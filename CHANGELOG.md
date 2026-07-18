@@ -29,6 +29,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R20 — ending a live session hangs up your mic.** The host's own voice-room membership outlived every end
+  path — the mic stayed hot after "End Session" and the next share started with a ghost member already in the
+  room. The one shared teardown now leaves the voice room too.
 - **R17/R19 — the last two raw-error surfaces speak human.** A failed Claude Code install dumped npm's raw
   "npm ERR!" noise (now: real next steps for permission/network failures); a voice transcription/speech
   failure returned the raw exception ("TypeError: fetch failed" — now: "the voice services aren't running —
