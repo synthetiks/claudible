@@ -832,5 +832,24 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   /if \(!app\.requestSingleInstanceLock\(\)\) \{\s*\n\s*app\.quit\(\);/.test(MAIN)
   && /app\.on\('second-instance'/.test(MAIN) ? [] : ['requestSingleInstanceLock + second-instance focus required']);
 
+// ---------------------------------------------------------------------------------------------------------
+// 31. R35/R36/R37/R38/R41 — the remaining quiet/raw failure surfaces. Skill toggle can't fail silently or
+//     print a bare code; kicking a guest reports its failure; checkpoint-revert's fallthrough humanizes;
+//     the new-session name-share failure toasts like the rename path; delete-workspace only appends a
+//     sentence-shaped reason.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the skill toggle fails silently / prints a raw code again (R35)',
+    /Could not switch that skill — ' \+ humanError\(\(r && r\.error\) \|\| 'exec'\)/.test(APP) ? [] : ['skill toggle not humanized']);
+  none('kicking a guest fails silently again (R36)',
+    /Could not remove ' \+ g\.name/.test(APP) ? [] : ['no kick-failure toast']);
+  none('checkpoint-revert renders a bare internal label again (R37)',
+    /'session history is off' : \(r && r\.error\) \? humanError\(r\.error\)/.test(APP) ? [] : ['revert fallthrough not humanized']);
+  none('a new-session name-share failure is silent again (R38)',
+    /Named here — sharing the name failed, will keep retrying/.test(APP) && (APP.match(/sharing the name failed/g) || []).length >= 2 ? [] : ['pendingTitle publish failure must toast like the rename path']);
+  none('delete-workspace staples a bare code onto its message again (R41)',
+    /r\.error && \/\\s\/\.test\(r\.error\) \? ': ' \+ r\.error : ''/.test(MAIN) ? [] : ['sentence-gate missing']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -561,7 +561,7 @@ claudible.onStatus((s) => {
       const tstamps = Object.assign({}, _pp.sessionTitleTs || {}); tstamps[s.sessionId] = Date.now();   // stamp the rename so global newest-wins can compare it against collaborators'
       saveSessionTitles(titles, tstamps);   // copy → mutable (cached map may be a frozen contextBridge object); bounded + evictable
       const _aw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace, not the sidebar's — a background tab resolving while you view another ws must gate + publish against ITS OWN repo
-      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators
+      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then((r) => { if (r && r.ok === false) toast('Named here — sharing the name failed, will keep retrying'); pollTitles(true); }).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators. R38: a failed publish was silent (the rename path already toasts this same line); the inverse reconciler keeps retrying either way
     }
     if (sidebarReady && t.wsId === activeWsId) refreshSessions();
   }
@@ -1464,7 +1464,7 @@ function renderRoster(roster) {
     if (hosting && !g.host && g.state !== 'gone') {                  // host can remove a guest who's present
       const k = document.createElement('button'); k.className = 'rkick'; k.type = 'button';
       k.title = 'Remove ' + g.name; k.setAttribute('aria-label', 'Remove ' + g.name); k.textContent = '✕';
-      k.addEventListener('click', (e) => { e.stopPropagation(); claudible.shareKick(g.name).then((r) => { if (r && r.ok) toast('Removed ' + g.name); }).catch(() => {}); });
+      k.addEventListener('click', (e) => { e.stopPropagation(); claudible.shareKick(g.name).then((r) => { toast((r && r.ok) ? ('Removed ' + g.name) : ('Could not remove ' + g.name + ' — they may have already left')); }).catch(() => toast('Could not remove ' + g.name)); });   // R36: failure was completely silent — the row just sat there
       m.appendChild(k);
     }
     el.appendChild(m);
@@ -1854,7 +1854,7 @@ async function loadSkills() {
     tog.addEventListener('click', async () => {
       let r = null; try { r = await claudible.skillsSet(s.name, on ? 'off' : 'on'); } catch {}
       if (r && r.ok) loadSkills();
-      else if (r && r.error) toast(r.error);
+      else toast('Could not switch that skill — ' + humanError((r && r.error) || 'exec'));   // R35: a null result was SILENT and a raw code rendered verbatim; real sentences (the adopted-settings refusal) pass through humanError unchanged
     });
     row.appendChild(tog); el.appendChild(row);
   });
@@ -2138,7 +2138,7 @@ async function revertToCheckpoint(en) {
   if (!r || !r.ok) {
     const why = (r && r.error === 'no such checkpoint') ? 'that snapshot has aged out (only the latest 10 are kept)'
       : (r && r.error === 'undo snapshot failed') ? 'couldn’t capture a safety snapshot first, so nothing was changed'
-      : (r && r.error === 'disabled') ? 'session history is off' : (r && r.error) ? r.error : 'unknown error';
+      : (r && r.error === 'disabled') ? 'session history is off' : (r && r.error) ? humanError(r.error) : 'unknown error';   // R37: an unmapped code rendered as a bare internal label
     toast('Could not revert — ' + why);
     return;
   }

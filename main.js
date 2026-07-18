@@ -1974,7 +1974,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
     runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-workspace:', err.message); return finish('the project was removed, but its folder could not be moved to trash'); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-      if (r.ok === false) { console.error('[claudible] delete-workspace refused:', r.error); return finish('the project was removed, but its folder is still on disk: ' + (r.error || 'unknown')); }
+      if (r.ok === false) { console.error('[claudible] delete-workspace refused:', r.error); return finish('the project was removed, but its folder is still on disk' + (r.error && /\s/.test(r.error) ? ': ' + r.error : '')); }   // R41: only append the script's reason when it's a sentence — a bare code stapled to a good message reads as gibberish (the console keeps the raw one)
       finish();
     });
   } else finish();
