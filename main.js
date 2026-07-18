@@ -1641,6 +1641,19 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
   const after = live();
   if (!after) return { ok: false, error: 'unknown workspace' };      // deleted mid-clone: the registry is already right; don't resurrect it
   if (!c.ok && !(payload && payload.useDefault) && after.path) { delete after.path; saveRegistry(); }   // failed custom clone → don't leave a dangling path
+  if (c.ok && !after.syncSessions) {
+    // R3: the accept modal promises "sessions still sync with the team" — but nothing ever enabled it, so the
+    // invited collaborator landed in a normal-looking project that could neither see the team's sessions nor
+    // publish its own until they found a second consent menu item nothing pointed at. Clicking "Add shared
+    // project" on a modal that states sessions sync IS the consent — honor it, and kick the first sync so the
+    // team's sessions appear now, not at the next poll tick (mirrors workspace:upgrade's post-enable kick).
+    after.syncSessions = true; saveRegistry();
+    (async () => {
+      if (syncLock.has(after.id)) return; syncLock.add(after.id);
+      let ir; try { ir = await runSync(after, 'init', {}); } finally { syncLock.delete(after.id); }
+      if (ir && ir.ok) doSync(after, 'sync', {});
+    })();
+  }
   return c.ok ? { ok: true, path: after.path || null } : { ok: false, error: c.error || 'clone failed' };
 });
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.

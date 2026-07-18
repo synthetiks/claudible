@@ -614,5 +614,30 @@ none('renderer: orphanTab is never rendered',
     /function writeSettings\(obj\) \{ fs\.mkdirSync\(PERSIST/.test(MAIN) ? [] : ['writeSettings mkdirs the wrong root']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 16. R2/R3 — consent tells the truth, and a promise made is a promise kept.
+//     R2: publishing a local project to GitHub (upgrade OR invite) must be gated by a confirm that HONESTLY
+//     discloses transcript sync — the old text claimed transcripts "stay OUT of the repo" while the same click
+//     enabled the machinery that commits them. R3: the accept-invite modal says "sessions still sync with the
+//     team"; accepting must actually enable syncSessions (and kick the first sync), or the promise is a lie.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // Comments stripped first — the fix's own comment QUOTES the old line (comment-blindness, reverse edition).
+  const appCode = APP.split('\n').map((l) => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n');
+  none('the sync/share consent claims transcripts stay OUT of the repo again (they sync — that is the feature)',
+    /stay OUT of the repo/i.test(appCode) ? ['the lying consent line is back'] : []);
+  const upg = (APP.match(/async function upgradeWorkspace\(w\) \{[\s\S]*?\n\}/) || [''])[0];
+  none('upgradeWorkspace lost its consent gate or its transcript disclosure',
+    /if \(!confirm\([\s\S]*?transcripts/.test(upg) ? [] : ['no confirm with a transcript disclosure']);
+  const inv = (APP.match(/async function inviteToLocal\(w\) \{[\s\S]*?\n\}/) || [''])[0];
+  none('inviteToLocal publishes to GitHub without consent (R2 — must confirm BEFORE workspaceUpgrade)',
+    /if \(!confirm\([\s\S]*?transcripts[\s\S]*?workspaceUpgrade\(/.test(inv) ? [] : ['no confirm before workspaceUpgrade']);
+  const acc = (MAIN.match(/ipcMain\.handle\('workspace:acceptInvite'[\s\S]*?\n\}\);/) || [''])[0];
+  none('acceptInvite does not enable syncSessions on a successful clone (R3 — the modal promises sync)',
+    /after\.syncSessions = true; saveRegistry\(\);/.test(acc) ? [] : ['no syncSessions enable in acceptInvite']);
+  none('acceptInvite enables sync but never kicks the first one (team sessions would wait for a poll tick)',
+    /runSync\(after, 'init'/.test(acc) && /doSync\(after, 'sync'/.test(acc) ? [] : ['no init/sync kick after enabling']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

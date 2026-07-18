@@ -4579,7 +4579,10 @@ async function toggleShared(w) {
 // Make a LOCAL workspace synced across devices (and shareable): one click backs it with a private GitHub repo
 // in place — its sessions appear on your other devices via discovery. Needs GitHub connected.
 async function upgradeWorkspace(w) {
-  if (!confirm('Sync "' + w.label + '" across your devices?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected). The project + its sessions then appear on your other devices, and you can invite people. Your Claude transcripts stay OUT of the repo.')) return;
+  // R2: this consent used to claim "Your Claude transcripts stay OUT of the repo" — false: upgrade enables
+  // session sync, whose whole job is committing transcripts to the private repo (its own sync modal already
+  // disclosed this honestly). A consent dialog that lies is worse than none.
+  if (!confirm('Sync "' + w.label + '" across your devices?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected). The project + its sessions then appear on your other devices, and you can invite people.\n\nHeads up: session sync commits your Claude transcripts — including anything Claude read during them (file contents, secrets, command output) — into that private repo’s history.')) return;
   toast('Setting up sync — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
   if (r && r.ok) { toast('Synced ✓ — this project now appears on your other devices'); try { await refreshWorkspaces(); } catch {} }
@@ -4588,6 +4591,10 @@ async function upgradeWorkspace(w) {
 // Inviting to a local workspace: it must become a synced repo first (collaborators need a GitHub repo), then
 // open the normal invite modal on the now-repo workspace.
 async function inviteToLocal(w) {
+  // R2: this used to create the GitHub repo with NO dialog at all — a click that read like "open the invite
+  // form" published a local project (and enabled transcript sync) before any consent appeared. Same gate as
+  // upgradeWorkspace, same honest disclosure as the sync modal.
+  if (!confirm('Share "' + w.label + '" with someone?\n\nThis creates a PRIVATE GitHub repo for it and turns on session sync, so the person you invite can see, resume, and join this project’s conversations.\n\nHeads up: session sync commits your Claude transcripts — including anything Claude read during them (file contents, secrets, command output) — into that private repo’s history.')) return;
   toast('Preparing to share — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
   if (!r || !r.ok) { const m = (r && r.error) || 'unknown'; toast('Could not share: ' + humanError(m) + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); return; }

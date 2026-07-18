@@ -29,6 +29,14 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R2 — sharing consent tells the truth, and "Invite someone…" asks before publishing.** Inviting from a local
+  project used to create the GitHub repo with no dialog at all, and the sync consent claimed transcripts "stay
+  OUT of the repo" while enabling the very machinery that commits them. Both flows now show the same honest
+  disclosure the collaboration modal always had.
+- **R3 — accepting a project invite now actually turns session sync on.** The modal promised "sessions still
+  sync with the team", then left sync off — the invited collaborator saw an empty-looking project until they
+  found a second consent menu item nothing pointed at (today's onboarding confusion, root-caused). Accepting is
+  the consent; the first sync kicks immediately.
 - **R4 — your projects, settings, consent and history now survive a reinstall.** They lived inside the app
   folder (`<clone>/runtime/`), so "delete the folder and re-clone" — the documented uninstall, an
   update-by-reclone, an antivirus quarantine — silently wiped the project registry, every sync consent and
