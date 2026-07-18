@@ -29,6 +29,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R28/R29/R34 — sidebar order, tree visibility, and the native-Windows voice button.** Dragging sessions no
+  longer forgets where a joined session belongs; a collaborator live in a session you haven't synced yet shows
+  up in that project's tree; the packaged Windows app gets the voice Install button every other install had.
 - **R26/R27/R31/R39/R40 — joined sessions and invite-checking tell the whole truth.** A view-only mirror now
   says so (once, plus on its row) instead of silently eating keys; reconnecting re-arms voice instead of a
   mic button that lies; "Check for invites" says WHY it can't look when GitHub isn't connected; /clear on a

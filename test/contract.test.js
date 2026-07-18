@@ -884,5 +884,21 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /!joinedTabSessionIds\(\)\.has\(s\.id\) && peersForWs\(activeWsId\)\.find/.test(APP) ? [] : ['the badge arm must consult joinedTabSessionIds']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 34. R28/R29/R34 — the last sidebar/deps mediums. A drag re-inserts joined-suppressed ids at their old
+//     positions (never silently drops them from the saved order); a non-active tree renders standalone rows
+//     for live peers with no local copy; the win runner's voice row is installable (routes to
+//     ensureVoiceProvisioned — every other runner already had the button).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const DEPS = read('runners/deps.js');
+  none('a drag drops joined-suppressed ids from the saved order again (R28)',
+    /joined\.has\(id\) && !order\.includes\(id\)\) order\.splice/.test(APP) ? [] : ['the order merge is gone']);
+  none('a live peer with no local copy is invisible in a non-active tree again (R29)',
+    /seenIds\.has\(p2\.session\) \|\| joined\.has\(p2\.session\)\) return; kids\.appendChild\(renderLivePeerRow\(p2\)\)/.test(APP) ? [] : ['tree standalone peer rows missing']);
+  none('the packaged-win voice row lost its Install button again (R34)',
+    /m\.id === 'voice' && runnerId === 'win'\) return true/.test(DEPS) ? [] : ['voice must be installable on the win runner']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

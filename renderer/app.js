@@ -3504,6 +3504,11 @@ function onSessPointerUp() {
   d.row.classList.remove('dragging');
   if (d.moved) {
     const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft):not(.sess-joined-live):not(.sess-peer-live)')).map((r) => r.dataset.id);   // same exclusion as the drop-target list — live rows have no dataset.id
+    // R28: a session suppressed by the joined-mirror dedup has NO row in this DOM walk — a drag used to DROP
+    // its id from the persisted order entirely, resetting its place the moment its saved row returned. Missing
+    // previously-ordered ids re-insert at their old (clamped) positions: a drag reorders only what you can see.
+    { const prev = (loadPrefs()[orderKey()] || []); const joined = joinedTabSessionIds();
+      prev.forEach((id, i) => { if (joined.has(id) && !order.includes(id)) order.splice(Math.min(i, order.length), 0, id); }); }
     setOrder(order);                                                               // manual order persists (per workspace)
     refreshSessions();                                                             // reconcile: refreshes skipped DURING the drag (the sdrag guard) catch up now
   } else {
@@ -4169,6 +4174,11 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     const ordered = orderedSessionsFor(w.id, (list || []).filter((s) => !joined.has(s.id) && ((s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id)))).slice(0, 60);
     if (!ordered.length && !joinedRows.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
+    // R29: a peer live in a session with NO local saved copy (not yet synced here) was invisible in this tree —
+    // badges only decorate saved rows, and standalone peer rows existed only in the active list. Same
+    // suppressions as there: a joined tab wins; saved rows already wear their badge on the ordered rows above.
+    { const seenIds = new Set(ordered.map((s) => s.id));
+      peersForWs(w.id).forEach((p2) => { if (seenIds.has(p2.session) || joined.has(p2.session)) return; kids.appendChild(renderLivePeerRow(p2)); }); }
     // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).
     // A non-active workspace lists its sessions for browsing/opening; to start a new one you select it first.
   };

@@ -38,6 +38,7 @@ const MANIFEST = [
 // Can this runner auto-install this dep? (display-only voice is provisioned by main.js's voice path.)
 function installable(m, runnerId) {
   if (m.displayOnly) return false;
+  if (m.id === 'voice' && runnerId === 'win') return true;   // R34: win routes to main's ensureVoiceProvisioned — every other runner had an Install button for voice, the packaged native app had none
   if (runnerId === 'win') return !!(m.win && (m.win.winget || m.win.npm));
   return !!m.posix;   // posix/wsl: claude via install-claude.sh, others via provision.sh
 }
