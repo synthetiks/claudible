@@ -407,18 +407,8 @@ ok('app.js: the mirror fills when possible, floors at the viewer’s stock size,
   && /classList\.toggle\('live-pan', overflows\)/.test(APP)
   && !/FS_FLOOR/.test(APP)
   && !/t\.tabId === sharedTabIdR\) \{ scaleTermToGrid/.test(APP));
-// FROZEN-SHAPE SHARE (owner-approved retry of the reverted concept, WITHOUT the font scaling that broke it):
-// while pinned, the shared tab keeps its exact grid+font — main drops pty:resize for it, the renderer's sync
-// letterboxes/pans (a class toggle, no measurements), and un-pinning restores the normal fit. The pinned-mode
-// branch must contain NO fontSize writes — the scaled variant is what broke rendering for both parties.
-ok('main.js: pty:resize is dropped for the pinned shared tab (the grid is frozen)',
-  /sharedTabId && tabId === sharedTabId\) return;/.test(MAIN));
-ok('app.js: the pinned tab letterboxes/pans without ANY font math',
-  /if \(t\.started && t\.tabId === sharedTabIdR\) \{ t\.container\.classList\.add\('live-pan'\); updateScrollbar\(\); return; \}/.test(APP)
-  && !/sharedTabIdR\) \{ scaleTermToGrid/.test(APP)
-  && !/sharedTabIdR[^\n]*fontSize/.test(APP));
-ok('app.js: un-pinning drops the pan surface and re-fits',
-  /classList\.remove\('live-pan'\)/.test(APP) && /sharedTabIdR == null\) \{ const t = tabs\.get\(was\)/.test(APP));
+ok('main.js: pty:resize has NO shared-tab special case (the host resizes freely)',
+  !/sharedTabId && tabId === sharedTabId\) return;/.test(MAIN));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1

@@ -118,11 +118,6 @@ register; fixes land here one commit per register id, each pinned by a test.
   (the bash writer and the app's pollers must derive the same path).
 
 ### Finish-line follow-up (July 19)
-- **Frozen-shape live sessions (owner-approved): while sharing, the terminal keeps its exact size for
-  everyone.** Even with stable fonts, a host resize made Claude re-wrap its whole layout — the "I still see
-  him zoom out" residue. The shared terminal is now frozen at its share-start shape: the host's bigger window
-  shows margin around it, a smaller one pans, guests see a shape that never changes, and ending the share
-  restores normal resizing. No font scaling anywhere — the scaled variant that broke rendering stays dead.
 - **The host resizing can no longer zoom the guest out OR leave them a minimized patch.** The joined mirror
   fills the guest's window whenever the host's screen fits (scaling up freely), never shrinks below the
   guest's own text size, and pans (scrollbars) when the host's screen is genuinely bigger — guest-side only,
