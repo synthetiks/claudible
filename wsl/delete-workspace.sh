@@ -16,7 +16,20 @@ esac
 [ -d "$dir" ] || { printf '{"ok":true,"note":"already gone"}'; exit 0; }
 trash="$HOME/.claudible/trash"; mkdir -p "$trash" 2>/dev/null
 ts="$(date +%Y%m%d-%H%M%S)"
+# The workspace's WHOLE footprint goes to trash, not just the code dir — the other two pieces used to leak
+# forever outside any managed lifecycle (trash-prune's age/size bounds now apply to all three):
+#  * the Claude-Code shadow dir (~/.claude/projects/<encoded SDIR>) holding every transcript + the
+#    .claudible-* sidecars — a later workspace re-created at the same path silently inherited the dead
+#    project's sessions, and discovery's per-machine tombstones pointed at data that never left;
+#  * (repo) the sessions-sync worktree (~/.claudible/sessions-sync/<slug>) — orphaned with a broken gitdir
+#    link once the code dir moved, still holding every collaborator's exported transcripts.
+# Encoding matches sessions.sh/session.sh exactly; CLAUDIBLE_PROJ overrides on win-native (same contract).
+proj="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$dir" | sed 's#[^A-Za-z0-9]#-#g')}"
 if mv -f "$dir" "$trash/ws-$kind-$slug.$ts" 2>/dev/null; then
+  [ -d "$proj" ] && mv -f "$proj" "$trash/proj-$kind-$slug.$ts" 2>/dev/null
+  if [ "$kind" = "repo" ] && [ -d "$HOME/.claudible/sessions-sync/$slug" ]; then
+    mv -f "$HOME/.claudible/sessions-sync/$slug" "$trash/syncwt-$slug.$ts" 2>/dev/null
+  fi
   printf '{"ok":true}'
 else
   printf '{"ok":false,"error":"move failed"}'
