@@ -686,5 +686,18 @@ none('renderer: orphanTab is never rendered',
     /is_live\(\) \{ case " \$LIVE " in \*" \$1 "\*\)/.test(SYNC) && (SYNC.match(/is_live "\$id" && continue/g) || []).length === 2 ? [] : ['is_live missing or not used at both import+export sites']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 20. R12 — an invite targets the repo's RECORDED owner, never whoever happens to be signed in. The script
+//     used to resolve `gh api user` (the clicker) as the namespace: a collaborator inviting a third person
+//     PUT against their own account — a same-named repo of theirs got the invite, or it 404'd as "invited".
+// ---------------------------------------------------------------------------------------------------------
+{
+  const INV = read('wsl/repo-invite.sh');
+  none('repo:invite does not pass the workspace owner through to the script',
+    /const owner = String\(ws\.owner \|\| ''\)/.test(MAIN) && /repo-invite\.sh', `'\$\{repo\}' '\$\{login\}' '\$\{owner\}'`/.test(MAIN) ? [] : ['owner not threaded through repo:invite']);
+  none('repo-invite.sh trusts the signed-in user as the namespace again',
+    /owner="\$\{3:-\}"/.test(INV) && /\[ "\$me" != "\$owner" \]/.test(INV) && /repos\/\$owner\/\$slug\/collaborators/.test(INV) ? [] : ['script must take owner as $3, refuse a non-owner, and PUT against $owner']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

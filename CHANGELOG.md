@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R12 — invites always target the repo's real owner.** A collaborator clicking "Invite collaborator…" used
+  to fire the invite at their OWN GitHub namespace (whoever was signed in), silently hitting a same-named repo
+  of theirs or reporting success on a 404. The owner is now explicit, and a non-owner gets the honest answer:
+  ask the owner to invite.
 - **R13 — "Sync now" can no longer export the hosted session mid-write.** With a second tab mid-turn in the
   same project, the busy tab's session id silently replaced the hosted session's in the sync exclusion — the
   transcript guests were watching got copied to the branch while Claude was still appending to it. The

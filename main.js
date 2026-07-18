@@ -1989,8 +1989,14 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   // collaborators API path must target the live name. repoName falls back to slug for never-renamed workspaces.
   const repo = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');   // honor the bash-interpolation invariant (re-sanitise)
   if (!repo) return resolve({ ok: false, error: 'bad workspace' });
+  // R12: the OWNER is the workspace's recorded owner, passed explicitly — the script used to resolve `gh api
+  // user` (whoever clicked), so a collaborator's invite targeted their OWN namespace: a same-named repo of
+  // theirs, or a 404 the UI reported as success. The script refuses politely when the signed-in user isn't
+  // this owner (GitHub wouldn't honor it anyway).
+  const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (!owner) return resolve({ ok: false, error: 'this project has no recorded GitHub owner — re-sync it first' });
   if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
-  runner.runScript('repo-invite.sh', `'${repo}' '${login}'`, { timeout: 60000 }).then(({ err, stdout }) => {
+  runner.runScript('repo-invite.sh', `'${repo}' '${login}' '${owner}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
