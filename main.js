@@ -795,6 +795,7 @@ function openLiveSocket(tabId) {
     switch (m.type) {
       case 'hello': {
         gotHello = true; r.pid = m.pid || null; r.readOnly = !!m.readOnly;
+        r.retry = 0; r.coldTries = 0; r.resumeFails = 0;   // R14: a successful admit resets EVERY reconnect counter — they used to accumulate for the tab's lifetime, so enough brief blips across an evening permanently killed the mirror
         r.hostCols = m.cols || r.hostCols || 120; r.hostRows = m.rows || r.hostRows || 32;
         if (m.resume) r.resume = m.resume;
         if (m.you) r.name = String(m.you).slice(0, 40);   // adopt the name the host assigned (may be disambiguated); so if a later IP-roam reconnect falls back to the link (no grace record to restore), our ?n= re-sends the unique name instead of the stale original
@@ -850,7 +851,21 @@ function openLiveSocket(tabId) {
     if (!gotHello && r.resume) { r.resumeFails = (r.resumeFails || 0) + 1; if (r.resumeFails >= 2) { r.resume = null; r.resumeFails = 0; } }
     else if (gotHello) { r.resumeFails = 0; }
     const warm = gotHello || r.resume;                     // admitted this attempt, or still holding a not-yet-exhausted resume token
-    if (!warm) { r.coldTries = (r.coldTries || 0) + 1; if (r.coldTries > 8) { liveSend(tabId, 'live:state', { state: 'offline' }); return; } }   // cold: host tunnel slow to come up OR we just fell back resume→link — try a few times, then give up
+    if (!warm) {
+      r.coldTries = (r.coldTries || 0) + 1;
+      if (r.coldTries > 8) {
+        // R14: this was a PERMANENT give-up (bare return, no timer) — and with the counters never resetting,
+        // the 9th cold dial EVER ended the mirror with no rejoin affordance anywhere. Now: go quiet (offline
+        // row) but keep a slow 30s lifeline dialing the handle — the moment the host's tunnel answers again
+        // (same url+token), hello resets every counter above and the mirror comes back on its own. A dead
+        // handle costs one fast failed dial per 30s; a RE-shared session (new handle) re-arms via the
+        // renderer's Join/↻ path instead.
+        liveSend(tabId, 'live:state', { state: 'offline' });
+        r.retryTimer = setTimeout(() => openLiveSocket(tabId), 30000);
+        if (r.retryTimer.unref) r.retryTimer.unref();
+        return;
+      }
+    }   // cold: host tunnel slow to come up OR we just fell back resume→link — try a few times before the lifeline
     r.retry = Math.min(r.retry + 1, 6);
     liveSend(tabId, 'live:state', { state: warm ? 'reconnecting' : 'offline' });
     r.retryTimer = setTimeout(() => openLiveSocket(tabId), (warm ? 500 : 3000) * r.retry);

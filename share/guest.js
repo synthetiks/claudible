@@ -8,6 +8,7 @@ var STORE_KEY = 'claudible_resume';
 // reconnect without re-prompting the host. A different/new link ignores a stale stored token.
 var resume = null;
 try { var s = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); if (s && s.t === token && s.r) resume = s.r; } catch (e) {}
+var resumeFails = 0;   // consecutive not-admitted closes while presenting a resume token (R14: 2 → fall back to the link)
 
 // Tag <body class="mobile"> for PHONE-width screens only (matches the CSS @media breakpoint). Tablets,
 // desktops and wide views are "non-mobile": side-by-side layout + scale-to-fill (see recomputeFit).
@@ -604,11 +605,24 @@ function connect() {
       return;
     }
     if (denied) return;                                  // host rejected → do not hammer them with retries
-    if (gotHello) { reconnect('reconnecting…'); return; }        // we were in; transient drop → resume
+    if (gotHello) { resumeFails = 0; reconnect('reconnecting…'); return; }   // we were in; transient drop → resume
     if (!opened && !resume) {                            // upgrade refused on the LINK → it's used/invalid
       setStatus('link unavailable', 'bad');
       showOverlay(true, 'This link can’t be used', 'It may have already been used, expired, or the host stopped sharing. Ask for a new link.', true);
       return;
+    }
+    // R14: a not-admitted close while presenting a resume token means the server no longer knows it (its ~15s
+    // grace expired — tokens are deleted, not archived). Retrying the SAME dead token loops "host offline —
+    // retrying…" forever, and even a reload can't escape (sessionStorage resupplies it). After 2 consecutive
+    // refusals, drop it and fall back to the link token → the normal approval flow, which actually works.
+    if (!gotHello && resume) {
+      resumeFails++;
+      if (resumeFails >= 2 && token) {
+        resume = null; resumeFails = 0;
+        try { sessionStorage.removeItem(STORE_KEY); } catch (e) {}
+        reconnect('asking to rejoin…');
+        return;
+      }
     }
     reconnect(opened ? 'reconnecting…' : 'host offline — retrying…');   // pending drop or resume refused
   };

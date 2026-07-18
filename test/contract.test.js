@@ -639,5 +639,24 @@ none('renderer: orphanTab is never rendered',
     /runSync\(after, 'init'/.test(acc) && /doSync\(after, 'sync'/.test(acc) ? [] : ['no init/sync kick after enabling']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 17. R14 — reconnects must survive real life. (a) hello resets every retry counter (they accumulated for the
+//     tab's LIFETIME — the 9th cold dial ever was permanent death); (b) the cold give-up arms a 30s lifeline
+//     instead of a bare return; (c) the browser guest drops a twice-refused resume token and falls back to the
+//     link (it retried the same dead token forever, and reload couldn't escape sessionStorage); (d) a dead
+//     joined row offers ↻ reconnect (it offered only focus and Leave).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const GUEST = read('share/guest.js');
+  none('hello does not reset the reconnect counters (blips accumulate to permanent death)',
+    /case 'hello': \{\s*\n\s*gotHello = true;[^\n]*\n\s*r\.retry = 0; r\.coldTries = 0; r\.resumeFails = 0;/.test(MAIN) ? [] : ['no counter reset in hello']);
+  none('the cold give-up is a permanent return again (no lifeline timer)',
+    /coldTries > 8\) \{[\s\S]{0,900}?setTimeout\(\(\) => openLiveSocket\(tabId\), 30000\)/.test(MAIN) ? [] : ['no 30s lifeline after coldTries > 8']);
+  none('guest.js retries a dead resume token forever (no link fallback)',
+    /resumeFails >= 2 && token/.test(GUEST) && /sessionStorage\.removeItem\(STORE_KEY\)/.test(GUEST) ? [] : ['no resume→link fallback in guest.js']);
+  none('a dead joined row has no reconnect affordance',
+    /rec\.liveState === 'offline' \|\| rec\.liveState === 'denied'\) \{[\s\S]{0,900}?Reconnect to this live session/.test(APP) ? [] : ['no ↻ button on offline/denied joined rows']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

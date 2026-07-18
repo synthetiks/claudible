@@ -29,6 +29,12 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R14 — live-session reconnects stop giving up on you.** Retry counters accumulated for the joined tab's
+  entire lifetime (the 9th failed dial *ever* was permanent death with no rejoin control anywhere), and the
+  browser viewer retried a long-dead resume token forever — even a reload couldn't escape it. Now: a
+  successful connect resets every counter, exhausted retries drop to a quiet 30-second lifeline that
+  self-heals the moment the host answers, a twice-refused resume token falls back to the normal approval
+  flow, and a dead joined row grows a ↻ Reconnect button.
 - **R2 — sharing consent tells the truth, and "Invite someone…" asks before publishing.** Inviting from a local
   project used to create the GitHub repo with no dialog at all, and the sync consent claimed transcripts "stay
   OUT of the repo" while enabling the very machinery that commits them. Both flows now show the same honest

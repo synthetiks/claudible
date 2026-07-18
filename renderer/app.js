@@ -3158,6 +3158,24 @@ function renderJoinedTabRow(rec) {
     m.appendChild(document.createTextNode('joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
   }
   row.appendChild(p); row.appendChild(m);
+  // R14: a dead mirror had NO rejoin affordance — the row offered only focus and ✕ Leave, so a guest whose
+  // reconnect budget ran out had to leave and re-find the Join badge (which needs live presence). ↻ re-dials:
+  // freshest handle from presence when the host re-shared (new url/token), else the last known one.
+  if (rec.liveState === 'offline' || rec.liveState === 'denied') {
+    const rb = document.createElement('button');
+    rb.className = 'sess-menu-btn'; rb.title = 'Reconnect to this live session'; rb.setAttribute('aria-label', 'Reconnect to live session');
+    rb.textContent = '↻';
+    rb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const fresh = peersForWs(rec.peerWsId).find((p2) => p2.session === (rec.peer && rec.peer.session) && p2.url && p2.token);
+      if (fresh) rec.peer = fresh;
+      setLiveState(rec, 'connecting'); refreshSessions();
+      claudible.liveConnect(rec.tabId, rec.peer, collabName())
+        .then((res) => { if (!res || !res.ok) { setLiveState(rec, 'offline'); toast('Could not reconnect: ' + humanError(res && res.error)); } })
+        .catch(() => setLiveState(rec, 'offline'));
+    });
+    row.appendChild(rb);
+  }
   const xb = document.createElement('button');
   xb.className = 'sess-menu-btn'; xb.title = 'Leave this live session'; xb.setAttribute('aria-label', 'Leave live session');
   xb.textContent = '✕';
