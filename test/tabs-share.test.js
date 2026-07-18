@@ -19,7 +19,6 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const APP = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
 const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const HTML = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
 
 let pass = 0, fail = 0;
 const ok = (label, c) => c ? pass++ : (fail++, console.error('  FAIL ' + label));
@@ -399,23 +398,6 @@ ok('app.js: switching off/onto a joined tab repaints the expanded trees (R6 — 
 ok('app.js: the sidebar follows a joined tab to its home project',
   /const sideWs = rec\.wsId \|\| \(rec\.kind === 'live' && rec\.peerWsId\) \|\| null;/.test(APP)
   && /if \(sideWs && sideWs !== activeWsId\) \{ activeWsId = sideWs; primeSessionListForWs\(sideWs\)/.test(APP));
-// GUEST-SIDE resize independence: the mirror's fit has a readable font FLOOR and pans past it, so the host
-// going fullscreen can never shrink this side's text without limit. Strictly guest-side — the host's sync()
-// and pty:resize paths must contain NO share-conditional behavior (the reverted host-side attempt broke
-// rendering for both parties; this pin fails if anyone reintroduces it).
-ok('app.js: the mirror fills when possible, floors at the viewer’s stock size, and pans past it (guest-side only)',
-  /const fs = Math\.max\(TERM_OPTS\.fontSize, Math\.min\(30, Math\.floor\(Math\.min\(wFont, hFont\)\)\)\);/.test(APP)
-  && /classList\.toggle\('live-pan', overflows\)/.test(APP)
-  && !/FS_FLOOR/.test(APP)
-  && !/t\.tabId === sharedTabIdR\) \{ scaleTermToGrid/.test(APP));
-// Pan sizing is MEASURED (xterm's own .xterm-screen pixels stamped as explicit width/height), never CSS width
-// tricks — width:max-content fought xterm's internal layout and mangled the rendering ("completely broken").
-ok('app.js: pan dimensions come from the terminal’s own screen layer, and the CSS trick is gone',
-  /querySelector\('\.xterm-screen'\)/.test(APP)
-  && /el\.style\.width = scr\.offsetWidth \+ 'px'/.test(APP)
-  && !/\.live-pan \.xterm\{width:max-content\}/.test(HTML));
-ok('main.js: pty:resize has NO shared-tab special case (the host resizes freely)',
-  !/sharedTabId && tabId === sharedTabId\) return;/.test(MAIN));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1

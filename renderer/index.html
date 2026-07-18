@@ -241,11 +241,6 @@
     .term-host{position:absolute;inset:0;display:none;padding:10px 12px}
     .term-host.active{display:block}
     /* native joined-live tab: centered status overlay for the non-streaming states (connecting/paused/…) */
-    /* Guest-side resize independence: when the host's grid can't fit at a readable font, the mirror pane
-       pans (view-at-100%) instead of shrinking the text further. Only ever applied to live mirrors.
-       NO width tricks on .xterm — fitLiveTab sets explicit px dimensions measured from the terminal's own
-       screen layer (width:max-content fought xterm's internal pixel layout and mangled the rendering). */
-    .live-pan{overflow:auto}
     .live-ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;
       padding:0 28px;font-size:12px;line-height:1.5;color:var(--ink-faint,#9097a1);background:rgba(7,8,9,.82);
       backdrop-filter:blur(2px);z-index:5;pointer-events:none}

@@ -3057,32 +3057,10 @@ function fitLiveTab(rec) {
   const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
   const pw = rec.container.clientWidth - padX, ph = rec.container.clientHeight - padY;
   if (pw <= 0 || ph <= 0) return;
-  // GUEST-SIDE resize independence, final form (live-tuned with Crazy across three iterations):
-  //   * the host's grid SMALLER than this window → scale UP to fill it (a locked font left the mirror as a
-  //     tiny patch in the pane — "I still see him minimized");
-  //   * the host's grid BIGGER → NEVER shrink below this viewer's stock size — keep it readable and PAN
-  //     (scrollbars) over the host's larger screen instead (downscaling was the original "his fullscreen
-  //     zooms me out", and the in-between "readable floor" still let the font dance).
-  // So: fill when possible, floor at stock, pan past it. The one thing a host resize still changes here is
-  // the content re-wrapping — Claude itself redrawing for the new width, identical on both screens, not
-  // removable viewer-side. The host's terminal code stays untouched (the host-side attempt broke both).
   const wFont = pw / (cols * 0.6), hFont = ph / (rows * 1.18);       // largest font whose whole grid still fits
-  const fs = Math.max(TERM_OPTS.fontSize, Math.min(30, Math.floor(Math.min(wFont, hFont))));
+  const fs = Math.max(6, Math.min(30, Math.floor(Math.min(wFont, hFont))));
   try { if (rec.term.options.fontSize !== fs) rec.term.options.fontSize = fs; } catch {}
   try { rec.term.resize(cols, rows); } catch {}
-  const overflows = (fs * 0.6 * cols) > pw + 1 || (fs * 1.18 * rows) > ph + 1;
-  try { rec.container.classList.toggle('live-pan', overflows); } catch {}
-  // Panning works by giving the terminal element its REAL pixel size (measured from xterm's own screen layer,
-  // after this frame's render settles) so the container's overflow:auto has true dimensions to scroll — the
-  // previous width:max-content CSS fought xterm's internal pixel layout and mangled the rendering entirely.
-  try {
-    requestAnimationFrame(() => {
-      const el = rec.term && rec.term.element; if (!el) return;
-      if (!rec.container.classList.contains('live-pan')) { el.style.width = ''; el.style.height = ''; return; }
-      const scr = el.querySelector('.xterm-screen');
-      if (scr && scr.offsetWidth > 0) { el.style.width = scr.offsetWidth + 'px'; el.style.height = scr.offsetHeight + 'px'; }
-    });
-  } catch {}
 }
 // Per-tab overlay for the non-streaming states (connecting / waiting / reconnecting / paused / declined / offline).
 function setLiveState(rec, state, detail) {
