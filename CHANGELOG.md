@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R15 — deleted projects stay deleted, in every shape.** Deleting an adopted project never recorded a
+  tombstone (wrong kind), and deleting a repo before its stable GitHub id was known tombstoned by name only —
+  either way the "deleted" project came back as a phantom invite. Tombstones are now kind-agnostic and
+  backfill the stable id in the background.
 - **R11 — a fork between your OWN two machines is detected, not silently overwritten.** Sessions you continue
   on two of your devices used to be invisible to divergence detection ("same login = my own edit"), so
   whichever machine synced last quietly destroyed the other's turns. Exports now carry a per-machine tag:

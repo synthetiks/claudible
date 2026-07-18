@@ -31,7 +31,8 @@ const { repoTombstoneKeys, isRepoDismissed } = new Function(`${src}\nreturn { re
 console.log('\nrepo delete-tombstones (main.js, lifted from source)\n');
 
 ok('main.js actually calls repoTombstoneKeys on the delete path (else this test guards nothing)',
-  /dismissedRepos = Array\.from\(new Set\(\[\.\.\.\(registry\.dismissedRepos \|\| \[\]\), \.\.\.repoTombstoneKeys\(ws\)\]\)\)/.test(MAIN));
+  /const keys = repoTombstoneKeys\(ws\);/.test(MAIN)
+  && /if \(keys\.length\) registry\.dismissedRepos = Array\.from\(new Set\(\[\.\.\.\(registry\.dismissedRepos \|\| \[\]\), \.\.\.keys\]\)\)/.test(MAIN));   // R15 shape: kind-agnostic, empty-safe
 ok('…and discovery asks isRepoDismissed rather than string-matching owner/slug itself',
   /if \(isRepoDismissed\(registry, owner, slug, ghId\)\) continue;/.test(MAIN)
   && !/dismissedRepos \|\| \[\]\)\.includes\(owner \+ '\/' \+ slug\)/.test(MAIN));

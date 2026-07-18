@@ -1892,11 +1892,27 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   // writes race the orphaned chain. The queue self-drains and self-bounds; letting it finish is the safe path.
   if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
   registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
-  // TOMBSTONE a deleted repo workspace (per-machine, in the registry): discoverWorkspaces would otherwise
-  // re-register it as a fresh invite on the very next launch — 'deleted workspaces come back' — because the
-  // GitHub repo (intentionally) still exists. Deliberately re-adding it (workspace:create / re-clone) clears it.
-  if (ws.kind === 'repo' && ws.owner && ws.slug) {
-    registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ...repoTombstoneKeys(ws)]));
+  // TOMBSTONE a deleted GitHub-identified workspace (per-machine, in the registry): discoverWorkspaces would
+  // otherwise re-register it as a fresh invite on the very next launch — 'deleted workspaces come back' —
+  // because the GitHub repo (intentionally) still exists. Deliberately re-adding it clears it.
+  // R15, two gaps closed: (a) KIND-AGNOSTIC — an ADOPTED project is kind:'local' but its Claudible-tagged repo
+  // is re-surfaced by discovery all the same; the old kind==='repo' gate meant deleting it never tombstoned
+  // (repoTombstoneKeys is empty-safe, so a plain local project without GitHub identity still skips cleanly).
+  // (b) A delete BEFORE the ghId backfill ran tombstoned by name only, so a repo renamed outside Claudible
+  // resurrected as a phantom — the stable gh: key is now resolved in the BACKGROUND on a snapshot (ws leaves
+  // the registry below) and appended when it lands. Residual: a discovery pass racing that window can briefly
+  // re-add the phantom once; the appended key stops every pass after.
+  {
+    const keys = repoTombstoneKeys(ws);
+    if (keys.length) registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ...keys]));
+    if (!Number.isFinite(ws.ghId) && ws.owner && (ws.repoName || ws.slug)) {
+      const snap = { owner: ws.owner, repoName: ws.repoName, slug: ws.slug, ghId: ws.ghId };
+      backfillRepoIdentity(snap).then((got) => {
+        if (!got || !Number.isFinite(snap.ghId)) return;
+        registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), 'gh:' + snap.ghId]));
+        saveRegistry();
+      }).catch(() => {});
+    }
   }
   saveRegistry();
   // Deleting the workspace the LIVE session runs in is the one navigation a share cannot survive: its folder is

@@ -778,5 +778,19 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
     /\[ "\$_own" -eq 1 \] && \{ _tid="\$\(tag_of "\$id"\)"; \[ -z "\$_tid" \] \|\| \[ "\$_tid" = "\$MID" \]; \}/.test(SYNC) ? [] : ['the _own gate must consult tag_of vs MID']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 27. R15 — delete-tombstones cover every GitHub-identified workspace. The old kind==='repo' gate meant a
+//     deleted ADOPTED project (kind:'local') never tombstoned and re-surfaced as a phantom invite; a delete
+//     before the ghId backfill tombstoned by name only, so an external rename resurrected it. The tombstone
+//     is now kind-agnostic, and the stable gh: key is backfilled in the background onto a snapshot.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const del = (MAIN.match(/ipcMain\.handle\('workspace:delete'[\s\S]*?\n\}\)\);/) || [''])[0];
+  none('the delete tombstone regrew its kind gate (adopted repos become phantoms again)',
+    /const keys = repoTombstoneKeys\(ws\);\s*\n\s*if \(keys\.length\)/.test(del) && !/ws\.kind === 'repo' && ws\.owner && ws\.slug\) \{\s*\n\s*registry\.dismissedRepos/.test(del) ? [] : ['kind-agnostic tombstone missing']);
+  none('the background gh-key backfill on delete is gone (external renames resurrect deleted projects)',
+    /backfillRepoIdentity\(snap\)\.then/.test(del) && /'gh:' \+ snap\.ghId/.test(del) ? [] : ['no snapshot backfill append']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
