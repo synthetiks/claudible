@@ -118,6 +118,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   (the bash writer and the app's pollers must derive the same path).
 
 ### Finish-line follow-up (July 19)
+- **The host resizing can no longer shrink the guest's text into unreadability.** The joined mirror now stops
+  shrinking at a readable size and pans (scrollbars) over the host's bigger screen instead — guest-side only,
+  the host's terminal behavior is untouched. (Replaces a reverted host-side attempt that broke rendering.)
 - **Joining a live session no longer "moves" it into whatever project you were browsing.** The joined tab now
   scopes the sidebar to the session's home project, the same way opening any local session does — the third
   and final sighting of the pinned-row-under-the-wrong-header confusion.

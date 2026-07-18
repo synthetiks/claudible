@@ -398,6 +398,16 @@ ok('app.js: switching off/onto a joined tab repaints the expanded trees (R6 — 
 ok('app.js: the sidebar follows a joined tab to its home project',
   /const sideWs = rec\.wsId \|\| \(rec\.kind === 'live' && rec\.peerWsId\) \|\| null;/.test(APP)
   && /if \(sideWs && sideWs !== activeWsId\) \{ activeWsId = sideWs; primeSessionListForWs\(sideWs\)/.test(APP));
+// GUEST-SIDE resize independence: the mirror's fit has a readable font FLOOR and pans past it, so the host
+// going fullscreen can never shrink this side's text without limit. Strictly guest-side — the host's sync()
+// and pty:resize paths must contain NO share-conditional behavior (the reverted host-side attempt broke
+// rendering for both parties; this pin fails if anyone reintroduces it).
+ok('app.js: the mirror fit floors at a readable size and pans past it (guest-side only)',
+  /const FS_FLOOR = 9;/.test(APP)
+  && /classList\.toggle\('live-pan', overflows\)/.test(APP)
+  && !/t\.tabId === sharedTabIdR\) \{ scaleTermToGrid/.test(APP));
+ok('main.js: pty:resize has NO shared-tab special case (the host resizes freely)',
+  !/sharedTabId && tabId === sharedTabId\) return;/.test(MAIN));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1
