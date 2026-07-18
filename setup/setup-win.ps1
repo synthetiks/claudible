@@ -58,11 +58,16 @@ if (-not (Test-Path $whisperExe)) {
 
 # base speech model (~150 MB) - canonical whisper.cpp model host. Placed at models\ggml-base.bin so the
 # server (started from $VOICE\whisper) finds it via `-m models\ggml-base.bin` (matches setup.sh/services.sh).
+# Size guard (real file is ~140MB, mirrors Test-Kokoro below) - an interrupted download leaves a small/truncated
+# file that a bare Test-Path would treat as "present" forever, so wipe it before retrying.
 $model = Join-Path $VOICE 'whisper\models\ggml-base.bin'
-if (-not (Test-Path $model)) {
+function Test-Whisper { (Test-Path $model) -and ((Get-Item $model -EA SilentlyContinue).Length -gt 100MB) }
+if (-not (Test-Whisper)) {
   Say 'Downloading base speech model (~150 MB)...'
+  Remove-Item -Force $model -ErrorAction SilentlyContinue     # clear any truncated partial from a prior failed run
   New-Item -ItemType Directory -Force -Path (Split-Path $model) | Out-Null
   Invoke-WebRequest -UseBasicParsing -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin' -OutFile $model
+  if (-not (Test-Whisper)) { Remove-Item -Force $model -ErrorAction SilentlyContinue; Warn 'Whisper model download failed or was truncated - check your network, then re-run setup-win.ps1.'; exit 1 }
 } else { Say 'Whisper model already present.' }
 
 # --- 3. Kokoro - FastAPI TTS (CPU torch via uv) -----------------------------------------------------

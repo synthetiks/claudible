@@ -5,6 +5,9 @@
 # (node via the distro package may be older than 22.12 — the proven WSL voice path is the recommended one;
 # detection will flag an outdated node so the user can upgrade.)
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells — without this the `node` case below can judge the WRONG node (system vs nvm)
+
 dep="$1"
 ok()  { printf '{"ok":true}\n'; exit 0; }
 err() { printf '{"ok":false,"error":"%s"}\n' "$(printf '%s' "$1" | tr -d '\000-\037"\\')"; exit 0; }
@@ -72,7 +75,12 @@ case "$dep" in
         chmod +x "$tmp"; sudo mv "$tmp" /usr/local/bin/cloudflared 2>/dev/null || { mkdir -p "$HOME/.local/bin"; mv "$tmp" "$HOME/.local/bin/cloudflared"; }
       fi
     fi
-    have cloudflared && ok || err "could not install cloudflared (https://developers.cloudflare.com/cloudflared/)"
+    # Validate by actually RUNNING it, not just `have` (command -v) — a truncated-but-nonzero-size download
+    # passes the `[ -s ]` checks above yet can't execute, and `have` would still report a false ok.
+    if have cloudflared && cloudflared --version >/dev/null 2>&1; then ok; fi
+    cfbin="$(command -v cloudflared 2>/dev/null)"
+    [ -n "$cfbin" ] && rm -f "$cfbin"   # don't leave a broken binary on PATH claiming to be installed
+    err "could not install cloudflared (https://developers.cloudflare.com/cloudflared/)"
     ;;
   uv)
     have uv && ok
@@ -85,14 +93,53 @@ case "$dep" in
     # terminal — so capture it and translate: exit 0 -> ok; non-zero -> its own last say() line is already the
     # actionable message ("run this, then re-run `npm run setup`"), which is exactly what a failure here should show.
     _here="$(cd "$(dirname "$0")" && pwd)"
+    VOICE="${CLAUDIBLE_VOICE:-$HOME/.claudible/voice}"
+    mkdir -p "$(dirname "$VOICE")"
+    _lock="$(dirname "$VOICE")/voice-install.lock"   # mkdir is atomic → a cross-process lock; lives in VOICE's PARENT so it survives setup.sh's own `rm -rf "$VOICE/..."` calls
+
+    # The caller (runners/deps.js) bounds this whole call with a ~10min timeout by killing the wsl.exe WRAPPER on
+    # the Windows side — that kill never reaches this Linux-side process (same interop gap killtree.sh documents
+    # for the pty), so a "timed out" install can keep running here as an ORPHAN while the caller retries. Without
+    # a lock, the retry's setup.sh would `rm -rf "$VOICE/whisper"` (etc.) out from under the still-running orphan.
+    if ! mkdir "$_lock" 2>/dev/null; then
+      _started="$(cat "$_lock/started" 2>/dev/null || echo 0)"
+      _age=$(( $(date +%s) - _started ))
+      if [ "$_age" -lt 7200 ]; then   # < 2h old → treat as a genuinely still-running install; refuse rather than race its files
+        err "a voice install is already in progress (started ~$(( _age / 60 )) min ago) — wait for it to finish, then retry"
+      fi
+      rm -rf "$_lock"; mkdir "$_lock" 2>/dev/null || true   # stale past 2h → the holder is dead, not slow; reclaim
+    fi
+    date +%s > "$_lock/started" 2>/dev/null || true
+
     _log="$(mktemp)"
-    "$_here/../setup/setup.sh" >"$_log" 2>&1
-    _rc=$?
-    if [ "$_rc" -eq 0 ]; then rm -f "$_log"; ok; fi
+    "$_here/../setup/setup.sh" >"$_log" 2>&1 &
+    _pid=$!
+    # session id, captured now — for the SID sweep below (same idiom as killtree.sh: catches a double-forked/
+    # detached child that would otherwise escape the parent-pointer walk).
+    _sid="$(ps -o sess= -p "$_pid" 2>/dev/null | tr -d ' ')"
+    [ "$_sid" = "$_pid" ] || _sid=""   # only sweep if setup.sh IS the session leader — else its sid is shared with unrelated processes
+    for ((_i = 0; _i < 270; _i++)); do   # 2s * 270 = 9 min — comfortably under the caller's ~10min cutoff, so WE clean up instead of leaving an orphan for it to miss
+      kill -0 "$_pid" 2>/dev/null || break
+      sleep 2
+    done
+    if kill -0 "$_pid" 2>/dev/null; then
+      # REAL timeout: reap the WHOLE tree, not just $_pid — STOP-then-walk (same idiom as killtree.sh) so nothing
+      # forks into the gap between snapshotting children and killing them, plus the SID sweep for anything detached.
+      _kill_tree() { kill -STOP "$1" 2>/dev/null; local c; for c in $(pgrep -P "$1" 2>/dev/null); do _kill_tree "$c"; done; kill -KILL "$1" 2>/dev/null; }
+      _kill_tree "$_pid"
+      case "$_sid" in '' | 0 | *[!0-9]*) ;; *)
+        for _p in $(ps -eo pid=,sess= 2>/dev/null | awk -v s="$_sid" '$2==s {print $1}'); do kill -KILL "$_p" 2>/dev/null; done ;;
+      esac
+      wait "$_pid" 2>/dev/null
+      rm -rf "$_lock"; rm -f "$_log"
+      err "voice install timed out after 9 minutes — re-run \`npm run setup\` in a WSL terminal to see where it's stuck"
+    fi
+    wait "$_pid"; _rc=$?
+    if [ "$_rc" -eq 0 ]; then rm -rf "$_lock"; rm -f "$_log"; ok; fi
     # say()'s bold/reset codes (\033[1m / \033[0m) survive as literal "[1m"/"[0m" once err()'s tr strips only the
     # ESC byte, not the whole escape sequence — strip the full CSI sequence here so the wizard shows clean text.
     _msg="$(sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$_log" | grep -v '^[[:space:]]*$' | tail -n 4 | tr '\n' ' ')"
-    rm -f "$_log"
+    rm -rf "$_lock"; rm -f "$_log"
     err "${_msg:-voice setup failed - run: npm run setup}"
     ;;
   *) err "unknown dependency: $dep" ;;

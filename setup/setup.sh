@@ -62,13 +62,22 @@ if [ ! -x "$VOICE/whisper/build/bin/whisper-server" ]; then
   rm -rf "$VOICE/whisper"
   git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$VOICE/whisper"
   cmake -B "$VOICE/whisper/build" -S "$VOICE/whisper" -DWHISPER_BUILD_SERVER=ON
-  cmake --build "$VOICE/whisper/build" --config Release -j
+  # explicit failure branch (not just `set -e`'s bare exit): provision.sh's `voice` case captures this whole
+  # script's log and tails its LAST few lines as the wizard's error message — without this, that tail is cmake's
+  # raw build output instead of an actionable one.
+  cmake --build "$VOICE/whisper/build" --config Release -j || { say "Whisper build failed — check the log above, then re-run \`npm run setup\`."; exit 1; }
 else
   say "Whisper already built."
 fi
-if [ ! -f "$VOICE/whisper/models/ggml-base.bin" ]; then
+# Size guard (real file is ~140 MB) — an interrupted download leaves a small/truncated file that a bare
+# existence check would treat as "present" forever. Wipe it before retrying so a plain re-run self-heals.
+whisper_model="$VOICE/whisper/models/ggml-base.bin"
+whisper_model_ok() { [ -f "$whisper_model" ] && [ "$(wc -c <"$whisper_model" 2>/dev/null || echo 0)" -gt 104857600 ]; }
+if ! whisper_model_ok; then
+  rm -f "$whisper_model"
   say "Downloading base speech model (~150 MB)…"
   ( cd "$VOICE/whisper" && bash ./models/download-ggml-model.sh base )
+  whisper_model_ok || { say "Whisper model download failed or produced a truncated file — check your network, then re-run \`npm run setup\`."; exit 1; }
 else
   say "Whisper model already present."
 fi
@@ -78,7 +87,9 @@ fi
 if [ ! -d "$VOICE/kokoro/.git" ]; then
   say "Installing Kokoro (TTS)…"
   rm -rf "$VOICE/kokoro"
-  git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI "$VOICE/kokoro"
+  # on failure, wipe the partial clone — a half-clone still has a .git dir, which would fool the guard above
+  # into calling it "already installed" on the next run (mirrors setup-win.ps1's Kokoro clone check).
+  git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI "$VOICE/kokoro" || { rm -rf "$VOICE/kokoro"; say "Kokoro clone failed (network?). Re-run \`npm run setup\`."; exit 1; }
 fi
 # CPU install only — `--extra cpu` pulls torch==2.6.0+cpu from the pytorch-cpu index. A bare `uv sync`
 # resolves torch from default PyPI = the ~731MB CUDA wheel + ~2GB of nvidia-* packages (and that CUDA
@@ -90,9 +101,17 @@ say "Installing/refreshing Kokoro CPU dependencies…"
 # Without this the server exits at warmup (FileNotFoundError) and :8880 never binds. Idempotent:
 # download_model.py skips itself if the file already exists. Kept outside the dir guard above so a
 # checkout that somehow lacks the model still gets repaired on a re-run.
-if [ ! -f "$VOICE/kokoro/api/src/models/v1_0/kokoro-v1_0.pth" ]; then
+# Size + config.json guard (real file is ~327 MB) — mirrors setup-win.ps1's Test-Kokoro. An interrupted
+# download leaves a small/truncated .pth that a bare existence check would treat as "present" forever; wipe
+# it before retrying so a plain re-run self-heals.
+kokoro_model="$VOICE/kokoro/api/src/models/v1_0/kokoro-v1_0.pth"
+kokoro_conf="$VOICE/kokoro/api/src/models/v1_0/config.json"
+kokoro_model_ok() { [ -f "$kokoro_model" ] && [ "$(wc -c <"$kokoro_model" 2>/dev/null || echo 0)" -gt 104857600 ] && [ -f "$kokoro_conf" ]; }
+if ! kokoro_model_ok; then
+  rm -f "$kokoro_model" "$kokoro_conf"
   say "Downloading Kokoro model weights (~327 MB)…"
   ( cd "$VOICE/kokoro" && uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0 )
+  kokoro_model_ok || { say "Kokoro model download failed or produced a truncated file — check your network, then re-run \`npm run setup\`."; exit 1; }
 else
   say "Kokoro model already present."
 fi

@@ -46,7 +46,11 @@ fi
 # native-Windows build layout (.exe, Release/) and so is always false for a WSL/posix voice install.
 VOICE="${CLAUDIBLE_VOICE:-$HOME/.claudible/voice}"
 voice_ready=false
-if [ -x "$VOICE/whisper/build/bin/whisper-server" ] && [ -f "$VOICE/whisper/models/ggml-base.bin" ] && [ -f "$VOICE/kokoro/api/src/models/v1_0/kokoro-v1_0.pth" ]; then
+# A model file must clear 100MB (real sizes: whisper ~140MB, kokoro ~327MB) — a plain existence check would
+# report "ready" for a truncated/interrupted download too, with no wizard recovery path (setup.sh's own size
+# guard is what self-heals it, but only on the NEXT `npm run setup` — this probe must not paper over that gap).
+big() { [ -f "$1" ] && [ "$(wc -c <"$1" 2>/dev/null || echo 0)" -gt 104857600 ]; }
+if [ -x "$VOICE/whisper/build/bin/whisper-server" ] && big "$VOICE/whisper/models/ggml-base.bin" && big "$VOICE/kokoro/api/src/models/v1_0/kokoro-v1_0.pth" ; then
   voice_ready=true
 fi
 # setup.sh treats an existing ~/.voicemode install as already done and never builds its own — match that.
