@@ -259,7 +259,7 @@ function nextRuntimeId(tabId) { return tabRuntimeId(tabId) + '-g' + _bootNonce +
 // Reap a killed generation's WSL/posix-side process tree (bash session.sh + claude + children), then drop its
 // runtime dir. The win runner spawns claude.exe directly under ConPTY — its kill already reaches everything.
 function _killSessionTree(runtimeId) {
-  if (!runtimeId || runner.id === 'win') return;
+  if (!runtimeId || runner.id === 'win') return;   // win-native reaps its tree inside the pty facade's kill() (taskkill /T — R22); this WSL-side script has nothing to reach there
   try {
     // detach: this also runs on the quit path, where the reap must survive app.quit() (enforced now, not assumed)
     runner.runScript('killtree.sh', `'${String(runtimeId)}'`, { timeout: 8000, detach: true }).then(() => {

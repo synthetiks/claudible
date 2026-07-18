@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R22 — closing sessions on native-Windows installs reaps the whole process tree.** The Windows-native
+  runner had no equivalent of the WSL tree-reaper, and the terminal's own kill can miss children — orphaned
+  claude.exe processes piled up across restarts. Every kill now walks the tree at the OS level. (Needs the
+  Windows smoke pass to verify live — this machine runs the WSL flavor.)
 - **R10 — sync operations stop racing each other.** Presence beats, delete-everywhere, out-of-sync resolves,
   title renames and full syncs all ran the sync script concurrently against the same branch — one operation's
   pull could silently discard another's just-committed work while both reported success. Every operation now

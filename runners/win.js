@@ -462,7 +462,18 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
     resize(c, r) { dims.cols = c; dims.rows = r; try { inner.resize(c, r); } catch {} },
     pause() { try { inner.pause(); } catch {} },
     resume() { try { inner.resume(); } catch {} },
-    kill(signal) { killedByUs = true; try { inner.kill(signal); } catch {} },
+    kill(signal) {
+      killedByUs = true;
+      // R22: ConPTY's kill can be single-process under the known Electron/node-pty failure — the
+      // claude.exe → node child tree survived every close path and piled up across restarts (the
+      // win-native twin of what killtree.sh exists for on WSL; that script never runs here). taskkill /T
+      // walks ParentProcessId at the OS level; /F because the survivors have no console for a soft close.
+      // Detached + unref'd so the quit sweep's reap outlives app.quit() — the same guarantee the WSL
+      // reaper relies on. Captured BEFORE kill: inner.pid may be unreadable after the process dies.
+      const pid = inner && inner.pid;
+      try { inner.kill(signal); } catch {}
+      if (pid) { try { const c = cp.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, detached: true, stdio: 'ignore' }); c.unref(); } catch {} }
+    },
   };
   // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —
   // main injects the same line into the terminal when it sees this flag). Never weakens the guard: argv above

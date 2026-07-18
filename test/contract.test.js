@@ -809,5 +809,19 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
     /_beatArgs\.get\(key\) === args\) return;/.test(MAIN) ? [] : ['coalescing must compare exact args']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 29. R22 — the win-native pty kill reaps the WHOLE tree. ConPTY's kill can be single-process (the known
+//     Electron/node-pty failure), and killtree.sh never runs on the win runner — so the claude.exe→node
+//     child tree survived every close path. facade.kill() must fire a detached `taskkill /T /F` on the pid
+//     captured BEFORE the kill. Static pin only — this machine has no win-native install; the behavior needs
+//     the Windows smoke pass (docs/TWO-MACHINE-TEST.md flags it).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const WIN = read('runners/win.js');
+  none('win.js facade.kill no longer tree-reaps (children pile up across restarts on win-native)',
+    /const pid = inner && inner\.pid;\s*\n\s*try \{ inner\.kill\(signal\); \} catch \{\}\s*\n\s*if \(pid\) \{ try \{ const c = cp\.spawn\('taskkill', \['\/PID', String\(pid\), '\/T', '\/F'\]/.test(WIN)
+    && /detached: true, stdio: 'ignore'/.test(WIN) ? [] : ['taskkill /T /F tree-reap missing from facade.kill']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
