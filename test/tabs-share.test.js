@@ -373,6 +373,10 @@ ok('app.js: the out-of-sync chip is suppressed on a live session — checked in 
 ok('app.js: sessionIsLive covers hosted, joined, and peer-hosted sessions — scoped, and ignores dead joined tabs',
   /function sessionIsLive\(id, wsId\)[\s\S]{0,200}?sharedSessionId === id[\s\S]{0,700}?r\.peer\.session === id && !LIVE_DEAD\.has\(r\.liveState\)[\s\S]{0,400}?peersForWs\(wsId \|\| activeWsId\)\.some/.test(APP)
   && /const LIVE_DEAD = new Set\(\['offline', 'denied'\]\);/.test(APP));
+// closeTab is reachable from the Command Center's always-visible "End this session" ✕ with zero other guard —
+// killing a mid-turn Claude must never be silent. The confirm must sit BEFORE the actual tabClose IPC.
+ok('app.js: closeTab confirms before killing a BUSY session (R1 — the last unguarded kill path)',
+  /function closeTab\(tabId\) \{[\s\S]{0,1400}?rec\.busy && !confirm\([\s\S]{0,1600}?claudible\.tabClose\(tabId\)/.test(APP));
 // A JOINED session renders exactly once, sidebar-wide. The active list pins the joined row (its `shown` set);
 // the expanded-tree renderer must consult the SAME authority (joinedTabSessionIds) and stand its saved copy
 // down — this is the "I see the same live session twice" screenshot (joined row under the active project +

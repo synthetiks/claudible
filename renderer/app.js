@@ -339,6 +339,12 @@ function closeTab(tabId) {
   // Confirm, then let main's tab:close send share:force-end so the tunnel actually closes (it used to just pause,
   // leaving guests frozen on a dead pty while the host's UI still said "live").
   if (tabId === sharedTabIdR && !confirm('This tab is live-shared.\nClosing it ends the live session — everyone watching will be disconnected.')) return;
+  // The last unguarded kill path (register R1): every OTHER mutating route (switch/delete/sync/project ops) is
+  // busy-guarded by main's authoritative flag, but closeTab — reachable from the Command Center's always-visible
+  // "End this session" ✕ — killed a mid-turn Claude silently. Closing a busy session is a legitimate choice,
+  // never an accidental one: confirm, mirroring the shared-tab gate above. rec.busy is main's flag mirrored via
+  // tab:busy (never renderer-derived), so an esc'd/crashed turn can't false-positive this.
+  if (rec.busy && !confirm('Claude is mid-turn in this session.\nClosing it kills the running turn — whatever it was doing stops unfinished.\n\nClose anyway?')) return;
   if (tabId === liveVoiceTabId) { try { liveVoice.leave(); } catch {} liveVoiceTabId = null; }   // leaving a joined session drops its voice
   if (rec.kind === 'live') { try { claudible.liveDisconnect(tabId); } catch {} }   // leaving a JOINED peer session: tear down the client WebSocket too (was leaking)
   try { claudible.tabClose(tabId); } catch {}

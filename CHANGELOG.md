@@ -15,6 +15,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   still kill the clear mid-push and leave you "live · Join" on collaborators' screens for up to 2 minutes.
   window-all-closed now sends a detached one-shot that survives app exit (the in-process retry loop is for
   app-alive ends only — its backoff timers can never fire in a dying process). Test-executed both ways.
+- **R1 — "End this session" can no longer kill a mid-turn Claude silently.** The Command Center's ✕ (and any
+  tab close) was the one mutating path with no busy guard. A busy close now asks first — same pattern as the
+  live-shared-tab confirm, driven by main's authoritative busy flag so a crashed/esc'd turn can't false-alarm.
 
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or
