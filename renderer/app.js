@@ -351,6 +351,7 @@ function closeTab(tabId) {
     setActiveTab(next.tabId);
   }
   else if (sidebarReady) refreshSessions();      // ✕ on a BACKGROUND tab (e.g. a joined live row you're not viewing) must still refresh the sidebar: drop its row + bring back any saved row it was deduping
+  if (rec.kind === 'live') refreshExpandedTrees();   // leaving a joined mirror: its saved row was deduped out of its HOME project's tree too (joinedTabSessionIds) — bring that copy back everywhere, not just in the active list
 }
 
 new ResizeObserver(sync).observe(termHost);
@@ -2724,14 +2725,26 @@ function sharedSessionLabel() {
 // suppress the "out of sync" resolve affordance: a live transcript is being appended to by its host's Claude
 // this instant, so replacing it on disk (what "use the shared version" does) would destroy the running turn.
 const LIVE_DEAD = new Set(['offline', 'denied']);   // a joined tab in these states is a corpse, not a live session
-function sessionIsLive(id) {
+// `wsId` = the project of the ROW asking (an expanded tree passes its own w.id; active-list callers omit it).
+// peersForWs is per-project, so checking the ACTIVE project's bucket for a row in a DIFFERENT project's tree
+// found nothing — and the "out of sync" chip painted onto a session a collaborator was hosting live on screen.
+function sessionIsLive(id, wsId) {
   if (!id) return false;
   if (sharedSessionId === id) return true;                                            // I'm hosting it
   // I've joined it — but only while the mirror is actually alive. A joined tab whose host ended their session can
   // linger indefinitely (reconcileJoinedTabs only auto-closes it while you're viewing ITS project), and keying
   // liveness on the tab merely EXISTING would suppress that session's "out of sync" chip forever.
   for (const r of tabs.values()) if (r.kind === 'live' && r.peer && r.peer.session === id && !LIVE_DEAD.has(r.liveState)) return true;
-  return peersForWs(activeWsId).some((p) => p && p.session === id);                    // a collaborator is hosting it, in THIS project
+  return peersForWs(wsId || activeWsId).some((p) => p && p.session === id);           // a collaborator is hosting it, in the row's project
+}
+// Session ids currently occupied by a JOINED live tab (any state — a dead mirror still owns its row until the
+// user closes it, mirroring the active list's dedup rule). The ONE authority both render surfaces consult so a
+// joined session can never paint twice: the active list pins the joined row (refreshSessions' `shown` set), and
+// an expanded tree's saved copy of the same id stands down (renderWsNonActiveSessions).
+function joinedTabSessionIds() {
+  const s = new Set();
+  for (const r of tabs.values()) if (r.kind === 'live' && r.peer && r.peer.session) s.add(r.peer.session);
+  return s;
 }
 // Advertise only changes when it actually changes (avoids spamming presence pushes).
 function updateAdvertise() {
@@ -3084,6 +3097,7 @@ function openLiveTab(peer, localLabel) {
   setActiveTab(id);
   setLiveState(rec, 'connecting');
   refreshSessions();                                                 // surface the joined-tab row immediately
+  refreshExpandedTrees();                                            // …and stand its saved copy down in its home project's tree in the same paint (the cross-project duplicate)
   claudible.liveConnect(id, peer, collabName()).then((r) => {
     if (!r || !r.ok) {
       // DON'T closeTab here — a vanishing tab leaves the guest with no ✕ to leave and no idea why (exactly the bug
@@ -3178,7 +3192,7 @@ function appendConflictChip(m, s, w) {
     db.className = 'sess-chip removed'; db.title = 'Deleted from GitHub by a collaborator';
     db.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>removed';
     db.addEventListener('click', act(openDeletedRemoteModal)); m.appendChild(db);
-  } else if (s.diverged && !sessionIsLive(s.id)) {                   // same session edited on both machines → soft amber "diverged" chip
+  } else if (s.diverged && !sessionIsLive(s.id, w && w.id)) {        // same session edited on both machines → soft amber "diverged" chip. Liveness is checked in THIS row's project: the active bucket knows nothing about a non-active tree's peers (the "OUT OF SYNC on a live session" screenshot)
     // NOT shown while the session is LIVE. Both resolutions are wrong there: "use the shared version" replaces the
     // .jsonl that the host's Claude is appending to this instant (main refuses it outright now), and "keep mine"
     // just silences a flag nobody can act on. Nothing about a live session is out of sync anyway — everyone is
@@ -4053,7 +4067,13 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     // other two onto the saved order, so the rows you saw in the tree visibly REORDERED the instant you clicked
     // into the project and the pre-fill repainted them (the "sessions switch places" glitch). One helper now;
     // contract check 11 fails if any render path grows its own sort again.
-    const ordered = orderedSessionsFor(w.id, (list || []).filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id))).slice(0, 60);
+    // Joined-mirror dedup, tree edition. The active list already suppresses the saved/peer copies of a session
+    // you've JOINED (refreshSessions' `shown` set) — but this tree renders independently, so the same session
+    // painted TWICE when its home project was expanded while another project was active: the joined row under
+    // the active project + this tree's saved row wearing a live badge ("the same live session twice", b9c51fe).
+    // Same priority rule as the active list: the joined mirror wins; the tree row returns when the tab closes.
+    const joined = joinedTabSessionIds();
+    const ordered = orderedSessionsFor(w.id, (list || []).filter((s) => !joined.has(s.id) && ((s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id)))).slice(0, 60);
     if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
     // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).

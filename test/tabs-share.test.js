@@ -360,14 +360,28 @@ ok('app.js: the share ends in exactly one place, called only by End Session + fo
   && (APP.match(/endLiveNow\(/g) || []).length === 3);   // definition + terminateLive + onShareForceEnd
 ok('app.js: a host browsing elsewhere still sees their live session is running',
   /bar\.classList\.add\('elsewhere'\)/.test(APP) && /live-jump/.test(APP));
-ok('app.js: the out-of-sync chip is suppressed on a live session',
-  /\} else if \(s\.diverged && !sessionIsLive\(s\.id\)\) \{/.test(APP));
-// The peer-hosted arm is now peersForWs(activeWsId).some — an UNSCOPED livePeers.some let a repo project's live
-// collaborator mark a LOCAL project's session as "live". contract.test.js check 12 owns the no-bare-reads
-// invariant across the file; this pins sessionIsLive's own shape.
+// The chip must ask about liveness in the ROW's OWN project (w && w.id): a tree row checked against the ACTIVE
+// project's peer bucket found nothing and painted "out of sync" onto a session being hosted live on screen.
+ok('app.js: the out-of-sync chip is suppressed on a live session — checked in the row’s own project',
+  /\} else if \(s\.diverged && !sessionIsLive\(s\.id, w && w\.id\)\) \{/.test(APP));
+// The peer-hosted arm reads peersForWs(wsId || activeWsId) — per-row scoping with the active bucket as the
+// active-list default. An UNSCOPED livePeers.some let a repo project's live collaborator mark a LOCAL project's
+// session as "live"; a HARDCODED activeWsId broke the suppression for every non-active tree row.
+// contract.test.js check 12 owns the no-bare-reads invariant across the file; this pins sessionIsLive's shape.
 ok('app.js: sessionIsLive covers hosted, joined, and peer-hosted sessions — scoped, and ignores dead joined tabs',
-  /function sessionIsLive\(id\)[\s\S]{0,200}?sharedSessionId === id[\s\S]{0,700}?r\.peer\.session === id && !LIVE_DEAD\.has\(r\.liveState\)[\s\S]{0,400}?peersForWs\(activeWsId\)\.some/.test(APP)
+  /function sessionIsLive\(id, wsId\)[\s\S]{0,200}?sharedSessionId === id[\s\S]{0,700}?r\.peer\.session === id && !LIVE_DEAD\.has\(r\.liveState\)[\s\S]{0,400}?peersForWs\(wsId \|\| activeWsId\)\.some/.test(APP)
   && /const LIVE_DEAD = new Set\(\['offline', 'denied'\]\);/.test(APP));
+// A JOINED session renders exactly once, sidebar-wide. The active list pins the joined row (its `shown` set);
+// the expanded-tree renderer must consult the SAME authority (joinedTabSessionIds) and stand its saved copy
+// down — this is the "I see the same live session twice" screenshot (joined row under the active project +
+// the home tree's saved row with a live badge). Both join/leave transitions must repaint the trees, or the
+// dedup only lands on the next unrelated refresh.
+ok('app.js: a joined session renders once — the home tree stands down and repaints on join/leave',
+  /const joined = joinedTabSessionIds\(\);/.test(APP)
+  && /!joined\.has\(s\.id\) && \(\(s\.msgs \|\| 0\) > 0 \|\| hasExplicitTitle\(s\.id, w\.id\)\)/.test(APP)
+  && /function joinedTabSessionIds\(\)[\s\S]{0,300}?r\.kind === 'live' && r\.peer && r\.peer\.session/.test(APP)
+  && /refreshSessions\(\);[^\n]*\n\s*refreshExpandedTrees\(\);[^\n]*cross-project/.test(APP)
+  && /if \(rec\.kind === 'live'\) refreshExpandedTrees\(\);/.test(APP));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1
