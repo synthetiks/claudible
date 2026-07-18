@@ -738,6 +738,11 @@ ipcMain.on('pty:input', (e, { tabId, data }) => {
 });
 ipcMain.on('pty:resize', (e, { tabId, cols, rows }) => {
   const t = ptys.get(tabId); if (!t) return;
+  // FROZEN-SHAPE SHARE: while pinned, the shared tab's pty keeps the exact grid it had at share start — a
+  // resize would make Claude redraw its whole layout for the new width, which every guest then watches ("I
+  // still see him zoom out": the content re-wrap itself). The renderer letterboxes/pans instead (no font
+  // scaling of any kind — the scaled variant broke rendering for both sides). Other tabs resize freely.
+  if (sharedTabId && tabId === sharedTabId) return;
   t.cols = cols || t.cols; t.rows = rows || t.rows;
   try { t.proc.resize(t.cols, t.rows); } catch {}
   if (tabId === mirrorTabId()) share.setSize(t.cols, t.rows);   // keep guests' xterm matched to the MIRRORED pty size

@@ -177,6 +177,12 @@ function sendInput(d) {
 function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
   if (t.kind === 'live') { fitLiveTab(t); return; }            // a live tab is a fixed-grid remote mirror — never start/resize a local pty
+  // FROZEN-SHAPE SHARE: while THIS tab is pinned-shared, its terminal keeps the exact grid AND font it had at
+  // share start. No re-fit, no resize, no font math of any kind (the scaled variant broke rendering) — a
+  // bigger window shows margin around the same terminal, a smaller one pans (.live-pan = overflow:auto, so
+  // scrollbars only exist when genuinely needed). Guests see a shape that never changes; the pin lifting
+  // returns this tab to the normal fit below.
+  if (t.started && t.tabId === sharedTabIdR) { t.container.classList.add('live-pan'); updateScrollbar(); return; }
   try {
     // Compute the fitted size ONCE. The old path called fit() (which resized the term to R rows) and then
     // resized AGAIN to R-1 — two alt-buffer reflows on EVERY sync, i.e. the flicker on every tab switch.
@@ -464,7 +470,14 @@ function parseTokCount(str) {
 // So the payload is built from the tab RECORD, never the DOM (the DOM shows whatever the host is browsing),
 // and main drops any push whose tabId isn't the mirrored tab — a stray push can never leak another session.
 let sharedTabIdR = null;   // the tab main has pinned the live mirror to (null = not hosting)
-if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); });
+if (claudible.onSharePinned) claudible.onSharePinned((p) => {
+  const was = sharedTabIdR;
+  sharedTabIdR = (p && p.tabId != null) ? p.tabId : null;
+  // FROZEN-SHAPE SHARE ends → drop the pan surface and re-fit the tab to the window (the sync() below).
+  if (was != null && sharedTabIdR == null) { const t = tabs.get(was); if (t && t.container) { try { t.container.classList.remove('live-pan'); } catch {} } }
+  try { sync(); } catch {}
+  pushTracker();
+});
 // (share:session-moved is gone: main no longer moves the pinned tab off its session for ANY navigation, so the
 // "your guests are frozen, re-share from its session" toast had nothing left to report. Deleting the live
 // session's workspace is the one remaining teardown, and it sends share:force-end instead — a real ending.)
