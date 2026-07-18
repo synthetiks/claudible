@@ -388,6 +388,10 @@ ok('app.js: a joined session renders once — the home tree stands down and repa
   && /function joinedTabSessionIds\(\)[\s\S]{0,300}?r\.kind === 'live' && r\.peer && r\.peer\.session/.test(APP)
   && /refreshSessions\(\);[^\n]*\n\s*refreshExpandedTrees\(\);[^\n]*cross-project/.test(APP)
   && /if \(rec\.kind === 'live'\) refreshExpandedTrees\(\);/.test(APP));
+// R6: reconcileWsChips only refills an EMPTY tree, so a tab switch off a joined tab must repaint the trees
+// itself — `prev` is captured BEFORE activeTabId moves, and the refresh fires on live-tab transitions.
+ok('app.js: switching off/onto a joined tab repaints the expanded trees (R6 — the vanishing joined row)',
+  /function setActiveTab\(tabId\) \{[\s\S]{0,220}?const prev = tabs\.get\(activeTabId\);[\s\S]{0,3600}?\(prev\.kind === 'live' \|\| rec\.kind === 'live'\)\) refreshExpandedTrees\(\);/.test(APP));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1

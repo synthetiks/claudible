@@ -18,6 +18,9 @@ register; fixes land here one commit per register id, each pinned by a test.
 - **R1 — "End this session" can no longer kill a mid-turn Claude silently.** The Command Center's ✕ (and any
   tab close) was the one mutating path with no busy guard. A busy close now asks first — same pattern as the
   live-shared-tab confirm, driven by main's authoritative busy flag so a crashed/esc'd turn can't false-alarm.
+- **R6 — a joined live session's row can no longer vanish sidebar-wide.** Clicking into another project while a
+  joined tab stayed open left its home tree's stale paint in place (trees only refill when empty), erasing the
+  session everywhere until a manual collapse/expand. Tab switches across a live tab now repaint the trees.
 
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or

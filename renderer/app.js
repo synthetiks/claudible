@@ -292,6 +292,7 @@ function tabLabel(rec) {
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
 function setActiveTab(tabId) {
   const rec = tabs.get(tabId); if (!rec) return;
+  const prev = tabs.get(activeTabId);   // the tab being LEFT — captured before activeTabId moves (R6 below)
   rec.lastActive = Date.now();   // "least recently VIEWED" — the only ordering reclaimTabSlot() may evict by
   if (dragging) { dragging = false; thumb.classList.remove('drag'); }   // a scroll-thumb drag must not straddle a tab switch (its window-level pointermove would page the newly-active tab)
   activeTabId = tabId;
@@ -315,6 +316,12 @@ function setActiveTab(tabId) {
     refreshSessions();                                                                     // re-highlight rows for this tab's ws/session
   }
   clearTabAttention(tabId);                           // and un-pulse the row if it's already painted
+  // R6 (register): switching OFF (or onto) a joined live tab changes what the expanded trees must show — the
+  // joined session's dedup (joinedTabSessionIds) and its home tree's paint depend on which tab is active, but
+  // reconcileWsChips only ever refills an EMPTY tree. Without this, navigating to another project made the
+  // joined session's row vanish sidebar-wide (its home tree kept the stale join-time paint) until a manual
+  // collapse/expand. Guarded to live-tab transitions so ordinary switches don't repaint every tree.
+  if (sidebarReady && prev && prev !== rec && (prev.kind === 'live' || rec.kind === 'live')) refreshExpandedTrees();
   setTimeout(() => { if (term) term.focus(); }, 0);
 }
 // Open a brand-new session in a NEW tab (the current tab keeps running in the background).
