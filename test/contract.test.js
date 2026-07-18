@@ -592,5 +592,27 @@ none('renderer: orphanTab is never rendered',
     /if \(res\.ok\) \{[\s\S]*?if \(id === 'voice'\) startVoiceServices\(\);[\s\S]*?\n  \}/.test(pf) ? [] : ['startVoiceServices() is not inside the res.ok block']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 15. R4 — durable state lives OUTSIDE the app folder. runtime/ sits in the clone, so delete-and-reclone (the
+//     documented uninstall, update-by-reclone, an antivirus quarantine) wiped the registry, every sync consent
+//     and every title (the 2026-07-18 data loss). Settings/registry/history must anchor at ~/.claudible/app,
+//     with a one-time migration so existing installs don't boot empty. Per-tab runtime deliberately STAYS in
+//     RT (wsl/session.sh derives the same path from $APPDIR — moving it would split writer from pollers).
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('PERSIST is not anchored at ~/.claudible/app (or lost its test override)',
+    /const PERSIST = process\.env\.CLAUDIBLE_PERSIST \|\| path\.join\(app\.getPath\('home'\), '\.claudible', 'app'\)/.test(MAIN) ? [] : ['PERSIST default wrong/missing']);
+  none('settings.json moved back inside the clone (R4 regression: wiped by delete-and-reclone)',
+    /const SETTINGS_FILE = path\.join\(PERSIST, 'settings\.json'\)/.test(MAIN) ? [] : ['SETTINGS_FILE not under PERSIST']);
+  none('workspaces.json moved back inside the clone (R4 regression)',
+    /const WORKSPACES = path\.join\(PERSIST, 'workspaces\.json'\)/.test(MAIN) ? [] : ['WORKSPACES not under PERSIST']);
+  none('session history moved back inside the clone (R4 regression)',
+    /path\.join\(PERSIST, 'history'\)/.test(MAIN) ? [] : ['_histFile not under PERSIST']);
+  none('the one-time migration from the old in-clone location is gone (existing installs would boot empty)',
+    /fs\.copyFileSync\(oldP, newP\)/.test(MAIN) && /'settings\.json', 'workspaces\.json'/.test(MAIN) ? [] : ['migration copy missing']);
+  none('writeSettings still mkdirs the old RT root instead of PERSIST',
+    /function writeSettings\(obj\) \{ fs\.mkdirSync\(PERSIST/.test(MAIN) ? [] : ['writeSettings mkdirs the wrong root']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -180,7 +180,9 @@ async function findPage(deadline) {
   ok('workspace:list round-trips and returns a registry', typeof wsList === 'string' && wsList.includes('workspaces'));
 
   // Isolation is ASSERTED, not assumed — both directions.
-  ok('the app wrote its registry inside the sandbox app copy', fs.existsSync(path.join(APP, 'runtime', 'workspaces.json')));
+  // R4: durable state moved OUT of the app folder to ~/.claudible/app — the sandbox's HOME anchors it here.
+  ok('the app wrote its registry inside the sandbox HOME (R4: survives delete-and-reclone)',
+    fs.existsSync(path.join(HOME, '.claudible', 'app', 'workspaces.json')));
   const realRuntimeAfter = fs.existsSync(REAL_RUNTIME)
     ? fs.readdirSync(REAL_RUNTIME).sort().join(',') + '|' + String(fs.statSync(REAL_RUNTIME).mtimeMs)
     : '(absent)';

@@ -29,6 +29,12 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R4 — your projects, settings, consent and history now survive a reinstall.** They lived inside the app
+  folder (`<clone>/runtime/`), so "delete the folder and re-clone" — the documented uninstall, an
+  update-by-reclone, an antivirus quarantine — silently wiped the project registry, every sync consent and
+  every session title (the July 18 reinstall data loss, root-caused). Durable state now lives at
+  `~/.claudible/app/` with a one-time automatic migration; per-tab runtime stays in the clone on purpose
+  (the bash writer and the app's pollers must derive the same path).
 
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or

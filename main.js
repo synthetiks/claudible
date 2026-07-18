@@ -181,16 +181,37 @@ ipcMain.on('share:audio-send', (e, p) => { try { share.audioFromHost(p && p.data
 const WHISPER = process.env.CLAUDIBLE_WHISPER || 'http://localhost:2022';
 const KOKORO  = process.env.CLAUDIBLE_KOKORO  || 'http://localhost:8880';
 const RT = runner.runtimeDir();   // per-tab status/hooks live under RT/tabs/<tabId>/ (see pollers)
-// Durable settings (Claudible username + every renderer pref). Lives in gitignored runtime/ so it survives
-// restarts, force-kills (written synchronously) and `git reset --hard`, and never leaks into the public repo.
-// The sandboxed preload can't use fs, so MAIN owns the file; these handlers are registered at top level here
-// (before any window loads) because the preload reads it via a blocking sendSync.
-const SETTINGS_FILE = path.join(RT, 'settings.json');
+// Durable state — settings (username + every renderer pref), the workspace registry, session history — lives
+// under ~/.claudible/app, NOT inside the app folder (R4). runtime/ sits in the clone, so "delete the folder and
+// re-clone" (the documented uninstall, an update-by-reclone, an antivirus quarantine of the folder) silently
+// wiped every project registration, every sync consent, and every title: the 2026-07-18 reinstall data-loss,
+// root-caused. ~/.claudible already survives reinstalls (it holds the repos + sessions); the app's own state now
+// enjoys the same guarantee. CLAUDIBLE_PERSIST overrides for sandboxed tests. Per-tab runtime (status/hooks/
+// context.json) STAYS under RT on purpose: it's ephemeral, and wsl/session.sh derives the same path from
+// $APPDIR — relocating it would split the bash writer from main's pollers (the documented runner constraint).
+const PERSIST = process.env.CLAUDIBLE_PERSIST || path.join(app.getPath('home'), '.claudible', 'app');
+try { fs.mkdirSync(PERSIST, { recursive: true }); } catch {}
+// One-time migration from the old in-clone location: an EXISTING install keeps its data on the first boot after
+// this change (the new location wins once populated; old copies stay behind as inert backups, never re-read).
+try {
+  for (const f of ['settings.json', 'workspaces.json']) {
+    const oldP = path.join(RT, f), newP = path.join(PERSIST, f);
+    if (!fs.existsSync(newP) && fs.existsSync(oldP)) fs.copyFileSync(oldP, newP);
+  }
+  const oldH = path.join(RT, 'history'), newH = path.join(PERSIST, 'history');
+  if (!fs.existsSync(newH) && fs.existsSync(oldH)) {
+    fs.mkdirSync(newH, { recursive: true });
+    for (const f of fs.readdirSync(oldH)) { try { fs.copyFileSync(path.join(oldH, f), path.join(newH, f)); } catch {} }
+  }
+} catch (e) { console.error('[claudible] persist migration:', e && e.message); }   // never fatal — a failed copy just means first-run defaults
+// The sandboxed preload can't use fs, so MAIN owns the settings file; these handlers are registered at top level
+// here (before any window loads) because the preload reads it via a blocking sendSync.
+const SETTINGS_FILE = path.join(PERSIST, 'settings.json');
 // A parse error here is INDISTINGUISHABLE from "no settings yet" — both mean {}. That's the right default for a
 // missing file and a silent wipe for a torn one (every session title, the collab name, the permission mode), so
 // writeSettings goes through tmp+rename: the file this returns is always one whole write or another.
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
-function writeSettings(obj) { fs.mkdirSync(RT, { recursive: true }); atomicWriteJson(fs, SETTINGS_FILE, obj); }
+function writeSettings(obj) { fs.mkdirSync(PERSIST, { recursive: true }); atomicWriteJson(fs, SETTINGS_FILE, obj); }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
 ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); writeSettings(obj && typeof obj === 'object' ? obj : {}); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
@@ -255,7 +276,7 @@ try { for (const f of fs.readdirSync(RT)) if (/^diffaction-.*\.tmp$/.test(f)) { 
 // LOCAL workspace as the guaranteed place to open. We no longer inject the old hardcoded, undeletable 'legacy'
 // "My Sessions" bucket; instead, when no local workspace exists, a REAL default Local workspace is materialized
 // (renameable, relocatable, and deletable once another local exists). Persisted on the Windows FS (native read).
-const WORKSPACES = path.join(RT, 'workspaces.json');
+const WORKSPACES = path.join(PERSIST, 'workspaces.json');   // R4: survives delete-and-reclone (see PERSIST above)
 const DEFAULT_LOCAL = { id: 'local-local', label: 'Local', kind: 'local', slug: 'local', createdAt: 0 };
 // Guarantee a default Local workspace. Synchronous mkdir so startup always has a valid cwd; sets firstRun so the
 // renderer can offer a one-time "name + locate your workspace" setup prompt. Never throws (caller wraps too).
@@ -2451,7 +2472,7 @@ function _machineId() {
   } catch { return ''; }
 }
 function _histFile(wsId) {
-  const dir = path.join(RT, 'history'); try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const dir = path.join(PERSIST, 'history'); try { fs.mkdirSync(dir, { recursive: true }); } catch {}   // R4: user history survives a reinstall
   return path.join(dir, String(wsId || 'default').replace(/[^A-Za-z0-9_-]/g, '-') + '.json');
 }
 
