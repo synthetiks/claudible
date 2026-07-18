@@ -541,12 +541,17 @@ none('renderer: orphanTab is never rendered',
 // 18. GUEST CAP IS ENFORCED AT ADMISSION, not only at connect. With approval on (the default), a joiner waits
 //   in `pending` (bounded by MAX_PENDING=16, not MAX_GUESTS=8) between the connect-time check and admit(), so
 //   the cap MUST be re-checked inside admit() for a fresh `link` join or a backlog of approvals seats > 8.
+//   The cap counts grace-window seats (pendingDrops) as OCCUPIED — drop() releases clients.size immediately,
+//   so a bare clients.size check lets a link joiner fill a seat whose owner's in-window resume (no cap check
+//   by design) then overflows the cap. An orphaned-token resume (no reservation, no ghost) is capped too.
 // ---------------------------------------------------------------------------------------------------------
 {
   const server = read('share/server.js');
   const admitBody = (server.match(/function admit\(ws, mode, name, resumeTok\)\s*\{[\s\S]*?\n  \}/) || [''])[0];
   none('share/server.js: admit() does not re-check MAX_GUESTS for a fresh link join (cap enforced only at connect)',
-    /mode === 'link' && clients\.size >= MAX_GUESTS/.test(admitBody) ? [] : ['admit() lacks the link-mode MAX_GUESTS re-check']);
+    /mode === 'link' && clients\.size \+ pendingDrops\.size >= MAX_GUESTS/.test(admitBody) ? [] : ['admit() lacks the link-mode MAX_GUESTS re-check (with grace-window seats counted)']);
+  none('share/server.js: an orphaned-token resume (no grace record, no superseded ghost) bypasses MAX_GUESTS',
+    /mode === 'resume' && !back && !ghost && clients\.size \+ pendingDrops\.size >= MAX_GUESTS/.test(admitBody) ? [] : ['admit() lacks the orphaned-resume MAX_GUESTS check']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

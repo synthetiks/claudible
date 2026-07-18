@@ -231,9 +231,10 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     // Re-check the guest cap HERE, not only at connect (the check at the bottom of onConnection). With approval
     // ON (the default), a fresh joiner waits in `pending` — bounded by MAX_PENDING(16), not MAX_GUESTS(8) —
     // between that connect-time check and this admission, so a backlog of approvals could otherwise seat more
-    // than MAX_GUESTS. Only a fresh `link` join grows the room: a `resume` reclaims a slot it already counts
-    // against, and its supersede path closes its own ghost before this, so it never nets an extra seat.
-    if (mode === 'link' && clients.size >= MAX_GUESTS) {
+    // than MAX_GUESTS. A seat inside its owner's grace window (pendingDrops) counts as OCCUPIED: drop()
+    // releases clients.size immediately, so without the reservation a link joiner could fill the seat and the
+    // original guest's in-window resume — which has NO cap check of its own by design — would overflow the cap.
+    if (mode === 'link' && clients.size + pendingDrops.size >= MAX_GUESTS) {
       try { ws.send(JSON.stringify({ type: 'denied', reason: 'full' })); } catch {}
       try { ws.close(); } catch {}
       return;
@@ -256,6 +257,14 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         if (voiceGuests.delete(ghost._pid)) ghostVoice = true;
         try { ghost.close(4001, 'superseded'); } catch {}
       }
+    }
+    // A resume that neither reclaims a grace reservation (back) nor supersedes a still-connected ghost is,
+    // seat-wise, a NEW occupant — their old seat was fully released when the grace window expired. Cap it
+    // exactly like a link join, or a valid-but-orphaned token re-admits past MAX_GUESTS.
+    if (mode === 'resume' && !back && !ghost && clients.size + pendingDrops.size >= MAX_GUESTS) {
+      try { ws.send(JSON.stringify({ type: 'denied', reason: 'full' })); } catch {}
+      try { ws.close(); } catch {}
+      return;
     }
     // A FRESH joiner gets a roster-unique name here — inside admit's single synchronous critical section, BEFORE
     // clients.add below, so no two joins racing through the approval queue can slip identical names past (and the
@@ -412,8 +421,8 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
         return admit(ws, 'resume', name, r);
       }
     }
-    // mode === 'link' (a new viewer joining the invite)
-    if (clients.size >= MAX_GUESTS) {
+    // mode === 'link' (a new viewer joining the invite). Grace-window seats count as occupied — see admit().
+    if (clients.size + pendingDrops.size >= MAX_GUESTS) {
       try { ws.send(JSON.stringify({ type: 'denied', reason: 'full' })); } catch {}
       try { ws.close(); } catch {}
       return;
