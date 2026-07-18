@@ -3072,6 +3072,17 @@ function fitLiveTab(rec) {
   try { rec.term.resize(cols, rows); } catch {}
   const overflows = (fs * 0.6 * cols) > pw + 1 || (fs * 1.18 * rows) > ph + 1;
   try { rec.container.classList.toggle('live-pan', overflows); } catch {}
+  // Panning works by giving the terminal element its REAL pixel size (measured from xterm's own screen layer,
+  // after this frame's render settles) so the container's overflow:auto has true dimensions to scroll — the
+  // previous width:max-content CSS fought xterm's internal pixel layout and mangled the rendering entirely.
+  try {
+    requestAnimationFrame(() => {
+      const el = rec.term && rec.term.element; if (!el) return;
+      if (!rec.container.classList.contains('live-pan')) { el.style.width = ''; el.style.height = ''; return; }
+      const scr = el.querySelector('.xterm-screen');
+      if (scr && scr.offsetWidth > 0) { el.style.width = scr.offsetWidth + 'px'; el.style.height = scr.offsetHeight + 'px'; }
+    });
+  } catch {}
 }
 // Per-tab overlay for the non-streaming states (connecting / waiting / reconnecting / paused / declined / offline).
 function setLiveState(rec, state, detail) {
