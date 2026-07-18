@@ -391,7 +391,13 @@ ok('app.js: a joined session renders once — the home tree stands down and repa
 // R6: reconcileWsChips only refills an EMPTY tree, so a tab switch off a joined tab must repaint the trees
 // itself — `prev` is captured BEFORE activeTabId moves, and the refresh fires on live-tab transitions.
 ok('app.js: switching off/onto a joined tab repaints the expanded trees (R6 — the vanishing joined row)',
-  /function setActiveTab\(tabId\) \{[\s\S]{0,220}?const prev = tabs\.get\(activeTabId\);[\s\S]{0,3600}?\(prev\.kind === 'live' \|\| rec\.kind === 'live'\)\) refreshExpandedTrees\(\);/.test(APP));
+  /function setActiveTab\(tabId\) \{[\s\S]{0,220}?const prev = tabs\.get\(activeTabId\);[\s\S]{0,4600}?\(prev\.kind === 'live' \|\| rec\.kind === 'live'\)\) refreshExpandedTrees\(\);/.test(APP));
+// Viewing a joined tab scopes the sidebar to its HOME project (peerWsId) — the pinned row used to land under
+// whatever project happened to be active, so joining visually "moved" the session into an unrelated project
+// (three sightings). main's activeWorkspace stays untouched (live tabs still skip tabForeground).
+ok('app.js: the sidebar follows a joined tab to its home project',
+  /const sideWs = rec\.wsId \|\| \(rec\.kind === 'live' && rec\.peerWsId\) \|\| null;/.test(APP)
+  && /if \(sideWs && sideWs !== activeWsId\) \{ activeWsId = sideWs; primeSessionListForWs\(sideWs\)/.test(APP));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1

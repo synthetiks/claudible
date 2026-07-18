@@ -117,6 +117,11 @@ register; fixes land here one commit per register id, each pinned by a test.
   `~/.claudible/app/` with a one-time automatic migration; per-tab runtime stays in the clone on purpose
   (the bash writer and the app's pollers must derive the same path).
 
+### Finish-line follow-up (July 19)
+- **Joining a live session no longer "moves" it into whatever project you were browsing.** The joined tab now
+  scopes the sidebar to the session's home project, the same way opening any local session does — the third
+  and final sighting of the pinned-row-under-the-wrong-header confusion.
+
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or
   failed switch now rolls everything back, not just the tab. This was the live root of "my project shows the

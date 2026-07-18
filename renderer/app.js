@@ -322,7 +322,13 @@ function setActiveTab(tabId) {
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
   rec.attention = false;                              // you're looking at it now — drop any "finished while away" pulse
   if (sidebarReady) {   // guard: the sessions/workspace section's consts aren't initialized during the boot tab
-    if (rec.wsId && rec.wsId !== activeWsId) { activeWsId = rec.wsId; primeSessionListForWs(rec.wsId); renderWsChips(); }   // sidebar library follows the tab's ws — prime the new ws's rows BEFORE reconcileWsChips re-nests the list, so it can't nest the OLD project's rows under the NEW project's label for a frame (the cross-project-click "wrong content" flash)
+    // The sidebar follows the tab's project — and for a JOINED tab that is its HOME project (peerWsId). A live
+    // tab has no local wsId, so the scope never moved and the pinned joined row landed under whatever project
+    // happened to be active ("the live session jumped from MK-Crazy to my local project", Crazy's 07-19 report —
+    // the third sighting of this wart; the pin-in-active-list design stays, the SCOPE now moves with the join).
+    // main's activeWorkspace is deliberately NOT re-pointed (live tabs skip tabForeground — host-side privacy).
+    const sideWs = rec.wsId || (rec.kind === 'live' && rec.peerWsId) || null;
+    if (sideWs && sideWs !== activeWsId) { activeWsId = sideWs; primeSessionListForWs(sideWs); renderWsChips(); }   // prime the new ws's rows BEFORE reconcileWsChips re-nests the list, so it can't nest the OLD project's rows under the NEW project's label for a frame (the cross-project-click "wrong content" flash)
     refreshSessions();                                                                     // re-highlight rows for this tab's ws/session
   }
   clearTabAttention(tabId);                           // and un-pulse the row if it's already painted
