@@ -177,6 +177,10 @@ function sendInput(d) {
 function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
   if (t.kind === 'live') { fitLiveTab(t); return; }            // a live tab is a fixed-grid remote mirror — never start/resize a local pty
+  // While THIS tab is live-shared its grid is PINNED (set at share start): a host window resize used to re-fit
+  // the pty, re-wrapping Claude's whole layout for every guest ("I fullscreen and his terminal goes tiny").
+  // Scale-to-fit like a mirror instead — the host zooms their own view, the shared video never changes.
+  if (t.started && t.tabId === sharedTabIdR) { scaleTermToGrid(t, t.term.cols, t.term.rows); updateScrollbar(); return; }
   try {
     // Compute the fitted size ONCE. The old path called fit() (which resized the term to R rows) and then
     // resized AGAIN to R-1 — two alt-buffer reflows on EVERY sync, i.e. the flicker on every tab switch.
@@ -464,7 +468,16 @@ function parseTokCount(str) {
 // So the payload is built from the tab RECORD, never the DOM (the DOM shows whatever the host is browsing),
 // and main drops any push whose tabId isn't the mirrored tab — a stray push can never leak another session.
 let sharedTabIdR = null;   // the tab main has pinned the live mirror to (null = not hosting)
-if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); });
+if (claudible.onSharePinned) claudible.onSharePinned((p) => {
+  const was = sharedTabIdR;
+  sharedTabIdR = (p && p.tabId != null) ? p.tabId : null;
+  if (was != null && sharedTabIdR == null) {
+    // share ended → the tab leaves fixed-grid mode: restore the stock font and re-fit to the window
+    const t = tabs.get(was); if (t) { try { t.term.options.fontSize = TERM_OPTS.fontSize; } catch {} }
+  }
+  try { sync(); } catch {}
+  pushTracker();
+});
 // (share:session-moved is gone: main no longer moves the pinned tab off its session for ANY navigation, so the
 // "your guests are frozen, re-share from its session" toast had nothing left to report. Deleting the live
 // session's workspace is the one remaining teardown, and it sends share:force-end instead — a real ending.)
@@ -3049,9 +3062,11 @@ const LIVE_REASON = { full: 'the session is full', busy: 'the host is busy right
 function liveReasonText(c) { const s = String(c == null ? '' : c).trim(); if (!s) return ''; return LIVE_REASON[s] || humanError(s); }
 // Sizing: a guest can't resize the host's pty, so we mirror the host's FIXED grid and scale the font to contain
 // it in the pane (never a CSS transform — that breaks xterm's char metrics + text selection).
-function fitLiveTab(rec) {
-  if (!rec || rec.kind !== 'live' || !rec.container) return;
-  const cols = rec.hostCols || 120, rows = rec.hostRows || 32;
+// ONE scaling rule for every FIXED-GRID view: find the largest font whose whole cols×rows grid fits this
+// viewer's container, zoom the VIEW, never touch the grid — "same video, your own zoom". Used by joined
+// mirrors (the host's grid) and, while a share runs, by the HOST's own shared tab (the pinned grid).
+function scaleTermToGrid(rec, cols, rows) {
+  if (!rec || !rec.container) return;
   const cs = getComputedStyle(rec.container);
   const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
   const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
@@ -3060,7 +3075,11 @@ function fitLiveTab(rec) {
   const wFont = pw / (cols * 0.6), hFont = ph / (rows * 1.18);       // largest font whose whole grid still fits
   const fs = Math.max(6, Math.min(30, Math.floor(Math.min(wFont, hFont))));
   try { if (rec.term.options.fontSize !== fs) rec.term.options.fontSize = fs; } catch {}
-  try { rec.term.resize(cols, rows); } catch {}
+  try { if (rec.term.cols !== cols || rec.term.rows !== rows) rec.term.resize(cols, rows); } catch {}
+}
+function fitLiveTab(rec) {
+  if (!rec || rec.kind !== 'live' || !rec.container) return;
+  scaleTermToGrid(rec, rec.hostCols || 120, rec.hostRows || 32);
 }
 // Per-tab overlay for the non-streaming states (connecting / waiting / reconnecting / paused / declined / offline).
 function setLiveState(rec, state, detail) {

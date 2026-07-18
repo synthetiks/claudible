@@ -738,6 +738,10 @@ ipcMain.on('pty:input', (e, { tabId, data }) => {
 });
 ipcMain.on('pty:resize', (e, { tabId, cols, rows }) => {
   const t = ptys.get(tabId); if (!t) return;
+  // Resize decoupling: while pinned-shared, the tab's grid is FROZEN (the renderer scales its view instead) —
+  // a raced/stale resize here would re-wrap Claude's layout for every guest, the exact "I fullscreen and his
+  // terminal goes tiny" coupling this closes. Other tabs resize freely; the pin lifting restores normal fits.
+  if (sharedTabId && tabId === sharedTabId) return;
   t.cols = cols || t.cols; t.rows = rows || t.rows;
   try { t.proc.resize(t.cols, t.rows); } catch {}
   if (tabId === mirrorTabId()) share.setSize(t.cols, t.rows);   // keep guests' xterm matched to the MIRRORED pty size
