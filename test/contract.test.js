@@ -753,5 +753,13 @@ none('renderer: orphanTab is never rendered',
     /_clbestv" "\$_clnv" \| sort -V \| tail -n1/.test(NP) ? [] : ['newest-wins comparison missing']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 25. R23 — the wizard's "Create your project" step is reachable on a first run. The registry guarantees a
+//     default workspace at boot, so a bare "some workspace exists" gate made step 3 permanently dead: every
+//     user skipped naming their first project. On firstRun, the auto-created default must not count.
+// ---------------------------------------------------------------------------------------------------------
+none('the wizard create-step gate ignores firstRun again (step 3 is dead code for every user)',
+  /hasWs = real\.length > \(\(wl && wl\.firstRun\) \? 1 : 0\);/.test(APP) ? [] : ['the firstRun-aware gate is gone']);
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

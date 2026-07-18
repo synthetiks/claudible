@@ -5102,7 +5102,16 @@ window.addEventListener('keydown', (e) => {
     try { const s = await status(); if (s) applyClaude(s); } finally { ticking = false; }
   }
   async function open() {
-    try { const wl = await claudible.workspaceList(); hasWs = !!(wl && (wl.workspaces || []).some((w) => w && w.kind && w.kind !== 'legacy')); } catch {}
+    try {
+      const wl = await claudible.workspaceList();
+      const real = ((wl && wl.workspaces) || []).filter((w) => w && w.kind && w.kind !== 'legacy');
+      // R23: the registry GUARANTEES a default Local workspace exists at boot (startup needs a cwd), so
+      // "some workspace exists" was ALWAYS true and step 3 — naming your first project — was unreachable
+      // dead code for every user: the wizard's four dots lied, and every install kept the placeholder name.
+      // On a FIRST RUN the auto-created default doesn't count as "the user has a project" (creating a real
+      // one triggers the existing placeholder cleanup); any other run keeps the old skip-if-any rule.
+      hasWs = real.length > ((wl && wl.firstRun) ? 1 : 0);
+    } catch {}
     wiz.classList.add('show'); show(1); refreshSystem();
   }
   function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} } }

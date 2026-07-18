@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R23 — the setup wizard's "Create your project" step actually appears on a fresh install.** A boot-time
+  guarantee (a default workspace always exists) made the step unreachable for every user — the wizard's four
+  dots lied and everyone kept the placeholder project name. First runs now get the naming step; creating the
+  real project cleans up the placeholder as designed.
 - **R21 — node discovery covers fnm, volta, asdf and n — not just nvm.** Anyone using those managers had the
   original "empty session list" bug (their shell init never runs in the app's scripts). The resolver now
   sweeps every manager's install dir and uses the newest node it finds.
