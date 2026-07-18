@@ -232,8 +232,9 @@ On **Windows**, uninstall from *Settings → Apps* (or the Start-menu uninstalle
 shortcuts. A few things are **intentionally left behind** so a reinstall or upgrade keeps your work — remove
 them by hand if you want to reclaim the space fully:
 
-- **Your projects & settings:** `~/.claudible/` on the Windows side (`workspaces.json`, `runtime/`, logs). Kept
-  on purpose so reinstalling doesn't wipe your workspaces.
+- **Your projects & settings:** `~/.claudible/` — the app's durable state lives at `~/.claudible/app/`
+  (`settings.json`, `workspaces.json`, session history), with project clones under `~/.claudible/repos/` and
+  `~/.claudible/workspaces/`. Kept on purpose so a reinstall keeps every project, setting, and sync consent.
 - **The voice models & build** (several hundred MB): `~/.claudible/voice/` on the **WSL/Linux** side —
   whisper.cpp's build plus the Kokoro clone and downloaded model weights. Delete this folder to reclaim it.
 - **Background voice services:** the Whisper (`:2022`) and Kokoro (`:8880`) helpers can keep running after you

@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R33/R42 — the orphan-reaper gets real tests, the docs stop pointing at the old state location.** killtree.sh
+  (the guard against the "(empty session)" orphan factory) now has behavioral coverage in the suite — a real
+  process tree reaped, the recycled-pid guard proven both ways; the README describes where state actually
+  lives. Plus docs/TWO-MACHINE-TEST.md: the 15-minute script for the one thing automation can't drive.
 - **R28/R29/R34 — sidebar order, tree visibility, and the native-Windows voice button.** Dragging sessions no
   longer forgets where a joined session belongs; a collaborator live in a session you haven't synced yet shows
   up in that project's tree; the packaged Windows app gets the voice Install button every other install had.
