@@ -658,5 +658,19 @@ none('renderer: orphanTab is never rendered',
     /rec\.liveState === 'offline' \|\| rec\.liveState === 'denied'\) \{[\s\S]{0,900}?Reconnect to this live session/.test(APP) ? [] : ['no ↻ button on offline/denied joined rows']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 18. R16/R18/R30 — error surfaces speak human. One shared installer filter guards ALL THREE install-error
+//     surfaces (click path, streamed provision path, Connect-Claude popover); the join catch toasts through
+//     humanError (never a raw JS exception); the joined row maps wire denial codes ('full') to sentences.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('installErrText is missing or unused on one of its three surfaces (R18)',
+    /function installErrText\(raw\)/.test(APP) && (APP.match(/installErrText\(/g) || []).length >= 4 ? [] : ['def + 3 call sites required']);
+  none('openLiveTab toasts a raw JS exception on a join crash (R16)',
+    /toast\('Join failed: ' \+ humanError\(e && e\.message\)\)/.test(APP) ? [] : ['join catch bypasses humanError']);
+  none('the joined row paints raw wire denial codes (R30)',
+    /function liveReasonText\(/.test(APP) && (APP.match(/liveReasonText\(rec\.liveReason\)/g) || []).length === 2 ? [] : ['both row sites must map through liveReasonText']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

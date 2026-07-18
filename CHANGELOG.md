@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R16/R18/R30 — live-join and installer errors reach you as sentences, never internals.** A crashed join
+  toasted the raw JS exception; two of the three install-error surfaces still showed the raw "Command failed:
+  wsl.exe …" dump; a declined/dead joined row painted bare wire codes (" — full"). One shared filter now guards
+  every install surface, joins fail through the human-error map, and denial codes read as real explanations.
 - **R14 — live-session reconnects stop giving up on you.** Retry counters accumulated for the joined tab's
   entire lifetime (the 9th failed dial *ever* was permanent death with no rejoin control anywhere), and the
   browser viewer retried a long-dead resume token forever — even a reload couldn't escape it. Now: a

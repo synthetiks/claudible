@@ -42,6 +42,16 @@ function humanError(code) {
   if (/\s/.test(c) && c.length <= 120 && !/[{}<>]|Error:|\bat .*:\d|\bE[A-Z]{3,}\b|Cannot read prop/.test(c)) return c;   // already a human sentence → keep it (but never a raw node/JS exception)
   return 'something went wrong';
 }
+// Installer/provisioner error text for the UI (R18). A script's OWN error is a curated, actionable sentence —
+// often a full copy-paste command — so it shows in FULL, however long: the opposite of humanError's job. The ONE
+// thing to intercept is the raw Node exec-crash string ("Command failed: <cmd> <args…>"): pure internals, emitted
+// only when the child died before producing its JSON (network timeout, killed wrapper). This filter used to guard
+// one of the three surfaces that show install errors; it is the single shared helper for all of them now.
+function installErrText(raw) {
+  const s = String(raw == null ? '' : raw);
+  if (/^Command failed:/.test(s)) return 'Could not reach the installer — check your network connection and try again.';
+  return s || 'Install failed — retry, or Skip for now.';
+}
 // Log uncaught renderer errors to the console (mirrored to .claudible-debug.log in DEBUG builds). No user-facing
 // error toast — end users should never see raw JS error text.
 window.addEventListener('error', (e) => { try { console.error('[uncaught]', (e && e.message) || e, (e && e.filename || '') + ':' + (e && e.lineno)); } catch (x) {} });
@@ -3025,6 +3035,11 @@ function renderLivePeerRow(peer) {
 }
 // ---- native joined-session tab: render + drive a peer's live session inside the cockpit -----------------
 const LIVE_STATE_LABEL = { '': 'live', live: 'live', connecting: 'connecting…', pending: 'waiting for host…', reconnecting: 'reconnecting…', paused: 'paused', denied: 'declined', offline: 'ended' };
+// R30: the server's denial/offline reasons are bare wire codes ('full', 'busy', 'removed', 'revoked') and used
+// to paint onto the joined row verbatim (" — full"). Map the known codes; anything else — a host-controlled
+// string — goes through humanError so a raw code or junk can never render (textContent already escapes it).
+const LIVE_REASON = { full: 'the session is full', busy: 'the host is busy right now', removed: 'the host removed you from this session', revoked: 'the host reset the invite link' };
+function liveReasonText(c) { const s = String(c == null ? '' : c).trim(); if (!s) return ''; return LIVE_REASON[s] || humanError(s); }
 // Sizing: a guest can't resize the host's pty, so we mirror the host's FIXED grid and scale the font to contain
 // it in the pane (never a CSS transform — that breaks xterm's char metrics + text selection).
 function fitLiveTab(rec) {
@@ -3060,7 +3075,7 @@ function setLiveState(rec, state, detail) {
   if (meta) {   // build via text nodes — rec.liveReason is a host-controlled ('denied') string; textContent escapes it (CSP is not the only XSS guard)
     meta.textContent = '';
     const dot = document.createElement('span'); dot.className = 'sess-livedot'; meta.appendChild(dot);
-    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '';
+    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + liveReasonText(rec.liveReason) : '';   // R30: wire codes become sentences
     meta.appendChild(document.createTextNode('joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
   }
   let ov = rec.container.querySelector('.live-ov');
@@ -3140,7 +3155,7 @@ function openLiveTab(peer, localLabel) {
       toast('Could not join ' + who + ' — ' + why + ((r && r.error === 'bad handle') ? '. The link may be expired, or you and the host are on different app versions — make sure both are on the latest build and retry.' : ''));
     }
   }).catch((err) => { console.error('[live] liveConnect rejected:', err); setLiveState(rec, 'offline'); toast('Could not join ' + who + ' — connection failed'); });
- } catch (e) { console.error('[live] openLiveTab THREW:', e && (e.stack || e.message || e)); toast('Join failed: ' + ((e && e.message) || e)); }
+ } catch (e) { console.error('[live] openLiveTab THREW:', e && (e.stack || e.message || e)); toast('Join failed: ' + humanError(e && e.message)); }   // R16: the raw JS exception goes to the console; the user gets a sentence
 }
 // A joined live session as a sidebar row (pinned at the top): click to switch, ✕ to leave.
 function renderJoinedTabRow(rec) {
@@ -3154,7 +3169,7 @@ function renderJoinedTabRow(rec) {
   const mdot = document.createElement('span'); mdot.className = 'sess-livedot'; m.appendChild(mdot);
   if (rec.sessMismatch) m.appendChild(document.createTextNode('⚠ host moved to another session · ' + who));
   else {
-    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + rec.liveReason : '';
+    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + liveReasonText(rec.liveReason) : '';   // R30: wire codes become sentences
     m.appendChild(document.createTextNode('joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
   }
   row.appendChild(p); row.appendChild(m);
@@ -5234,13 +5249,7 @@ window.addEventListener('keydown', (e) => {
     if (r && r.restartRequired) { restartNeeded = true; setSysPill(id, 'ready', 'installed'); setDepMsg(id, 'Installed. Claudible needs a quick restart to finish.'); const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Restart now'; return; }
     if (!r || !r.ok) {
       setSysPill(id, 'error', 'failed');
-      const raw = (r && r.error) || 'Install failed — retry, or Skip for now.';
-      // provision.sh's own error text is a curated, actionable sentence (sometimes a full copy-paste command) —
-      // show it in full, however long; that's the opposite of humanError()'s job. The ONE thing to catch is the
-      // raw Node execFile crash string ("Command failed: <cmd> <args>"), which only appears when the child died
-      // before producing any JSON at all (e.g. a network timeout) — that's an internal detail, not an instruction.
-      const msg = /^Command failed:/.test(raw) ? 'Could not reach the installer — check your network connection and try again.' : raw;
-      setDepMsg(id, msg, true);
+      setDepMsg(id, installErrText(r && r.error), true);   // shared filter (R18) — raw exec-crash internals never reach the row; real script errors show in full
       return;
     }
     await refreshSystem();
@@ -5258,7 +5267,7 @@ window.addEventListener('keydown', (e) => {
     const cls = m.phase === 'done' ? 'ready' : m.phase === 'error' ? 'error' : 'installing';
     const txt = m.phase === 'done' ? 'ready' : m.phase === 'error' ? 'failed' : 'installing…';
     setSysPill(m.dep, cls, txt);
-    if (step === 1 && m.msg) setDepMsg(m.dep, m.msg, m.phase === 'error');
+    if (step === 1 && m.msg) setDepMsg(m.dep, m.phase === 'error' ? installErrText(m.msg) : m.msg, m.phase === 'error');   // the streamed path shows the same filtered text as the click path (R18)
   });
 
   $('wiz-sys-next').addEventListener('click', sysNext);
@@ -5328,7 +5337,7 @@ window.addEventListener('keydown', (e) => {
     let r; try { r = await claudible.preflightInstall('claude'); } catch (e) { r = { ok: false, error: e && e.message }; }
     act.disabled = false;
     if (r && r.ok) { busy.textContent = ''; render(); }
-    else { busy.classList.add('err'); busy.textContent = 'Install failed: ' + ((r && r.error) || 'unknown') + ' — retry, or install it manually.'; }
+    else { busy.classList.add('err'); busy.textContent = 'Install failed: ' + installErrText(r && r.error) + ' — retry, or install it manually.'; }   // shared filter (R18): the third surface that used to show the raw exec-crash string
   }
   async function signIn() {
     busy.classList.remove('err'); busy.textContent = 'Opening Claude — finish sign-in in the terminal/browser…';
