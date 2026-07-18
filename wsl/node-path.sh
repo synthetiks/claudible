@@ -26,12 +26,28 @@ case "$(uname -s 2>/dev/null)" in
       done
     fi ;;
   *)                                                      # WSL / Linux: use a NATIVE node (never node.exe)
-    _clnd="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -n1)"
-    if [ -n "$_clnd" ] && [ -x "$_clnd/node" ]; then
-      _clnv="${_clnd#"$HOME"/.nvm/versions/node/v}"; _clnv="${_clnv%/bin}"
-      # prepend when node is absent, or the nvm one is strictly newer than the one PATH resolves
-      if [ "$_clnv" != "$_clhave" ] && { [ -z "$_clhave" ] || [ "$(printf '%s\n%s\n' "$_clhave" "$_clnv" | sort -V | tail -n1)" = "$_clnv" ]; }; then
-        PATH="$_clnd:$PATH"; export PATH
+    # R21: every version manager that fronts node via SHELL INIT has the identical non-interactive hole nvm
+    # had — fnm, volta, asdf and n all park their nodes in predictable dirs and rely on rc-file init that a
+    # `-lc` shell never runs. Sweep them ALL, pick the single newest node found, and apply the same rule:
+    # prepend when node is absent, or when the managed one is strictly newer than whatever PATH resolves
+    # (a stale distro /usr/bin/node must not shadow the user's real toolchain).
+    _clbest=""; _clbestv=""
+    for _clnd in "$HOME"/.nvm/versions/node/*/bin \
+                 "$HOME"/.local/share/fnm/node-versions/*/installation/bin \
+                 "$HOME"/.fnm/node-versions/*/installation/bin \
+                 "$HOME"/.asdf/installs/nodejs/*/bin \
+                 "$HOME"/.volta/tools/image/node/*/bin \
+                 "$HOME"/n/n/versions/node/*/bin /usr/local/n/versions/node/*/bin; do
+      [ -x "$_clnd/node" ] || continue
+      _clnv="$("$_clnd/node" -v 2>/dev/null)"; _clnv="${_clnv#v}"
+      [ -n "$_clnv" ] || continue
+      if [ -z "$_clbestv" ] || [ "$(printf '%s\n%s\n' "$_clbestv" "$_clnv" | sort -V | tail -n1)" = "$_clnv" ]; then
+        _clbest="$_clnd"; _clbestv="$_clnv"
+      fi
+    done
+    if [ -n "$_clbest" ]; then
+      if [ "$_clbestv" != "$_clhave" ] && { [ -z "$_clhave" ] || [ "$(printf '%s\n%s\n' "$_clhave" "$_clbestv" | sort -V | tail -n1)" = "$_clbestv" ]; }; then
+        PATH="$_clbest:$PATH"; export PATH
       fi
     elif [ -z "$_clhave" ]; then
       for _clc in /usr/local/bin /usr/bin /snap/bin; do
@@ -39,4 +55,4 @@ case "$(uname -s 2>/dev/null)" in
       done
     fi ;;
 esac
-unset _clnd _clc _clnv _clhave 2>/dev/null || true
+unset _clnd _clc _clnv _clhave _clbest _clbestv 2>/dev/null || true

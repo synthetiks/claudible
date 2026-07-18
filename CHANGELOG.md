@@ -29,6 +29,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R21 — node discovery covers fnm, volta, asdf and n — not just nvm.** Anyone using those managers had the
+  original "empty session list" bug (their shell init never runs in the app's scripts). The resolver now
+  sweeps every manager's install dir and uses the newest node it finds.
 - **R20 — ending a live session hangs up your mic.** The host's own voice-room membership outlived every end
   path — the mic stayed hot after "End Session" and the next share started with a ghost member already in the
   room. The one shared teardown now leaves the voice room too.

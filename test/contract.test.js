@@ -739,5 +739,19 @@ none('renderer: orphanTab is never rendered',
     /function endLiveNow\(msg\) \{[\s\S]{0,700}?hostVoice\.isJoined\(\)\) hostVoice\.leave\(\);/.test(APP) ? [] : ['no hostVoice.leave() in endLiveNow']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 24. R21 — node-path.sh rescues EVERY rc-file-init version manager, not just nvm. fnm/volta/asdf/n park
+//     their nodes in predictable dirs and rely on shell init a `-lc` shell never runs — the identical
+//     silent-empty-answer hole nvm had. The sweep must cover them and pick the newest node found.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const NP = read('wsl/node-path.sh');
+  const missing = ['fnm/node-versions', '.asdf/installs/nodejs', '.volta/tools/image/node', 'versions/node']
+    .filter((p) => !NP.includes(p));
+  none('node-path.sh dropped a version manager from its sweep (its users get silent empty answers)', missing);
+  none('the sweep no longer picks the NEWEST managed node (a stale manager dir would shadow the real one)',
+    /_clbestv" "\$_clnv" \| sort -V \| tail -n1/.test(NP) ? [] : ['newest-wins comparison missing']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
