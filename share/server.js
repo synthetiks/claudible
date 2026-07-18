@@ -33,6 +33,7 @@ const ASSETS = {
   '/logo.png':     { file: path.join(__dirname, '..', 'assets', 'logo.png'),   type: 'image/png' },
 };
 const GUEST_HTML = path.join(__dirname, 'guest.html');
+let APP_VERSION = ''; try { APP_VERSION = require('../package.json').version || ''; } catch {}   // rides the hello frame so a joiner can surface host/guest build skew
 const RING_CAP = 256 * 1024;
 const APPROVAL_TIMEOUT = 90000;
 const MAX_GUESTS = 8;            // cap concurrent viewers (the host typically invites a few)
@@ -306,7 +307,7 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
     notifyGuests(); notifyRoster();
     if ((back && back.wasVoice) || ghostVoice) broadcastVoice();   // re-list them as a voice member under the new pid
     try {
-      ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused, pid: ws._pid, voice: voiceMembers() }));
+      ws.send(JSON.stringify({ type: 'hello', readOnly, cols, rows, resume: ws._resume, host: hostName, you: name, workspaces, paused, pid: ws._pid, voice: voiceMembers(), appVersion: APP_VERSION }));   // appVersion: lets a joining cockpit SURFACE host/guest build skew instead of failing as a generic bad handle (native join across mismatched builds was undiagnosable)
       // Never replay status/scrollback/history while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
       if (!paused && lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
       if (!paused && lastHistory.length) ws.send(JSON.stringify({ type: 'history', entries: lastHistory }));

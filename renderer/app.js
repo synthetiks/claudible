@@ -306,6 +306,8 @@ function setActiveTab(tabId) {
   renderAgents();                                  // …and its agents into the agents pane
   updateScrollbar();
   refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined)
+  if ($('tts-in')) $('tts-in').value = rec.lastReply || '';   // the Speak box shows THIS tab's latest reply (per-tab, never another tab's — the lastReply bleed fix)
+  try { updateVoiceOutBtn(); } catch {}
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
   rec.attention = false;                              // you're looking at it now — drop any "finished while away" pulse
   if (sidebarReady) {   // guard: the sessions/workspace section's consts aren't initialized during the boot tab
@@ -713,7 +715,10 @@ if ($('ptt-key-btn')) $('ptt-key-btn').addEventListener('click', () => { pttCapt
 
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
 let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0, fullReadout = true;
-let lastReply = '';                                  // Claude's latest reply (stripped) — the manual "▶ Speak" reads this
+// Claude's latest reply (stripped) lives ON THE TAB RECORD (rec.lastReply), never in a module global — a
+// global bled between tabs (the altFrac class): once any tab had spoken, "▶ Speak" read tab A's reply while
+// tab B was on screen. lastReplyNow() is the one accessor; setActiveTab repopulates the Speak box from it.
+function lastReplyNow() { const t = AT(); return (t && t.lastReply) || ''; }
 let ttsSpeed = 0;                                    // % faster over baseline (0–25), applied via audio.playbackRate
 let announceOn = true, chimeOn = true;               // factory-on: spoken "task complete" cue + soft chat chime
 // Voice Out button is dual: ▶ Speak (idle, reads lastReply) ↔ ■ Stop (while speaking). Disabled when nothing to speak.
@@ -807,14 +812,19 @@ document.querySelectorAll('.vpill').forEach((p) => p.addEventListener('mousedown
 if ($('vout-stop')) {
   $('vout-stop').addEventListener('click', async () => {
     if (ttsBusy || ttsAudio) { stopSpeech(); return; }
-    if (lastReply) { speak(lastReply); return; }
-    // Nothing captured this app-session — fetch the OPEN session's latest reply from its transcript so you can
+    if (lastReplyNow()) { speak(lastReplyNow()); return; }
+    // Nothing captured for THIS tab — fetch the OPEN session's latest reply from its transcript so you can
     // re-listen (after a relaunch, or for a session opened from history). Empty → tell the user there's nothing.
     const sid = activeSession;
     if (sid) {
       try {
         const r = await claudible.latestReply(sid);
-        if (r && r.text && r.text.trim()) { lastReply = stripForSpeech(r.text); if ($('tts-in')) $('tts-in').value = lastReply; speak(lastReply); return; }
+        if (r && r.text && r.text.trim()) {
+          const t = AT(), reply = stripForSpeech(r.text);
+          if (t) t.lastReply = reply;
+          if ($('tts-in')) $('tts-in').value = reply;
+          speak(reply); return;
+        }
       } catch {}
     }
     toast('No text detected to read');
@@ -1003,9 +1013,9 @@ claudible.onHookLine((tabId, line) => {
     // disk, so refresh the sidebar to collapse that draft row into its proper saved session row.
     if (sidebarReady && t.wsId === activeWsId && sessListEl && sessListEl.querySelector('.sess.sess-draft[data-tab="' + t.tabId + '"]')) refreshSessions();
     if (o.last_assistant_message) {
+      const reply = stripForSpeech(o.last_assistant_message);
+      t.lastReply = reply;                  // remember it on ITS tab — Speak on that tab reads the right reply even if this turn finished in the background
       if (tabId === activeTabId) {   // only the FOREGROUND tab speaks / fills the Speak box, so background turns never talk over it
-        const reply = stripForSpeech(o.last_assistant_message);
-        lastReply = reply;                  // remember it for the manual "▶ Speak" button
         $('tts-in').value = reply;          // populate the (collapsible) box for manual Speak
         updateVoiceOutBtn();                // enable ▶ Speak now that there's a reply
         if (alwaysSpeak) speak(reply);      // auto-speak the reply in the selected voice
@@ -1533,6 +1543,9 @@ claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped m
   tunnelUp = false; lastShareUrl = ''; lastShareRemote = false;
   toast('Live link dropped — the tunnel went down. Toggle Share Live off then on for a fresh link.');
   renderLiveBar(); refreshChatPanel();
+});
+if (claudible.onUpdateAvailable) claudible.onUpdateAvailable((p) => {   // notice-only: installed builds otherwise NEVER learn a fix shipped
+  toast('Claudible ' + p.latest + ' is out (you run ' + p.mine + ') — grab the new installer from the GitHub releases page.');
 });
 if (claudible.onAdvertiseLost) claudible.onAdvertiseLost((p) => {   // the presence heartbeat lost the one-host-per-session claim (our presence went stale — sleep/outage — and a collaborator went live on the same session) → stop claiming to share
   sharedSessionId = null; sharedWsId = null; advertisedSession = null;
@@ -2910,7 +2923,12 @@ async function pollLivePeers() {
       const nowMs = Date.now();
       [...deadPeerSessions].forEach(([sid, at]) => { if (!live.has(sid) || nowMs - at > DEAD_SUPPRESS_MS) deadPeerSessions.delete(sid); });
     }
-    const sig = JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.ts, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));
+    // The sig deliberately EXCLUDES p.ts: the host's advertise heartbeat re-stamps ts every ~45s with nothing
+    // else changing, and a ts-sensitive sig forced a full refreshExpandedTrees() rebuild on every beat —
+    // restarting the live/busy-dot keyframe animations in every expanded project (a metronome flicker).
+    // url+token ARE included: a host handle rotation must still change the sig so reconcileJoinedTabs re-arms
+    // joined tabs (the auto-recover path); membership changes (TTL age-out) change the sig by themselves.
+    const sig = JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));
     if (sig === livePeersSig) return;
     livePeersSig = sig; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(activeOk);   // repaint the active list AND every expanded tree · re-arm/auto-leave joined tabs
   } finally { _pollLiveInFlight = false; }
@@ -3147,6 +3165,7 @@ claudible.onLiveHello((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
   rec.liveReadOnly = !!p.readOnly; rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows;
   rec.livePid = p.pid || null; if (p.host) rec.hostName = p.host;
+  if (p.skew && p.skew.host) { rec.buildSkew = p.skew; toast('Heads up: the host runs Claudible ' + p.skew.host + ', you run ' + p.skew.mine + ' — if this live session misbehaves, update whichever side is older'); }   // main sanitized both strings
   if (p.you) rec.liveYou = p.you;                                   // the name the host's server registered us under (may be disambiguated, e.g. "MK (2)") — used to dedup ourselves out of the roster below
   setLiveState(rec, p.paused ? 'paused' : 'live');
   if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { rec.term.focus(); } catch {} } }
@@ -3413,7 +3432,7 @@ function onSessPointerDown(e, row, s) {
 function onSessPointerMove(e) {
   if (!sdrag) return;
   if (!sdrag.moved) { if (Math.abs(e.clientY - sdrag.startY) < 5) return; sdrag.moved = true; sdrag.row.classList.add('dragging'); }
-  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft)')).filter((r) => r !== sdrag.row);
+  const rows = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft):not(.sess-joined-live):not(.sess-peer-live)')).filter((r) => r !== sdrag.row);   // pinned joined/live-peer rows are not drop targets — they carry no dataset.id, and interleaving them briefly corrupted the persisted order with `undefined`
   let before = null;
   for (let i = 0; i < rows.length; i++) { const r = rows[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { before = rows[i]; break; } }
   if (before) sessListEl.insertBefore(sdrag.row, before); else sessListEl.appendChild(sdrag.row);
@@ -3428,7 +3447,7 @@ function onSessPointerUp() {
   try { d.row.releasePointerCapture(d.pid); } catch {}
   d.row.classList.remove('dragging');
   if (d.moved) {
-    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft)')).map((r) => r.dataset.id);
+    const order = Array.prototype.slice.call(sessListEl.querySelectorAll('.sess:not(.sess-draft):not(.sess-joined-live):not(.sess-peer-live)')).map((r) => r.dataset.id);   // same exclusion as the drop-target list — live rows have no dataset.id
     setOrder(order);                                                               // manual order persists (per workspace)
     refreshSessions();                                                             // reconcile: refreshes skipped DURING the drag (the sdrag guard) catch up now
   } else {
@@ -3616,7 +3635,18 @@ async function refreshSessions() {
   let list = []; try { list = await claudible.sessionListWs(myWs); } catch {}
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;               // a rename opened DURING the await — bail so the rebuild below can't wipe the in-flight edit (the top-of-fn guard only covers renames that existed before the await)
-  if (!Array.isArray(list)) list = [];
+  if (!Array.isArray(list)) {
+    // Typed FETCH FAILURE (main marks it {error}) — not an empty project. Painting [] over a populated list
+    // was the "all my sessions vanished" bug. Fall back to this ws's warm cache and keep whatever's on
+    // screen; the next poll retries. Only a truly cold list (no cache, nothing rendered) shows the notice.
+    const cached = _wsSessCache.get(myWs);
+    if (cached && Array.isArray(cached.list)) list = cached.list.slice();
+    else {
+      console.error('[sessions] list failed and no cache — leaving the sidebar as-is:', list && list.error);
+      if (sessListEl && !sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">Couldn’t read sessions — retrying…</div>';
+      return;
+    }
+  }
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
   // Hide promptless stubs ('(empty session)' — fork artifacts / killed boots): clicking one can only re-fail
   // resume (nothing to resume) and mint ANOTHER stub. A stub reappears the moment it gains a real user message.
@@ -4073,8 +4103,15 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     // the active project + this tree's saved row wearing a live badge ("the same live session twice", b9c51fe).
     // Same priority rule as the active list: the joined mirror wins; the tree row returns when the tab closes.
     const joined = joinedTabSessionIds();
+    // The suppression above only holds together with a SUBSTITUTE row: a joined tab whose home project (peerWsId)
+    // is THIS tree must render its joined row HERE, or the session has no row anywhere once the user switches
+    // workspace + tab away (active list: peerWsId≠activeWsId and not the active tab; tree: saved copy suppressed) —
+    // the "joined live session vanished from the whole sidebar while still streaming" bug. The active-tab case is
+    // excluded because the active list already pins it (tabId===activeTabId) — rendering here too would double it.
+    const joinedRows = Array.from(tabs.values()).filter((r) => r.kind === 'live' && r.peerWsId === w.id && r.tabId !== activeTabId);
+    joinedRows.forEach((rec) => kids.appendChild(renderJoinedTabRow(rec)));
     const ordered = orderedSessionsFor(w.id, (list || []).filter((s) => !joined.has(s.id) && ((s.msgs || 0) > 0 || hasExplicitTitle(s.id, w.id)))).slice(0, 60);
-    if (!ordered.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
+    if (!ordered.length && !joinedRows.length) { const e = document.createElement('div'); e.className = 'sess-empty'; e.textContent = 'no sessions yet'; kids.appendChild(e); }
     else ordered.forEach((s) => kids.appendChild(renderWsSessionRow(w, s)));
     // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).
     // A non-active workspace lists its sessions for browsing/opening; to start a new one you select it first.
@@ -4085,8 +4122,9 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     _wsSessFetching.add(w.id);
     claudible.sessionListWs(w.id)
       .then((list) => {
-        const arr = Array.isArray(list) ? list : []; _wsSessCache.set(w.id, { list: arr, ts: Date.now() });
-        if (document.body.contains(kids)) fill(arr);
+        if (!Array.isArray(list)) return;               // typed fetch failure — keep the warm cache + whatever's painted (never cache/paint [] over real rows); the next 4s-stale refresh retries
+        _wsSessCache.set(w.id, { list, ts: Date.now() });
+        if (document.body.contains(kids)) fill(list);
         else if (isWsExpanded(w.id)) renderWsChips();   // the container was replaced by a re-render mid-fetch → repaint from the now-fresh cache (no re-fetch)
       })
       .catch(() => {})
@@ -4369,7 +4407,16 @@ async function deleteWorkspace(w) {
       resetStats(rec);
       if (rec.tabId === activeTabId) activeSession = null;
     }
-    for (const rec of tabs.values()) { if (rec.wsId === w.id) rec.wsId = r.activeId || activeWsId; }   // belt: any record main didn't know (e.g. a tab with no pty yet) must not keep naming a dead ws
+    // Belt: any record main didn't know (e.g. a tab whose pty never started — layout deferred while the window
+    // was backgrounded) must not keep naming a dead ws. Full reset like the `moved` branch, not just wsId:
+    // rebinding wsId alone left session/label pointing at a session inside the just-trashed workspace.
+    for (const rec of tabs.values()) {
+      if (rec.wsId !== w.id) continue;
+      rec.wsId = r.activeId || activeWsId; rec.session = ''; rec.label = ''; rec.curSessionLabel = '';
+      try { rec.term.reset(); } catch {}
+      resetStats(rec);
+      if (rec.tabId === activeTabId) activeSession = null;
+    }
     forgetWorkspaceCaches(w.id);   // its warm caches are dead weight — and _wsSessCache would serve STALE rows to a ws later re-created with this id
     await refreshWorkspaces(); refreshSessions();
     // The registry entry is gone either way — but if the FOLDER couldn't be moved to trash (locked file, no
@@ -4701,16 +4748,30 @@ async function switchWorkspace(id, targetSession) {
     if (r && r.ok === false && r.error !== 'superseded') { failed = true; toast('Could not switch project' + (r.error ? ': ' + humanError(r.error) : '')); }
     else kept = !!(r && r.keptTab);
   } catch (e) { failed = true; toast('Could not switch project'); }
+  // Undo the OPTIMISTIC repaint when the switch didn't actually re-point this tab. Restoring only the tab
+  // record isn't enough: activeWsId/activeSession and the sidebar still claim the TARGET workspace while the
+  // active tab's pty never left the old one — the ws-scope-desync class (every ws-keyed surface, session list
+  // included, silently re-scopes to a project the tab never entered). Roll the globals back to the tab's truth.
+  const rollBack = () => {
+    Object.assign(t, prev);
+    activeWsId = prev.wsId;
+    activeSession = (prev.session && prev.session !== 'new') ? prev.session : null;
+    lastTitlePoll = 0; titlesSig = '';
+    primeSessionListForWs(prev.wsId); renderWsChips(); refreshSessions();
+  };
   if (kept) {
     // main declined to re-point this tab's pty — a turn started inside the race window, or `share:pinned` hadn't
     // reached us yet. Its pty never moved, so put the RECORD back (a tab claiming a workspace its process isn't in
     // orphans the sidebar highlight forever) and give the project a tab of its own, exactly like the guards above.
-    Object.assign(t, prev);
-    if (!newBlankTab(id, sess || 'new')) toast('That session is still running — close a tab to open that project beside it');
-    return;                                        // newBlankTab → setActiveTab already refreshed + focused
+    Object.assign(t, prev);                        // restore BEFORE newBlankTab — its setActiveTab repaints synchronously and must not see the optimistic record
+    if (newBlankTab(id, sess || 'new')) return;    // new tab in the target ws is now active → globals correctly point there
+    toast('That session is still running — close a tab to open that project beside it');
+    rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back
+    return;
   }
-  if (!failed) { t.term.reset(); resetStats(t); }  // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
-  if (!failed) refreshSessions();   // don't paint the new workspace's sessions over a switch that actually failed (frontend/backend mismatch)
+  if (failed) { rollBack(); setTimeout(() => { if (term) term.focus(); }, 150); return; }
+  t.term.reset(); resetStats(t);                   // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
+  refreshSessions();
   setTimeout(() => { if (term) term.focus(); }, 150);
 }
 // new-workspace chooser modal

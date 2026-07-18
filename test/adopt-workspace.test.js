@@ -419,8 +419,8 @@ ok('main.js: deleting a workspace clears its fetch throttle', /_lastFetch\.delet
 // The snapshot must precede EVERY write into .claude — the hook `cp`s come first, the settings heredoc later.
 {
   const iOwn = SESSION_SH.indexOf('.claudible-owned');
-  const iHooks = SESSION_SH.indexOf('cp "$APPDIR/hooks/statusline.js"');
-  const iSettings = SESSION_SH.indexOf('cat > "$SDIR/.claude/settings.json"');
+  const iHooks = SESSION_SH.indexOf('stage_hook "$APPDIR/hooks/statusline.js"');       // atomic tmp+mv staging (the concurrent-tabs fix) — the ordering invariant is unchanged
+  const iSettings = SESSION_SH.indexOf('cat > "$SDIR/.claude/settings.json.cltmp.$$"');
   ok('session.sh: the ownership snapshot runs BEFORE the hook scripts are staged', iOwn > -1 && iHooks > iOwn);
   ok('session.sh: …and before settings.json is written', iSettings > iOwn);
   ok('session.sh: it covers the hook scripts, not just settings.json',
@@ -428,8 +428,8 @@ ok('main.js: deleting a workspace clears its fetch throttle', /_lastFetch\.delet
 }
 {
   const iOwn = WIN.indexOf(".claudible-owned");
-  const iHooks = WIN.indexOf("fs.copyFileSync(path.join(APP_ROOT, 'hooks', 'statusline.js')");
-  const iSettings = WIN.indexOf("fs.writeFileSync(path.win32.join(cdir, 'settings.json')");
+  const iHooks = WIN.indexOf("stage(path.join(APP_ROOT, 'hooks', 'statusline.js')");   // atomic tmp+rename staging — same invariant
+  const iSettings = WIN.indexOf("const sPath = path.win32.join(cdir, 'settings.json')");
   ok('win.js: the Windows-native twin snapshots before staging its hooks', iOwn > -1 && iHooks > iOwn);
   ok('win.js: …and before writing settings.json', iSettings > iOwn);
   ok('win.js: it covers the hook scripts too',

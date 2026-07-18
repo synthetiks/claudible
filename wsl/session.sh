@@ -117,8 +117,18 @@ HOOK_MODE="bash"
 if [ -n "$NODE_BIN" ] && [ -f "$APPDIR/hooks/statusline.js" ] && [ -f "$APPDIR/hooks/hook.js" ]; then
   # Stage the context hook too when present; it's additive, so its absence must NOT force the bash fallback
   # (an older bundle without it still gets telemetry via the two required hooks).
-  [ -f "$APPDIR/hooks/context-hook.js" ] && cp "$APPDIR/hooks/context-hook.js" "$SDIR/.claude/" 2>/dev/null || true
-  if cp "$APPDIR/hooks/statusline.js" "$APPDIR/hooks/hook.js" "$SDIR/.claude/" 2>/dev/null; then
+  # ATOMIC + skip-if-identical staging: $SDIR/.claude is WORKSPACE-shared, and every tab on this project
+  # respawns through here concurrently (new-tab, ws-delete repoint, post-sync reload all fan out). A plain
+  # `cp` truncates-then-fills, so a sibling's Claude launching mid-copy could read a HALF-WRITTEN hook and
+  # silently disable telemetry for that whole session (physically observed: a 0-byte hooks.ndjson generation).
+  # tmp+mv on the same fs is atomic; identical content skips the write entirely (the common case).
+  stage_hook() {   # $1=src  $2=dest — atomic install, no-op when already identical
+    [ -f "$1" ] || return 1
+    cmp -s "$1" "$2" 2>/dev/null && return 0
+    cp "$1" "$2.cltmp.$$" 2>/dev/null && mv -f "$2.cltmp.$$" "$2" 2>/dev/null
+  }
+  stage_hook "$APPDIR/hooks/context-hook.js" "$SDIR/.claude/context-hook.js" || true
+  if stage_hook "$APPDIR/hooks/statusline.js" "$SDIR/.claude/statusline.js" && stage_hook "$APPDIR/hooks/hook.js" "$SDIR/.claude/hook.js"; then
     HOOK_MODE="node"
   else
     echo "[claudible] WARN: couldn't stage the node hooks into $SDIR/.claude — using bash hooks." >&2
@@ -204,7 +214,9 @@ else
   SESSIONSTART_LINE=""
 fi
 # settings.json is one of the names the ownership snapshot above already backed up. This overwrite is safe.
-cat > "$SDIR/.claude/settings.json" <<EOF
+# Written via tmp+mv (atomic): concurrent tabs on this workspace all rewrite this file at spawn, and a
+# sibling's Claude parsing it mid-truncate would silently drop ALL hooks/statusLine for that launch.
+cat > "$SDIR/.claude/settings.json.cltmp.$$" <<EOF
 {
   "autoCompactEnabled": false,
   "env": { "DISABLE_AUTO_COMPACT": "1" },
@@ -218,6 +230,7 @@ cat > "$SDIR/.claude/settings.json" <<EOF
   }
 }
 EOF
+mv -f "$SDIR/.claude/settings.json.cltmp.$$" "$SDIR/.claude/settings.json" 2>/dev/null || true   # atomic swap — see comment above
 
 cd "$SDIR" || { echo "[claudible] FATAL: could not enter the session dir ($SDIR) — refusing to launch Claude (with --dangerously-skip-permissions) in the wrong directory." >&2; exit 1; }
 # Run Claude DIRECTLY — no tmux. tmux uses the terminal's ALTERNATE screen, which has no

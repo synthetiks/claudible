@@ -119,11 +119,12 @@ ok('main.js: respawnPty detects the pinned tab leaving its session',
   /const onPinned = sharing && !!sharedTabId && tabId === sharedTabId;/.test(MAIN)
   && /const movesShared = !trusted && onPinned && !!rec && rec\.session !== \(session \|\| ''\);/.test(MAIN));
 // The guard must NOT fire for the share's own machinery: a guest switching to another GRANTED workspace, and a
-// Claude re-login restart, both legitimately pass session:'' on the pinned tab.
-ok('main.js: a guest switching granted workspaces is a trusted reroute (never freezes the room)',
-  /respawnPty\(target, '', \{ trustedReroute: true \}\)/.test(MAIN));
-ok('main.js: restarting Claude for re-login is a trusted reroute',
-  /respawnPty\(fgTabId, '', \{ trustedReroute: true \}\)/.test(MAIN));
+// Claude re-login restart, both legitimately pass session:'' on the pinned tab. Both ALSO carry guardBusy now:
+// trusted-reroute exempts them from the moves-shared freeze, never from the mid-turn kill guard.
+ok('main.js: a guest switching granted workspaces is a trusted reroute (never freezes the room) AND busy-guarded (never kills a mid-turn Claude)',
+  /respawnPty\(target, '', \{ trustedReroute: true, guardBusy: true \}\)/.test(MAIN));
+ok('main.js: restarting Claude for re-login is a trusted reroute AND busy-guarded',
+  /respawnPty\(fgTabId, '', \{ trustedReroute: true, guardBusy: true \}\)/.test(MAIN));
 ok('main.js: the guard only engages while a share is actually running',
   /const sharing = \(\(\) => \{ try \{ return !!share\.status\(\)\.running; \} catch \{ return false; \} \}\)\(\);/.test(MAIN));
 // The one allowed reroute of the pinned tab (its workspace was deleted) freezes the mirror and keeps it frozen.
@@ -343,9 +344,10 @@ ok('app.js: createWorkspace repaints NOTHING when superseded',
 ok('app.js: switchWorkspace rolls the tab record back when main keeps the tab',
   /const prev = \{ wsId: t\.wsId, session: t\.session, label: t\.label, curSessionLabel: t\.curSessionLabel, pendingTitle: t\.pendingTitle \};/.test(APP)
   && /if \(kept\) \{[\s\S]{0,400}?Object\.assign\(t, prev\);[\s\S]{0,200}?newBlankTab\(id, sess \|\| 'new'\)/.test(APP));
-ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty',
-  /if \(!failed\) \{ t\.term\.reset\(\); resetStats\(t\); \}/.test(APP)
-  && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('if (!failed) { t.term.reset(); resetStats(t); }'));
+ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty (a failed switch rolls the GLOBALS back too)',
+  /if \(failed\) \{ rollBack\(\);[\s\S]{0,120}?return; \}/.test(APP)
+  && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('t.term.reset(); resetStats(t);')
+  && /const rollBack = \(\) => \{[\s\S]{0,400}?activeWsId = prev\.wsId;/.test(APP));
 ok('main.js: resolveDiverged refuses to overwrite a LIVE session\'s transcript',
   /if \(sid === liveSessionId\(\)\) return resolve\(\{ ok: false, error: 'live' \}\);/.test(MAIN));
 ok('main.js: …and a mid-turn one', /rec\.session === sid && rec\.busy\) return resolve\(\{ ok: false, error: 'busy' \}\)/.test(MAIN));

@@ -125,15 +125,25 @@ const share = createShareServer({
     if (!ws) return;                                                   // only granted workspaces are switchable
     openGen++;                                                         // supersede any in-flight workspace:open clone
     const target = mirrorTabId();
-    const rec = ptys.get(target); if (rec) rec.ws = ws;                // re-point the SHARED tab at that ws (the guest is switching the live session, not the host's focus)
+    const rec = ptys.get(target);
+    const prevWs = rec && rec.ws;
+    if (rec) rec.ws = ws;                                              // re-point the SHARED tab at that ws (the guest is switching the live session, not the host's focus) — respawnPty reads rec.ws, so set before; reverted below on refusal
+    const hostIsHere = target === fgTabId;
+    // guardBusy: a GUEST's library click must never kill a mid-turn Claude — this was the one respawn path
+    // left without the busy guard every host-driven path already has. On refusal: revert the optimistic
+    // re-point (the pty never moved), touch no globals, and re-broadcast the true share state so the guest's
+    // library selection snaps back instead of showing a switch that never happened.
+    if (!respawnPty(target, '', { trustedReroute: true, guardBusy: true })) {
+      if (rec) rec.ws = prevWs;
+      try { syncShare(); } catch {}
+      return;
+    }
     // Touch the GLOBAL active workspace only when the shared tab IS the host's foreground tab. When the host is
     // working in a private tab, a guest's click used to clobber activeWorkspace/registry.activeId anyway —
     // silently re-scoping the host's sidebar session list (and everything else keyed to the active ws) to a
     // workspace the host never switched to. setForegroundTab reconciles the globals whenever the host actually
     // returns to the shared tab.
-    const hostIsHere = target === fgTabId;
     if (hostIsHere) { activeWorkspace = ws; registry.activeId = id; saveRegistry(); }
-    respawnPty(target, '', { trustedReroute: true });                   // resume the most-recent conversation in that cwd (guest-driven, pre-approved: `w.shared` — never a privacy pause)
     try { win && win.webContents.send('workspace:active-changed', { id, tabId: target, global: hostIsHere }); } catch {}   // tabId = the tab whose pty was ACTUALLY re-pointed (the pinned shared tab); global:false = reset that tab's record but leave the host's sidebar scope alone
   },
   // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
@@ -223,14 +233,15 @@ function tabRuntimeId(tabId) { return String(tabId || '').replace(/[^A-Za-z0-9-]
 // a killed generation (WSL-side processes survive ConPTY kills — see killtree.sh) can then never bleed its
 // status.json/hooks.ndjson into the generation currently on screen; the old dir simply stops being read.
 let _spawnGen = 0;
-const _bootNonce = Date.now().toString(36).slice(-5);   // gen ids must be unique ACROSS runs too — a leftover main-g1 from the last launch must never collide with this launch's first gen (the startup sweep's delayed rm would hit the live dir)
+const _bootNonce = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);   // gen ids must be unique ACROSS runs too — a leftover main-g1 from the last launch must never collide with this launch's first gen (the startup sweep's delayed rm would hit the live dir). Full timestamp + 4 random chars: the old `.slice(-5)` wrapped every ~16.8h, so two launches COULD mint the same nonce
 function nextRuntimeId(tabId) { return tabRuntimeId(tabId) + '-g' + _bootNonce + '-' + (++_spawnGen); }
 // Reap a killed generation's WSL/posix-side process tree (bash session.sh + claude + children), then drop its
 // runtime dir. The win runner spawns claude.exe directly under ConPTY — its kill already reaches everything.
 function _killSessionTree(runtimeId) {
   if (!runtimeId || runner.id === 'win') return;
   try {
-    runner.runScript('killtree.sh', `'${String(runtimeId)}'`, { timeout: 8000 }).then(() => {
+    // detach: this also runs on the quit path, where the reap must survive app.quit() (enforced now, not assumed)
+    runner.runScript('killtree.sh', `'${String(runtimeId)}'`, { timeout: 8000, detach: true }).then(() => {
       setTimeout(() => { try { fs.rmSync(path.join(RT, 'tabs', String(runtimeId)), { recursive: true, force: true }); } catch {} }, 250);
     });
   } catch {}
@@ -321,10 +332,14 @@ function refreshWindowsPath() {
 
 function voiceProvisioned() {
   const v = process.env.CLAUDIBLE_VOICE || path.join(app.getPath('home'), '.claudible', 'voice');   // same root setup-win.ps1 writes to (else re-provisions forever)
+  // Models are size-checked, not merely present: an interrupted download leaves a truncated file that a bare
+  // existsSync reports 'provisioned' FOREVER — voice silently broken with no retry and no signal. 100MB floor
+  // clears both real models (whisper ~140MB, kokoro ~327MB) with margin; setup-win.ps1 wipes+retries the rest.
+  const bigEnough = (p) => { try { return fs.statSync(p).size > 100 * 1024 * 1024; } catch { return false; } };
   try {
     return fs.existsSync(path.join(v, 'whisper', 'Release', 'whisper-server.exe'))
-        && fs.existsSync(path.join(v, 'whisper', 'models', 'ggml-base.bin'))
-        && fs.existsSync(path.join(v, 'kokoro', 'api', 'src', 'models', 'v1_0', 'kokoro-v1_0.pth'));
+        && bigEnough(path.join(v, 'whisper', 'models', 'ggml-base.bin'))
+        && bigEnough(path.join(v, 'kokoro', 'api', 'src', 'models', 'v1_0', 'kokoro-v1_0.pth'));
   } catch { return false; }
 }
 let provisioning = false;
@@ -338,20 +353,34 @@ function ensureVoiceProvisioned() {
   // cleanly on the next launch, once Git is present. No behavior change on an already-set-up machine.
   if (!APPDIR_WSL) return false;
   if (voiceProvisioned()) return false;
-  provisioning = true;
   const home = app.getPath('home');
+  // ON-DISK lock, not just the in-memory flag: an app crash/force-kill orphans a still-running setup-win.ps1
+  // (Windows children outlive their parent), and the relaunch's fresh `provisioning=false` used to spawn a
+  // SECOND instance racing the survivor's Remove-Item -Recurse resets over the same voice tree. The lock file
+  // carries the child PID; a live PID defers to the survivor, a dead one is a stale lock we take over.
+  const lockFile = path.join(home, '.claudible', 'voice-provision.lock');
+  try {
+    const pid = parseInt(fs.readFileSync(lockFile, 'utf8').trim(), 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      try { process.kill(pid, 0); return false; }   // signal 0 = liveness probe — an orphaned installer is still working; let it finish
+      catch {}                                       // dead PID → stale lock from a crash → fall through and take it
+    }
+  } catch {}
+  provisioning = true;
   const send = (phase, msg) => { try { win && win.webContents.send('provision', { dep: 'voice', phase, msg }); } catch {} };   // dep tag: the renderer routes voice events to the chip, per-dep events to the System-check rows
   let out = 'ignore'; try { fs.mkdirSync(path.join(home, '.claudible', 'logs'), { recursive: true }); out = fs.openSync(path.join(home, '.claudible', 'logs', 'provision.out'), 'a'); } catch {}
   const closeOut = () => { try { if (typeof out === 'number') fs.closeSync(out); } catch {} };   // release the log fd when the child ends
+  const dropLock = () => { try { fs.rmSync(lockFile, { force: true }); } catch {} };
   const script = path.join(__dirname, 'setup', 'setup-win.ps1');   // shipped in the bundle (asar:false, setup/** included)
   send('start', 'Setting up voice for the first time — downloading models (a few hundred MB, can take several minutes)…');
   let child;
   try {
     child = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true, stdio: ['ignore', out, out] });
   } catch (e) { provisioning = false; closeOut(); send('error', 'Voice setup could not start: ' + e.message); startVoiceServices(); return true; }
-  child.on('error', (e) => { provisioning = false; closeOut(); send('error', 'Voice setup could not start: ' + e.message); startVoiceServices(); });
+  try { fs.writeFileSync(lockFile, String(child.pid || '')); } catch {}
+  child.on('error', (e) => { provisioning = false; closeOut(); dropLock(); send('error', 'Voice setup could not start: ' + e.message); startVoiceServices(); });
   child.on('exit', (code) => {
-    provisioning = false; closeOut();
+    provisioning = false; closeOut(); dropLock();
     if (code === 0) {
       // setup-win.ps1 just installed uv — to %USERPROFILE%\.local\bin (astral script) OR winget's Links dir. This
       // process's PATH is stale, so surface both before starting the services that shell out to uv; if neither
@@ -376,6 +405,15 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   Menu.setApplicationMenu(null);   // no default menu → no View>Reload/Force-Reload that would re-init pollers & corrupt the hook stream
+  // Removing the menu also removed the stock Ctrl+Shift+I DevTools accelerator — leaving NO way to self-diagnose
+  // a "clicking X does nothing" report without being told to set CLAUDIBLE_DEBUG=1 and relaunch (nobody is).
+  // Re-provide exactly that one chord (the dangerous Reload accelerators stay gone).
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && String(input.key).toUpperCase() === 'I') {
+      e.preventDefault();
+      try { win.webContents.isDevToolsOpened() ? win.webContents.closeDevTools() : win.webContents.openDevTools({ mode: 'detach' }); } catch {}
+    }
+  });
   // Grant ONLY the microphone (needed for push-to-talk); deny every other permission request.
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media'));
   // Lock the window down: it only ever loads our local renderer. Block navigation away and any
@@ -734,13 +772,19 @@ function openLiveSocket(tabId) {
     if (isBinary) { try { win && win.webContents.send('live:data', { tabId, data }); } catch {} return; }   // raw terminal bytes
     let m = null; try { m = JSON.parse(data.toString()); } catch {} if (!m) return;
     switch (m.type) {
-      case 'hello':
+      case 'hello': {
         gotHello = true; r.pid = m.pid || null; r.readOnly = !!m.readOnly;
         r.hostCols = m.cols || r.hostCols || 120; r.hostRows = m.rows || r.hostRows || 32;
         if (m.resume) r.resume = m.resume;
         if (m.you) r.name = String(m.you).slice(0, 40);   // adopt the name the host assigned (may be disambiguated); so if a later IP-roam reconnect falls back to the link (no grace record to restore), our ?n= re-sends the unique name instead of the stale original
-        liveSend(tabId, 'live:hello', { readOnly: r.readOnly, cols: r.hostCols, rows: r.hostRows, host: m.host, you: m.you, pid: r.pid, paused: !!m.paused, voice: Array.isArray(m.voice) ? m.voice : [] });
+        // Surface host/guest BUILD SKEW instead of letting a protocol drift fail as an undiagnosable generic
+        // connect error (the known cross-machine join failure mode is exactly "both sides must be on the same
+        // build"). Untrusted remote string → sanitized + length-capped before it can reach the renderer.
+        const hv = String(m.appVersion || '').replace(/[^0-9A-Za-z.\-]/g, '').slice(0, 20);
+        const skew = (hv && hv !== app.getVersion()) ? { host: hv, mine: app.getVersion() } : null;
+        liveSend(tabId, 'live:hello', { readOnly: r.readOnly, cols: r.hostCols, rows: r.hostRows, host: m.host, you: m.you, pid: r.pid, paused: !!m.paused, voice: Array.isArray(m.voice) ? m.voice : [], skew });
         break;
+      }
       case 'status': liveSend(tabId, 'live:status', { status: m.status || {} }); break;
       case 'size': r.hostCols = m.cols || r.hostCols; r.hostRows = m.rows || r.hostRows; liveSend(tabId, 'live:size', { cols: r.hostCols, rows: r.hostRows }); break;
       case 'paused': liveSend(tabId, 'live:paused', { paused: !!m.paused }); break;
@@ -901,9 +945,9 @@ ipcMain.handle('share:approve', (e, arg) => ({ ok: share.decideApproval(arg && a
 // ---- Live sessions: advertise the session I'm hosting (presence on the shared branch) so a collaborator in
 // the same workspace can JOIN it natively — no link to paste. Joins run through liveConnect (a client
 // WebSocket mirrored into a cockpit tab), so it's "through Claudible", not an external browser. ----
-function runPresence(args, cb, ws) {
+function runPresence(args, cb, ws, opts) {
   if (!APPDIR_WSL) return cb && cb(null);
-  runner.runScript('sessions-sync.sh', `${args}`, { ws: ws || activeWorkspace, timeout: 45000 }).then(({ err, stdout }) => {   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
+  runner.runScript('sessions-sync.sh', `${args}`, { ws: ws || activeWorkspace, timeout: 45000, detach: !!(opts && opts.detach) }).then(({ err, stdout }) => {   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
@@ -991,11 +1035,13 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     resolve(r || { ok: false });
   }, ws);
 }));
-// Clear on the ws we advertised on, not the (possibly-switched) active one. runPresence hands back `null` both
-// when there's no backend and when the script failed — either way the presence entry is STILL on the branch and
-// peers keep seeing us as live until its TTL expires. That is not `ok:true`. (live:advertise, right above, already
-// defaults to false for the same callback.)
-ipcMain.handle('live:unadvertise', () => new Promise((resolve) => { const ws = advertisedWs; stopAdvertiseHeartbeat(); runPresence('presence-clear', (r) => resolve(r || { ok: false, error: 'exec' }), ws); }));
+// ONE presence-teardown implementation: this is the renderer's primary "End Session"/"Stop sharing" path
+// (endLiveNow → updateAdvertise), and it used to do its own SINGLE presence-clear attempt with no retry — so a
+// transient outage at exactly End-live left the stale entry on the branch and peers saw "live" until the 120s
+// TTL (the reported bug, fixed for share:stop by clearPresenceWithRetry but never for THIS handler). Route it
+// through stopAdvertising(): same capture-before-null ordering, same bounded retry, idempotent. The renderer
+// fire-and-forgets this call, so the immediate ok is honest ("teardown initiated, retrying until it lands").
+ipcMain.handle('live:unadvertise', () => { stopAdvertising(); return { ok: true }; });
 // Peers for the workspace the SIDEBAR shows, not whatever main is on — the same retrofit title:list already
 // carries. main's activeWorkspace follows tabForeground, which a joined LIVE tab deliberately skips, so the two
 // genuinely diverge. Reading ambient state here polled the wrong repo's presence branch, and one project's live
@@ -1020,8 +1066,16 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === wsId);
   if (!APPDIR_WSL || !ws) return resolve([]);
   runner.runScript('sessions.sh', '', { ws, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
-    if (err) return resolve([]);
-    try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+    // A fetch FAILURE must never masquerade as an empty list: the renderer painted `[]` over a populated
+    // sidebar with zero trace anywhere ("where are all my sessions"). Resolve a typed error instead — the
+    // renderer keeps the last good list on screen. sessions.sh itself emits {"error":...} when its node tool
+    // dies (its old `|| printf "[]"` fallback had the same masquerade baked in), which parses into the same shape.
+    const fail = (why) => { console.error('[sessions] list failed for ws', wsId, String(why).slice(0, 300)); resolve({ error: String(why).slice(0, 300) }); };
+    if (err) return fail((err && err.message) || 'exec');
+    let parsed;
+    try { parsed = JSON.parse(String(stdout).trim() || '[]'); } catch { return fail('unparseable output'); }
+    if (parsed && !Array.isArray(parsed) && parsed.error) return fail(parsed.error);
+    resolve(Array.isArray(parsed) ? parsed : []);
   });
 }));
 // Re-point an existing tab at 'new' | <session-id>. guardBusy: main refuses to kill a mid-turn Claude (ok:false → the
@@ -1180,7 +1234,13 @@ function runSync(ws, op, opts) {
   return new Promise((resolve) => {
     const o = ['init', 'pull', 'push', 'sync', 'status'].includes(op) ? op : 'status';
     if (!APPDIR_WSL || !ws || ws.kind !== 'repo') return resolve({ ok: false, error: 'not a repo workspace' });
-    const live = (opts && opts.live && /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(opts.live)) ? `CLAUDIBLE_LIVE_SESSION='${opts.live}' ` : '';
+    // The HOSTED (advertised) session is always excluded, no matter which caller got us here: the background
+    // poll and every boot/toggle sync pass no `live` at all, so a hosted-but-idle-between-turns session could
+    // be exported mid-share — and import could compare our own earlier snapshot against its still-changing
+    // local file (falsely foreign/diverged-marking the session being live-hosted RIGHT NOW). main knows exactly
+    // which session it hosts (advertisedSid); thread it centrally instead of trusting each caller to remember.
+    const liveRaw = (opts && opts.live) || ((advertisedSid && advertisedWs && ws.id === advertisedWs.id) ? advertisedSid : '');
+    const live = (liveRaw && /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(liveRaw)) ? `CLAUDIBLE_LIVE_SESSION='${liveRaw}' ` : '';
     runner.runScript('sessions-sync.sh', `'${o}'`, { ws, extraEnv: live, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] sessions-sync', o, err.message); return resolve({ ok: false, error: 'sync could not run: ' + ((err && err.message) || err) }); }
         const raw = String(stdout).trim();
@@ -1221,9 +1281,13 @@ function liveIdNow() {
   if (!APPDIR_WSL) return Promise.resolve('');
   return new Promise((resolve) => {
     runner.runScript('sessions.sh', '', { ws: activeWorkspace, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
-      if (err) return resolve('');
-      let a = []; try { a = JSON.parse(String(stdout).trim() || '[]'); } catch { return resolve(''); }
-      resolve((Array.isArray(a) && a[0] && a[0].id) || '');
+      // FAIL CLOSED: '' means "nothing to skip", so resolving it on a script failure silently disabled the
+      // whole mid-turn guard — a half-written transcript could be pushed. null = "could not determine";
+      // the caller defers the manual sync instead of guessing.
+      if (err) return resolve(null);
+      let a = []; try { a = JSON.parse(String(stdout).trim() || '[]'); } catch { return resolve(null); }
+      if (!Array.isArray(a)) return resolve(null);            // sessions.sh's typed {"error":...} shape — the tool died
+      resolve((a[0] && a[0].id) || '');
     });
   });
 }
@@ -1260,8 +1324,14 @@ function startPoll() {
 // workspace after each turn. tabId comes from which per-tab hooks file the line was read from.
 function handleHook(tabId, line) {
   let ev = ''; try { ev = JSON.parse(line).hook_event_name || ''; } catch {}
-  if (ev === 'UserPromptSubmit') setGenBusy(tabId, true);
-  else if (ev === 'Stop') { setGenBusy(tabId, false); const r = ptys.get(tabId); schedulePush(r && r.ws); _snapshotOnStop(tabId); }
+  if (ev === 'UserPromptSubmit') {
+    setGenBusy(tabId, true);
+    // Re-arm the agent-token settle latch off the ACTUAL busy edge: a turn faster than pollAgentTokens' 8s
+    // cadence used to fall entirely between two ticks — no tick ever saw busy=true, agentTokSettled stayed
+    // true from before the turn, and the "one more poll after idle" never ran → that turn's subagent tokens
+    // were silently dropped from the meter forever.
+    const r = ptys.get(tabId); if (r) r.agentTokSettled = false;
+  } else if (ev === 'Stop') { setGenBusy(tabId, false); const r = ptys.get(tabId); schedulePush(r && r.ws); _snapshotOnStop(tabId); }
 }
 // Clone an existing (invited) repo workspace into ~/.claudible/repos/<slug> if it isn't local yet.
 function ensureClone(ws) {
@@ -1425,6 +1495,7 @@ ipcMain.handle('session:syncNow', async (e, id) => {   // the manual "sync now" 
   if (!ws.syncSessions || ws.needsClone) return { ok: false, error: 'sync is off for this workspace' };
   // only the ACTIVE workspace has a live transcript to skip; for any other, there's nothing to exclude
   const live = (activeWorkspace && ws.id === activeWorkspace.id) ? await liveIdNow() : '';
+  if (live === null) return { ok: false, error: 'busy' };   // couldn't determine which transcript is mid-write → defer rather than risk pushing a torn file (fail closed; retry lands a moment later)
   return doSync(ws, 'sync', { live });
 });
 
@@ -1456,6 +1527,13 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   if (err) return { ok: false, error: 'upgrade failed to run' };
   let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
   if (!r.ok) return { ok: false, error: r.error || 'could not create the repo' };
+  // The script can run for MINUTES — re-check the workspace survived (a concurrent workspace:delete removes it
+  // from the registry; mutating the stale `ws` object then "succeeds" into a saveRegistry that resurrects
+  // nothing, leaving an orphaned private GitHub repo + a phantom invite discovery would re-offer). If it's
+  // gone, say so honestly — the repo WAS created and only the user can decide to delete it on GitHub.
+  if (!registry.workspaces.includes(ws)) {
+    return { ok: false, error: `the project was deleted while the upgrade ran — the GitHub repo ${r.owner ? r.owner + '/' : ''}${slug} was already created; delete it on GitHub if you don’t want it` };
+  }
   ws.kind = 'repo'; ws.owner = r.owner; ws.repoUrl = r.repoUrl; if (r.path) ws.path = r.path; ws.syncSessions = true; saveRegistry();
   // set up the sessions-sync branch + first push in the background (don't block the click); failure leaves the
   // repo created with sync flagged — the next sync/relaunch retries (mirrors syncSetEnabled).
@@ -1696,6 +1774,12 @@ ipcMain.handle('workspace:rename', async (e, payload) => {
           res(r);
         });
       });
+      // Same stale-continuation guard as workspace:upgrade: the script await gave a concurrent
+      // workspace:delete time to remove this ws — mutating the dead object would silently no-op while the
+      // GitHub repo really did get renamed. Report that honestly instead.
+      if (!registry.workspaces.includes(ws)) {
+        return { ok: false, error: (rr && rr.ok) ? `the project was deleted while renaming — the GitHub repo is now ${owner}/${(rr.repoName || newName)}` : 'the project was deleted while renaming' };
+      }
       if (rr && rr.ok) {
         ws.repoName = rr.repoName || newName;
         ws.repoUrl = rr.repoUrl || ('https://github.com/' + owner + '/' + (rr.repoName || newName));
@@ -1921,7 +2005,15 @@ function pollStatus() {
         const raw = fs.readFileSync(path.join(RT, 'tabs', rec.runtimeId, 'status.json'), 'utf8');
         if (raw === lastStatusByTab.get(tabId)) continue; lastStatusByTab.set(tabId, raw);
         const d = JSON.parse(raw); const c = d.context_window || {}; const cost = d.cost || {};
-        if (d.session_id) rec.sessionId = d.session_id;   // the live session id — used to locate this tab's workflow/swarm agents
+        if (d.session_id) {
+          rec.sessionId = d.session_id;   // the live session id — used to locate this tab's workflow/swarm agents
+          // Reconcile rec.session too (write-once at spawn — stuck at ''/new for a born-new tab's whole life,
+          // while the RENDERER's copy reconciles every status event and stamps history entries with the real
+          // id). _snapshotOnStop matches entries by rec.session, so without this a new-session tab NEVER
+          // matched its own entry and its turn stats landed on whichever entry was newest (cross-tab
+          // misattribution). Also makes respawnPty's moves-shared compare truthful.
+          if (rec.session !== d.session_id) rec.session = d.session_id;
+        }
         const cu = c.current_usage || null;   // last turn's usage (input/output here are NEW, non-cache)
         win && win.webContents.send('status', {
           tabId,
@@ -2164,8 +2256,11 @@ ipcMain.handle('onboard:install-claude', async () => {
 // The renderer hides the wizard to reveal the terminal, then polls onboard:status until signedIn flips true.
 ipcMain.handle('onboard:claude-login', async () => {
   try {
-    if (fgTabId && ptys.has(fgTabId)) respawnPty(fgTabId, '', { trustedReroute: true });   // restart Claude in the live tab → login surfaces (same conversation; never a privacy pause)
-    else spawnPty('main', 120, 32, activeWorkspace, '');           // no tab yet → spawn one
+    if (fgTabId && ptys.has(fgTabId)) {
+      // guardBusy: the sign-in button must not kill a mid-turn Claude on the foreground tab (usually the tab
+      // needing re-auth is already dead, but "usually" isn't a guard). Refusal → tell the user instead.
+      if (!respawnPty(fgTabId, '', { trustedReroute: true, guardBusy: true })) return { ok: false, error: 'that tab is mid-turn — let it finish (or open a new session), then sign in' };
+    } else spawnPty('main', 120, 32, activeWorkspace, '');           // no tab yet → spawn one
     return { ok: true };
   } catch (e) { return { ok: false, error: (e && e.message) || 'could not start Claude' }; }
 });
@@ -2577,7 +2672,39 @@ function reapDeadGenerations() {
     }
   } catch {}
 }
-app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); });
+// Update check — the smallest honest fix for "an installed build can NEVER receive a fix today" (no
+// auto-update exists; a distributed Setup exe sits stale until the user happens to re-download). Packaged
+// builds ask GitHub for the latest release ONCE per launch, off the critical path, and merely TELL the user;
+// nothing downloads or installs itself. Fails silent by design: offline, rate-limited, or a private repo
+// (pre-public beta) all just skip the notice.
+function checkForUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    const https = require('https');
+    const req = https.get({
+      host: 'api.github.com', path: '/repos/thecrazydev1/claudible/releases/latest',
+      headers: { 'User-Agent': 'claudible-update-check', Accept: 'application/vnd.github+json' }, timeout: 8000,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return; }
+      let body = '';
+      res.on('data', (d) => { body += d; if (body.length > 262144) req.destroy(); });
+      res.on('end', () => {
+        try {
+          const latest = String((JSON.parse(body).tag_name || '')).replace(/^v/, '');
+          const mine = app.getVersion();
+          if (!/^\d+\.\d+\.\d+$/.test(latest) || latest === mine) return;
+          // Numeric semver compare — notify only when latest is genuinely NEWER (a dev build ahead of the tag must not nag).
+          const nl = latest.split('.').map(Number), nm = mine.split('.').map(Number);
+          const newer = nl[0] !== nm[0] ? nl[0] > nm[0] : nl[1] !== nm[1] ? nl[1] > nm[1] : nl[2] > nm[2];
+          if (newer) winSend('update:available', { latest, mine });
+        } catch {}
+      });
+    });
+    req.on('error', () => {});
+    req.on('timeout', () => { try { req.destroy(); } catch {} });
+  } catch {}
+}
+app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 15000); });
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
   try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the two self-rescheduling ones
