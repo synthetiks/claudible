@@ -29,6 +29,9 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R24/R25 — sync hygiene: cross-process temp files can't clobber each other, and a failed push no longer
+  hides what the pull already brought in** (open tabs refresh from a half-successful sync instead of showing
+  stale turns until the network recovers).
 - **R35/R36/R37/R38/R41 — five more quiet or cryptic failures now speak.** A failed skill toggle, removing a
   guest, an unmapped revert error, a new session's name failing to share, and a folder that couldn't be
   trashed — each either said nothing or showed an internal code. All five now report plainly.

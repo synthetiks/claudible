@@ -71,9 +71,9 @@ clear_diverged_run() { case " ${_divset:-} " in *" $1 "*) return 0 ;; esac; clea
 # collaborator file at $dest and resume it under --dangerously-skip-permissions (RCE).
 import_file() {   # $1=src  $2=dest  $3=id
   mark_foreign "$3" || return 1   # if we can't record it as foreign, DO NOT place it — never import an unflagged (would-be-trusted) transcript
-  cp -f "$1" "$2.cltmp" 2>/dev/null || return 1
-  touch -d '2000-01-01T00:00:00' "$2.cltmp" 2>/dev/null
-  mv -f "$2.cltmp" "$2" 2>/dev/null
+  cp -f "$1" "$2.cltmp.$$" 2>/dev/null || return 1   # PID-unique staging (R24): a resolve and a queued sync are separate PROCESSES — a shared name let one mv the other's half-written temp into place
+  touch -d '2000-01-01T00:00:00' "$2.cltmp.$$" 2>/dev/null
+  mv -f "$2.cltmp.$$" "$2" 2>/dev/null
 }
 
 # Stub gate shared by import + export. The app's ONE stub definition is sessions-tool.js's msgs counter
@@ -292,8 +292,8 @@ import_sessions() {
         _dsz="${_dl#* }"
         case "$_dsz" in '' | *[!0-9]*) _dsz=0 ;; esac
         if [ "$(wc -c < "$f")" -le "$_dsz" ]; then continue; fi
-        { grep -v "^$id " "$PROJ/.claudible-deleted" 2>/dev/null || true; } > "$PROJ/.claudible-deleted.tmp"
-        mv -f "$PROJ/.claudible-deleted.tmp" "$PROJ/.claudible-deleted" 2>/dev/null
+        { grep -v "^$id " "$PROJ/.claudible-deleted" 2>/dev/null || true; } > "$PROJ/.claudible-deleted.tmp.$$"   # PID-unique (R24): delete-session.sh rewrites this same file from OUTSIDE the sync queue
+        mv -f "$PROJ/.claudible-deleted.tmp.$$" "$PROJ/.claudible-deleted" 2>/dev/null
       fi
     fi
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
@@ -402,8 +402,14 @@ case "$op" in
     pull_branch || fail "pull failed"
     import_sessions
     export_sessions
-    commit_and_push || fail "push failed (no access, or network)"
-    emit "{\"ok\":true,\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"pushed\":$PUSHED,\"ids\":$(ids_json)}"
+    # R25: the push failing must not swallow the IMPORT's results — main uses `ids` to reload any open tab
+    # whose transcript was just replaced; a bare fail() here left those tabs silently stale until the next
+    # successful pass ("out of sync doesn't refresh the open session", the flaky-network edition).
+    if commit_and_push; then
+      emit "{\"ok\":true,\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"pushed\":$PUSHED,\"ids\":$(ids_json)}"
+    else
+      emit "{\"ok\":false,\"error\":\"push failed (no access, or network)\",\"op\":\"sync\",\"imported\":$IMPORTED,\"updated\":$UPDATED,\"diverged\":$DIVERGED,\"ids\":$(ids_json)}"
+    fi
     ;;
   delete)
     # "Delete everywhere": drop a tombstone on the branch + remove the transcript from EVERY author dir, so

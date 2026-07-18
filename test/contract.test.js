@@ -851,5 +851,19 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /r\.error && \/\\s\/\.test\(r\.error\) \? ': ' \+ r\.error : ''/.test(MAIN) ? [] : ['sentence-gate missing']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 32. R24/R25 — sync-file hygiene. Every rewrite of a shared marker/staging file uses a PID-unique temp
+//     (delete-session.sh runs OUTSIDE the R10 queue, so fixed names still raced), and a sync whose PUSH fails
+//     still reports the ids its IMPORT changed — main reloads open tabs from that list, and a bare fail()
+//     left them silently stale until the next successful pass.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SYNC = read('wsl/sessions-sync.sh'), DEL = read('wsl/delete-session.sh');
+  none('a shared tmp filename lost its PID suffix (R24 — cross-process rewrites race again)',
+    /cltmp\.\$\$/.test(SYNC) && /claudible-deleted\.tmp\.\$\$/.test(SYNC) && /\$dl\.tmp\.\$\$/.test(DEL) ? [] : ['PID-unique tmps required in import_file, the sync-side marker rewrite, and delete-session.sh']);
+  none('a failed push swallows the import results again (R25 — open tabs stay stale)',
+    /"ok\\":false,\\"error\\":\\"push failed[^\n]*\\"ids\\":\$\(ids_json\)/.test(SYNC) ? [] : ['the sync op must emit ids on push failure']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
