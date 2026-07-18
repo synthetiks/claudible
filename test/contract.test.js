@@ -699,5 +699,19 @@ none('renderer: orphanTab is never rendered',
     /owner="\$\{3:-\}"/.test(INV) && /\[ "\$me" != "\$owner" \]/.test(INV) && /repos\/\$owner\/\$slug\/collaborators/.test(INV) ? [] : ['script must take owner as $3, refuse a non-owner, and PUT against $owner']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 21. R9 — a stale git lock self-heals. An interrupted git write (timeout-killed wrapper, sleep, force-quit)
+//     left index.lock behind and NOTHING cleared it: every later sync write failed silently, forever. The
+//     clear must be age-BOUNDED (>60s) so a genuinely-running git is never stepped on, and must run before
+//     the first write of every invocation (ensure_worktree's healthy path).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SYNC = read('wsl/sessions-sync.sh');
+  none('sessions-sync.sh lost its stale-lock self-heal (one interrupted write wedges sync forever)',
+    /clear_stale_locks\(\) \{/.test(SYNC) && /index\.lock/.test(SYNC) && /-gt 60 \]/.test(SYNC) ? [] : ['clear_stale_locks with a 60s bound is required']);
+  none('the stale-lock heal is not wired into ensure_worktree’s healthy path',
+    /rev-parse --is-inside-work-tree >\/dev\/null 2>&1; then\n\s*clear_stale_locks/.test(SYNC) ? [] : ['ensure_worktree must call clear_stale_locks before the first write']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -114,8 +114,24 @@ case "$author" in '' | *[!A-Za-z0-9-]*) fail "gh is not authenticated — run: g
 gitwt() { GIT_EDITOR=true git -C "$WT" -c user.name="$author" -c user.email="$author@users.noreply.github.com" "$@"; }
 
 # --- ensure the sessions worktree exists and tracks origin/claudible/sessions -----------------------------
+# R9: an interrupted git write — the runner SIGTERM-kills the wsl.exe wrapper on timeout (which never reaches
+# this Linux-side git), a sleep/hibernate, a force-quit — leaves index.lock behind, and NOTHING ever cleared it:
+# every later add/commit/merge failed silently (all git chatter is muted) into generic "push/pull failed",
+# forever, and no in-app action could fix it. A lock is only legitimate while a git process holds it; every git
+# call here is short-lived, so a lock older than 60s is a corpse. Bounded age keeps us off a genuinely-running
+# git's toes. HEAD.lock gets the same treatment (branch-update interruptions).
+clear_stale_locks() {
+  local gd lk
+  gd="$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+  [ -n "$gd" ] || return 0
+  for lk in "$gd/index.lock" "$gd/HEAD.lock"; do
+    [ -f "$lk" ] && [ "$(mtime_age "$lk")" -gt 60 ] && rm -f "$lk" 2>/dev/null
+  done
+  return 0
+}
 ensure_worktree() {
   if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    clear_stale_locks   # R9: heal a wedged worktree BEFORE the first write of this invocation
     # Heal a partially-checked-out worktree so a later `add` can't stage missing files as deletions.
     [ -n "$(git -C "$WT" ls-files -d 2>/dev/null)" ] && git -C "$WT" checkout-index -f -a >/dev/null 2>&1
     return 0

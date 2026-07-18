@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R9 — one interrupted sync can no longer wedge syncing forever.** A git write cut off mid-flight (timeout,
+  sleep, force-quit) left a lock file that nothing ever cleared — every later sync failed silently until
+  someone hand-deleted a file they'd never heard of. Locks older than a minute now self-heal at the start of
+  every sync; a genuinely running git is never touched.
 - **R12 — invites always target the repo's real owner.** A collaborator clicking "Invite collaborator…" used
   to fire the invite at their OWN GitHub namespace (whoever was signed in), silently hitting a same-named repo
   of theirs or reporting success on a 404. The owner is now explicit, and a non-owner gets the honest answer:
