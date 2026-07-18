@@ -76,6 +76,19 @@ import_file() {   # $1=src  $2=dest  $3=id
   mv -f "$2.cltmp" "$2" 2>/dev/null
 }
 
+# Stub gate shared by import + export. The app's ONE stub definition is sessions-tool.js's msgs counter
+# (the picker hides msgs===0); prompt-scan.js applies exactly that rule in ONE batch node call per pass.
+# If node is unavailable the old coarse grep gate still stands — a weaker filter beats losing sync.
+scan_real_prompts() { node "$HERE/prompt-scan.js" 2>/dev/null; }        # stdin: paths → '#ok' + qualifying paths
+has_real_prompt() {   # $1=file  $2=scan output ('' → node failed → legacy grep fallback)
+  if [ -n "$2" ]; then printf '%s\n' "$2" | grep -qxF -- "$1"
+  else grep -aq '"type":"user"' "$1" 2>/dev/null; fi
+}
+mtime_age() {   # seconds since $1's mtime (0 floor for clock skew); GNU stat -c, BSD/macOS stat -f fallback
+  local _m; _m="$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0)"
+  echo $(( $(date +%s) - _m ))
+}
+
 WT="$HOME/.claudible/sessions-sync/$WS_SLUG"         # the isolated sessions worktree
 BR="claudible/sessions"                              # the orphan branch sessions ride on
 
@@ -211,11 +224,17 @@ import_sessions() {
   [ -d "$WT/sessions" ] || return 0
   # _divset seeds the run-scoped guard read by clear_diverged_run: an id added here (a fork flagged, or a kept-local
   # ack) can no longer be cleared by a later author dir THIS pass, so a fork is flagged no matter the glob order.
-  local f id dest dsz _divset=" " _dl _dsz
+  local f id dest dsz _divset=" " _dl _dsz _rp _own
+  _rp="$(for f in "$WT"/sessions/*/*.jsonl; do [ -e "$f" ] && printf '%s\n' "$f"; done | scan_real_prompts)"
+  case "$_rp" in "#ok"*) ;; *) _rp="" ;; esac                       # no '#ok' header → node failed → per-file grep fallback
   for f in "$WT"/sessions/*/*.jsonl; do
     [ -e "$f" ] || continue
     id="$(basename "$f" .jsonl)"
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac  # reject leading/trailing-dash ids (argv tricks)
+    # Import is now symmetric with export's LIVE skip: the currently-live session's LOCAL file is mid-write
+    # truth — comparing it against our own earlier branch snapshot falsely read as "forked"/"remote grew"
+    # and could foreign-mark or overwrite a session that is being hosted RIGHT NOW.
+    [ "$id" = "$LIVE" ] && continue
     tombstoned "$id" && continue                                    # deleted everywhere → never re-import
     # LOCAL delete marker (written by delete-session.sh): this machine deliberately trashed the transcript, so
     # the branch's identical copy must NOT resurrect it on the next pull. Only a remote copy that has GROWN
@@ -231,8 +250,13 @@ import_sessions() {
       fi
     fi
     head -c 1 "$f" 2>/dev/null | grep -q '{' || continue            # must look like line-delimited JSON
-    grep -aq '"type":"user"' "$f" 2>/dev/null || continue            # never import a promptless stub (defense against collaborators on builds that still export them)
+    has_real_prompt "$f" "$_rp" || continue                          # never import a promptless stub (same definition the app's picker uses)
+    case "$f" in "$WT/sessions/$author/"*) _own=1 ;; *) _own=0 ;; esac   # our own author dir = our own prior exports (NOT a trust signal — see FSET comment — but a valid "who wins a diff" signal)
     dest="$PROJ/$id.jsonl"
+    # Never touch a local transcript that is being written RIGHT NOW (a busy tab the caller didn't name as
+    # LIVE — e.g. the background poll, which threads no live id). Same 2s torn-write guard export uses;
+    # the next pass picks it up once the writer goes quiet.
+    if [ -e "$dest" ] && [ "$(mtime_age "$dest")" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ]; then continue; fi
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
       import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }; continue
     fi
@@ -242,6 +266,8 @@ import_sessions() {
       import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
       clear_diverged_run "$id"                                       # local is ahead of remote → our push handles it
+    elif [ "$_own" -eq 1 ]; then
+      clear_diverged_run "$id"                                       # our OWN prior export truly differing (compaction/rewrite) is not a competing copy: local wins, the next push overwrites the branch snapshot — flagging it "diverged" was the false-fork nag
     elif is_acked "$id"; then
       _divset="$_divset$id "                                        # user chose KEEP-LOCAL: honor it AND protect the ack from a same-run clear by another author dir (don't re-nag)
     else
@@ -257,7 +283,9 @@ import_sessions() {
 export_sessions() {
   mkdir -p "$WT/sessions/$author" 2>/dev/null
   PUSHED=0
-  local f id dest m age
+  local f id dest m age _rp
+  _rp="$(for f in "$PROJ"/*.jsonl; do [ -e "$f" ] && printf '%s\n' "$f"; done | scan_real_prompts)"
+  case "$_rp" in "#ok"*) ;; *) _rp="" ;; esac                       # no '#ok' header → node failed → per-file grep fallback
   for f in "$PROJ"/*.jsonl; do
     [ -e "$f" ] || continue
     id="$(basename "$f" .jsonl)"
@@ -267,7 +295,7 @@ export_sessions() {
     grep -qxF -- "$id" "$FSET" 2>/dev/null && continue              # imported (foreign) → never republish under our name
     m="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"; age=$(( $(date +%s) - m ))   # torn-write guard: skip a file still (GNU stat -c, BSD/macOS stat -f fallback)
     [ "$age" -ge 0 ] && [ "$age" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ] && continue   # being written (~2s); ignore future mtimes (clock skew)
-    grep -aq '"type":"user"' "$f" 2>/dev/null || continue            # promptless stub (fork artifact / killed boot) — noise that must never spread to collaborators; it exports once it gains a real prompt
+    has_real_prompt "$f" "$_rp" || continue                          # promptless stub (fork artifact / killed boot) — noise that must never spread to collaborators; it exports once it gains a real prompt (same definition the app's picker uses)
     dest="$WT/sessions/$author/$id.jsonl"
     if ! cmp -s "$f" "$dest" 2>/dev/null; then cp -f "$f" "$dest" 2>/dev/null && PUSHED=$((PUSHED+1)); fi
   done

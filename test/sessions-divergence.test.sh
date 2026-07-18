@@ -12,14 +12,15 @@ pass=0; fail=0
 ok() { if [ "$1" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL $3: expected [$2] got [$1]"; fi; }
 
 # Byte-exact fixture contents (each line is valid JSON so the import's head-c1='{' sanity check passes;
-# the first line carries "type":"user" like every real transcript, so the promptless-stub import guard passes):
-LOCAL_C='{"type":"user","m":"a"}
+# the first line is a REAL prompt — type:"user" with non-empty message.content text — because the stub gate
+# now applies sessions-tool.js's actual msgs rule (via prompt-scan.js), not a bare '"type":"user"' grep:
+LOCAL_C='{"type":"user","message":{"content":"a"}}
 {"m":"b"}
 '                                            # the machine's local copy (2 turns)
-FORK_C='{"type":"user","m":"a"}
+FORK_C='{"type":"user","message":{"content":"a"}}
 {"m":"z"}
 '                                            # a TRUE fork: same first turn, diverged second (same size, neither a prefix)
-FF_C='{"type":"user","m":"a"}
+FF_C='{"type":"user","message":{"content":"a"}}
 {"m":"b"}
 {"m":"c"}
 '                                            # a clean fast-forward: local + one more turn
@@ -34,6 +35,7 @@ run_case() (
   printf '#!/usr/bin/env bash\necho tester\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
   export PATH="$TMP/bin:$PATH"
   export CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws CLAUDIBLE_PROJ=testproj
+  export CLAUDIBLE_SYNC_MIN_AGE=0                     # fixtures are written this instant — disable the 2s torn-write guard (import shares export's knob)
   mkdir -p "$TMP/.claudible/repos/testws/.git"        # satisfy [ -d "$SDIR/.git" ]
   # shellcheck disable=SC1090
   source "$SCRIPT" status >/dev/null 2>&1             # defines functions + sets WT/PROJ/DDSET/AKSET/FSET (status op is inert here)
@@ -82,6 +84,7 @@ run_stub_case() (
   printf '#!/usr/bin/env bash\necho tester\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
   export PATH="$TMP/bin:$PATH"
   export CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws CLAUDIBLE_PROJ=testproj
+  export CLAUDIBLE_SYNC_MIN_AGE=0                     # fixtures are written this instant — disable the 2s torn-write guard (import shares export's knob)
   mkdir -p "$TMP/.claudible/repos/testws/.git"
   # shellcheck disable=SC1090
   source "$SCRIPT" status >/dev/null 2>&1
@@ -106,6 +109,7 @@ run_ids_case() (
   printf '#!/usr/bin/env bash\necho tester\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
   export PATH="$TMP/bin:$PATH"
   export CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws CLAUDIBLE_PROJ=testproj
+  export CLAUDIBLE_SYNC_MIN_AGE=0                     # fixtures are written this instant — disable the 2s torn-write guard (import shares export's knob)
   mkdir -p "$TMP/.claudible/repos/testws/.git"
   # shellcheck disable=SC1090
   source "$SCRIPT" status >/dev/null 2>&1
