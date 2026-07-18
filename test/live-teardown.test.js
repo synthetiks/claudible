@@ -17,23 +17,26 @@ const ok = (label, c, extra) => { if (c) pass++; else { fail++; console.error(' 
 const eq = (label, a, b) => ok(label, JSON.stringify(a) === JSON.stringify(b), `got ${JSON.stringify(a)} want ${JSON.stringify(b)}`);
 
 const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const m = MAIN.match(/function stopAdvertising\(\) \{[\s\S]*?\n\}/);
-ok('stopAdvertising() exists in main.js', !!m);
+const m = MAIN.match(/function stopAdvertising\(opts\) \{[\s\S]*?\n\}/);
+ok('stopAdvertising(opts) exists in main.js', !!m);
 if (!m) { console.log(`\nlive-teardown: ${pass} passed, ${fail} failed`); process.exit(1); }
 
 // Execute the lifted stopAdvertising body inside a scope whose `advertisedWs`/`advertisedSid` are REAL mutable
 // bindings that the stubbed stopAdvertiseHeartbeat nulls — reproducing main.js's module state exactly. The clear
-// goes through clearPresenceWithRetry (a separate fn); we stub it to record the ws it was handed, which is the
-// thing the capture-before-stop ordering protects. `src` lets a mutation test run a broken variant.
-function drive(state, src) {
+// goes through clearPresenceWithRetry (app alive) or a detached runPresence one-shot (quitting); both are stubbed
+// to record the ws they were handed, which is the thing the capture-before-stop ordering protects. `src` lets a
+// mutation test run a broken variant; `callOpts` drives the quit path.
+function drive(state, src, callOpts) {
   const calls = [];
-  const body = (src || m[0]).replace(/^function stopAdvertising\(\) \{/, '').replace(/\n\}$/, '');
-  new Function('rec', 'ws0', 'sid0', `
+  const body = (src || m[0]).replace(/^function stopAdvertising\(opts\) \{/, '').replace(/\n\}$/, '');
+  new Function('rec', 'ws0', 'sid0', 'callOpts', `
     let advertisedWs = ws0, advertisedSid = sid0;
     const stopAdvertiseHeartbeat = () => { rec.push(['heartbeat-stop']); advertisedWs = null; advertisedSid = null; };
     const clearPresenceWithRetry = (ws) => rec.push(['presence-clear', ws]);
-    ${body}
-  `)(calls, state.ws, state.sid);
+    const runPresence = (op, cb, ws, o) => rec.push(['presence-clear-detached', ws, !!(o && o.detach)]);
+    ((opts) => { ${body}
+    })(callOpts);   // closing brace on its OWN line — the body's last line may end in a // comment
+  `)(calls, state.ws, state.sid, callOpts);
   return calls;
 }
 
@@ -55,6 +58,24 @@ function drive(state, src) {
   ok('no clear when we never advertised', !calls.some((c) => c[0] === 'presence-clear'), JSON.stringify(calls));
   eq('…but the heartbeat teardown still runs', calls.map((c) => c[0]), ['heartbeat-stop']);
 }
+
+// ---- QUIT path (R7): the clear must be a DETACHED one-shot that survives app exit, never the retry loop ------
+// The retry loop's backoff timers are unref'd (a dying process never fires them) and a non-detached child can be
+// killed with the app before its push lands — so on quit, presence silently stayed on the branch until the 2-min
+// TTL ("MK still sees me live after I quit", the app-quit edition).
+{
+  const WS = { id: 'repo-mk-crazy' };
+  const calls = drive({ ws: WS, sid: 'sess-1' }, null, { quitting: true });
+  const det = calls.find((c) => c[0] === 'presence-clear-detached');
+  ok('quitting: the presence-clear goes out DETACHED', !!det && det[2] === true, JSON.stringify(calls));
+  ok('quitting: …on the ADVERTISED ws captured before the heartbeat teardown', det && det[1] === WS,
+    'got ' + JSON.stringify(det && det[1]));
+  ok('quitting: the in-process retry loop is NOT used (its timers die with the app)',
+    !calls.some((c) => c[0] === 'presence-clear'), JSON.stringify(calls));
+}
+// …and window-all-closed actually passes quitting:true (the fix is dead code without the call site).
+ok('window-all-closed quits via stopLiveSharing({ quitting: true })',
+  /stopLiveSharing\(\{ quitting: true \}\)/.test(MAIN));
 
 // ---- self-check: the harness genuinely catches the reordering bug -------------------------------------------
 // Build the buggy variant (capture AFTER the heartbeat teardown — the shipped quit-path mistake) and run it
@@ -93,9 +114,9 @@ function drive(state, src) {
 
 // ---- stopLiveSharing composes stopAdvertising() then share.stop() -------------------------------------------
 {
-  const sls = (MAIN.match(/function stopLiveSharing\(\) \{[\s\S]*?\n\}/) || [''])[0];
-  ok('stopLiveSharing() calls stopAdvertising() before share.stop()',
-    /stopAdvertising\(\);[\s\S]*share\.stop\(\)/.test(sls), sls);
+  const sls = (MAIN.match(/function stopLiveSharing\(opts\) \{[\s\S]*?\n\}/) || [''])[0];
+  ok('stopLiveSharing(opts) forwards opts to stopAdvertising() before share.stop()',
+    /stopAdvertising\(opts\);[\s\S]*share\.stop\(\)/.test(sls), sls);
 }
 
 // ---- the two lazy end paths (close shared tab, delete shared workspace) now stop advertising directly --------

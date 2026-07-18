@@ -7,6 +7,15 @@ All notable changes to Claudible are documented here.
 The master-debug release: a 63-agent audit of the whole codebase confirmed 42 defects; this ships fixes for 39
 of them (2 were verified fine-as-designed; 3 remain owner decisions, below).
 
+### Finish-line fix loop (July 18, evening — release-readiness register R1–R42)
+A second full-fleet sweep (10 subsystem auditors against docs/FINISH-LINE.md) produced a ranked 42-defect
+register; fixes land here one commit per register id, each pinned by a test.
+- **R7 — quitting while hosting now truly detaches its presence-clear.** The entry further down claims the
+  cleanup processes are detached; the detach capability existed but no call site passed it, so quitting could
+  still kill the clear mid-push and leave you "live · Join" on collaborators' screens for up to 2 minutes.
+  window-all-closed now sends a detached one-shot that survives app exit (the in-process retry loop is for
+  app-alive ends only — its backoff timers can never fire in a dying process). Test-executed both ways.
+
 ### Session tabs tell the truth
 - **Switching projects can no longer re-scope your sidebar to a project your tab never entered** — a refused or
   failed switch now rolls everything back, not just the tab. This was the live root of "my project shows the

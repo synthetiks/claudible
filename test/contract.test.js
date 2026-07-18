@@ -228,8 +228,10 @@ none('renderer: orphanTab is never rendered',
   none('main.js calls share.stop() outside stopLiveSharing (a teardown path that can drift again)',
     stopCalls === 1 ? [] : [`share.stop() appears ${stopCalls}× — must be exactly once, inside stopLiveSharing`]);
   const quitBlock = (MAIN.match(/app\.on\('window-all-closed'[\s\S]*?\n\}\);/) || [''])[0];
+  // quitting:true is load-bearing (R7): it makes the presence-clear a DETACHED one-shot that survives app exit —
+  // without it a non-detached child could die with the app before its push landed (the 2-min-ghost, quit edition).
   none('the quit handler does not run the full live teardown (presence would outlive the app again)',
-    /stopLiveSharing\(\)/.test(quitBlock) ? [] : ['window-all-closed does not call stopLiveSharing()']);
+    /stopLiveSharing\(\{ quitting: true \}\)/.test(quitBlock) ? [] : ['window-all-closed does not call stopLiveSharing({ quitting: true })']);
   none('the quit handler calls stopAdvertiseHeartbeat directly (nulls advertisedWs before any clear could use it)',
     /stopAdvertiseHeartbeat\(\)/.test(quitBlock) ? ['window-all-closed calls stopAdvertiseHeartbeat() around the helper'] : []);
 }

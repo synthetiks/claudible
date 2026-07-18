@@ -985,10 +985,17 @@ function clearPresenceWithRetry(ws, attempt) {
 // test/live-teardown.test.js executes THIS function and fails if the capture is reordered. Extracted so every end
 // path (the End button, quit, closing the shared tab, deleting the shared workspace) tears presence down the SAME
 // way instead of the copies drifting. Idempotent: a second call after advertisedSid is null does nothing.
-function stopAdvertising() {
+function stopAdvertising(opts) {
   const advWs = advertisedWs, wasAdvertising = !!advertisedSid;   // capture BEFORE stopAdvertiseHeartbeat nulls them
   stopAdvertiseHeartbeat();                                       // no longer hosting → stop re-stamping presence
-  if (wasAdvertising) clearPresenceWithRetry(advWs);             // pull live/<login>.json off the branch now, not at TTL
+  if (!wasAdvertising) return;
+  // QUITTING: the retry loop is a mirage on this path — its backoff timers are unref'd (a dying process never
+  // fires them) and a non-detached child can be killed WITH the app before its push lands, so the clear silently
+  // never happened and peers saw us "live" until the 120s TTL (the exact bug the quit-path comment claimed was
+  // fixed). A detached one-shot survives app exit — the same guarantee the pty reaper relies on — and the
+  // script's own 3 internal push retries absorb transient blips.
+  if (opts && opts.quitting) runPresence('presence-clear', null, advWs, { detach: true });
+  else clearPresenceWithRetry(advWs);                             // app alive → observable, retrying clear (2s..10s backoff)
 }
 // THE full live-hosting teardown: presence down (above) + share server down. Called from share:stop (the button)
 // and window-all-closed (quit). The two OTHER end paths — closing the shared tab, deleting the shared workspace —
@@ -996,8 +1003,8 @@ function stopAdvertising() {
 // round-trip to eventually reach here, during which share.status().running stayed true and the heartbeat kept
 // RE-STAMPING presence — so an "ended" session could keep advertising itself for seconds).
 // (presence-clear's spawned wsl.exe outlives app exit — the same guarantee the pty reaper relies on.)
-function stopLiveSharing() {
-  stopAdvertising();
+function stopLiveSharing(opts) {
+  stopAdvertising(opts);                                 // opts.quitting → detached presence-clear (see above)
   share.stop();
 }
 function startAdvertiseHeartbeat(sid, ws) {
@@ -2710,8 +2717,9 @@ app.on('window-all-closed', () => {
   try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the two self-rescheduling ones
   // The FULL live teardown — including presence-clear, which this path used to skip entirely: quitting while
   // hosting left live/<login>.json on the branch, so collaborators saw "live · Join" for up to 5 minutes after
-  // the app was gone. The spawned wsl.exe completes the clear after exit, same as the pty reaper below.
-  try { stopLiveSharing(); } catch {}
+  // the app was gone. quitting:true makes the clear a DETACHED one-shot — a non-detached child (the old default
+  // here) could die with the app before its push landed, silently reverting this exact bug to the 2-min TTL.
+  try { stopLiveSharing({ quitting: true }); } catch {}
   // Kill Windows-side ptys AND reap each WSL-side tree — the execFile'd wsl.exe survives our exit, so the
   // reap completes even though the app is quitting (this is how zombies stopped accumulating across restarts).
   try { for (const rec of ptys.values()) { try { rec.proc.kill(); } catch {} _killSessionTree(rec.runtimeId); } ptys.clear(); } catch {}
