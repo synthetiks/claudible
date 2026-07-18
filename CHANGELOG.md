@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R17/R19 — the last two raw-error surfaces speak human.** A failed Claude Code install dumped npm's raw
+  "npm ERR!" noise (now: real next steps for permission/network failures); a voice transcription/speech
+  failure returned the raw exception ("TypeError: fetch failed" — now: "the voice services aren't running —
+  use Install/Repair on the Voice row, or restart Claudible").
 - **R9 — one interrupted sync can no longer wedge syncing forever.** A git write cut off mid-flight (timeout,
   sleep, force-quit) left a lock file that nothing ever cleared — every later sync failed silently until
   someone hand-deleted a file they'd never heard of. Locks older than a minute now self-heal at the start of

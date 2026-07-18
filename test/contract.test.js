@@ -713,5 +713,20 @@ none('renderer: orphanTab is never rendered',
     /rev-parse --is-inside-work-tree >\/dev\/null 2>&1; then\n\s*clear_stale_locks/.test(SYNC) ? [] : ['ensure_worktree must call clear_stale_locks before the first write']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 22. R17/R19 — the last two raw-error surfaces speak human. install-claude.sh classifies permission/network
+//     failures into next steps (raw npm noise only survives labeled "npm said:"); the voice STT/TTS handlers
+//     translate transport failures (services down / timeout) instead of returning String(err) internals.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const IC = read('wsl/install-claude.sh');
+  none('install-claude.sh dumps raw npm output again (R17)',
+    /EACCES/.test(IC) && /network problem reaching npm/.test(IC) && /npm said: /.test(IC) ? [] : ['classification missing']);
+  none('a voice STT/TTS failure returns the raw exception again (R19)',
+    /function voiceErrText\(err, what\)/.test(MAIN)
+    && /voiceErrText\(err, 'transcription'\)/.test(MAIN) && /voiceErrText\(err, 'speech'\)/.test(MAIN)
+    && !/catch \(err\) \{ return \{ error: String\(err\) \}; \}/.test(MAIN) ? [] : ['voiceErrText missing or a catch still returns String(err)']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

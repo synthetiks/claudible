@@ -2184,6 +2184,15 @@ function startWorkflowPoll() {
 }
 
 // ---- audio (in main: no renderer CORS) ----
+// R19: `String(err)` handed the renderer raw undici internals ("TypeError: fetch failed") — the single most
+// common failure (services not running) read as a code crash with no next step. Classify the transport-level
+// failures; a service's OWN error body (the !r.ok branches) already reads fine and stays untouched.
+function voiceErrText(err, what) {
+  const s = String((err && err.message) || err || '');
+  if (/abort|timeout/i.test(s)) return what + ' timed out — the voice service may still be warming up; try again in a moment';
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket|network/i.test(s)) return 'the voice services aren’t running — use Install/Repair on the Voice row in the System check, or restart Claudible';
+  return what + ' failed — ' + s.replace(/[\u0000-\u001f"]/g, ' ').slice(0, 120);
+}
 ipcMain.handle('stt', async (e, arrayBuf) => {
   try {
     const fd = new FormData();
@@ -2192,7 +2201,7 @@ ipcMain.handle('stt', async (e, arrayBuf) => {
     const r = await fetch(`${WHISPER}/v1/audio/transcriptions`, { method: 'POST', body: fd, signal: AbortSignal.timeout(70000) });   // fail cleanly if Whisper hangs, instead of undici's ~300s default (70s is generous for a long clip on CPU)
     if (!r.ok) { const j = await r.json().catch(() => ({})); return { error: (j.detail && (j.detail.message || j.detail)) || j.error || ('HTTP ' + r.status) }; }
     return await r.json();
-  } catch (err) { return { error: String(err) }; }
+  } catch (err) { return { error: voiceErrText(err, 'transcription') }; }   // R19: never the raw exception
 });
 ipcMain.handle('tts', async (e, text, voice) => {
   try {
@@ -2207,7 +2216,7 @@ ipcMain.handle('tts', async (e, text, voice) => {
       return { error: (j.detail && (j.detail.message || j.detail)) || j.error || ('HTTP ' + r.status) };
     }
     return { audio: await r.arrayBuffer() };
-  } catch (err) { return { error: String(err) }; }
+  } catch (err) { return { error: voiceErrText(err, 'speech') }; }   // R19: never the raw exception
 });
 ipcMain.handle('endpoints', () => ({ whisper: WHISPER, kokoro: KOKORO, pty: !!runner.ptyInfo().mod, ptyErr: runner.ptyInfo().err }));
 // Open a URL in the user's real browser (e.g. the "visit repo on GitHub" button). Validated: http(s) only — never
@@ -2260,7 +2269,7 @@ ipcMain.handle('session:export', async (e, arg) => {
     if (canceled || !filePath) return { canceled: true };
     fs.writeFileSync(filePath, html, 'utf8');
     return { saved: filePath, count: messages.length };
-  } catch (err) { return { error: String(err) }; }
+  } catch (err) { return { error: 'could not save the export: ' + String((err && err.message) || err).slice(0, 160) }; }   // err.message (no class-name prefix) — fs errors carry the path+cause
 });
 
 // Save a session's transcript as a plain Markdown (.md/.txt) document — same transcript source as the HTML
@@ -2288,7 +2297,7 @@ ipcMain.handle('session:export-text', async (e, arg) => {
     if (canceled || !filePath) return { canceled: true };
     fs.writeFileSync(filePath, text, 'utf8');
     return { saved: filePath, count: messages.length };
-  } catch (err) { return { error: String(err) }; }
+  } catch (err) { return { error: 'could not save the export: ' + String((err && err.message) || err).slice(0, 160) }; }   // err.message (no class-name prefix) — fs errors carry the path+cause
 });
 
 // The embedded Claude Code CLI version, for the status bar. Resolved once via a tiny cross-backend script and
@@ -2417,7 +2426,7 @@ ipcMain.handle('session:latest-reply', async (e, sessionId) => {
       if (m && m.role === 'claude' && m.text && String(m.text).trim()) return { text: String(m.text) };
     }
     return { text: '' };
-  } catch (err) { return { text: '', error: String(err) }; }
+  } catch (err) { return { text: '', error: String((err && err.message) || err).slice(0, 160) }; }
 });
 
 // ---- Diff Review: see what Claude changed in the active workspace's git repo, revert per hunk/file ----
