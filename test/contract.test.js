@@ -865,5 +865,24 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /"ok\\":false,\\"error\\":\\"push failed[^\n]*\\"ids\\":\$\(ids_json\)/.test(SYNC) ? [] : ['the sync op must emit ids on push failure']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 33. R26/R27/R31/R39/R40 — joined-tab + discovery truthfulness. Read-only mirrors say so (toast once + row
+//     label); a hard reconnect re-arms the voice room; "Check for invites" distinguishes can't-look from
+//     found-nothing; /clear on a mirror keeps the host's tracker; no Join badge on an already-joined session.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const DISC = read('wsl/sessions-discover.sh');
+  none('a read-only mirror is indistinguishable again (R26)',
+    /View-only — the host shared a watch link/.test(APP) && /rec\.liveReadOnly \? ' · view-only' : ''/.test(APP) ? [] : ['toast + row label required']);
+  none('a hard reconnect strands the voice room again (R27)',
+    /rec\.liveWasLost\) \{ try \{ liveVoice\.leave\(\); liveVoice\.join\(\)/.test(APP) && /rec\.liveWasLost = true/.test(APP) ? [] : ['loss flag + hello re-arm required']);
+  none('discovery reports [] when it cannot look (R31 — "all caught up" on a machine with no gh)',
+    /gh-missing/.test(DISC) && /gh-auth/.test(DISC) && /r\.reason === 'gh-auth'/.test(APP) ? [] : ['error emit + renderer reason handling required']);
+  none('/clear resets a joined mirror’s tracker again (R39)',
+    /'\/clear' && !\(AT\(\) && AT\(\)\.kind === 'live'\)\) resetStats\(\)/.test(APP) ? [] : ['live-tab guard on the /clear resetStats missing']);
+  none('a Join badge can render on an already-joined session again (R40)',
+    /!joinedTabSessionIds\(\)\.has\(s\.id\) && peersForWs\(activeWsId\)\.find/.test(APP) ? [] : ['the badge arm must consult joinedTabSessionIds']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

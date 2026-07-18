@@ -9,9 +9,13 @@
 set -u
 emit() { printf '%s\n' "$1"; }
 
-command -v gh >/dev/null 2>&1 || { emit '[]'; exit 0; }
+# R31: "can't look" and "looked, found nothing" are different answers. A bare [] here made the manual
+# "Check for invites" toast "you're all caught up" on a machine that has no gh (or isn't signed in) — the
+# one user who most needs to be told WHY nothing will ever appear. Emit the reason; silent discovery paths
+# ignore it, the manual path surfaces it.
+command -v gh >/dev/null 2>&1 || { emit '{"error":"gh-missing"}'; exit 0; }
 me="$(gh api user --jq .login 2>/dev/null)"
-case "$me" in '' | *[!A-Za-z0-9-]*) emit '[]'; exit 0 ;; esac
+case "$me" in '' | *[!A-Za-z0-9-]*) emit '{"error":"gh-auth"}'; exit 0 ;; esac
 
 # ONE paginated /user/repos call (affiliation includes `owner` so the user's OWN synced workspaces surface on
 # their other devices — the old query excluded owned repos). The inline `topics` array tells us, with NO extra

@@ -29,6 +29,10 @@ register; fixes land here one commit per register id, each pinned by a test.
   hook — which runs `git -C <workspace>` on every single prompt — didn't, reopening the exact RCE class on a
   different runway. It now applies the same neutralization per child process, and the git-safe sweep gained a
   hooks/*.js edition so the class can't silently reappear outside the shell-script glob.
+- **R26/R27/R31/R39/R40 — joined sessions and invite-checking tell the whole truth.** A view-only mirror now
+  says so (once, plus on its row) instead of silently eating keys; reconnecting re-arms voice instead of a
+  mic button that lies; "Check for invites" says WHY it can't look when GitHub isn't connected; /clear on a
+  mirror no longer zeroes the host's stats; an already-joined session never shows a stale Join badge.
 - **R24/R25 — sync hygiene: cross-process temp files can't clobber each other, and a failed push no longer
   hides what the pull already brought in** (open tabs refresh from a half-successful sync instead of showing
   stale turns until the network recovers).

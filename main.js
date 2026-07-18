@@ -1500,6 +1500,9 @@ async function discoverWorkspaces() {
     runner.runScript('sessions-discover.sh', '', { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }).then(({ err, stdout }) => {
         if (err) { console.error('[claudible] discover:', err.message); return resolve({ ok: false, added: [] }); }
         let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+        // R31: the script now distinguishes "can't look" from "found nothing" — thread the reason through so
+        // the manual Check-for-invites can tell the user WHY instead of "you're all caught up".
+        if (list && !Array.isArray(list) && list.error) return resolve({ ok: false, reason: String(list.error).slice(0, 20), added: [] });
         const added = [];
         let changed = false;   // registry mutated by a backfill/reconcile even when nothing new was added
         for (const item of (Array.isArray(list) ? list : [])) {
@@ -1547,7 +1550,7 @@ function maybeDiscoverOnFocus() {
 ipcMain.handle('workspace:discover', async () => {
   _lastDiscover = Date.now();
   const r = await discoverWorkspaces();
-  return { ok: !!(r && r.ok), added: (r && r.added ? r.added.length : 0) };
+  return { ok: !!(r && r.ok), added: (r && r.added ? r.added.length : 0), reason: (r && r.reason) || '' };
 });
 // Turn sync on/off for a workspace. Enabling = one-time consent to publish this workspace's transcripts;
 // it clones if needed, sets up the branch, and kicks a first sync. Disabling leaves all files in place.

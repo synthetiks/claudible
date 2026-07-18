@@ -986,7 +986,7 @@ const cmdUp = () => {
   if (!cdrag) return;
   const { moved, pill, pid } = cdrag; cdrag = null;
   try { cmdscroll.releasePointerCapture(pid); } catch {}
-  if (!moved && pill && pill.dataset.cmd) { send(pill.dataset.cmd); if (pill.dataset.cmd === '/clear') resetStats(); }
+  if (!moved && pill && pill.dataset.cmd) { send(pill.dataset.cmd); if (pill.dataset.cmd === '/clear' && !(AT() && AT().kind === 'live')) resetStats(); }   // R39: a joined mirror's tracker is the HOST's (re-broadcast) — resetting the local copy painted zeros until the next status frame
 };
 cmdscroll.addEventListener('pointerup', cmdUp);
 cmdscroll.addEventListener('pointercancel', cmdUp);
@@ -3058,6 +3058,7 @@ function fitLiveTab(rec) {
 }
 // Per-tab overlay for the non-streaming states (connecting / waiting / reconnecting / paused / declined / offline).
 function setLiveState(rec, state, detail) {
+  if (state === 'offline' || state === 'reconnecting' || state === 'denied') rec.liveWasLost = true;   // R27: a fresh hello after any loss re-arms the voice room
   if (!rec || rec.kind !== 'live') return;
   rec.liveState = state || '';
   rec.liveReason = detail || rec.liveReason || '';
@@ -3171,7 +3172,7 @@ function renderJoinedTabRow(rec) {
   if (rec.sessMismatch) m.appendChild(document.createTextNode('⚠ host moved to another session · ' + who));
   else {
     const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + liveReasonText(rec.liveReason) : '';   // R30: wire codes become sentences
-    m.appendChild(document.createTextNode('joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
+    m.appendChild(document.createTextNode('joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + (rec.liveReadOnly ? ' · view-only' : '') + reason));   // R26
   }
   row.appendChild(p); row.appendChild(m);
   // R14: a dead mirror had NO rejoin affordance — the row offered only focus and ✕ Leave, so a guest whose
@@ -3214,6 +3215,14 @@ claudible.onLiveHello((p) => {
   rec.livePid = p.pid || null; if (p.host) rec.hostName = p.host;
   if (p.skew && p.skew.host) { rec.buildSkew = p.skew; toast('Heads up: the host runs Claudible ' + p.skew.host + ', you run ' + p.skew.mine + ' — if this live session misbehaves, update whichever side is older'); }   // main sanitized both strings
   if (p.you) rec.liveYou = p.you;                                   // the name the host's server registered us under (may be disambiguated, e.g. "MK (2)") — used to dedup ourselves out of the roster below
+  // R26: a read-only mirror looked identical to a co-drive one — keys were silently refused with zero cue.
+  // Say it once per tab, and the row's meta line carries it permanently (renderJoinedTabRow below).
+  if (rec.liveReadOnly && !rec.roToldOnce) { rec.roToldOnce = true; toast('View-only — the host shared a watch link, so typing is off'); refreshSessions(); }
+  // R27: a HARD reconnect (main re-dialed the socket) tore down the server side of the voice room while this
+  // renderer still believed it was joined — the mic button said joined, no audio flowed. Re-arm on the fresh
+  // hello: leave clears the stale local state, join re-registers on the new socket.
+  if (liveVoiceTabId === p.tabId && rec.liveWasLost) { try { liveVoice.leave(); liveVoice.join().catch(() => {}); } catch {} }
+  rec.liveWasLost = false;
   setLiveState(rec, p.paused ? 'paused' : 'live');
   if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { rec.term.focus(); } catch {} } }
 });
@@ -3286,8 +3295,8 @@ function renderSessionRow(s) {
     lv.innerHTML = '<span class="live-dot"></span><span class="liw">Live</span>'; lv.title = 'You are sharing this session live';
     m.appendChild(lv);
   } else {
-    const _lp = peersForWs(activeWsId).find((x) => x.session === s.id);
-    if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s))); }   // a collaborator is live here → green bar + calm dot, "Join" on hover (carry this row's name onto the joined tab)
+    const _lp = !joinedTabSessionIds().has(s.id) && peersForWs(activeWsId).find((x) => x.session === s.id);
+    if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s))); }   // a collaborator is live here → green bar + calm dot, "Join" on hover (carry this row's name onto the joined tab). R40: never a Join badge for a session you already joined (belt over the shown-set dedup for the switch-in repaint)
   }
   row.appendChild(p); row.appendChild(m);
   appendConflictChip(m, s, null);                                    // active-workspace row: chip opens the resolve modal directly
@@ -4919,6 +4928,8 @@ if ($('ws-discover')) $('ws-discover').addEventListener('click', async () => {
   let r = null; try { r = await claudible.discoverWorkspaces(); } catch {}
   b.disabled = false; b.textContent = was;
   if (r && r.ok) toast(r.added ? ('Found ' + r.added + ' invited project' + (r.added > 1 ? 's' : '')) : 'No new invites — you’re all caught up');
+  else if (r && r.reason === 'gh-auth') toast('Connect GitHub first (Settings → GitHub) — invites can’t be checked without it');   // R31: "can't look" ≠ "all caught up"
+  else if (r && r.reason === 'gh-missing') toast('The GitHub CLI isn’t installed — run the System check to set it up, then try again');
   else toast('Couldn’t check for invites');
 });
 // keyboard access for the radio-style picker: Enter/Space selects; arrows move through the group (standard radiogroup keys)
