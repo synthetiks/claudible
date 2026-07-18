@@ -3057,14 +3057,17 @@ function fitLiveTab(rec) {
   const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
   const pw = rec.container.clientWidth - padX, ph = rec.container.clientHeight - padY;
   if (pw <= 0 || ph <= 0) return;
-  // GUEST-SIDE resize independence, locked-font edition: the fit-derived font made the mirror's text DANCE
-  // with every host resize (13→10→12…) — a "readable floor" only bounded the extreme, it didn't stop the
-  // motion. The mirror now ALWAYS renders at this viewer's own stock size; when the host's grid is bigger
-  // than this window, the pane PANS (scrollbars) over it — view-at-100%, never zoom-to-fit. The one thing a
-  // host resize still changes here is the content re-wrapping: that is Claude itself redrawing for the new
-  // width — the shared video changing — identical to what the host sees, and not removable viewer-side.
-  // The host's terminal code stays untouched by design (the reverted host-side attempt broke both parties).
-  const fs = TERM_OPTS.fontSize;
+  // GUEST-SIDE resize independence, final form (live-tuned with Crazy across three iterations):
+  //   * the host's grid SMALLER than this window → scale UP to fill it (a locked font left the mirror as a
+  //     tiny patch in the pane — "I still see him minimized");
+  //   * the host's grid BIGGER → NEVER shrink below this viewer's stock size — keep it readable and PAN
+  //     (scrollbars) over the host's larger screen instead (downscaling was the original "his fullscreen
+  //     zooms me out", and the in-between "readable floor" still let the font dance).
+  // So: fill when possible, floor at stock, pan past it. The one thing a host resize still changes here is
+  // the content re-wrapping — Claude itself redrawing for the new width, identical on both screens, not
+  // removable viewer-side. The host's terminal code stays untouched (the host-side attempt broke both).
+  const wFont = pw / (cols * 0.6), hFont = ph / (rows * 1.18);       // largest font whose whole grid still fits
+  const fs = Math.max(TERM_OPTS.fontSize, Math.min(30, Math.floor(Math.min(wFont, hFont))));
   try { if (rec.term.options.fontSize !== fs) rec.term.options.fontSize = fs; } catch {}
   try { rec.term.resize(cols, rows); } catch {}
   const overflows = (fs * 0.6 * cols) > pw + 1 || (fs * 1.18 * rows) > ph + 1;

@@ -118,10 +118,12 @@ register; fixes land here one commit per register id, each pinned by a test.
   (the bash writer and the app's pollers must derive the same path).
 
 ### Finish-line follow-up (July 19)
-- **The host resizing cannot change the guest's text size, at all.** The joined mirror renders at the guest's
-  own size, always, and pans (scrollbars) when the host's screen is bigger — guest-side only, the host's
-  terminal behavior untouched. The only motion a host resize still causes is Claude's own redraw for the new
-  width, which both sides see identically. (Replaces a reverted host-side attempt that broke rendering.)
+- **The host resizing can no longer zoom the guest out OR leave them a minimized patch.** The joined mirror
+  fills the guest's window whenever the host's screen fits (scaling up freely), never shrinks below the
+  guest's own text size, and pans (scrollbars) when the host's screen is genuinely bigger — guest-side only,
+  the host's terminal behavior untouched. The only motion a host resize still causes is Claude's own redraw
+  for the new width, which both sides see identically. (Live-tuned with Crazy across three iterations;
+  replaces a reverted host-side attempt that broke rendering.)
 - **Joining a live session no longer "moves" it into whatever project you were browsing.** The joined tab now
   scopes the sidebar to the session's home project, the same way opening any local session does — the third
   and final sighting of the pinned-row-under-the-wrong-header confusion.

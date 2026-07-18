@@ -402,8 +402,8 @@ ok('app.js: the sidebar follows a joined tab to its home project',
 // going fullscreen can never shrink this side's text without limit. Strictly guest-side — the host's sync()
 // and pty:resize paths must contain NO share-conditional behavior (the reverted host-side attempt broke
 // rendering for both parties; this pin fails if anyone reintroduces it).
-ok('app.js: the mirror renders at the viewer’s LOCKED font and pans (no fit-derived dancing, guest-side only)',
-  /const fs = TERM_OPTS\.fontSize;/.test(APP)
+ok('app.js: the mirror fills when possible, floors at the viewer’s stock size, and pans past it (guest-side only)',
+  /const fs = Math\.max\(TERM_OPTS\.fontSize, Math\.min\(30, Math\.floor\(Math\.min\(wFont, hFont\)\)\)\);/.test(APP)
   && /classList\.toggle\('live-pan', overflows\)/.test(APP)
   && !/FS_FLOOR/.test(APP)
   && !/t\.tabId === sharedTabIdR\) \{ scaleTermToGrid/.test(APP));
