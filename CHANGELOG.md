@@ -118,10 +118,6 @@ register; fixes land here one commit per register id, each pinned by a test.
   (the bash writer and the app's pollers must derive the same path).
 
 ### Finish-line follow-up (July 19)
-- **Resizing your window during a live session only zooms YOUR view.** The host's window used to steer the
-  shared terminal's actual grid — fullscreen on one side shrank the other side's text. The shared session's
-  layout is now pinned for the duration of the share ("same video, your own zoom"): each person's resize
-  scales only their own screen, and ending the share restores normal resize behavior.
 - **Joining a live session no longer "moves" it into whatever project you were browsing.** The joined tab now
   scopes the sidebar to the session's home project, the same way opening any local session does — the third
   and final sighting of the pinned-row-under-the-wrong-header confusion.

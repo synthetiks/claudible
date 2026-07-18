@@ -398,18 +398,6 @@ ok('app.js: switching off/onto a joined tab repaints the expanded trees (R6 — 
 ok('app.js: the sidebar follows a joined tab to its home project',
   /const sideWs = rec\.wsId \|\| \(rec\.kind === 'live' && rec\.peerWsId\) \|\| null;/.test(APP)
   && /if \(sideWs && sideWs !== activeWsId\) \{ activeWsId = sideWs; primeSessionListForWs\(sideWs\)/.test(APP));
-// RESIZE DECOUPLING ("same video, your own zoom"): while a tab is pinned-shared, its grid is FROZEN — the
-// host's sync() scales the view to the pinned grid instead of re-fitting the pty (which re-wrapped Claude's
-// layout for every guest), main drops any raced pty:resize for that tab, and the pin lifting restores the
-// stock font + a normal fit. One scaler serves every fixed-grid view (joined mirrors + the host's shared tab).
-ok('app.js: the host’s shared tab is a fixed-grid view while pinned (scale, never re-fit)',
-  /if \(t\.started && t\.tabId === sharedTabIdR\) \{ scaleTermToGrid\(t, t\.term\.cols, t\.term\.rows\); updateScrollbar\(\); return; \}/.test(APP)
-  && /function scaleTermToGrid\(rec, cols, rows\)/.test(APP)
-  && /scaleTermToGrid\(rec, rec\.hostCols \|\| 120, rec\.hostRows \|\| 32\)/.test(APP));
-ok('app.js: un-pinning restores the stock font and re-fits',
-  /t\.term\.options\.fontSize = TERM_OPTS\.fontSize/.test(APP));
-ok('main.js: a pty:resize for the pinned shared tab is dropped (the grid is frozen)',
-  /if \(sharedTabId && tabId === sharedTabId\) return;/.test(MAIN));
 // The share is torn down only after every owning tab is confirmed off the doomed session.
 ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
   APP.indexOf('if (owners.some((r) => r.busy)) return abort();') > -1
