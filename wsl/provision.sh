@@ -79,5 +79,21 @@ case "$dep" in
     curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
     { [ -x "$HOME/.local/bin/uv" ] || have uv; } && ok || err "uv install failed"
     ;;
+  voice)
+    # Reuse setup.sh unchanged (it's also the direct `npm run setup` entry point) rather than duplicating its
+    # whisper.cpp/Kokoro build+download logic here. It isn't JSON-shaped — it's `say()` progress lines for a
+    # terminal — so capture it and translate: exit 0 -> ok; non-zero -> its own last say() line is already the
+    # actionable message ("run this, then re-run `npm run setup`"), which is exactly what a failure here should show.
+    _here="$(cd "$(dirname "$0")" && pwd)"
+    _log="$(mktemp)"
+    "$_here/../setup/setup.sh" >"$_log" 2>&1
+    _rc=$?
+    if [ "$_rc" -eq 0 ]; then rm -f "$_log"; ok; fi
+    # say()'s bold/reset codes (\033[1m / \033[0m) survive as literal "[1m"/"[0m" once err()'s tr strips only the
+    # ESC byte, not the whole escape sequence — strip the full CSI sequence here so the wizard shows clean text.
+    _msg="$(sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$_log" | grep -v '^[[:space:]]*$' | tail -n 4 | tr '\n' ' ')"
+    rm -f "$_log"
+    err "${_msg:-voice setup failed - run: npm run setup}"
+    ;;
   *) err "unknown dependency: $dep" ;;
 esac

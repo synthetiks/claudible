@@ -41,10 +41,22 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   gh_account="$(gh api user --jq .login 2>/dev/null | head -1 | tr -d '\000-\037"\\')"
 fi
 
-printf '{"node":{"installed":%s,"version":"%s","ok":%s},"git":{"installed":%s,"version":"%s"},"claude":{"installed":%s,"version":"%s","signedIn":%s},"uv":{"installed":%s,"version":"%s"},"cloudflared":{"installed":%s,"version":"%s"},"gh":{"installed":%s,"version":"%s","signedIn":%s,"account":"%s"}}\n' \
+# Voice models (Whisper + Kokoro) — same file layout setup.sh builds/downloads, checked HERE (inside the
+# guest, where $HOME is the real one) instead of main.js's Windows-side check, which only ever looks at the
+# native-Windows build layout (.exe, Release/) and so is always false for a WSL/posix voice install.
+VOICE="${CLAUDIBLE_VOICE:-$HOME/.claudible/voice}"
+voice_ready=false
+if [ -x "$VOICE/whisper/build/bin/whisper-server" ] && [ -f "$VOICE/whisper/models/ggml-base.bin" ] && [ -f "$VOICE/kokoro/api/src/models/v1_0/kokoro-v1_0.pth" ]; then
+  voice_ready=true
+fi
+# setup.sh treats an existing ~/.voicemode install as already done and never builds its own — match that.
+if [ -d "$HOME/.voicemode/services/kokoro" ] && [ -d "$HOME/.voicemode/services/whisper" ]; then voice_ready=true; fi
+
+printf '{"node":{"installed":%s,"version":"%s","ok":%s},"git":{"installed":%s,"version":"%s"},"claude":{"installed":%s,"version":"%s","signedIn":%s},"uv":{"installed":%s,"version":"%s"},"voice":{"ready":%s},"cloudflared":{"installed":%s,"version":"%s"},"gh":{"installed":%s,"version":"%s","signedIn":%s,"account":"%s"}}\n' \
   "$(has node)" "$node_v" "$node_ok" \
   "$(has git)" "$git_v" \
   "$(has claude)" "$claude_v" "$claude_signed" \
   "$(has uv)" "$uv_v" \
+  "$voice_ready" \
   "$(has cloudflared)" "$cf_v" \
   "$(has gh)" "$gh_v" "$gh_signed" "$gh_account"

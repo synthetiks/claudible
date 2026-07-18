@@ -2178,12 +2178,15 @@ ipcMain.handle('preflight:status', async () => {
   try { return await deps.detect(runner, voiceState()); }
   catch (e) { return { runner: runner.id, gitBash: true, deps: [], error: (e && e.message) || 'detect failed' }; }
 });
-// Install one dependency. Voice keeps its proven path (ensureVoiceProvisioned); everything else goes through
-// deps.install. On success we persist any portable-fallback env, apply it + refresh PATH live, and report
-// whether a restart is needed (Git on win, whose app-dir resolves at require-time).
+// Install one dependency. Voice on WIN keeps its proven path (ensureVoiceProvisioned, the native-Windows
+// build); on wsl/posix it now goes through deps.install like every other dep (provision.sh's `voice` case,
+// which wraps setup.sh) — ensureVoiceProvisioned is a no-op there (guarded on CLAUDIBLE_RUNNER==='win'), so
+// routing wsl/posix through it used to silently do nothing: a wizard button that reported success without
+// installing anything. On success we persist any portable-fallback env, apply it + refresh PATH live, and
+// report whether a restart is needed (Git on win, whose app-dir resolves at require-time).
 ipcMain.handle('preflight:install', async (_e, depId) => {
   const id = String(depId || '').replace(/[^a-z]/g, '');
-  if (id === 'voice') { const started = ensureVoiceProvisioned(); return { ok: started || voiceProvisioned(), restartRequired: false }; }
+  if (id === 'voice' && runner.id === 'win') { const started = ensureVoiceProvisioned(); return { ok: started || voiceProvisioned(), restartRequired: false }; }
   const send = (m) => { try { win && win.webContents.send('provision', m); } catch {} };
   let res;
   try { res = await deps.install(runner, id, send); } catch (e) { return { ok: false, error: (e && e.message) || 'install failed', restartRequired: false }; }

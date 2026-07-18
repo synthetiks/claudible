@@ -27,7 +27,10 @@ const MANIFEST = [
   { id: 'git',         label: 'Git', winLabel: 'Git for Windows', hint: 'Drives projects, sync & checkpoints', winHint: 'Provides the bash the scripts run on', category: 'core', required: true, auth: false, requires: [], restartOnInstall: true, win: { winget: 'Git.Git' },               posix: true },
   { id: 'claude',      label: 'Claude Code CLI', hint: 'The engine Claudible embeds',            category: 'core',     required: true,  auth: true,  authSoft: true, requires: ['node'], restartOnInstall: false, win: { npm: '@anthropic-ai/claude-code' }, posix: 'install-claude.sh' },
   { id: 'uv',          label: 'uv (Python)',     hint: 'Builds the local voice stack',           category: 'voice',    required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'astral-sh.uv' },          posix: true },
-  { id: 'voice',       label: 'Voice models',    hint: 'Whisper + Kokoro — talk & hear',    category: 'voice',    required: false, auth: false, requires: ['uv'],    restartOnInstall: false, displayOnly: true },
+  // WSL/posix: a real install, routed through provision.sh's `voice` case (which wraps setup.sh) like every
+  // other posix dep — no `win` entry, so `installable()` still correctly reports false on the win runner,
+  // which keeps its own proven path (main.js's ensureVoiceProvisioned, silent on first boot).
+  { id: 'voice',       label: 'Voice models',    hint: 'Whisper + Kokoro — talk & hear',    category: 'voice',    required: false, auth: false, requires: ['uv'],    restartOnInstall: false, posix: true },
   { id: 'cloudflared', label: 'cloudflared',     hint: 'Public share links (optional)',          category: 'optional', required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'Cloudflare.cloudflared' }, posix: true },
   { id: 'gh',          label: 'GitHub CLI',      hint: 'Private-repo sync (optional)',           category: 'optional', required: false, auth: true,  requires: [],        restartOnInstall: false, win: { winget: 'GitHub.cli' },            posix: true },
 ];
@@ -40,10 +43,17 @@ function installable(m, runnerId) {
 }
 
 // Compute the UI state for one dep from the raw probe map (+ main-injected voice state).
-function rowState(m, raw, extra) {
+// `runnerId` matters ONLY for voice: on win, main.js's own ensureVoiceProvisioned/voiceProvisioned (the
+// `extra` param) is the one true state (a native-Windows build, checked on the Windows side); on wsl/posix
+// the guest-side preflight.sh probe (raw.voice) is — main.js's check looks for a Windows-only file layout
+// that can never exist there, so trusting `extra` on those runners would show "missing" forever.
+function rowState(m, raw, extra, runnerId) {
   if (m.id === 'voice') {
-    if (extra && extra.voiceProvisioning) return 'installing';
-    return (extra && extra.voiceReady) ? 'ready' : 'missing';
+    if (runnerId === 'win') {
+      if (extra && extra.voiceProvisioning) return 'installing';
+      return (extra && extra.voiceReady) ? 'ready' : 'missing';
+    }
+    return (raw.voice && raw.voice.ready) ? 'ready' : 'missing';
   }
   const r = raw[m.id] || {};
   if (!r.installed) return 'missing';
@@ -72,7 +82,7 @@ async function detect(runner, extra) {
       required: !!m.required, auth: !!m.auth, authSoft: !!m.authSoft,
       requires: m.requires || [], restartOnInstall: !!m.restartOnInstall,
       installable: installable(m, runner.id),
-      state: rowState(m, raw, extra),
+      state: rowState(m, raw, extra, runner.id),
       version: r.version || '', account: r.account || '',
     };
   });

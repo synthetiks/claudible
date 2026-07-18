@@ -5042,10 +5042,24 @@ window.addEventListener('keydown', (e) => {
   // claude need only be INSTALLED here — its sign-in is the dedicated next step. Optional deps never block.
   // Skip/Escape still dismiss at any time (the wizard invariant), so a failed/unavailable install never traps.
   let depRows = [], restartNeeded = false;
+  // Per-dependency message text (id -> {text, err}), rendered under THAT row — NOT one shared box. "Install
+  // all missing" installs sequentially, and a single shared status line meant dep #2's result erased dep #1's
+  // just-shown, sometimes-actionable message (a real copy-paste command) before anyone could read it.
+  let depMsgs = {};
   const SYS_PILL = { ready: 'ready', missing: 'missing', outdated: 'update', installing: 'installing…', signin: 'sign in', unconfirmed: 'check', error: 'failed' };
   const sysInstallable = (d) => d.installable && (d.state === 'missing' || d.state === 'outdated' || d.state === 'error');
   const sysBlocking = (d) => d.required && !(d.state === 'ready' || (d.id === 'claude' && (d.state === 'unconfirmed' || d.state === 'signin')));
-  function sysBusy(msg, err) { const b = $('wiz-sys-busy'); if (!b) return; b.classList.toggle('err', !!err); b.textContent = msg || ''; }
+  // Update one row's message live (during an in-flight install) without waiting for a full renderSystem() rebuild.
+  function setDepMsg(id, msg, err) {
+    if (msg) depMsgs[id] = { text: msg, err: !!err }; else delete depMsgs[id];
+    const r = document.querySelector('#wiz-dep-list .dep-row[data-dep="' + id + '"]'); if (!r) return;
+    const main = r.querySelector('.dep-main'); if (!main) return;
+    let m = main.querySelector('.dep-msg');
+    if (!msg) { if (m) m.remove(); return; }
+    if (!m) { m = document.createElement('div'); m.className = 'dep-msg'; main.appendChild(m); }
+    m.classList.toggle('err', !!err);
+    m.textContent = msg;
+  }
   function setSysPill(id, cls, text) { const r = document.querySelector('#wiz-dep-list .dep-row[data-dep="' + id + '"]'); if (!r) return; const p = r.querySelector('.dep-pill'); if (p) { p.className = 'dep-pill ' + cls; p.textContent = text; } }
   function disableSysActs(on) { document.querySelectorAll('#wiz-dep-list .dep-act').forEach((b) => { b.disabled = on; }); const i = $('wiz-sys-install'); if (i) i.disabled = on; }
   async function refreshSystem() {
@@ -5072,6 +5086,7 @@ window.addEventListener('keydown', (e) => {
     const list = $('wiz-dep-list'); if (!list) return; list.innerHTML = '';
     let anyInstallable = false, blocking = 0;
     for (const d of depRows) {
+      if (d.state === 'ready') delete depMsgs[d.id];   // a leftover failure message about a now-fixed dep is stale noise
       if (sysBlocking(d)) blocking++;
       const row = document.createElement('div'); row.className = 'dep-row'; row.dataset.dep = d.id;
       const main = document.createElement('div'); main.className = 'dep-main';
@@ -5081,6 +5096,8 @@ window.addEventListener('keydown', (e) => {
       if (detail) { const v = document.createElement('span'); v.className = 'wiz-dim'; v.style.marginLeft = '6px'; v.textContent = detail; name.appendChild(v); }
       const hint = document.createElement('div'); hint.className = 'dep-hint'; hint.textContent = d.hint || '';
       main.appendChild(name); main.appendChild(hint);
+      const dm = depMsgs[d.id];
+      if (dm) { const mEl = document.createElement('div'); mEl.className = 'dep-msg' + (dm.err ? ' err' : ''); mEl.textContent = dm.text; main.appendChild(mEl); }
       const pill = document.createElement('span'); pill.className = 'dep-pill ' + d.state; pill.textContent = SYS_PILL[d.state] || d.state;
       row.appendChild(main); row.appendChild(pill);
       if (sysInstallable(d)) { anyInstallable = true; const b = document.createElement('button'); b.className = 'dep-act'; b.textContent = 'Install'; b.onclick = () => installDep(d.id); row.appendChild(b); }
@@ -5092,11 +5109,21 @@ window.addEventListener('keydown', (e) => {
     else { next.disabled = blocking > 0; next.textContent = blocking > 0 ? 'Install required to continue' : 'Next'; }
   }
   async function installDep(id) {
-    setSysPill(id, 'installing', 'installing…'); disableSysActs(true); sysBusy('');
+    setSysPill(id, 'installing', 'installing…'); disableSysActs(true); setDepMsg(id, '');
     let r; try { r = await claudible.preflightInstall(id); } catch (e) { r = { ok: false, error: e && e.message }; }
     disableSysActs(false);
-    if (r && r.restartRequired) { restartNeeded = true; setSysPill(id, 'ready', 'installed'); sysBusy('Installed. Claudible needs a quick restart to finish.'); const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Restart now'; return; }
-    if (!r || !r.ok) { setSysPill(id, 'error', 'failed'); sysBusy((r && r.error) || 'Install failed — retry, or Skip for now.', true); return; }
+    if (r && r.restartRequired) { restartNeeded = true; setSysPill(id, 'ready', 'installed'); setDepMsg(id, 'Installed. Claudible needs a quick restart to finish.'); const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Restart now'; return; }
+    if (!r || !r.ok) {
+      setSysPill(id, 'error', 'failed');
+      const raw = (r && r.error) || 'Install failed — retry, or Skip for now.';
+      // provision.sh's own error text is a curated, actionable sentence (sometimes a full copy-paste command) —
+      // show it in full, however long; that's the opposite of humanError()'s job. The ONE thing to catch is the
+      // raw Node execFile crash string ("Command failed: <cmd> <args>"), which only appears when the child died
+      // before producing any JSON at all (e.g. a network timeout) — that's an internal detail, not an instruction.
+      const msg = /^Command failed:/.test(raw) ? 'Could not reach the installer — check your network connection and try again.' : raw;
+      setDepMsg(id, msg, true);
+      return;
+    }
     await refreshSystem();
   }
   async function installAllMissing() {
@@ -5112,7 +5139,7 @@ window.addEventListener('keydown', (e) => {
     const cls = m.phase === 'done' ? 'ready' : m.phase === 'error' ? 'error' : 'installing';
     const txt = m.phase === 'done' ? 'ready' : m.phase === 'error' ? 'failed' : 'installing…';
     setSysPill(m.dep, cls, txt);
-    if (step === 1 && m.msg) sysBusy(m.msg, m.phase === 'error');
+    if (step === 1 && m.msg) setDepMsg(m.dep, m.msg, m.phase === 'error');
   });
 
   $('wiz-sys-next').addEventListener('click', sysNext);
