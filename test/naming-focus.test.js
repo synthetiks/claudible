@@ -43,7 +43,19 @@ ok('focusTermSoon is used at 12+ call sites (found ' + uses + ')', uses >= 12);
 ok('no unguarded synchronous rec.term.focus on the hello/setActiveTab paths',
   !APP.split('\n').some((l) => /rec\.term\.focus\(\)/.test(l) && !/typingElsewhere/.test(l)));
 
-// ---- 2. modalPrompt self-heals a stolen keyboard ----
+// ---- 2. sidebar repaints defer while a rename is being typed ----
+const nasStart = APP.indexOf('function renderWsNonActiveSessions(');
+ok('renderWsNonActiveSessions found', nasStart >= 0);
+ok('non-active tree fill() defers while a rename is open in its subtree',
+  /kids\.querySelector\('\.sess-rename'\)\) return;/.test(APP.slice(nasStart, nasStart + 2500)));
+const rwcStart = APP.indexOf('function renderWsChips(');
+ok('renderWsChips found', rwcStart >= 0);
+ok('renderWsChips structural rebuild defers while any rename is open',
+  /el\.querySelector\('\.sess-rename, \.ws-rename'\)\) return;/.test(APP.slice(rwcStart, rwcStart + 2000)));
+// The active list's own long-standing guards must stay (before AND after its await).
+ok('refreshSessions keeps its pre-await rename guard', (APP.match(/sessListEl\.querySelector\('\.sess-rename'\)\) return;/g) || []).length >= 2);
+
+// ---- 3. modalPrompt self-heals a stolen keyboard ----
 const mpStart = APP.indexOf('function modalPrompt(');
 ok('modalPrompt found', mpStart >= 0);
 const mpBody = APP.slice(mpStart, mpStart + 4000);

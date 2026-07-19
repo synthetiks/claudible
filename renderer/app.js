@@ -4179,6 +4179,11 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     // the emptied list ("sessions disappear for a split second"). document.body.contains(kids) can't see that;
     // only the activeness check can. (Cache is already updated by the caller, so the switch-in reads fresh data.)
     if (w.id === activeWsId) return;
+    // A rename is being typed in THIS tree → defer the wipe (same rule refreshSessions enforces for the active
+    // list at both its guards). Without this, a background sync event or the 10s peer poll rebuilding this
+    // subtree destroyed the input mid-keystroke. User-initiated repaints are unaffected: a click elsewhere
+    // blurs → commits the rename BEFORE the click handler repaints. The periodic caller re-fills soon after.
+    if (kids.querySelector('.sess-rename')) return;
     Array.from(kids.querySelectorAll('.sess,.sess-empty,.newsess-row')).forEach((n) => n.remove());
     // Same stub rule as the active list (promptless fork artifacts hidden, NAMED sessions always shown), and —
     // critically — the SAME ordering. This was the one site still sorting by used/mtime after a0c3c59 moved the
@@ -4274,6 +4279,11 @@ function renderWsChips() {
   // busy/syncing dots (a visible stutter). When the structural signature matches, update chips IN PLACE instead.
   const sig = wsChipsSig();
   if (sig === _wsChipsSig && el.querySelector('.ws-chip')) { reconcileWsChips(el); el.scrollTop = _scroll; return; }
+  // STRUCTURAL rebuild below (innerHTML=''). Removing the ancestor of a focused rename input fires a native
+  // blur → commit(true) mid-edit — a background sync-state ping was silently auto-saving half-typed names and
+  // tearing the box down. Defer the rebuild while any rename is open (sig stays stale, so the next periodic
+  // caller retries); the in-place fast path above stays live, and user clicks blur/commit first anyway.
+  if (el.querySelector('.sess-rename, .ws-rename')) return;
   _wsChipsSig = sig;
   // Preserve the live sessions list + its inline "+ New Session" across the wipe — they get moved INTO the active
   // workspace node below. .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare
