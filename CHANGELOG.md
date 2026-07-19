@@ -4,7 +4,26 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
-## [0.8.3] — 2026-07-19
+## [0.8.4] — 2026-07-19
+
+Driven by two live reports ("the create flow won't let me invite anyone" and "sometimes a rename/name box won't
+let me type") plus a 6-agent scan of the last 200 commits.
+
+- **The three-tile New-project modal is back** — Local project / **Shared GitHub project** / Add a folder I
+  already have (an owner decision, restoring what 0.8.2 removed). The shared tile now carries the same honest
+  transcript-sync consent as the ▾-menu share flows (the old tile had none), and — new — **a project created
+  shared syncs from birth**: session sync auto-enables and the sessions branch initializes at creation, exactly
+  like an upgraded project, so it's invitable immediately (▾ → Invite collaborator…). GitHub name collisions are
+  reported plainly before anything is created, and auth problems show the "connect GitHub first" hint only when
+  gh is genuinely missing/signed out.
+- **Typing into rename / naming / create prompts can no longer be silently stolen.** The renderer had ~15
+  independent deferred "hand the keyboard back to the terminal" timers; whichever fired last won, so a box opened
+  right after the wrong action sent keystrokes to the terminal — intermittently. One focus discipline now: a
+  deferred terminal-focus never steals from an open modal or a focused text field, and the "Name this session"
+  prompt reclaims the keyboard if the terminal grabs it while the prompt is open.
+- **An open rename survives background repaints.** A sync event or the peer poll could rebuild the sidebar and
+  destroy the input mid-keystroke (or silently auto-save a half-typed name via the native blur). Both repaint
+  paths now defer while a rename is open — the same rule the active list has always enforced.
 
 The master-debug release: a 63-agent audit of the whole codebase confirmed 42 defects; this ships fixes for 39
 of them (2 were verified fine-as-designed; 3 remain owner decisions, below).
