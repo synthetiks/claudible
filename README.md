@@ -42,7 +42,7 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 - **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first — Claudible embeds your already-authenticated session)
 - **Git for Windows** — to clone the repo. The one-line installer below **auto-installs it via winget** if you don't have it; otherwise grab it from [git-scm.com](https://git-scm.com/download/win).
 - **Node.js 22.12+** on Windows (Electron 42 requires it) — and that's the *only* Windows-side tooling: **no compiler, no Python, no Visual Studio Build Tools** (the one native module, `node-pty`, ships a ready-to-run N-API prebuilt).
-- Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
+- Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, `curl`, and [`uv`](https://docs.astral.sh/uv/) — `npm run setup` checks for these and prints the exact apt line if any are missing
 - **Optional, for remote co-work:** [`cloudflared`](https://github.com/cloudflare/cloudflared) on Windows (`winget install Cloudflare.cloudflared`, or point `CLAUDIBLE_CLOUDFLARED` at the binary). Without it, **Share** still works but the invite link is **localhost/LAN-only**.
 - **Optional, for private-repo projects + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
 

@@ -101,8 +101,10 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   const resumeTokens = new Map();   // private reconnect token per approved guest -> the client IP it was minted for (fail-open replay guard)
   const pending = new Map();
   let pendingSeq = 0;
-  // ---- voice room (WebRTC mesh) ----  every participant has a stable id; the host is 'host', guests are 'gN'.
-  // The server is ONLY a signaling relay (offer/answer/ICE) + membership tracker — no audio flows through it.
+  // ---- voice room (server-relayed audio) ----  every participant has a stable id; the host is 'host', guests
+  // are 'gN'. Audio is RELAYED through this server as base64 PCM frames (audioFromHost / the guest voice frames
+  // below) — it is NOT peer-to-peer. The original WebRTC-mesh design was dropped in c4b9c4f; the server both
+  // tracks membership AND forwards every audio frame, so voice traffic does cross the relay.
   let pidSeq = 0;
   const byPid = new Map();           // pid -> ws (find the target of a relayed signal)
   const voiceGuests = new Set();     // pids of guests currently in the voice room (mic on)

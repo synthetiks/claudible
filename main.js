@@ -171,8 +171,9 @@ const share = createShareServer({
         reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
       });
   },
-  // Voice room (WebRTC) — the server is signaling-only; audio is peer-to-peer. Bridge the host cockpit's
-  // voice membership + audio frames go back to the cockpit renderer (over IPC).
+  // Voice room — audio is RELAYED through the share server as base64 PCM (the original peer-to-peer WebRTC path
+  // was replaced by c4b9c4f). The server tracks membership and forwards every voice frame. Bridge the host
+  // cockpit's voice membership + audio frames back to the cockpit renderer (over IPC).
   onVoiceMembers: (members) => { try { win && win.webContents.send('share:voice-members', members); } catch {} },
   onAudio: (frame) => { try { win && win.webContents.send('share:audio', frame); } catch {} },   // a guest's voice frame → cockpit
 });

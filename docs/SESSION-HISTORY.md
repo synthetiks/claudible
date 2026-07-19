@@ -42,15 +42,16 @@ The renderer only ever sends the **raw prompt**; the main process stamps identit
 can't spoof who they are (attribution-trust by construction).
 
 ## Enable it
-In `runtime/settings.json`:
+In `~/.claudible/app/settings.json`:
 ```json
 { "sessionHistory": true }
 ```
 Then every prompt is captured and the last 10 render in the Repo Review drawer.
 
 ## Storage
-Per-workspace, local-first, in the gitignored runtime dir:
-`~/.claudible/runtime/history/<workspaceId>.json` (ring-buffered to the last 10).
+Per-workspace, local-first, in the durable per-user app dir (survives a reinstall, since commit `4eb9582` / R4 —
+this moved out of the in-clone `runtime/`):
+`~/.claudible/app/history/<workspaceId>.json` (ring-buffered to the last 10).
 Cross-machine, the log travels over the **live channel** (join handshake), not git.
 
 ## Tests (headless — no running app needed)

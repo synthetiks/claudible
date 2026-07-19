@@ -7,9 +7,9 @@ Claudible runs on **Windows 11 + WSL2**. The Electron app runs on Windows; it em
 - **Claude Code CLI inside WSL** — `claude` must be on your WSL PATH **and signed in**. Run `claude` once in WSL and complete login *before* launching Claudible (it embeds your existing session and doesn't handle first-time login specially). See the Claude Code docs.
 - **Node.js 22.12+ on Windows.** (Electron 42 and its build tooling require it; older Node prints `EBADENGINE` warnings on install.)
 - **Git for Windows** — to clone the repo. The one-liner in step 2 **auto-installs it via winget** if missing; otherwise get it from [git-scm.com/download/win](https://git-scm.com/download/win).
-- Inside WSL: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, `espeak-ng`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
+- Inside WSL: `git`, `cmake`, `build-essential`, `ffmpeg`, `python3`, `espeak-ng`, `curl`, and [`uv`](https://docs.astral.sh/uv/). Quick install:
   ```bash
-  sudo apt update && sudo apt install -y git cmake build-essential ffmpeg python3 espeak-ng
+  sudo apt update && sudo apt install -y git cmake build-essential ffmpeg python3 espeak-ng curl
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 
