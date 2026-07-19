@@ -1741,8 +1741,14 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
         // conversation); fresh=false when re-attaching an orphan (resume whatever's in that cwd).
         const attach = (repoUrl, owner, fresh, wsPath) => {
           openGen++;                                                     // supersede any in-flight workspace:open clone
-          const ws = { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
+          // The create script can run for minutes (repo = network create+clone+push). If a workspace with this
+          // exact id materialized meanwhile (discovery / an accepted invite / a concurrent create of the same
+          // name), REUSE it instead of pushing a duplicate id into the registry — the same stale-continuation
+          // class workspace:upgrade/rename already guard (4b0dd24), creation edition.
+          const dup = registry.workspaces.find((w) => w.id === `${kind}-${slug}`);
+          const ws = dup || { id: `${kind}-${slug}`, label: name.slice(0, 80) || slug, kind, slug,
             repoUrl: repoUrl || undefined, owner: owner || undefined, path: wsPath || undefined, createdAt: Date.now() };
+          if (dup) { if (repoUrl && !ws.repoUrl) ws.repoUrl = repoUrl; if (owner && !ws.owner) ws.owner = owner; if (wsPath && !ws.path) ws.path = wsPath; }
           if (kind === 'repo' && owner && Array.isArray(registry.dismissedRepos)) {   // deliberately (re-)adding a repo clears its delete-tombstone so discovery works normally again
             // Only the name-form key can be cleared here: this fresh workspace does not know its ghId yet (the
             // backfill sets it later), so there is no `gh:<id>` to match on. That is fine, and not a leak: a
@@ -1751,7 +1757,21 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
             // ever suppress a repo that has no workspace — which is exactly what a tombstone is for.
             registry.dismissedRepos = registry.dismissedRepos.filter((k) => k !== owner + '/' + slug);
           }
-          registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
+          // A SHARED project created from the modal must behave exactly like an upgraded one: sync on from
+          // birth, sessions-branch initialized, first push kicked. Without this the "Shared repo project" tile
+          // minted a repo whose creator couldn't see collaborators' sessions (or Join live) until they manually
+          // clicked "Collaborate in Claudible…" — the invited side got sync enabled on accept, the creator
+          // didn't. Mirrors workspace:upgrade + workspace:acceptInvite line-for-line.
+          if (kind === 'repo' && owner) {
+            ws.syncSessions = true;
+            (async () => {
+              if (syncLock.has(ws.id)) return; syncLock.add(ws.id);
+              let ir; try { ir = await runSync(ws, 'init', {}); } finally { syncLock.delete(ws.id); }   // release BEFORE doSync, else its lock-guard makes the first push a no-op
+              if (ir && ir.ok) doSync(ws, 'sync', {});
+            })();
+          }
+          if (!dup) registry.workspaces.push(ws);
+          registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
           // The create script can run for minutes (repo = network clone+push). Only re-point/respawn the tab
           // this create was FOR, and only if the user hasn't foregrounded another tab since — and never kill
           // a turn they started while waiting (same stale-continuation class as workspace:open, audit finding).
@@ -1772,7 +1792,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
         // The dir already exists on disk but isn't in our registry (registry wiped, or a prior create
         // timed out AFTER provisioning): re-attach it instead of dead-ending the name.
         if (/already exists/i.test(String(r.error || ''))) return attach(r.repoUrl, r.owner, false, r.path);   // reattach with the owner recovered from the existing clone's remote (create-workspace.sh) so it isn't left owner-less (L-2)
-        resolve({ ok: false, error: r.error || 'creation failed' });
+        resolve({ ok: false, error: r.error || 'creation failed', authIssue: !!r.authIssue });   // authIssue → the renderer shows the "connect GitHub first" hint (only genuine gh-not-installed/-authenticated failures — mirrors workspace:upgrade)
       });
   };
   // Custom save-location (local only): pick a parent folder, convert Windows→WSL path, create <folder>/<slug> there.

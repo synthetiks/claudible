@@ -637,6 +637,14 @@ none('renderer: orphanTab is never rendered',
     /after\.syncSessions = true; saveRegistry\(\);/.test(acc) ? [] : ['no syncSessions enable in acceptInvite']);
   none('acceptInvite enables sync but never kicks the first one (team sessions would wait for a poll tick)',
     /runSync\(after, 'init'/.test(acc) && /doSync\(after, 'sync'/.test(acc) ? [] : ['no init/sync kick after enabling']);
+  // A SHARED project created from the modal must behave like an upgraded one from birth: sync enabled + the
+  // sessions-branch init/first-push kicked inside workspace:create's attach(). Without this, the "Shared repo
+  // project" tile mints a repo whose creator can't see collaborators' sessions until a manual menu click.
+  const wc = MAIN.slice(MAIN.indexOf("ipcMain.handle('workspace:create'"), MAIN.indexOf("ipcMain.handle('workspace:adopt'"));
+  none('a created shared repo does not auto-enable session sync (creator-side sync dead until a manual click)',
+    /ws\.syncSessions = true;/.test(wc) && /runSync\(ws, 'init'/.test(wc) && /doSync\(ws, 'sync'/.test(wc) ? [] : ['no syncSessions/init/sync kick in workspace:create attach']);
+  none('workspace:create drops the authIssue flag (the connect-GitHub hint would never show for creation)',
+    /authIssue: !!r\.authIssue/.test(wc) && /"authIssue":true/.test(read('wsl/create-workspace.sh')) ? [] : ['authIssue not threaded through the create path']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

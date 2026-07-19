@@ -35,9 +35,9 @@ case "$kind" in
     ;;
 
   repo)
-    command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed in WSL"}'; exit 0; }
+    command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"authIssue":true,"error":"the GitHub CLI (gh) is not installed in WSL"}'; exit 0; }
     owner="$(gh api user --jq .login 2>/dev/null)"
-    if [ -z "$owner" ]; then printf '{"ok":false,"error":"gh is not authenticated — run: gh auth login"}'; exit 0; fi
+    if [ -z "$owner" ]; then printf '{"ok":false,"authIssue":true,"error":"gh is not authenticated — run: gh auth login"}'; exit 0; fi
     dir="$HOME/.claudible/repos/$slug"
     # win-native: normalize to a Windows path so gh/git.exe clone into the real dir, not a stray C:\c\.. (no-op off Windows).
     if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
@@ -51,9 +51,15 @@ case "$kind" in
       printf '{"ok":false,"error":"a repo workspace with that name already exists locally","owner":"%s","repoUrl":"https://github.com/%s/%s"}' "$ex_owner" "$ex_owner" "$slug"; exit 0
     fi
     mkdir -p "$HOME/.claudible/repos" 2>/dev/null
+    # Name already on GitHub? Bail BEFORE creating anything, with a message that says so plainly — the
+    # post-hoc "is the name already taken?" guess stays below only for genuine create failures (network,
+    # permissions). Mirrors upgrade-workspace.sh's preflight; keeps the action safely retryable.
+    if gh repo view "$owner/$slug" >/dev/null 2>&1; then
+      printf '{"ok":false,"error":"a GitHub repo named %s/%s already exists — pick another name or remove that repo first"}' "$owner" "$slug"; exit 0
+    fi
     # Create the private repo with an initial commit (--add-readme) so the clone has a real default branch.
     if ! gh repo create "$owner/$slug" --private --add-readme >/dev/null 2>&1; then
-      printf '{"ok":false,"error":"could not create the repo (is the name already taken on GitHub?)"}'; exit 0
+      printf '{"ok":false,"error":"could not create the repo on GitHub (network problem, or no repo-create permission) — try again"}'; exit 0
     fi
     # Tag it so the SAME user's other devices (and collaborators) discover it in ONE fast query (topics are
     # returned inline by /user/repos — no per-repo scan). Best-effort: discovery also still works via the marker.
