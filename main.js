@@ -466,11 +466,12 @@ function createWindow() {
     const dbgLog = app.isPackaged ? path.join(RT, 'debug.log') : path.join(__dirname, '.claudible-debug.log');   // writable root when installed; dev path unchanged
     const dbg = (s) => { try { fs.appendFileSync(dbgLog, new Date().toISOString() + ' ' + s + '\n'); } catch {} };
     try { fs.writeFileSync(dbgLog, new Date().toISOString() + ' [start] Claudible launched\n'); } catch {}
-    win.webContents.on('console-message', (...a) => {
-      let lvl, msg = '', src = '';
+    win.webContents.on('console-message', (o) => {   // Electron 36+ passes ONE event object {level,message,lineNumber,sourceId}; the pre-35 positional (event,level,message,line,source) signature was removed in 36, and package.json pins electron 42 — so the old positional branch was dead.
       const M = { debug: 0, verbose: 0, info: 1, log: 1, warning: 2, warn: 2, error: 3 };
-      if (typeof a[1] === 'number') { lvl = a[1]; msg = a[2]; src = (a[4] || '') + ':' + a[3]; }
-      else { const o = a[0] || {}; lvl = (M[o.level] != null) ? M[o.level] : 1; msg = (o.message != null) ? o.message : ''; src = (o.sourceId || '') + ':' + (o.lineNumber || ''); }
+      const e = o || {};
+      const lvl = (M[e.level] != null) ? M[e.level] : 1;
+      const msg = (e.message != null) ? e.message : '';
+      const src = (e.sourceId || '') + ':' + (e.lineNumber || '');
       dbg('[console L' + lvl + '] ' + msg + '  (' + src + ')');
     });
     win.webContents.on('render-process-gone', (e, d) => dbg('[render-process-gone] ' + JSON.stringify(d)));

@@ -18,8 +18,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"                   # absolute BEFORE the `c
 dir="${1:-}"
 [ -n "$dir" ] || { printf '{"ok":false,"error":"no folder given"}'; exit 0; }
 # Quotes/backslashes would break either the bash interpolation upstream or the JSON we emit below. main.js
-# rejects them too — this is the defense-in-depth copy (mirrors upgrade-workspace.sh's `case` guard).
-case "$dir" in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"that folder’s path contains a quote, a backslash or a line break — Claudible can’t use it"}'; exit 0 ;; esac
+# rejects them too — this is the defense-in-depth copy. Emits the short "bad dir" code (like clone-/create-/
+# upgrade-workspace.sh), which renderer humanError() translates to the full sentence — one place to edit the copy.
+case "$dir" in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac
 [ -d "$dir" ] || { printf '{"ok":false,"error":"that folder does not exist"}'; exit 0; }
 
 # Canonicalize (resolves `..`, symlinks, trailing slashes) so the registry stores ONE spelling of the folder —
@@ -29,7 +30,7 @@ dir="$(pwd -P)"
 # win-native: normalize to a real Windows path (C:/..) so the stored ws.path drives node-pty/claude.exe and the
 # ~/.claude/projects/<encoded-path> key correctly, instead of a /c/.. form read as a stray C:\c\.. (no-op on WSL).
 if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
-case "$dir" in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"that folder’s path contains a quote, a backslash or a line break — Claudible can’t use it"}'; exit 0 ;; esac
+case "$dir" in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac
 
 # Refuse the paths where adopting would be actively wrong rather than merely odd:
 #   * $HOME or / — Claude would be pointed at the user's entire machine, and `git diff` at whatever repo it lands in

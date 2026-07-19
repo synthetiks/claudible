@@ -35,6 +35,11 @@ let _pty = undefined;
 function ptyInfo() {
   if (_pty === undefined) {
     let mod = null, err = null;
+    // node-pty is the primary; node-pty-prebuilt-multiarch is a FALLBACK for platforms node-pty 1.1.0 has no
+    // prebuild for (notably linux/<arch>). It is intentionally NOT a package.json dependency — that would pull
+    // prebuild-install's whole tree into every Windows/Mac install for a Linux-only fallback. Release builds add
+    // it explicitly (`npm run dist:linux` + the CI build job, both `npm install --no-save …@^0.10.1-pre.5`). A
+    // plain `npm install && npm start` on native Linux that skips that step falls through to the clear error below.
     for (const name of ['node-pty', 'node-pty-prebuilt-multiarch']) {
       try { mod = require(name); err = null; console.log('[claudible] pty loaded via', name); break; }
       catch (e) { console.error(`[claudible] require('${name}') failed:`, e.message); err = `${name}: ${e.message}`; }

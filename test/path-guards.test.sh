@@ -45,7 +45,6 @@ TAB="$(printf '\tx')"; TAB="${TAB%x}"
 CR="$(printf '\rx')"; CR="${CR%x}"
 BADS=( "a'b" 'a"b' 'a\b' "a${NL}b" "a${TAB}b" "a${CR}b" )
 NAMES=( single-quote double-quote backslash newline tab carriage-return )
-UNSAFE_MSG='that folder’s path contains a quote, a backslash or a line break — Claudible can’t use it'
 
 i=0
 for n in "${NAMES[@]}"; do
@@ -66,9 +65,9 @@ for n in "${NAMES[@]}"; do
   # upgrade-workspace.sh <slug> <dir>           — same guard. "bad dir", not "workspace folder not found".
   refuses_with "upgrade-workspace ($n)" "bad dir" bash "$WSL/upgrade-workspace.sh" someslug "$d3"
 
-  # adopt-workspace.sh <dir>                    — had ' " \ ; now control bytes too.
-  # "…quote, backslash or line break", NOT "that folder does not exist".
-  refuses_with "adopt-workspace ($n)" "$UNSAFE_MSG" bash "$WSL/adopt-workspace.sh" "$d4"
+  # adopt-workspace.sh <dir>                    — had ' " \ ; now control bytes too. Emits the shared "bad dir"
+  # code (like its three siblings), which renderer humanError() translates — NOT "that folder does not exist".
+  refuses_with "adopt-workspace ($n)" "bad dir" bash "$WSL/adopt-workspace.sh" "$d4"
 done
 
 echo "== a legal, unusual path must still WORK — the guard must not lock users out of their own folders =="
