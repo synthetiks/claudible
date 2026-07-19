@@ -31,7 +31,13 @@ const MANIFEST = [
   // other posix dep — no `win` entry, so `installable()` still correctly reports false on the win runner,
   // which keeps its own proven path (main.js's ensureVoiceProvisioned, silent on first boot).
   { id: 'voice',       label: 'Voice models',    hint: 'Whisper + Kokoro — talk & hear',    category: 'voice',    required: false, auth: false, requires: ['uv'],    restartOnInstall: false, posix: true },
-  { id: 'cloudflared', label: 'cloudflared',     hint: 'Public share links (optional)',          category: 'optional', required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'Cloudflare.cloudflared' }, posix: true },
+  // hostSide: this dep must be installed where the Electron MAIN process runs, never inside a runner's
+  // execution guest. On the wsl flavor the main is native Windows while provision.sh installs into the WSL
+  // guest — a "successful" guest install can never be the binary main.js spawns (and preflight.sh's guest
+  // probe would keep the row green over it). installable()/installRoute() send (wsl, hostSide) through the
+  // SAME win path (winget/provision-win.ps1) native-win uses. Only cloudflared today: the tunnel is spawned
+  // by main.js itself (share/cloudflared.js), unlike every other dep, which runs inside the guest.
+  { id: 'cloudflared', label: 'cloudflared',     hint: 'Public share links (optional)',          category: 'optional', required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'Cloudflare.cloudflared' }, posix: true, hostSide: true },
   { id: 'gh',          label: 'GitHub CLI',      hint: 'Private-repo sync (optional)',           category: 'optional', required: false, auth: true,  requires: [],        restartOnInstall: false, win: { winget: 'GitHub.cli' },            posix: true },
 ];
 
@@ -39,8 +45,19 @@ const MANIFEST = [
 function installable(m, runnerId) {
   if (m.displayOnly) return false;
   if (m.id === 'voice' && runnerId === 'win') return true;   // R34: win routes to main's ensureVoiceProvisioned — every other runner had an Install button for voice, the packaged native app had none
+  if (runnerId === 'wsl' && m.hostSide) return !!(m.win && (m.win.winget || m.win.npm));   // must land on the Windows host, not the guest — see the hostSide manifest note
   if (runnerId === 'win') return !!(m.win && (m.win.winget || m.win.npm));
   return !!m.posix;   // posix/wsl: claude via install-claude.sh, others via provision.sh
+}
+
+// The pure routing decision — which install BACKEND serves this dep+runner combo? 'win' | 'posix' | null (not
+// installable here). A hostSide dep with no win entry is null, NEVER a posix fallback: falling back would
+// re-create the exact bug hostSide exists to prevent (a guest install reported as success the host can't use).
+// Exported so tests assert the dispatch without spawning powershell/bash.
+function installRoute(m, runnerId) {
+  if (!installable(m, runnerId)) return null;
+  if (runnerId === 'win' || (runnerId === 'wsl' && m.hostSide)) return 'win';
+  return 'posix';
 }
 
 // Compute the UI state for one dep from the raw probe map (+ main-injected voice state).
@@ -112,9 +129,9 @@ function toOnboardStatus(detectResult) {
 async function install(runner, depId, onProgress) {
   const m = MANIFEST.find((x) => x.id === depId);
   if (!m) return { ok: false, error: 'unknown dependency', env: {}, restartRequired: false };
-  if (!installable(m, runner.id)) return { ok: false, error: m.label + ' can’t be auto-installed here', env: {}, restartRequired: false };
-  if (runner.id === 'win') return installWin(m, onProgress);
-  return installPosix(runner, m, onProgress);
+  const route = installRoute(m, runner.id);
+  if (!route) return { ok: false, error: m.label + ' can’t be auto-installed here', env: {}, restartRequired: false };
+  return route === 'win' ? installWin(m, onProgress) : installPosix(runner, m, onProgress);
 }
 
 // Windows: spawn the per-dep PowerShell installer and stream its line-buffered `PHASE|message` output. It
@@ -160,4 +177,4 @@ async function installPosix(runner, m, onProgress) {
   return { ok, error, env: {}, restartRequired: false };
 }
 
-module.exports = { MANIFEST, detect, install, toOnboardStatus };
+module.exports = { MANIFEST, detect, install, toOnboardStatus, installRoute };

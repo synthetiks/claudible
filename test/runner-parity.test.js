@@ -124,6 +124,20 @@ eq('plugins.sh available (no-ws)', _scriptCmd(APP, 'plugins.sh', 'available', {}
     const thrown = await deps.detect(stub(async () => { throw new Error('boom'); }), {});
     eq('a THROWING probe still yields a usable result (no unavailable claim it cannot back)', thrown.unavailable, '');
 
+    // ---- hostSide install routing (the wsl-flavor cloudflared fix) ---------------------------------------------
+    // cloudflared is spawned by the Electron main (native Windows on the wsl flavor), so its install must land on
+    // the HOST — routing it through provision.sh "succeeded" into the WSL guest where the spawner can never find
+    // it. The route is a pure decision so we can pin all four runners without spawning powershell/bash.
+    const cf = deps.MANIFEST.find((m) => m.id === 'cloudflared');
+    const nodeDep = deps.MANIFEST.find((m) => m.id === 'node');
+    eq('cloudflared on wsl routes to the WINDOWS installer', deps.installRoute(cf, 'wsl'), 'win');
+    eq('cloudflared on native-win is unchanged', deps.installRoute(cf, 'win'), 'win');
+    eq('cloudflared on native-posix is unchanged (one OS runs everything there)', deps.installRoute(cf, 'posix'), 'posix');
+    eq('hostSide does not leak: node on wsl still routes posix', deps.installRoute(nodeDep, 'wsl'), 'posix');
+    // The generic form of the exact bug: a hostSide dep with NO win path must be un-installable on wsl —
+    // never silently "successful" via a guest install the host can't use.
+    eq('hostSide without a win entry is null on wsl, never a posix fallback', deps.installRoute({ id: 'x', hostSide: true, posix: true }, 'wsl'), null);
+
     console.log(`\nrunner-parity: ${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
   })();

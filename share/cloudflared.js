@@ -7,6 +7,11 @@
 //   under %LOCALAPPDATA% → cloudflared.exe / cloudflared on PATH. The winget path is checked explicitly
 //   because (a) a freshly-updated PATH doesn't reach an already-running shell, and (b) Node's spawn on
 //   Windows won't auto-append .exe for a bare command name.
+//
+//   probeCloudflared() is the detection-grade twin of startCloudflared(): same candidates, same order, so
+//   a dep row that says "ready" means "THIS process can launch it" — never "a binary exists somewhere". The
+//   wsl runner overrides its guest-side preflight row with this probe precisely because those two statements
+//   used to diverge (a Linux cloudflared inside WSL kept the row green while every spawn here ENOENT'd).
 'use strict';
 const cp = require('child_process');
 const fs = require('fs');
@@ -83,4 +88,32 @@ async function startCloudflared(port, opts = {}) {
   throw new Error(hint);
 }
 
-module.exports = { startCloudflared };
+// One candidate, detection-grade: does `<bin> --version` actually run HERE? Async execFile — this feeds
+// detectDeps(), which the wsl/posix flavors re-run on a 3s poll while the Connect-Claude popup is open; a
+// sync probe would freeze the whole main process (pty I/O + every IPC) for up to the timeout each tick.
+// The timeout is mandatory for a different reason: without it a hung binary leaves detectDeps()'s promise
+// pending forever and the System-check spinner never resolves.
+function probeOne(bin) {
+  return new Promise((resolve) => {
+    try {
+      cp.execFile(bin, ['--version'], { timeout: 4000, windowsHide: true }, (err, stdout) => {
+        if (err) return resolve(null);                       // ENOENT / non-zero / timeout → not launchable here
+        const m = String(stdout).match(/\d+\.\d+\.\d+/);
+        resolve({ version: m ? m[0] : '' });
+      });
+    } catch { resolve(null); }
+  });
+}
+
+// { installed, version, path } for the first candidate that launches. Never memoized — presence must flip
+// both ways between polls (freshly installed mid-share, or removed), or the tunnel self-heal loop and the
+// System-check could never see the state change they exist to react to.
+async function probeCloudflared(opts = {}) {
+  for (const bin of candidates(opts)) {
+    const r = await probeOne(bin);
+    if (r) return { installed: true, version: r.version, path: bin };
+  }
+  return { installed: false, version: '', path: '' };
+}
+
+module.exports = { startCloudflared, candidates, probeCloudflared };

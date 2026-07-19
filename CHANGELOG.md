@@ -4,6 +4,13 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **A Windows+WSL live share now actually reaches remote guests.** cloudflared was detected (and installed)
+  inside the WSL guest but launched from the Windows host — two different machines, so the System-check row
+  said "ready" while every share silently degraded to a localhost-only link nobody could join. Detection now
+  probes the exact binary the host will launch, the Install button lands it on Windows, a dropped or
+  never-present tunnel self-heals in the background (immediately after an in-place install), and hosting
+  without a public link shows a standing warning with a one-click fix instead of nothing.
+
 ## [0.8.4] — 2026-07-19
 
 Driven by two live reports ("the create flow won't let me invite anyone" and "sometimes a rename/name box won't

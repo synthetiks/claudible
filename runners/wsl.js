@@ -11,6 +11,7 @@
 const path = require('path');
 const cp = require('child_process');
 const shared = require('./_shared');   // OS-agnostic command construction (wsEnv/bootStr/scriptCmd), shared with posix.js
+const { probeCloudflared } = require('../share/cloudflared');   // host-side probe — plain node (cp/fs/path), requires cleanly anywhere incl. test/CI
 
 // App root = parent of this runners/ dir (main.js lives at the root; its __dirname == APP_ROOT).
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -138,7 +139,16 @@ async function detectDeps() {
   if (err) { console.error('[claudible] preflight (wsl):', err.message); return { gitBash: true, unavailable: 'wsl' }; }
   let o = {};
   try { o = JSON.parse(String(stdout).trim() || '{}'); } catch { return { gitBash: true, unavailable: 'wsl' }; }
-  return Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
+  const out = Object.assign({ gitBash: true }, (o && typeof o === 'object') ? o : {});
+  // cloudflared must launch on THIS (Windows) host, not in the guest: share:start spawns it from the Electron
+  // main, and a guest-side binary would tunnel to 127.0.0.1 INSIDE WSL while the share server binds the
+  // Windows loopback — unreachable under WSL2 NAT. preflight.sh's row only proves a Linux binary exists, so a
+  // green row over it lied for the only dep main.js itself spawns. Override with the SAME probe/order
+  // startCloudflared() uses (share/cloudflared.js), so "ready" finally means "will actually work". try/catch:
+  // one bad row must never blank the whole System-check (the class runner-parity's thrown-probe case guards).
+  try { out.cloudflared = await probeCloudflared(); }
+  catch { out.cloudflared = { installed: false, version: '', path: '' }; }
+  return out;
 }
 
 module.exports = {

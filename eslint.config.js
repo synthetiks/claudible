@@ -60,9 +60,11 @@ const RULES = {
 module.exports = [
   { ignores: ['node_modules/**', 'dist/**', 'runtime/**', 'patches/**', 'assets/**', 'test/fixtures/**'] },
 
-  // Node: main process, libs, runners, node-side hooks, wsl tool scripts, tests
+  // Node: main process, libs, runners, node-side hooks, wsl tool scripts, tests. share/cloudflared.js and
+  // share/server.js are node too (required by main.js) — before they were listed here they matched NO block
+  // and were silently unlinted, which is how a whole file can drift with zero gate.
   {
-    files: ['main.js', 'preload.js', 'lib/**/*.js', 'runners/**/*.js', 'hooks/**/*.js', 'wsl/**/*.js', 'test/**/*.js', 'eslint.config.js'],
+    files: ['main.js', 'preload.js', 'lib/**/*.js', 'runners/**/*.js', 'hooks/**/*.js', 'wsl/**/*.js', 'test/**/*.js', 'eslint.config.js', 'share/cloudflared.js', 'share/server.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: NODE_GLOBALS },
     rules: RULES,
   },

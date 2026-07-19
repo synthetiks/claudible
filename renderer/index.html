@@ -735,6 +735,11 @@
     #d-share:not(.ok):not(.work):not(.bad){display:none}   /* the web-share status light: hidden AND takes no width until a link is starting/live/failed (frees room so the row fits one line) */
     .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
     .share-dock .out:empty{display:none}   /* no fluff line when there's no live-share status to show (the hint moved to the button's tooltip) */
+    /* standing "hosting but not remotely reachable" warning — amber family matches .ctxbar.warn, persistent (not a toast) because this state strands every guest silently */
+    .tunnel-warn{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:8px 9px;border-radius:8px;font-size:10.5px;line-height:1.45;background:rgba(224,169,59,.10);border:1px solid rgba(224,169,59,.35);color:#e9b85a}
+    .tunnel-warn .tw-install{flex:none;padding:3px 9px;border-radius:6px;border:1px solid rgba(224,169,59,.4);background:rgba(224,169,59,.12);color:#e9b85a;font:inherit;font-size:10px;cursor:pointer}
+    .tunnel-warn .tw-install:hover{background:rgba(224,169,59,.22)}
+    .tunnel-warn .tw-install:disabled{opacity:.6;cursor:default}
     /* live collab bar: shows that the session is live + who has joined it */
     .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
     .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#5fb487);box-shadow:0 0 8px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
@@ -1098,6 +1103,10 @@
         <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
         <div class="out share-out" id="share-out"></div><!-- empty by default (hint is now the button tooltip); JS fills this only with live-share status -->
+        <div class="tunnel-warn" id="tunnel-warn" style="display:none"><!-- standing "hosting but not reachable" warning (renderTunnelWarn) — a toast is too easy to miss for a state that silently strands every guest -->
+          <span class="tw-txt" id="tunnel-warn-txt"></span>
+          <button class="tw-install" id="tunnel-warn-install" type="button" title="Install cloudflared on Windows so remote guests can reach your live session">Install cloudflared</button>
+        </div>
       </div>
     </aside>
     <div class="center">

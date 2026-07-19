@@ -924,6 +924,62 @@ ipcMain.on('live:audio-send', (e, { tabId, data, sr } = {}) => liveForward(tabId
 
 // ---- live terminal sharing (local server + cloudflared tunnel) ----
 let shareStartInFlight = null;                            // single-flight lock: a 2nd concurrent start must NOT spawn a 2nd tunnel
+
+// A tunnel can die mid-share (network blip, killed process) or never come up at share-start (no binary → the
+// loopback fallback below). Both used to stay silently degraded forever — the old exit-handler comment even
+// promised a self-heal helper that was never written. This is it, named armTunnelRetry/adoptTunnel on purpose:
+// the RENDERER has an unrelated tunnel function of its own, and a shared name is how a dangling promise goes
+// unnoticed. Presence needs no help here — the advertise heartbeat already skips beats until isTunnelUrl()
+// passes, so it re-publishes the moment a retry lands (plus one immediate beat from adoptTunnel).
+function armTunnelRetry(delayMs) {
+  if (appTimers.tunnelRetry || cloudflaredProc) return;    // already waiting / already up — never double or reset a pending retry
+  const t = setTimeout(attemptTunnelRetry, delayMs == null ? 45000 : delayMs);
+  if (t.unref) t.unref();
+  appTimers.tunnelRetry = t;
+}
+function disarmTunnelRetry() { if (appTimers.tunnelRetry) { clearTimeout(appTimers.tunnelRetry); appTimers.tunnelRetry = null; } }
+// Right-now variant for the one moment waiting would be silly: a cloudflared install just finished and its env
+// is already applied (preflight:install), so the very next candidates() read can see it — skip the 45s cadence.
+function kickTunnelRetryNow() { disarmTunnelRetry(); attemptTunnelRetry(); }
+async function attemptTunnelRetry() {
+  appTimers.tunnelRetry = null;                            // this firing consumed its arm (or was kicked)
+  const st0 = share.status();
+  if (!st0.running || shareStartInFlight || cloudflaredProc) return;   // not hosting, or a manual (re)start owns the spawn
+  let r;
+  try { r = await startCloudflared(st0.port); }
+  catch (e) { console.error('[claudible] tunnel retry:', (e && e.message) || e); armTunnelRetry(); return; }   // still down → next beat
+  // The await was multi-second — re-validate against a world that may have moved. `running` alone is NOT enough:
+  // a stop + fresh start can BOTH land inside that window, leaving running=true but on a NEW port — this tunnel
+  // would point at a dead origin. The retry deliberately does not hold shareStartInFlight (a manual restart must
+  // never queue behind a background attempt), which is exactly what opens that gap; the port check closes it.
+  const st1 = share.status();
+  if (!st1.running || st1.port !== st0.port || shareStartInFlight || cloudflaredProc) { try { r.proc.kill(); } catch {} return; }
+  adoptTunnel(r.proc, r.url);
+}
+// ONE adopt path for a share:start launch and a background retry — pid file, exit handler, context refresh and
+// the tunnel-up signal live here exactly once, so the two paths can never drift apart.
+function adoptTunnel(proc, url) {
+  disarmTunnelRetry();                                     // a live tunnel invalidates any pending retry
+  cloudflaredProc = proc; shareBaseUrl = url;
+  _writeCfPid(proc.pid);                                   // record the tunnel pid so a crash-orphan can be reaped on next launch
+  cloudflaredProc.on('exit', () => {
+    const unexpected = share.status().running;             // still "sharing" at exit ⇒ the tunnel dropped on its own (network/crash), not a clean host-stop
+    cloudflaredProc = null; shareBaseUrl = null; _clearCfPid();
+    if (unexpected) {
+      // The advertised live/<author>.json still points at the now-dead tunnel URL; pull it off the branch
+      // immediately so guests don't dial a dead handle (→ synchronous 'bad handle', no host prompt). Do NOT
+      // stopAdvertiseHeartbeat — its guard skips dead-URL beats and re-publishes automatically once the retry
+      // armed below lands a fresh URL.
+      if (advertisedSid) runPresence('presence-clear', () => {}, advertisedWs);   // clear on the advertised ws (not the current active one)
+      winSend('share:tunnel-down', {});                    // tell the host their public link is dead so guests aren't met with a silent refusal
+      armTunnelRetry();                                    // the self-heal the old comment only promised
+    }
+  });
+  presenceBeatOnce();                                      // advertising? publish the fresh handle NOW — recovery is bounded by the tunnel, not tunnel + next heartbeat
+  _writeAllContexts();
+  try { winSend('share:tunnel-up', { url: url + '/?t=' + share.status().token }); } catch {}   // renderer: refresh the link, drop the "local only" warning
+}
+
 ipcMain.handle('share:start', (e, opts) => {
   // Concurrent re-entry (double-click, or collab auto-share racing the manual web-share button) → reuse the SAME
   // in-flight start. Without this both calls pass the "already up" check (shareBaseUrl still null) and each spawns
@@ -946,22 +1002,9 @@ ipcMain.handle('share:start', (e, opts) => {
         cloudflaredProc = null;
         const { proc, url } = await startCloudflared(port);
         if (!share.status().running) { try { proc.kill(); } catch {} return { ok: false, error: 'stopped during start' }; }   // a share:stop landed while we were spawning → reap the tunnel, don't orphan a live public URL
-        cloudflaredProc = proc;
-        _writeCfPid(proc.pid);                              // record the tunnel pid so a crash-orphan can be reaped on next launch
-        cloudflaredProc.on('exit', () => {
-          const unexpected = share.status().running;        // still "sharing" at exit ⇒ the tunnel dropped on its own (network/crash), not a clean host-stop
-          cloudflaredProc = null; shareBaseUrl = null; _clearCfPid();
-          if (unexpected) {
-            // The advertised live/<author>.json still points at the now-dead tunnel URL; pull it off the branch
-            // immediately so guests don't dial a dead handle (→ synchronous 'bad handle', no host prompt). Do NOT
-            // stopAdvertiseHeartbeat — it self-heals: line 639 skips dead-URL beats and re-publishes automatically
-            // once a fresh tunnel URL comes back up via ensureTunnel.
-            if (advertisedSid) runPresence('presence-clear', () => {}, advertisedWs);   // clear on the advertised ws (not the current active one)
-            winSend('share:tunnel-down', {});               // tell the host their public link is dead so guests aren't met with a silent refusal
-          }
-        });
+        adoptTunnel(proc, url);                           // pid file + exit handler + tunnel-up signal — single adopt path, shared with the background retry
         base = url; remote = true;                       // public link
-      } catch (tunErr) { note = String(tunErr.message || tunErr); }   // tunnel down → fall back to localhost/LAN
+      } catch (tunErr) { note = String(tunErr.message || tunErr); armTunnelRetry(); }   // tunnel down → fall back to localhost/LAN, and keep trying in the background
       shareBaseUrl = base;
       const st = share.status();
       _writeAllContexts();                                // now hosting → tell the model (the fg tab's context flips to "hosting")
@@ -1077,26 +1120,30 @@ function stopAdvertising(opts) {
 // RE-STAMPING presence — so an "ended" session could keep advertising itself for seconds).
 // (presence-clear's spawned wsl.exe outlives app exit — the same guarantee the pty reaper relies on.)
 function stopLiveSharing(opts) {
+  disarmTunnelRetry();                                   // an explicit stop ends the self-heal too — a post-stop retry firing would spawn an orphan tunnel
   stopAdvertising(opts);                                 // opts.quitting → detached presence-clear (see above)
   share.stop();
+}
+// One presence beat, callable outside the interval too: adoptTunnel() fires it the instant a recovered tunnel
+// is adopted, so peers see the fresh handle in tunnel-time — not tunnel-time + up to a full 45s cadence.
+function presenceBeatOnce() {
+  const st = share.status();
+  if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
+  runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+    // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
+    // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
+    // duplicate, and tell the renderer so the UI stops saying "sharing" (it clears sharedSessionId + toasts).
+    if (r && r.error === 'already-live') {
+      stopAdvertiseHeartbeat();
+      try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
+    }
+  }, advertisedWs);
 }
 function startAdvertiseHeartbeat(sid, ws) {
   advertisedSid = sid;                                   // a session switch just re-points which sid we re-stamp
   advertisedWs = ws || advertisedWs || activeWorkspace;  // remember the ws this presence belongs to (for the heartbeat + clear)
   if (advertiseTimer) return;
-  advertiseTimer = setInterval(() => {
-    const st = share.status();
-    if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
-    runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
-      // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
-      // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
-      // duplicate, and tell the renderer so the UI stops saying "sharing" (it clears sharedSessionId + toasts).
-      if (r && r.error === 'already-live') {
-        stopAdvertiseHeartbeat();
-        try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
-      }
-    }, advertisedWs);
-  }, 45000);   // re-stamp cadence — must stay well under LIVE_TTL (120s) so a live host never ages out between beats
+  advertiseTimer = setInterval(presenceBeatOnce, 45000);   // re-stamp cadence — must stay well under LIVE_TTL (120s) so a live host never ages out between beats
   if (advertiseTimer.unref) advertiseTimer.unref();
 }
 ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
@@ -2141,7 +2188,7 @@ const appIntervals = [];   // long-lived poller intervals — cleared on window-
 // adaptive), so they never landed in appIntervals and nothing ever cleared them — the only two of six outside the
 // quit sweep. Both spawn a WSL subprocess per tick (sessions-sync.sh / workflows.sh). Today `app.quit()` masks it;
 // the day this process outlives its window (a tray icon, a background mode) they'd tick forever against nothing.
-const appTimers = { sync: null, workflow: null, trash: null };
+const appTimers = { sync: null, workflow: null, trash: null, tunnelRetry: null };   // tunnelRetry: the live-share self-heal (armTunnelRetry) — same contract, must die with the window
 // Heartbeat for the app→Claude context channel: the hook drops live/typedBy from a context.json whose ts is
 // >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
 // session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.
@@ -2455,6 +2502,9 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
     }
     await refreshWindowsPath();   // async: never block the main process (pty I/O + every poller) on a PowerShell spawn
     if (runner.id === 'win' && typeof runner.resetCaches === 'function') runner.resetCaches();   // re-resolve git-bash/app-dir next call
+    // A cloudflared installed MID-SHARE must not wait out the 45s retry cadence: its env/path is applied just
+    // above, so the very next candidates() read can see it — bring the tunnel (and with it, presence) up now.
+    if (id === 'cloudflared' && share.status().running && !cloudflaredProc) kickTunnelRetryNow();
     // R8: a wsl/posix voice install downloads+builds via setup.sh but starts NOTHING — the wizard row and the
     // topbar chip then say "ready" while Whisper/Kokoro aren't running, and the first Talk/PTT fails with a raw
     // fetch error until the next full relaunch (whose boot path is the only other startVoiceServices caller).
@@ -2883,7 +2933,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 app.on('window-all-closed', () => {
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
-  try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the two self-rescheduling ones
+  try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the self-rescheduling ones (sync/workflow/trash + the tunnel-retry)
   // The FULL live teardown — including presence-clear, which this path used to skip entirely: quitting while
   // hosting left live/<login>.json on the branch, so collaborators saw "live · Join" for up to 5 minutes after
   // the app was gone. quitting:true makes the clear a DETACHED one-shot — a non-detached child (the old default

@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onLiveTypist: (cb) => ipcRenderer.on('live:typist', (_e, p) => cb(p)),     // { tabId, name } someone is typing in a session I joined
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
   onShareTunnelDown: (cb) => ipcRenderer.on('share:tunnel-down', (_e) => cb()),   // public tunnel dropped while sharing
+  onShareTunnelUp: (cb) => ipcRenderer.on('share:tunnel-up', (_e, p) => cb(p)),   // { url } public tunnel is live — a fresh share, or the background self-heal recovered it
   onUpdateAvailable: (cb) => ipcRenderer.on('update:available', (_e, p) => cb(p)),   // a newer GitHub release exists (packaged builds only; notice-only, nothing auto-installs)
   onShareApproval: (cb) => ipcRenderer.on('share:approval', (_e, info) => cb(info)),
   onShareApprovalCancel: (cb) => ipcRenderer.on('share:approval-cancel', (_e, id) => cb(id)),

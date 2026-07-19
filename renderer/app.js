@@ -1409,6 +1409,7 @@ function webShareUI(on) {
   setDot('d-share', on ? 'ok' : '');
   const sr = $('share-reset'); if (sr) sr.style.display = on ? '' : 'none';   // "reset access" only while web-sharing
   if (!on) { shareLink.style.display = 'none'; shareLink.value = ''; }
+  renderTunnelWarn();
 }
 // "Reset access": disconnect every current guest + revoke the old link (server regenerateLink), then surface the fresh one.
 { const sr = $('share-reset'); if (sr) sr.addEventListener('click', async () => {
@@ -1535,6 +1536,7 @@ function endLiveNow(msg) {
   try { if (hostVoice && hostVoice.isJoined && hostVoice.isJoined()) hostVoice.leave(); } catch {}   // R20: the host's own voice-room membership outlived the share — mic stayed hot and the next share inherited a ghost member; every guest path already drops voice on leave, the HOST's end paths never did
   guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
   updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions(); refreshExpandedTrees();   // updateCollab→ensureTunnel drops the tunnel (closes guests). refreshSessions is ACTIVE-LIST-ONLY — without refreshExpandedTrees the ended session keeps its green rail + Live badge in any other project's open tree
+  renderTunnelWarn();                                              // hosting ended → the "guests can't reach you" chip must not outlive the share
   toast(msg);
 }
 // The shared thing was destroyed — its project deleted, or its tab closed. Main has already frozen the mirror.
@@ -1587,10 +1589,42 @@ function renderLiveBar() {
 }
 claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
 claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped mid-share → reflect it so guests aren't met with a silent refusal
-  tunnelUp = false; lastShareUrl = ''; lastShareRemote = false;
-  toast('Live link dropped — the tunnel went down. Toggle Share Live off then on for a fresh link.');
-  renderLiveBar(); refreshChatPanel();
+  tunnelUp = false; lastShareUrl = ''; lastShareRemote = false; lastShareNote = 'the tunnel dropped';
+  toast('Live link dropped — the tunnel went down. Reconnecting in the background…');   // main's armTunnelRetry keeps dialing; no manual toggle needed anymore
+  renderLiveBar(); refreshChatPanel(); renderTunnelWarn();
 });
+if (claudible.onShareTunnelUp) claudible.onShareTunnelUp((p) => {   // a fresh share, or the background self-heal recovered the tunnel
+  const wasDown = lastShareRemote === false;   // only a genuine recovery toasts — an ordinary fresh share already reported remote:true via shareStart's return
+  tunnelUp = true; lastShareRemote = true; lastShareNote = null;
+  if (p && p.url) { lastShareUrl = p.url; if (webShare) showLink(p.url); }
+  renderTunnelWarn();
+  if (wasDown) {
+    toast('Live link is back — the tunnel reconnected.');
+    // the #share-out line may still read "local link only" from a degraded manual start — make it honest too
+    if (webShare) { shareOut.textContent = 'invite link — share with your team' + (lastShareReadOnly ? ' · view-only' : ''); shareOut.className = 'out live'; }
+  }
+});
+// Standing warning while hosting WITHOUT a public tunnel — remote guests can't reach the share. The transient
+// toast is easy to miss, and the collab-share path used to swallow the degraded state entirely (it stored
+// remote:false and nothing ever read it). Gated on tunnelUp too, defense-in-depth: the stop paths reset
+// tunnelUp but not lastShareRemote, and there are four distinct end-paths — gate on both, not an audit of each.
+function renderTunnelWarn() {
+  const chip = $('tunnel-warn'); if (!chip) return;
+  const show = tunnelUp && (webShare || !!sharedSessionId) && lastShareRemote === false;
+  chip.style.display = show ? '' : 'none';   // '' → the .tunnel-warn class's flex display takes over
+  if (!show) return;
+  const t = $('tunnel-warn-txt');
+  if (t) t.textContent = 'Your live link only works on this machine — remote guests can’t reach it' + (lastShareNote ? ' (' + lastShareNote + ')' : '') + '.';
+}
+{ const b = $('tunnel-warn-install'); if (b) b.addEventListener('click', async () => {
+    b.disabled = true; b.textContent = 'Installing…';
+    let r = null; try { r = await claudible.preflightInstall('cloudflared'); } catch (e) { r = { ok: false, error: (e && e.message) || 'install failed' }; }
+    b.disabled = false; b.textContent = 'Install cloudflared';
+    if (!r || !r.ok) toast('Could not install cloudflared: ' + installErrText((r && r.error) || 'unknown'));
+    // success needs nothing here: main kicks the tunnel retry the moment the install lands (env already
+    // applied), and the chip hides itself via share:tunnel-up.
+  });
+}
 if (claudible.onUpdateAvailable) claudible.onUpdateAvailable((p) => {   // notice-only: installed builds otherwise NEVER learn a fix shipped
   toast('Claudible ' + p.latest + ' is out (you run ' + p.mine + ') — grab the new installer from the GitHub releases page.');
 });
@@ -2858,6 +2892,7 @@ async function ensureTunnel() {
   tunnelBusy = false;
   try { $('share-ro').disabled = tunnelUp; } catch (e) {}   // view-only can only be chosen when starting a FRESH tunnel
   refreshChatPanel(); updateAdvertise();
+  renderTunnelWarn();                                       // surface a degraded (remote:false) start on EVERY path — the collab flow used to drop it silently
   if ((webShare || collabLive) !== tunnelUp) ensureTunnel();   // desired state changed mid-flight → reconcile
 }
 // Collaboration follows the per-workspace "Sync sessions" toggle: a synced repo session means a collaborator can
@@ -2873,6 +2908,7 @@ function updateCollab() {
   collabLive = !!(aw && aw.kind === 'repo' && sharedSessionId);   // explicit: tunnel only when I've chosen to Share a session
   ensureTunnel();
   renderLiveBar();                                  // show/hide the in-session "● Live · who's here" bar
+  renderTunnelWarn();
 }
 // Toggle live-sharing of a session from the ▾ menu. Sharing streams the live pty, so the session must be the
 // active one — switch to it if needed. Stop sharing drops the tunnel (unless a manual web-share is up).
