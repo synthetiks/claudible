@@ -25,7 +25,7 @@ as_root() {
 pkg_err() {   # $1 = dep, $2 = the failing pkg() exit code → the accurate, actionable error
   case "$2" in
     2) err "installing $1 needs admin rights, and this installer has no way to prompt for your password — open your WSL/Linux terminal and run:  sudo apt-get install -y $1" ;;
-    1) err "no package manager (apt or brew) found — install $1 manually, then retry" ;;
+    3) err "no package manager (apt or brew) found — install $1 manually, then retry" ;;
     *) err "$1 could not be installed automatically — install it manually, then retry" ;;
   esac
 }
@@ -33,8 +33,8 @@ pkg() {   # install system packages via apt (Debian/WSL, needs root) or brew (ma
   if have apt-get; then
     as_root true || return 2                                       # can't get root non-interactively → tell the truth
     as_root apt-get update -y >/dev/null 2>&1; as_root apt-get install -y "$@" >/dev/null 2>&1
-  elif have brew; then brew install "$@" >/dev/null 2>&1
-  else return 1; fi
+  elif have brew; then brew install "$@" >/dev/null 2>&1           # brew's own exit (1 on failure) now maps to the generic "couldn't install" — NOT "no package manager", which it used to collide with
+  else return 3; fi                                               # neither apt nor brew — a DISTINCT sentinel (was 1, which brew's failure also returns)
 }
 
 case "$dep" in
@@ -57,8 +57,11 @@ case "$dep" in
                [ "$rc" = 2 ] && err "installing gh needs admin rights, and this installer can't prompt for your password — open your WSL/Linux terminal and run:  sudo apt-get install -y gh  (or see https://cli.github.com)"
                err "could not install gh automatically — see https://cli.github.com" ;;
   cloudflared)
-    have cloudflared && ok
-    pkg cloudflared && { have cloudflared && ok; }   # brew (macOS) / apt (rare on stock WSL) → else fall back to Cloudflare's official release below
+    # EXEC-validate (run --version), never just `have` (command -v): a truncated/corrupt binary left on PATH by a
+    # prior half-install passes `have` but can't run, so `have && ok` would falsely report success. Same rule the
+    # download branch below already applies — now applied to BOTH fast paths too.
+    have cloudflared && cloudflared --version >/dev/null 2>&1 && ok
+    pkg cloudflared && { have cloudflared && cloudflared --version >/dev/null 2>&1 && ok; }   # brew (macOS) / apt (rare on stock WSL) → else fall back to Cloudflare's official release below
     arch="$(uname -m)"; case "$arch" in x86_64|amd64) a=amd64 ;; aarch64|arm64) a=arm64 ;; armv7l) a=arm ;; *) a=amd64 ;; esac
     if [ "$(uname -s)" = "Darwin" ]; then
       # macOS ships a .tgz, NOT a bare binary — downloading cloudflared-linux here would drop a Linux ELF that
@@ -102,14 +105,26 @@ case "$dep" in
     # for the pty), so a "timed out" install can keep running here as an ORPHAN while the caller retries. Without
     # a lock, the retry's setup.sh would `rm -rf "$VOICE/whisper"` (etc.) out from under the still-running orphan.
     if ! mkdir "$_lock" 2>/dev/null; then
+      _holder="$(cat "$_lock/pid" 2>/dev/null || echo 0)"
       _started="$(cat "$_lock/started" 2>/dev/null || echo 0)"
       _age=$(( $(date +%s) - _started ))
-      if [ "$_age" -lt 7200 ]; then   # < 2h old → treat as a genuinely still-running install; refuse rather than race its files
+      # Refuse on LIVENESS, not just elapsed time. The old age-only rule both (a) blocked a legitimate retry for a
+      # full 2h when the holder had already died without cleanup, and (b) reclaimed purely on age without checking
+      # the holder was gone. If we recorded the holder PID, trust it: alive → still running, refuse; dead → reclaim
+      # now. Fall back to the 2h age heuristic only for a pre-upgrade lock that has no pid file.
+      _busy=0
+      if [ "$_holder" -gt 0 ] 2>/dev/null; then
+        kill -0 "$_holder" 2>/dev/null && _busy=1
+      elif [ "$_age" -lt 7200 ]; then
+        _busy=1
+      fi
+      if [ "$_busy" = 1 ]; then
         err "a voice install is already in progress (started ~$(( _age / 60 )) min ago) — wait for it to finish, then retry"
       fi
-      rm -rf "$_lock"; mkdir "$_lock" 2>/dev/null || true   # stale past 2h → the holder is dead, not slow; reclaim
+      rm -rf "$_lock"; mkdir "$_lock" 2>/dev/null || true   # holder is dead (or a pid-less lock older than 2h) → reclaim
     fi
     date +%s > "$_lock/started" 2>/dev/null || true
+    echo $$ > "$_lock/pid" 2>/dev/null || true   # record the holder so a later attempt can check liveness, not just age
 
     _log="$(mktemp)"
     "$_here/../setup/setup.sh" >"$_log" 2>&1 &
