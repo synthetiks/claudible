@@ -4,8 +4,37 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-07-19
+
 The master-debug release: a 63-agent audit of the whole codebase confirmed 42 defects; this ships fixes for 39
 of them (2 were verified fine-as-designed; 3 remain owner decisions, below).
+
+### Post-audit debug overhaul (July 19)
+A second 10-agent audit — the last 100 commits, the installers, and the docs — surfaced 39 findings plus two live
+user symptoms (spacebar not registering after a session switch; a mysterious "can't invite" failure). This pass
+fixes them across a dozen commits, each pinned by tests:
+- **The spacebar reaches the terminal after a session switch.** xterm delivers Space only via the native
+  `keypress` event, so a Space that lands on a still-focused `role=button` sidebar row scrolled the sidebar
+  instead of typing. Rows now activate on Space too, and switching a tab focuses the terminal synchronously.
+- **Collaboration invites surface the real error and recover the owner.** A failed upgrade-to-repo showed
+  "something went wrong — connect GitHub first" (the actionable 130-char message exceeded a 120-char cap, and a
+  text sniff mislabeled it); the hint is now gated on a real auth flag, curated errors show in full, and the
+  repo owner is recovered from the clone's remote so owner-less workspaces stop being an invite/rename dead end.
+- **First run no longer races.** The onboarding wizard and the legacy "name your project" modal both fired on a
+  fresh install, stacked, and stole keyboard focus; the wizard now owns first-run and its create-project step is
+  reachable again.
+- **Installers.** `install-claude.sh` finds a version-manager (nvm/fnm/volta/asdf/n) node; `install.ps1` requires
+  WSL2, not just any distro; cloudflared and the voice-install lock validate by liveness/execution, not by name;
+  whisper downloads fail with a friendly message instead of a raw stack trace.
+- **Tests.** The `sessions-divergence` suite survives an ambient `CLAUDIBLE_WS_DIR` — it's green when run from
+  inside Claudible, and a sourced script now resolves its own dir (a latent git-safety skip fixed too).
+- **State durability.** The R4 settings/history migration is atomic and resumable (an interrupted run no longer
+  strands history); `machine-id` writes atomically; a custom Windows workspace path is fully validated.
+- **Live + cleanup.** Joining a live session at the tab cap reclaims a slot instead of dead-ending; a native join
+  seeds its voice roster from the join handshake; a removed-in-Electron-36 code branch and a duplicated error
+  string are gone.
+- **Docs/comments.** The voice server RELAYS audio (it was wrongly documented as peer-to-peer signaling-only);
+  the reverted resize experiment is recorded as reverted; pre-R4 storage paths corrected.
 
 ### Finish-line fix loop (July 18, evening — release-readiness register R1–R42)
 A second full-fleet sweep (10 subsystem auditors against docs/FINISH-LINE.md) produced a ranked 42-defect
