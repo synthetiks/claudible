@@ -4714,7 +4714,7 @@ async function confirmSync() {
   if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); updateCollab(); }   // sync on → a peer can now Join live
   else { busy.textContent = (r && r.error) ? humanError(r.error) : 'could not turn on sharing'; busy.classList.add('err'); }   // r.error may be a bare code ('sync-busy') — never paint one into the modal
 }
-let firstRunHandled = false, firstRunActive = false;
+let firstRunHandled = false, firstRunActive = false, bootFirstRun = false;
 // "Never delete the last local project" exists so there is always somewhere to open. An ADOPTED project is only
 // a POINTER at a folder the user already owned — removing it deletes nothing — so the rule that guards a real
 // folder must not lock it in place. (First-run repro: adopt a folder, the auto-created "Local" placeholder is
@@ -4736,7 +4736,17 @@ function deleteWsPrompt(w) {
 // workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.
 function maybeFirstRun(r) {
   if (firstRunHandled || !r || !r.firstRun) return;
-  firstRunHandled = true; firstRunActive = true;
+  firstRunHandled = true;
+  bootFirstRun = true;   // remember the boot truth: the wizard re-reads workspaceList (~700ms) and by then this flag may be cleared — it must NOT read wl.firstRun directly, which skipped its create-project step (R23's re-break).
+  // On a genuine fresh install the onboarding WIZARD owns first-run — it has its own "create your project" step.
+  // Opening the ws-modal too would stack a SECOND full-screen dialog under the wizard and hold keyboard focus in
+  // its now-hidden input (the "typing goes nowhere, then a modal reappears" glitch on new projects). Only fall
+  // back to the standalone ws-modal when the wizard won't run (onboarding already finished, or no wizard). The
+  // wizard clears firstRun itself on dismiss, so a returning user never lands here.
+  let wizardWillRun = false;
+  try { wizardWillRun = !!($('wizard') && claudible.onboardStatus && !loadPrefs().onboardingDone); } catch (e) {}
+  if (wizardWillRun) return;
+  firstRunActive = true;
   try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch (e) {}
   try { toast('Welcome — name your project and pick where to keep it'); } catch (e) {}
   setTimeout(() => { try { openWsModal(); } catch (e) {} }, 450);
@@ -5031,10 +5041,15 @@ claudible.onWorkspaceActiveChanged((p) => {
 
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
+let newSessionPrompting = false;   // modalPrompt has no singleton — without this guard a double-click stacks two "Name this session" dialogs (and can create two tabs). Siblings ws-create/wiz-ws-create guard the same way.
 $('new-session').addEventListener('click', async () => {                            // a NEW tab — never clears the current session
-  const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
-  if (name === null) return;                                                         // Cancel / Esc → don't create
-  if (!newBlankTab(activeWsId, 'new', name || '')) toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');   // empty (just hit Create) → unnamed, like before
+  if (newSessionPrompting) return;                                                  // already asking — swallow the double-click
+  newSessionPrompting = true;
+  try {
+    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
+    if (name === null) return;                                                       // Cancel / Esc → don't create
+    if (!newBlankTab(activeWsId, 'new', name || '')) toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');   // empty (just hit Create) → unnamed, like before
+  } finally { newSessionPrompting = false; }
 });
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
@@ -5138,11 +5153,11 @@ window.addEventListener('keydown', (e) => {
       // dead code for every user: the wizard's four dots lied, and every install kept the placeholder name.
       // On a FIRST RUN the auto-created default doesn't count as "the user has a project" (creating a real
       // one triggers the existing placeholder cleanup); any other run keeps the old skip-if-any rule.
-      hasWs = real.length > ((wl && wl.firstRun) ? 1 : 0);
+      hasWs = real.length > (bootFirstRun ? 1 : 0);   // bootFirstRun is captured in maybeFirstRun BEFORE the registry flag is cleared; reading wl.firstRun here raced that clear and always saw false, so step 3 was skipped for every fresh install (R23's re-break via the wizard's second workspaceList read).
     } catch {}
     wiz.classList.add('show'); show(1); refreshSystem();
   }
-  function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} } }
+  function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch {} } }   // the wizard owns first-run (maybeFirstRun defers to it), so IT clears the registry flag on finish/skip — else the next boot, onboarding now done, would fall through to the legacy ws-modal.
   function finish() { dismiss(); setTimeout(() => { try { if (term) term.focus(); } catch {} }, 150); }
   function afterClaude() { if (hasWs) goGh(); else show(3); }   // existing users skip the create step (now step 3) — never a forced workspace mutation
 

@@ -758,8 +758,11 @@ none('renderer: orphanTab is never rendered',
 //     default workspace at boot, so a bare "some workspace exists" gate made step 3 permanently dead: every
 //     user skipped naming their first project. On firstRun, the auto-created default must not count.
 // ---------------------------------------------------------------------------------------------------------
+//     The gate now reads bootFirstRun — the boot-time firstRun value captured in maybeFirstRun BEFORE the
+//     registry flag is cleared — because the wizard re-reads workspaceList ~700ms later, by which point
+//     reading wl.firstRun directly always saw false (re-breaking R23 via the second read + stacking a modal).
 none('the wizard create-step gate ignores firstRun again (step 3 is dead code for every user)',
-  /hasWs = real\.length > \(\(wl && wl\.firstRun\) \? 1 : 0\);/.test(APP) ? [] : ['the firstRun-aware gate is gone']);
+  /hasWs = real\.length > \(bootFirstRun \? 1 : 0\);/.test(APP) && /bootFirstRun = true;/.test(APP) ? [] : ['the firstRun-aware gate is gone']);
 
 // ---------------------------------------------------------------------------------------------------------
 // 26. R11 — per-machine tags. "My login's branch copy differs from my local" is self-compaction ONLY when it
