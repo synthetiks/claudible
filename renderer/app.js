@@ -56,6 +56,22 @@ function installErrText(raw) {
 // error toast — end users should never see raw JS error text.
 window.addEventListener('error', (e) => { try { console.error('[uncaught]', (e && e.message) || e, (e && e.filename || '') + ':' + (e && e.lineno)); } catch (x) {} });
 window.addEventListener('unhandledrejection', (e) => { try { const r = e && e.reason; console.error('[unhandledrejection]', (r && (r.stack || r.message)) || r); } catch (x) {} });
+// ---- one focus discipline ----------------------------------------------------------------------------------
+// The renderer had ~15 independent deferred `term.focus()` timers (0-350ms) — "hand the keyboard back to the
+// terminal" after boot / closing a drawer / running a command / switching workspaces. Every naming/rename input
+// is ALSO focused via its own short timer, so whichever timer happened to fire LAST won the keyboard: open a
+// rename or a "Name this session" prompt right after an action that scheduled one of these, and keystrokes
+// silently went to the terminal — the intermittent "the field won't let me type" bug (an old 50ms hold-focus
+// loop fought the same disease until bbad946 removed it). One rule now: a deferred terminal-focus NEVER steals
+// from an open modal or a focused text field. Route every deferred handoff through focusTermSoon().
+function typingElsewhere() {
+  try {
+    if (document.querySelector('.back, .approve.show')) return true;   // a prompt/modal is open — never steal from it
+    const ae = document.activeElement;
+    return !!(ae && ae.matches && ae.matches('input, textarea') && !ae.closest('.xterm'));   // a real text field has the keyboard (xterm's own hidden textarea doesn't count)
+  } catch { return false; }
+}
+function focusTermSoon(ms) { setTimeout(() => { try { if (term && !typingElsewhere()) term.focus(); } catch {} }, ms || 0); }
 
 // ---------- embedded live TUI (one xterm per tab; only the foreground tab's container is visible) ----------
 const BASE_LH = 1.15;   // terminal line-height
@@ -308,7 +324,7 @@ function setActiveTab(tabId) {
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
   term = rec.term;
-  try { rec.term.focus(); } catch {}   // focus the terminal SYNCHRONOUSLY. The deferred focus below alone leaves a window where the just-clicked sidebar row (role=button, tabIndex=0) still holds DOM focus; xterm 5.5.0 delivers Space ONLY via the native keypress event, which never fires if that keydown landed on the row instead of the textarea — so a stray Space silently scrolls the sidebar rather than typing. Focusing here closes that window; the setTimeout stays as a layout-timing fallback.
+  try { if (!typingElsewhere()) rec.term.focus(); } catch {}   // focus the terminal SYNCHRONOUSLY (guarded: never steal from an open modal/text field). The deferred focus below alone leaves a window where the just-clicked sidebar row (role=button, tabIndex=0) still holds DOM focus; xterm 5.5.0 delivers Space ONLY via the native keypress event, which never fires if that keydown landed on the row instead of the textarea — so a stray Space silently scrolls the sidebar rather than typing. Focusing here closes that window; the focusTermSoon stays as a layout-timing fallback.
   if (rec.kind !== 'live') { try { claudible.tabForeground(tabId); } catch {} }   // guests + main's active-workspace follow the foreground tab — a live tab must NOT (it would hijack your own outgoing mirror)
   sync();                                          // fit the now-visible tab + (re)start/resize its pty (or fit the live mirror)
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
@@ -339,7 +355,7 @@ function setActiveTab(tabId) {
   // joined session's row vanish sidebar-wide (its home tree kept the stale join-time paint) until a manual
   // collapse/expand. Guarded to live-tab transitions so ordinary switches don't repaint every tree.
   if (sidebarReady && prev && prev !== rec && (prev.kind === 'live' || rec.kind === 'live')) refreshExpandedTrees();
-  setTimeout(() => { if (term) term.focus(); }, 0);
+  focusTermSoon(0);
 }
 // Open a brand-new session in a NEW tab (the current tab keeps running in the background).
 // → true if a tab was made. At the cap, reclaim a background tab first (reclaimTabSlot) rather than dead-ending:
@@ -398,12 +414,12 @@ window.addEventListener('load', scheduleFit);
 // transitively touches (fmtK, SWARM_SVG, …) is initialized — seeding it here would hit those in the TDZ.
 // These timers/observer are safe before then: sync()/updateScrollbar() no-op until a tab is active.
 setTimeout(sync, 180);
-setTimeout(() => { if (term) term.focus(); }, 350);   // keyboard ready in the terminal on launch
+focusTermSoon(350);   // keyboard ready in the terminal on launch
 
 // After ANY panel button click, hand keyboard focus back to the terminal so the next
 // keystroke (e.g. choosing an effort level after /effort) lands in Claude — not the button.
 document.querySelectorAll('.panel button').forEach((b) =>
-  b.addEventListener('click', () => setTimeout(() => term.focus(), 0)));
+  b.addEventListener('click', () => focusTermSoon(0)));   // guarded: a button that just opened a text field (e.g. the username editor) keeps the keyboard — the old bare timer stole it back a tick later
 
 // ---------- meta / health ----------
 (async () => {
@@ -951,7 +967,7 @@ $('stt-collapse').addEventListener('click', () => {
 // Always Speak: auto-voice every Claude reply in the selected voice
 $('always-speak').addEventListener('change', (e) => {
   setAlways(e.target.checked);
-  setTimeout(() => term.focus(), 0);
+  focusTermSoon(0);
 });
 
 // ---------- commands ----------
@@ -962,7 +978,7 @@ $('always-speak').addEventListener('change', (e) => {
 const send = (cmd) => {
   sendInput('\x1b');                                   // close prior menu / clear input
   setTimeout(() => sendInput(cmd + '\r'), 120);        // then run the command
-  setTimeout(() => term.focus(), 150);                    // keyboard back in the terminal
+  focusTermSoon(150);                                     // keyboard back in the terminal
 };
 // Command bar: 5 pills visible, the rest reached by horizontal scroll/drag in the same width.
 // Fire on pointer-UP (so a drag scrolls instead of triggering); preventDefault on pointer-DOWN
@@ -1294,7 +1310,7 @@ function setAgentsView(on) {
   const st = $('seg-term'), sa = $('seg-agents');
   if (st) st.classList.toggle('on', !on);
   if (sa) { sa.classList.toggle('on', on); if (on) sa.classList.remove('has-badge'); }
-  if (on) renderAgents(); else setTimeout(() => term.focus(), 30);
+  if (on) renderAgents(); else focusTermSoon(30);
 }
 if ($('seg-term')) {
   $('seg-term').addEventListener('click', () => setAgentsView(false));
@@ -1836,7 +1852,7 @@ function openDrawer(open) {
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (open) { loadSkills(); loadPlugins(); }       // refresh extension inventory each time the drawer opens
-  if (!open) setTimeout(() => term.focus(), 0);
+  if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
 async function loadSkills() {
@@ -1894,7 +1910,7 @@ if ($('skills-refresh')) $('skills-refresh').addEventListener('click', loadSkill
 if ($('plugins-refresh')) $('plugins-refresh').addEventListener('click', loadPlugins);
 
 // ---- official marketplace browser (the "+" beside Skills/Plugins) — search + install ----
-function termRun(cmd) { sendInput('\x1b'); setTimeout(() => sendInput(cmd + '\r'), 120); setTimeout(() => term.focus(), 170); }
+function termRun(cmd) { sendInput('\x1b'); setTimeout(() => sendInput(cmd + '\r'), 120); focusTermSoon(170); }
 let mktCache = null;
 async function openMkt() {
   $('mkt-modal').classList.add('show');
@@ -3232,7 +3248,7 @@ claudible.onLiveHello((p) => {
   if (liveVoiceTabId === p.tabId && rec.liveWasLost) { try { liveVoice.leave(); liveVoice.join().catch(() => {}); } catch {} }
   rec.liveWasLost = false;
   setLiveState(rec, p.paused ? 'paused' : 'live');
-  if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { rec.term.focus(); } catch {} } }
+  if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { if (!typingElsewhere()) rec.term.focus(); } catch {} } }   // guarded: a hello can arrive mid-rename/mid-prompt — never steal the keyboard from typing
 });
 claudible.onLiveRoster((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
@@ -3644,7 +3660,10 @@ function modalPrompt({ title, body, placeholder, value, ok }) {
     const close = (v) => { try { back.remove(); } catch {} document.removeEventListener('keydown', onDocKey, true); resolve(v); try { if (term) term.focus(); } catch {} };
     const onDocKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); close(inp.value.trim()); } else if (e.key === 'Escape') { e.preventDefault(); close(null); } });
-    okb.addEventListener('click', () => close(inp.value.trim()));
+    // Self-heal a stolen keyboard: if focus lands in the TERMINAL while this prompt is still open (a stray
+    // deferred term.focus() from an earlier action — the "the field won't let me type" bug), take it back. Only
+    // reclaims from the terminal, so clicking the prompt's own buttons (or anything else) is never fought.
+    inp.addEventListener('blur', () => setTimeout(() => { try { const ae = document.activeElement; if (document.body.contains(inp) && ae && ae.closest && ae.closest('.xterm')) inp.focus(); } catch {} }, 0));
     cancel.addEventListener('click', () => close(null));
     back.addEventListener('mousedown', (e) => { if (e.target === back) close(null); });
     document.addEventListener('keydown', onDocKey, true);
@@ -4072,7 +4091,7 @@ async function openSession(id, label, opts) {
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
   t.term.reset(); t.altFrac = 0;                       // clear this tab's view (the new pty repaints it) + reset its scroll estimate
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
-  setTimeout(() => { if (term) term.focus(); }, 150);
+  focusTermSoon(150);
 }
 // ---------- workspaces (the library a session belongs to: legacy / local folder / private repo) ----------
 const WS_FOLDER_SVG = '<svg class="ws-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
@@ -4595,7 +4614,7 @@ function gitCmd(cmd) {
   closeGitMenu();
   sendInput('\x1b');                                   // clear/close any open input first
   setTimeout(() => sendInput(cmd + '\r'), 120);        // …then run it in the terminal
-  setTimeout(() => term.focus(), 170);
+  focusTermSoon(170);
 }
 if ($('git-btn')) {
   $('git-btn').addEventListener('click', (e) => { e.stopPropagation(); const m = $('git-menu'); (m && m.style.display === 'block') ? closeGitMenu() : openGitMenu(); });
@@ -4860,10 +4879,10 @@ async function switchWorkspace(id, targetSession) {
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back
     return;
   }
-  if (failed) { rollBack(); setTimeout(() => { if (term) term.focus(); }, 150); return; }
+  if (failed) { rollBack(); focusTermSoon(150); return; }
   t.term.reset(); resetStats(t);                   // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
   refreshSessions();
-  setTimeout(() => { if (term) term.focus(); }, 150);
+  focusTermSoon(150);
 }
 // new-workspace chooser modal
 let wsChoiceKind = 'local';
@@ -4945,7 +4964,7 @@ async function createWorkspace() {
     try { await claudible.workspaceDelete('local-local'); await refreshWorkspaces(); } catch (e) {}
   }
   refreshSessions();
-  setTimeout(() => { if (term) term.focus(); }, 150);
+  focusTermSoon(150);
 }
 $('ws-add').addEventListener('click', openWsModal);
 // "Check for invites" — discovery also re-runs on window focus, but this is the immediate manual path for
@@ -5159,7 +5178,7 @@ window.addEventListener('keydown', (e) => {
     wiz.classList.add('show'); show(1); refreshSystem();
   }
   function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch {} } }   // the wizard owns first-run (maybeFirstRun defers to it), so IT clears the registry flag on finish/skip — else the next boot, onboarding now done, would fall through to the legacy ws-modal.
-  function finish() { dismiss(); setTimeout(() => { try { if (term) term.focus(); } catch {} }, 150); }
+  function finish() { dismiss(); focusTermSoon(150); }
   function afterClaude() { if (hasWs) goGh(); else show(3); }   // existing users skip the create step (now step 3) — never a forced workspace mutation
 
   async function refreshClaude() { const s = await status(); if (s) applyClaude(s); }

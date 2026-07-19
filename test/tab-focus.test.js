@@ -55,9 +55,10 @@ ok('no Enter-only row-activation handler remains', enterOnlyRow.length === 0);
 const saStart = APP.indexOf('function setActiveTab(');
 ok('setActiveTab found', saStart >= 0);
 const saBody = APP.slice(saStart, APP.indexOf('\n}', saStart));
-const syncFocusIdx = saBody.search(/\bterm\.focus\(\)/);       // rec.term.focus() / term.focus() called directly
-const deferFocusIdx = saBody.search(/setTimeout\(\(\) => \{ if \(term\) term\.focus\(\)/);
+const syncFocusIdx = saBody.search(/\bterm\.focus\(\)/);       // rec.term.focus() called directly (guarded by typingElsewhere)
+const deferFocusIdx = saBody.search(/focusTermSoon\(0\)/);     // the deferred fallback routes through the shared guard
 ok('setActiveTab focuses the terminal synchronously', syncFocusIdx >= 0);
+ok('the synchronous focus is typing-guarded (never steals from a modal/text field)', /typingElsewhere\(\)\) rec\.term\.focus\(\)/.test(saBody));
 ok('setActiveTab keeps a deferred focus as fallback', deferFocusIdx >= 0);
 ok('the synchronous focus runs before the deferred one', syncFocusIdx >= 0 && deferFocusIdx >= 0 && syncFocusIdx < deferFocusIdx);
 
