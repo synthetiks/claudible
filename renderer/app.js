@@ -39,7 +39,7 @@ function humanError(code) {
   };
   const c = String(code == null ? '' : code).trim();
   if (map[c]) return map[c];
-  if (/\s/.test(c) && c.length <= 120 && !/[{}<>]|Error:|\bat .*:\d|\bE[A-Z]{3,}\b|Cannot read prop/.test(c)) return c;   // already a human sentence → keep it (but never a raw node/JS exception)
+  if (/\s/.test(c) && c.length <= 200 && !/[{}<>]|Error:|\bat .*:\d|\bE[A-Z]{3,}\b|Cannot read prop/.test(c)) return c;   // already a human sentence → keep it in FULL. The SHAPE checks (not the length) are what keep raw node/JS exceptions out; the cap only bounds runaway text. It used to be 120, which silently ate upgrade-workspace.sh's 130-char actionable "delete the repo on GitHub and try again" message and replaced it with "something went wrong".
   return 'something went wrong';
 }
 // Installer/provisioner error text for the UI (R18). A script's OWN error is a curated, actionable sentence —
@@ -4646,7 +4646,7 @@ async function upgradeWorkspace(w) {
   toast('Setting up sync — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
   if (r && r.ok) { toast('Synced ✓ — this project now appears on your other devices'); try { await refreshWorkspaces(); } catch {} }
-  else { const m = (r && r.error) || 'unknown'; toast('Could not sync: ' + humanError(m) + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); }   // humanize for the toast, but sniff the RAW code for the gh hint
+  else { const m = (r && r.error) || 'unknown'; toast('Could not sync: ' + humanError(m) + ((r && r.authIssue) ? ' — connect GitHub first' : '')); }   // humanize for the toast; the gh hint is gated on a STRUCTURED authIssue flag (only "gh not installed / not authenticated"), not a text sniff — a create/push failure that merely mentions "GitHub" no longer mislabels itself as an auth problem
 }
 // Inviting to a local workspace: it must become a synced repo first (collaborators need a GitHub repo), then
 // open the normal invite modal on the now-repo workspace.
@@ -4657,7 +4657,7 @@ async function inviteToLocal(w) {
   if (!confirm('Share "' + w.label + '" with someone?\n\nThis creates a PRIVATE GitHub repo for it and turns on session sync, so the person you invite can see, resume, and join this project’s conversations.\n\nHeads up: session sync commits your Claude transcripts — including anything Claude read during them (file contents, secrets, command output) — into that private repo’s history.')) return;
   toast('Preparing to share — creating a private repo…');
   let r = null; try { r = await claudible.workspaceUpgrade(w.id); } catch (e) { r = { ok: false, error: e && e.message }; }
-  if (!r || !r.ok) { const m = (r && r.error) || 'unknown'; toast('Could not share: ' + humanError(m) + (/(gh|github|auth)/i.test(m) ? ' — connect GitHub first' : '')); return; }
+  if (!r || !r.ok) { const m = (r && r.error) || 'unknown'; toast('Could not share: ' + humanError(m) + ((r && r.authIssue) ? ' — connect GitHub first' : '')); return; }   // authIssue flag, not a text sniff — see upgradeWorkspace
   try { await refreshWorkspaces(); } catch {}
   const up = (workspaces || []).find((x) => x.id === w.id) || w;   // re-fetch the entry (now kind 'repo')
   openInviteModal(up);

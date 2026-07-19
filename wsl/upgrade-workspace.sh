@@ -16,9 +16,9 @@ case "$slug" in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad
 if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
 case "$dir"  in *\'* | *\"* | *\\* | *[[:cntrl:]]*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac   # ' ends the bash arg; " \ and control bytes break the JSON below (lib/pathSafe.js)
 [ -d "$dir" ] || { printf '{"ok":false,"error":"workspace folder not found"}'; exit 0; }
-command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed"}'; exit 0; }
+command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"authIssue":true,"error":"the GitHub CLI (gh) is not installed"}'; exit 0; }
 owner="$(gh api user --jq .login 2>/dev/null)"
-[ -n "$owner" ] || { printf '{"ok":false,"error":"gh is not authenticated — run: gh auth login"}'; exit 0; }
+[ -n "$owner" ] || { printf '{"ok":false,"authIssue":true,"error":"gh is not authenticated — run: gh auth login"}'; exit 0; }
 
 # Name already on GitHub? Bail BEFORE touching the local folder so the action is safely retryable.
 if gh repo view "$owner/$slug" >/dev/null 2>&1; then

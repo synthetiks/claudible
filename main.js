@@ -1606,7 +1606,7 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   const { err, stdout } = await runner.runScript('upgrade-workspace.sh', `'${slug}'${dirArg}`, { timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
   if (err) return { ok: false, error: 'upgrade failed to run' };
   let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-  if (!r.ok) return { ok: false, error: r.error || 'could not create the repo' };
+  if (!r.ok) return { ok: false, error: r.error || 'could not create the repo', authIssue: !!r.authIssue };   // authIssue → the renderer shows the "connect GitHub first" hint (only for genuine gh-not-installed/-authenticated failures, not every message that mentions GitHub)
   // The script can run for MINUTES — re-check the workspace survived (a concurrent workspace:delete removes it
   // from the registry; mutating the stale `ws` object then "succeeds" into a saveRegistry that resurrects
   // nothing, leaving an orphaned private GitHub repo + a phantom invite discovery would re-offer). If it's
@@ -1756,7 +1756,7 @@ ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
         if (r.ok) return attach(r.repoUrl, r.owner, true, r.path);
         // The dir already exists on disk but isn't in our registry (registry wiped, or a prior create
         // timed out AFTER provisioning): re-attach it instead of dead-ending the name.
-        if (/already exists/i.test(String(r.error || ''))) return attach(undefined, undefined, false, r.path);
+        if (/already exists/i.test(String(r.error || ''))) return attach(r.repoUrl, r.owner, false, r.path);   // reattach with the owner recovered from the existing clone's remote (create-workspace.sh) so it isn't left owner-less (L-2)
         resolve({ ok: false, error: r.error || 'creation failed' });
       });
   };

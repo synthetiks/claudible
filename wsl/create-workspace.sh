@@ -41,7 +41,15 @@ case "$kind" in
     dir="$HOME/.claudible/repos/$slug"
     # win-native: normalize to a Windows path so gh/git.exe clone into the real dir, not a stray C:\c\.. (no-op off Windows).
     if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir" 2>/dev/null || printf '%s' "$dir")"; fi
-    if [ -e "$dir" ]; then printf '{"ok":false,"error":"a repo workspace with that name already exists locally"}'; exit 0; fi
+    if [ -e "$dir" ]; then
+      # The clone exists locally but isn't in our registry (registry wiped, or a create that timed out after
+      # cloning). Recover the TRUE owner from the existing clone's origin remote so the re-attach in main.js isn't
+      # left owner-less — an owner-less repo workspace can never be invited/renamed/backfilled (L-2). Fall back to
+      # the signed-in user only if the remote can't be read.
+      ex_owner="$(git -C "$dir" remote get-url origin 2>/dev/null | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*\)/.*#\1#p' | tr -cd 'A-Za-z0-9-')"
+      [ -z "$ex_owner" ] && ex_owner="$owner"
+      printf '{"ok":false,"error":"a repo workspace with that name already exists locally","owner":"%s","repoUrl":"https://github.com/%s/%s"}' "$ex_owner" "$ex_owner" "$slug"; exit 0
+    fi
     mkdir -p "$HOME/.claudible/repos" 2>/dev/null
     # Create the private repo with an initial commit (--add-readme) so the clone has a real default branch.
     if ! gh repo create "$owner/$slug" --private --add-readme >/dev/null 2>&1; then
