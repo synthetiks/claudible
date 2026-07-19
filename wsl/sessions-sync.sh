@@ -122,7 +122,8 @@ if [ -z "$MID" ]; then
   MID="$(head -c 80 "$_midf" 2>/dev/null | tr -cd 'A-Za-z0-9-')"
   if [ -z "$MID" ]; then
     MID="$( { uuidgen 2>/dev/null || printf '%s-%s' "$(date +%s%N)" "$$"; } | tr -cd 'A-Za-z0-9-')"
-    mkdir -p "$HOME/.claudible" 2>/dev/null; printf '%s' "$MID" > "$_midf" 2>/dev/null
+    mkdir -p "$HOME/.claudible" 2>/dev/null
+    _mtmp="$_midf.tmp.$$"; printf '%s' "$MID" > "$_mtmp" 2>/dev/null && mv -f "$_mtmp" "$_midf" 2>/dev/null   # temp+rename: main.js writes this same file too, so a first-boot race could otherwise tear the id
   fi
 fi
 MID="$(printf '%s' "$MID" | head -c 64)"

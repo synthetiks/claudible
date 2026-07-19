@@ -194,14 +194,28 @@ try { fs.mkdirSync(PERSIST, { recursive: true }); } catch {}
 // One-time migration from the old in-clone location: an EXISTING install keeps its data on the first boot after
 // this change (the new location wins once populated; old copies stay behind as inert backups, never re-read).
 try {
+  // Copy through a temp sibling + rename so a crash mid-copy can't leave a TORN destination (a half-written
+  // settings.json reads as {} — a silent wipe). Atomic + idempotent (skip-if-present) = safe to retry.
+  const copyAtomic = (src, dst) => { const tmp = dst + '.mig-' + process.pid; fs.copyFileSync(src, tmp); fs.renameSync(tmp, dst); };
   for (const f of ['settings.json', 'workspaces.json']) {
     const oldP = path.join(RT, f), newP = path.join(PERSIST, f);
-    if (!fs.existsSync(newP) && fs.existsSync(oldP)) fs.copyFileSync(oldP, newP);
+    if (!fs.existsSync(newP) && fs.existsSync(oldP)) copyAtomic(oldP, newP);
   }
-  const oldH = path.join(RT, 'history'), newH = path.join(PERSIST, 'history');
-  if (!fs.existsSync(newH) && fs.existsSync(oldH)) {
+  // History was gated on the DESTINATION DIR existing — but mkdirSync created it BEFORE any file was copied, so an
+  // interrupted migration (or one swallowed copyFileSync error) left the dir present and the whole block was
+  // skipped forever, stranding the un-migrated per-workspace history. Gate on a completion MARKER instead, copy
+  // each file atomically and only if absent (resumable), and write the marker only after a fully clean pass. The
+  // marker lives beside the dir (not inside it) so it never shows up to the history reader.
+  const oldH = path.join(RT, 'history'), newH = path.join(PERSIST, 'history'), histDone = path.join(PERSIST, '.history-migrated');
+  if (!fs.existsSync(histDone) && fs.existsSync(oldH)) {
     fs.mkdirSync(newH, { recursive: true });
-    for (const f of fs.readdirSync(oldH)) { try { fs.copyFileSync(path.join(oldH, f), path.join(newH, f)); } catch {} }
+    let allOk = true;
+    for (const f of fs.readdirSync(oldH)) {
+      const dst = path.join(newH, f);
+      if (fs.existsSync(dst)) continue;
+      try { copyAtomic(path.join(oldH, f), dst); } catch { allOk = false; }   // a failed file → leave the marker unwritten so the next boot retries it
+    }
+    if (allOk) { try { fs.writeFileSync(histDone, String(Date.now())); } catch {} }
   }
 } catch (e) { console.error('[claudible] persist migration:', e && e.message); }   // never fatal — a failed copy just means first-run defaults
 // The sandboxed preload can't use fs, so MAIN owns the settings file; these handlers are registered at top level
@@ -225,11 +239,10 @@ ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); cons
     if (e && typeof e === 'object') for (const [k, v] of Object.entries(e)) {
       if (/^CLAUDIBLE_[A-Z_]+$/.test(k) && typeof v === 'string' && v && !process.env[k]) process.env[k] = v;
     }
-    if (s && typeof s.depPath === 'string' && s.depPath) for (const bin of s.depPath.split(path.delimiter)) {
-      if (bin && !String(process.env.PATH || '').split(path.delimiter).includes(bin)) process.env.PATH = bin + path.delimiter + (process.env.PATH || '');
-    }
   } catch {}
 })();
+// (settings.depPath was read here but never written by any code path — vestigial forward-compat; removed. The
+// live mechanism is settings.depEnv above, which the no-UAC provisioner fallback actually populates.)
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
 const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
@@ -2563,7 +2576,9 @@ function _machineId() {
     const f = path.join(app.getPath('home'), '.claudible', 'machine-id');
     try { const v = fs.readFileSync(f, 'utf8').trim(); if (v) return v; } catch {}
     const id = require('crypto').randomUUID();
-    fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, id);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const tmp = f + '.tmp-' + process.pid; fs.writeFileSync(tmp, id); fs.renameSync(tmp, f);   // atomic: this file has TWO writers (here + wsl/sessions-sync.sh) that can race on first boot; a plain writeFileSync could tear
+    try { const v = fs.readFileSync(f, 'utf8').trim(); if (v) return v; } catch {}             // re-read so concurrent creators converge on whoever won the rename
     return id;
   } catch { return ''; }
 }

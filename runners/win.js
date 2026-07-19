@@ -74,7 +74,7 @@ function sessionDir(ws, home) {
   if (kind === 'local' && slug) sdir = path.win32.join(home, '.claudible', 'workspaces', slug);
   else if (kind === 'repo' && slug) sdir = path.win32.join(home, '.claudible', 'repos', slug);
   else sdir = path.win32.join(home, '.claudible', 'session');
-  if (ws && ws.path && typeof ws.path === 'string' && !ws.path.includes("'")) sdir = ws.path;   // custom save-location
+  if (ws && ws.path && typeof ws.path === 'string' && !/['"\x00-\x1f]/.test(ws.path)) sdir = ws.path;   // custom save-location — reject quotes + control bytes (workspaces.json is documented as hand-editable, so ws.path isn't always pre-validated). Backslash stays: it's the Windows path separator (this is why it's a subset of lib/pathSafe.js's PATH_UNSAFE, which also bars '\' for POSIX paths).
   return sdir;
 }
 // Claude Code's own transcript store for a cwd: $HOME/.claude/projects/<cwd, every non-alnum -> '-'>.

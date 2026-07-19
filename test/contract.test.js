@@ -609,7 +609,7 @@ none('renderer: orphanTab is never rendered',
   none('session history moved back inside the clone (R4 regression)',
     /path\.join\(PERSIST, 'history'\)/.test(MAIN) ? [] : ['_histFile not under PERSIST']);
   none('the one-time migration from the old in-clone location is gone (existing installs would boot empty)',
-    /fs\.copyFileSync\(oldP, newP\)/.test(MAIN) && /'settings\.json', 'workspaces\.json'/.test(MAIN) ? [] : ['migration copy missing']);
+    /copyAtomic\(oldP, newP\)/.test(MAIN) && /'settings\.json', 'workspaces\.json'/.test(MAIN) && /fs\.renameSync\(tmp, dst\)/.test(MAIN) ? [] : ['migration copy missing (or no longer atomic)']);
   none('writeSettings still mkdirs the old RT root instead of PERSIST',
     /function writeSettings\(obj\) \{ fs\.mkdirSync\(PERSIST/.test(MAIN) ? [] : ['writeSettings mkdirs the wrong root']);
 }
