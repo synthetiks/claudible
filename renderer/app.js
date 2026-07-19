@@ -308,6 +308,7 @@ function setActiveTab(tabId) {
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
   term = rec.term;
+  try { rec.term.focus(); } catch {}   // focus the terminal SYNCHRONOUSLY. The deferred focus below alone leaves a window where the just-clicked sidebar row (role=button, tabIndex=0) still holds DOM focus; xterm 5.5.0 delivers Space ONLY via the native keypress event, which never fires if that keydown landed on the row instead of the textarea — so a stray Space silently scrolls the sidebar rather than typing. Focusing here closes that window; the setTimeout stays as a layout-timing fallback.
   if (rec.kind !== 'live') { try { claudible.tabForeground(tabId); } catch {} }   // guests + main's active-workspace follow the foreground tab — a live tab must NOT (it would hijack your own outgoing mirror)
   sync();                                          // fit the now-visible tab + (re)start/resize its pty (or fit the live mirror)
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
@@ -3205,7 +3206,7 @@ function renderJoinedTabRow(rec) {
   xb.addEventListener('click', (e) => { e.stopPropagation(); closeTab(rec.tabId); });
   row.appendChild(xb);
   row.addEventListener('click', (e) => { if (e.target.closest('button')) return; setActiveTab(rec.tabId); });
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setActiveTab(rec.tabId); } });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(rec.tabId); } });   // Space too: a role=button div doesn't get native Space-activation for free (WAI-ARIA), and an unhandled Space here scrolls the sidebar instead of typing
   return row;
 }
 // ---- live-session IPC: bytes/control from the peer (relayed by main's client WebSocket) ----------------
@@ -3321,7 +3322,7 @@ function renderSessionRow(s) {
   row.addEventListener('pointermove', onSessPointerMove);
   row.addEventListener('pointerup', onSessPointerUp);
   row.addEventListener('pointercancel', onSessPointerUp);
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openSession(s.id, sessTitle(s)); } });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSession(s.id, sessTitle(s)); } });   // Space too: see the setActiveTab-row note — an unhandled Space on a focused row scrolls the sidebar instead of typing
   return row;
 }
 // Visible ✓/✗ for an inline rename input. Without it the only ways to finish are Enter/Esc/blur, which leaves the
@@ -3833,7 +3834,7 @@ function renderLiveTabRow(rec) {
   });
   row.appendChild(mb);
   row.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('.sess-rename') || row.classList.contains('renaming')) return; setActiveTab(rec.tabId); });
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setActiveTab(rec.tabId); } });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(rec.tabId); } });   // Space too: a role=button div doesn't get native Space-activation for free (WAI-ARIA), and an unhandled Space here scrolls the sidebar instead of typing
   return row;
 }
 // Rename a live (unsaved) session: stored on the tab record's label (mirrors the saved-row rename UX).
@@ -4147,7 +4148,7 @@ function renderWsSessionRow(w, s) {
   appendConflictChip(m, s, w);                                       // expanded-tree row: same chips as the active list (bug fix — this path drew none)
   const go = () => { openWsSessionInTab(w, s); };   // open that project's session in its OWN tab (the tab you're on keeps running)
   row.addEventListener('click', go);
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });   // Space too: see the setActiveTab-row note — an unhandled Space on a focused row scrolls the sidebar instead of typing
   return row;
 }
 function renderWsNonActiveSessions(w, kids) {                          // a saved-sessions list for a NON-active expanded workspace
