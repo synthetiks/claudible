@@ -3,6 +3,8 @@
 #   {"ok":true} | {"ok":false,"error":"…"}
 # Uses npm -g (the documented install for all platforms; matches install.ps1 / setup.sh). Browser sign-in is
 # a SEPARATE step (the user runs claude once) — this only puts the binary on PATH.
+HERE="$(cd "$(dirname "$0")" && pwd)"                    # absolute BEFORE any cd
+. "$HERE/node-path.sh" 2>/dev/null || true              # a version-manager (nvm/fnm/volta/asdf/n) node+npm isn't on PATH in a non-interactive `bash -lc` shell — the same fix the 12 sibling node scripts already carry (d6b8a00). Its absence made THIS script (the wizard's "Install Claude Code" button) report "npm isn't available — install Node.js first" while the Node row directly above it already said ready.
 out="$(npm install -g @anthropic-ai/claude-code 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && command -v claude >/dev/null 2>&1; then
   printf '{"ok":true}\n'

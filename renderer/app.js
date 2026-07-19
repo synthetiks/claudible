@@ -5189,7 +5189,7 @@ window.addEventListener('keydown', (e) => {
     let r; try { r = await claudible.onboardInstallClaude(); } catch (e) { r = { ok: false, error: e && e.message }; }
     a.disabled = false;
     if (r && r.ok) { b.textContent = ''; refreshClaude(); }
-    else { b.classList.add('err'); b.textContent = 'Install failed: ' + ((r && r.error) || 'unknown') + ' — retry, or Skip for now.'; }
+    else { b.classList.add('err'); b.textContent = 'Install failed: ' + installErrText((r && r.error) || 'unknown') + ' — retry, or Skip for now.'; }   // shared filter (R18): this was the 4th, missed install-error surface — a raw Node exec-crash string ("Command failed: …") reached the DOM here unfiltered
   }
   async function signIn() {
     const b = $('wiz-claude-busy'); b.classList.remove('err'); b.textContent = 'Opening Claude — complete sign-in in the terminal/browser…';
