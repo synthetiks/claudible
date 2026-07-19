@@ -4,14 +4,15 @@
 # Args: $1 = op (list|toggle); for toggle: $2 = plugin key (name@marketplace), $3 = enable|disable.
 # Emits JSON.
 set -u
-. "$(dirname "$0")/node-path.sh" 2>/dev/null || true   # nvm's node isn't on PATH for non-interactive shells → resolve it
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"   # absolute BEFORE the ops below (some `unset`/branch first) — finishes the $HERE sweep so a future `cd` can't repoint the node-tool paths
+. "$HERE/node-path.sh" 2>/dev/null || true             # nvm's node isn't on PATH for non-interactive shells → resolve it
 
 op="${1:-list}"
 case "$op" in
 
   list)
     unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
-    node "$(dirname "$0")/plugins-tool.js" list 2>/dev/null || printf '[]'
+    node "$HERE/plugins-tool.js" list 2>/dev/null || printf '[]'
     ;;
 
   toggle)
@@ -29,7 +30,7 @@ case "$op" in
   available)
     # Browse what's installable from the registered marketplaces (the official one + any others).
     unset MSYS_NO_PATHCONV  # win-native: runner sets MSYS_NO_PATHCONV, so git-bash wont convert the /c/.. path(s) below to a Windows path for node.exe; clear it here (no-op on WSL/Posix)
-    node "$(dirname "$0")/plugins-tool.js" available 2>/dev/null || printf '[]'
+    node "$HERE/plugins-tool.js" available 2>/dev/null || printf '[]'
     ;;
 
   *) printf '{"ok":false,"error":"bad op"}' ;;

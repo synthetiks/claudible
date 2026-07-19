@@ -8,6 +8,12 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$ROOT/wsl/sessions-sync.sh"
+# This test SOURCES sessions-sync.sh, which honors CLAUDIBLE_WS_DIR (a real custom-save-location override) plus
+# the CLAUDIBLE_* runtime vars the app injects into every session. Running `npm test` from INSIDE a Claudible
+# tab leaks those in; CLAUDIBLE_WS_DIR then repoints SDIR at the real workspace and every case fails with "repo
+# workspace not found" — a false red that also means fork-detection has NO working coverage in the dev workflow.
+# Scrub them here; each case exports exactly the knobs it needs (WS_KIND/WS_SLUG/PROJ/SYNC_MIN_AGE/MACHINE_ID).
+unset CLAUDIBLE_WS_DIR CLAUDIBLE_CONTEXT CLAUDIBLE_HOOKS CLAUDIBLE_STATUS CLAUDIBLE_TAB CLAUDIBLE_MODEL_STRATEGY 2>/dev/null || true
 pass=0; fail=0
 ok() { if [ "$1" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL $3: expected [$2] got [$1]"; fi; }
 

@@ -18,7 +18,7 @@
 # Env: CLAUDIBLE_WS_KIND=repo, CLAUDIBLE_WS_SLUG=<slug>, CLAUDIBLE_LIVE_SESSION=<id-to-skip-on-push|''>
 # Emits ONE JSON line on stdout for the renderer; all git chatter is muted.
 set -u
-HERE="$(cd "$(dirname "$0")" && pwd)"                  # absolute, so the sources below survive any later cd
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"   # absolute, so the sources below survive any later cd. BASH_SOURCE (not $0) so HERE resolves to THIS script even when it's SOURCED (test/sessions-divergence.test.sh) not executed — with $0 it pointed at the caller's dir and the `. "$HERE/_git-safe.sh"` below silently failed, skipping git-safety hardening for every sourced op.
 . "$HERE/node-path.sh" 2>/dev/null || true             # nvm's node isn't on PATH for non-interactive shells → resolve it (title read/write)
 . "$HERE/_git-safe.sh"                                 # 22 git calls in a workspace repo. It's a repo WE cloned, so the config is ours — but that's an assumption about the caller, and this file is the one place it would cost nothing to stop assuming. Enforced tree-wide by test/adopt-workspace.test.js.
 
@@ -487,7 +487,7 @@ case "$op" in
     # push-retry pull below: per-author files merge cleanly, so a simultaneous rival claim arrives via THAT
     # pull — the tool's deterministic tie-break (earlier ts, then login) makes exactly one of us yield.
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
-    live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$(dirname "$0")/sessions-sync-tool.js" live-holder 2>/dev/null); }
+    live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null); }
     refuse="$(live_refuse)"
     if [ -n "$refuse" ]; then
       # Yield cleanly: if OUR OWN (losing) claim for this same session is already on the branch — a lost push
@@ -549,7 +549,7 @@ case "$op" in
         [ "$path" = "live/$author.json" ] && continue                # skip my own advertisement
         git -C "$WT" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r'; printf '\n'
       done < <(git -C "$WT" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null) \
-      | (unset MSYS_NO_PATHCONV; node "$(dirname "$0")/sessions-sync-tool.js" presence-filter)
+      | (unset MSYS_NO_PATHCONV; node "$HERE/sessions-sync-tool.js" presence-filter)
     )"
     [ -n "$result" ] && emit "$result" || emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[]}"   # node absent/failed → still emit a valid (empty) list so the renderer never chokes
     ;;
@@ -564,7 +564,7 @@ case "$op" in
     pull_branch || fail "pull failed"
     mkdir -p "$WT/meta" 2>/dev/null
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path (the gitwt push below still needs MSYS_NO_PATHCONV for the $BR refspec)
-    (unset MSYS_NO_PATHCONV; CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" node "$(dirname "$0")/sessions-sync-tool.js" title-write) || fail "title write failed"
+    (unset MSYS_NO_PATHCONV; CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" node "$HERE/sessions-sync-tool.js" title-write) || fail "title write failed"
     gitwt add -- "meta/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: title $author" >/dev/null 2>&1
     pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
@@ -576,7 +576,7 @@ case "$op" in
     ensure_worktree || fail "could not set up the sessions branch"
     git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
-    (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" CL_TS=1 node "$(dirname "$0")/sessions-sync-tool.js" title-read) || fail "title read failed"
+    (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" CL_TS=1 node "$HERE/sessions-sync-tool.js" title-read) || fail "title read failed"
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

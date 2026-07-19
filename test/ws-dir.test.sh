@@ -104,7 +104,7 @@ eq 'sessions.sh worktree path still derivable' "$got" "/h/.claudible/sessions-sy
 
 # ---- static: every script that used the block sources it, and NOBODY inlines it any more ----------------
 echo "== no script has a thirteenth copy =="
-USERS="agent-tokens checkpoint delete-session diff-apply diff git-fetch session-keep session sessions skills transcript workflows"
+USERS="agent-tokens checkpoint delete-session diff-apply diff git-fetch rename-repo session-keep session sessions skills transcript workflows"
 for f in $USERS; do
   if grep -q '^\. "\$HERE/_ws-dir\.sh"' "$WSL/$f.sh"; then ok; else bad "$f.sh sources _ws-dir.sh" "no" "yes"; fi
   # HERE must be assigned before the source line
