@@ -1374,11 +1374,15 @@
   <div class="approve" id="ws-modal">
     <div class="box">
       <h3>New project</h3>
-      <p>A project points Claude at a folder — it works inside those files, and you review &amp; revert its changes there. Private to you: sync it across your devices or share it with a teammate <b>later</b>, from the project’s ▾ menu.</p>
+      <p>A project points Claude at a folder — it works inside those files, and you review &amp; revert its changes there. Start it private, start it shared, or bring your own folder — a private project can always be synced or shared later from its ▾ menu.</p>
       <div class="choice-row">
         <div class="choice sel" id="ch-local" data-kind="local" role="radio" tabindex="0" aria-checked="true">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <div><div class="ct">Blank project</div><div class="cd">Start fresh — Claudible creates the folder for you.</div></div>
+          <div><div class="ct">Local project</div><div class="cd">Start fresh — Claudible creates the folder for you. Private to this machine.</div></div>
+        </div>
+        <div class="choice" id="ch-repo" data-kind="repo" role="radio" tabindex="0" aria-checked="false">
+          <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+          <div><div class="ct">Shared GitHub project</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team from the start, so you can invite people and go live together.</div></div>
         </div>
         <div class="choice" id="ch-adopt" data-kind="adopt" role="radio" tabindex="0" aria-checked="false">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14l3-3 3 3"/></svg>

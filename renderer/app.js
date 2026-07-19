@@ -4896,11 +4896,13 @@ async function switchWorkspace(id, targetSession) {
 }
 // new-workspace chooser modal
 let wsChoiceKind = 'local';
-// The New-project radiogroup, in DOM order. 'repo' was deliberately REMOVED as a creation-time choice: every
-// project starts plain, and becomes synced/shared later via the ▾ menu (upgradeWorkspace / inviteToLocal /
-// openSyncModal — all pre-existing, consented flows). The repo plumbing itself stays fully alive in main.js +
-// create-workspace.sh for invites, discovery, and the upgrade path; contract check 13 pins both halves.
-const WS_KINDS = ['local', 'adopt'];
+// The New-project radiogroup, in DOM order. All three kinds are creation-time choices again (owner decision,
+// 2026-07-19, restoring what 476630e removed): Local / Shared GitHub project / Add existing folder. The shared
+// tile carries the SAME consent gate as the ▾-menu share flows (see createWorkspace below — the old tile had
+// none, which is the one thing not restored verbatim), and a created shared repo syncs from birth (main.js
+// attach() mirrors workspace:upgrade). The later ▾-menu flows (upgradeWorkspace / inviteToLocal / openSyncModal)
+// stay fully alive for projects that start private.
+const WS_KINDS = ['local', 'repo', 'adopt'];
 function selectWsKind(kind) {
   wsChoiceKind = kind;
   WS_KINDS.forEach((k) => {
@@ -4930,13 +4932,17 @@ async function createWorkspace() {
   const adopt = wsChoiceKind === 'adopt';
   if (!name && !adopt) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }   // adopt names itself from the folder
   const pick = wsChoiceKind === 'local' && $('ws-pick') && $('ws-pick').checked;   // custom folder (local only)
-  busy.textContent = (adopt || pick) ? 'choose a folder…' : 'creating folder…';
+  // Creating SHARED publishes from birth (a private GitHub repo + session sync) — the same action the ▾-menu
+  // flows gate behind an honest transcript disclosure (R2), so the tile carries the identical consent. The old
+  // pre-476630e tile had NO consent dialog; that gap is deliberately not restored.
+  if (wsChoiceKind === 'repo' && !confirm('Create "' + name + '" as a shared project?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected) and turns on session sync, so people you invite can see, resume, and join this project’s conversations.\n\nHeads up: session sync commits your Claude transcripts — including anything Claude read during them (file contents, secrets, command output) — into that private repo’s history.')) return;
+  busy.textContent = (adopt || pick) ? 'choose a folder…' : (wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…');
   $('ws-create').disabled = true;
   let r = null;
   try { r = adopt ? await claudible.workspaceAdopt(name) : await claudible.workspaceCreate(wsChoiceKind, name, pick); } catch {}
   $('ws-create').disabled = false;
   if (r && !r.ok && r.error === 'cancelled') { busy.textContent = ''; return; }   // they closed the folder picker — not an error
-  if (!r || !r.ok) { busy.textContent = (r && r.error) ? humanError(r.error) : (adopt ? 'could not add that folder' : 'creation failed'); busy.classList.add('err'); return; }
+  if (!r || !r.ok) { busy.textContent = ((r && r.error) ? humanError(r.error) : (adopt ? 'could not add that folder' : 'creation failed')) + ((r && r.authIssue) ? ' — connect GitHub first' : ''); busy.classList.add('err'); return; }   // authIssue: structured flag from create-workspace.sh (genuine gh-not-installed/-authenticated only), same rule as upgradeWorkspace/inviteToLocal
   const wasFirstRun = firstRunActive; firstRunActive = false;
   if (r.note) { try { toast(r.note); } catch {} }   // honest partial-success (e.g. repo created but the discovery marker push failed)
   if (adopt) {
@@ -4968,8 +4974,8 @@ async function createWorkspace() {
   activeSession = null;
   await refreshWorkspaces();
   // first-run: the workspace they just made replaces the auto-created "Local" placeholder — remove it now that
-  // another local exists (the >=1-local invariant still holds). (Every modal creation is kind 'local' now — blank
-  // or adopted — so on first run this always applies; the guard stays because an invited-repo landing can't count.)
+  // another local exists (the >=1-local invariant still holds). A repo creation keeps the placeholder (still the
+  // only local) — the kind filter below counts locals only, so a first-run shared project correctly skips this.
   if (wasFirstRun && workspaces.some((w) => w.id === 'local-local') && workspaces.filter((w) => w.kind === 'local').length >= 2) {
     try { await claudible.workspaceDelete('local-local'); await refreshWorkspaces(); } catch (e) {}
   }

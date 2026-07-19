@@ -557,25 +557,28 @@ none('renderer: orphanTab is never rendered',
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 13. One kind of project at creation time — and the repo plumbing must OUTLIVE its removal from the modal.
-//     The New-project modal deliberately no longer offers "Shared repo project": every project starts plain and
-//     becomes synced later via the consented ▾-menu flows. Two failure modes, both pinned:
-//     (a) the tile creeping back (someone "restores" the choice and re-forks the UX);
-//     (b) someone garbage-collecting the now-UI-unreachable repo-creation path — which invites, discovery and
-//         upgrade still depend on. Deleting it would break accepting an invite, the exact kind of "cleanup"
-//         a dead-code sweep would suggest.
+// 13. Three kinds of project at creation time (owner decision, 2026-07-19, restoring what 476630e removed):
+//     Local / Shared GitHub project / Add existing folder. The invariants that survive from both eras:
+//     (a) the shared tile exists AND its creation path carries the SAME honest transcript-sync consent as the
+//         ▾-menu share flows (the pre-476630e tile had none — that gap must never come back);
+//     (b) the repo-creation plumbing stays alive (invites, discovery, upgrade AND the tile depend on it);
+//     (c) the later ▾-menu flows survive for projects that start private.
 // ---------------------------------------------------------------------------------------------------------
 {
-  none('the New-project modal grew a repo tile back', /ch-repo|Shared repo project/.test(HTML) ? ['index.html contains the repo tile again'] : []);
-  none('the modal path can reach workspaceCreate with kind repo again',
-    /const WS_KINDS = \['local', 'adopt'\]/.test(APP) && !/creating private repo on GitHub/.test(APP) ? [] : ['WS_KINDS regrew repo (or its busy text returned)']);
+  none('the New-project modal lost its shared-repo tile', /id="ch-repo" data-kind="repo" role="radio"/.test(HTML) ? [] : ['index.html has no #ch-repo radio tile']);
+  none('the modal path cannot reach workspaceCreate with kind repo',
+    /const WS_KINDS = \['local', 'repo', 'adopt'\]/.test(APP) && /creating private repo on GitHub/.test(APP) ? [] : ['WS_KINDS lost repo (or its busy text is gone)']);
+  // Creating shared publishes transcripts from birth — the tile must gate on the same honest disclosure the
+  // ▾-menu flows use (R2). Pinned to the repo branch of createWorkspace, not just any confirm() somewhere.
+  none('the shared tile creates without the transcript-sync consent gate',
+    /wsChoiceKind === 'repo' && !confirm\([\s\S]{0,420}session sync commits your Claude transcripts/.test(APP) ? [] : ['no consent confirm before workspaceCreate(repo)']);
   // ^\s*repo\)\s*$ = the actual case label. A bare /repo\)/ was satisfied by the header comment
   // "kind (local|repo)," — the comment-blindness trap that has now bitten this repo's guards three times.
-  none('the repo-creation plumbing was garbage-collected (invites/discovery/upgrade still need it)',
+  none('the repo-creation plumbing was garbage-collected (invites/discovery/upgrade/the tile all need it)',
     /^\s*repo\)\s*$/m.test(read('wsl/create-workspace.sh')) && /workspace:create/.test(MAIN) && /upgrade-workspace\.sh/.test(MAIN) ? [] : ['create-workspace.sh repo branch / workspace:create / upgrade path missing']);
-  // The deferred flows the modal now leans on must all still exist in the renderer.
+  // The ▾-menu flows must all still exist for projects that start private.
   const deferred = ['upgradeWorkspace(', 'inviteToLocal(', 'openSyncModal('].filter((f) => !APP.includes(f));
-  none('a deferred sync/share flow the modal copy promises is gone', deferred);
+  none('a ▾-menu sync/share flow is gone', deferred);
 }
 
 // ---------------------------------------------------------------------------------------------------------
