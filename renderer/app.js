@@ -1725,7 +1725,7 @@ try {
       const t = AT();
       if (t && t.kind === 'live') {                                  // joined-session voice (bound to ONE tab at a time)
         if (liveVoice.isJoined() && liveVoiceTabId === t.tabId) { liveVoice.leave(); liveVoiceTabId = null; }
-        else { if (liveVoice.isJoined()) { try { liveVoice.leave(); } catch {} } liveVoiceTabId = t.tabId; liveVoice.join().catch(() => {}); }   // switch the single live-voice to this tab
+        else { if (liveVoice.isJoined()) { try { liveVoice.leave(); } catch {} } liveVoiceTabId = t.tabId; liveVoice.join().catch(() => {}); if (Array.isArray(t.voiceSnap) && t.voiceSnap.length) { try { liveVoice.setMembers(t.voiceSnap); } catch {} } }   // switch the single live-voice to this tab; seed its roster from hello's cached snapshot so who's-already-in-voice shows immediately, before the server's first membership broadcast
       } else { if (hostVoice.isJoined()) hostVoice.leave(); else hostVoice.join().catch(() => {}); }
     });
     if ($('hv-mute')) $('hv-mute').addEventListener('click', () => voiceRoom().toggleMute());
@@ -3137,7 +3137,7 @@ function openLiveTab(peer, localLabel) {
       return;   // already joined → focus it (and reconnect above if it had gone offline/denied)
     }
   }
-  if (tabs.size >= MAX_TABS) { toast('Tab limit reached (' + MAX_TABS + ')'); return; }
+  if (tabs.size >= MAX_TABS && !reclaimTabSlot()) { toast('Tab limit reached (' + MAX_TABS + ') — close a tab first'); return; }   // at the cap, reclaim a background tab first rather than dead-ending — the one join path that still hard-refused (the sibling tab-creation sites already reclaim)
   const id = newTabId();
   const who = peer.name || peer.login || 'collaborator';
   const rec = makeTab(id, null, '', { kind: 'live', peer });
@@ -3220,6 +3220,7 @@ claudible.onLiveHello((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
   rec.liveReadOnly = !!p.readOnly; rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows;
   rec.livePid = p.pid || null; if (p.host) rec.hostName = p.host;
+  if (Array.isArray(p.voice)) { rec.voiceSnap = p.voice; if (liveVoiceTabId === p.tabId) { try { liveVoice.setMembers(p.voice); } catch {} } }   // M-4: the initial voice-room membership rides in on hello (the browser guest reads it — share/guest.js) but the native cockpit dropped it, so a join showed an empty roster until the next change. Cache it (seeded on Join-voice below) + seed now if we're already the voicing tab (reconnect).
   if (p.skew && p.skew.host) { rec.buildSkew = p.skew; toast('Heads up: the host runs Claudible ' + p.skew.host + ', you run ' + p.skew.mine + ' — if this live session misbehaves, update whichever side is older'); }   // main sanitized both strings
   if (p.you) rec.liveYou = p.you;                                   // the name the host's server registered us under (may be disambiguated, e.g. "MK (2)") — used to dedup ourselves out of the roster below
   // R26: a read-only mirror looked identical to a co-drive one — keys were silently refused with zero cue.
