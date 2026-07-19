@@ -60,11 +60,11 @@ fi
 if [ ! -x "$VOICE/whisper/build/bin/whisper-server" ]; then
   say "Installing Whisper (whisper.cpp)…"
   rm -rf "$VOICE/whisper"
-  git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$VOICE/whisper"
-  cmake -B "$VOICE/whisper/build" -S "$VOICE/whisper" -DWHISPER_BUILD_SERVER=ON
-  # explicit failure branch (not just `set -e`'s bare exit): provision.sh's `voice` case captures this whole
-  # script's log and tails its LAST few lines as the wizard's error message — without this, that tail is cmake's
-  # raw build output instead of an actionable one.
+  # Curated failure branches (not just `set -e`'s bare exit): provision.sh's `voice` case captures this whole
+  # script's log and tails its LAST few lines as the wizard's error message — without these, that tail is git's or
+  # cmake's raw output instead of an actionable one. The clone is the FIRST network op `npm run setup` performs.
+  git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$VOICE/whisper" || { say "Couldn't download Whisper (whisper.cpp) — check your network, then re-run \`npm run setup\`."; exit 1; }
+  cmake -B "$VOICE/whisper/build" -S "$VOICE/whisper" -DWHISPER_BUILD_SERVER=ON || { say "Whisper configure failed (is cmake installed?) — check the log above, then re-run \`npm run setup\`."; exit 1; }
   cmake --build "$VOICE/whisper/build" --config Release -j || { say "Whisper build failed — check the log above, then re-run \`npm run setup\`."; exit 1; }
 else
   say "Whisper already built."

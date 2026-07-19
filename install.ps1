@@ -99,6 +99,17 @@ if ($Native) {
   if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { Die "WSL2 isn't installed. Run 'wsl --install' in an admin PowerShell, reboot, then re-run this installer (or use -Native for a WSL-free install)." }
   & wsl.exe -e true 2>$null
   if ($LASTEXITCODE -ne 0) { Die "WSL has no working default distro. Install one (e.g. 'wsl --install -d Ubuntu' and finish its first-run setup), then re-run this installer." }
+  # Confirm the DEFAULT distro is WSL2, not WSL1 - the whole backend (interop, path translation, NAT networking)
+  # is authored against WSL2, and a WSL1 distro passes the "a distro runs" check above silently. `wsl -l -v` prints
+  # UTF-16 with a `*` on the default distro; strip the NULs and read its VERSION column. Only refuse when we can
+  # POSITIVELY read a "1" - an output we can't parse (locale, future format) falls through rather than false-blocking.
+  try {
+    $wslV = ((& wsl.exe -l -v 2>$null) -join "`n") -replace "`0",''
+    $defLine = ($wslV -split "`n" | Where-Object { $_ -match '^\s*\*' } | Select-Object -First 1)
+    if ($defLine -and ($defLine -match '(\d)\s*$') -and ($Matches[1] -eq '1')) {
+      Die "Your default WSL distro is WSL1, but Claudible needs WSL2. Convert it:  wsl --set-version <distro> 2  (run 'wsl -l -v' for the name), then re-run this installer."
+    }
+  } catch { }
 
   Step '2/4' 'Building the local voice services in WSL (you may be asked for your WSL sudo password)...'
   npm run setup

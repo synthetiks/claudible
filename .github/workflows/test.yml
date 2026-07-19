@@ -41,8 +41,8 @@ jobs:
       # shellcheck ships on ubuntu-latest. --severity=error only (real bugs, not style); every wsl/*.sh already
       # passes `bash -n`, so this is a genuine gate, not a nitpick wall. SC1091 = "can't follow sourced file"
       # (we source _git-safe.sh / node-path.sh by a runtime-resolved path shellcheck can't statically follow).
-      - name: shellcheck (wsl scripts)
-        run: shellcheck --severity=error -e SC1091 wsl/*.sh
+      - name: shellcheck (wsl + setup scripts)
+        run: shellcheck --severity=error -e SC1091 wsl/*.sh setup/setup.sh
 
   # Boots the REAL Electron app and drives the renderer over CDP — the only gate that can catch a TDZ error, a
   # missing preload export, or a renderer syntax error before a human opens the app. Its own job: an ephemeral

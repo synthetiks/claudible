@@ -47,11 +47,21 @@ if (-not (Test-Path $whisperExe)) {
   } catch { }
   if (-not $zipUrl) { $zipUrl = 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip' }
   $tmpZip = Join-Path $env:TEMP 'whisper-bin-x64.zip'
-  Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -OutFile $tmpZip
-  # The zip contains Release\whisper-server.exe + the ggml CPU DLLs (verified). Extract so the exe lands
-  # at $VOICE\whisper\Release\whisper-server.exe with its DLLs alongside.
-  Remove-Item -Recurse -Force (Join-Path $VOICE 'whisper\Release') -ErrorAction SilentlyContinue
-  Expand-Archive -Path $tmpZip -DestinationPath (Join-Path $VOICE 'whisper') -Force
+  # try/catch + a size floor around the download/extract: with $ErrorActionPreference='Stop', a network blip in
+  # Invoke-WebRequest/Expand-Archive otherwise throws a raw .NET stack trace instead of the friendly Warn pattern
+  # every other failure in this file uses (the model downloads below got this hardening in 03ad76f; this step
+  # didn't). The zip is a few MB, so a sub-100KB file is a truncated download, not a real archive.
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -OutFile $tmpZip
+    if ((-not (Test-Path $tmpZip)) -or ((Get-Item $tmpZip).Length -lt 100KB)) { throw 'download was truncated' }
+    # The zip contains Release\whisper-server.exe + the ggml CPU DLLs (verified). Extract so the exe lands
+    # at $VOICE\whisper\Release\whisper-server.exe with its DLLs alongside.
+    Remove-Item -Recurse -Force (Join-Path $VOICE 'whisper\Release') -ErrorAction SilentlyContinue
+    Expand-Archive -Path $tmpZip -DestinationPath (Join-Path $VOICE 'whisper') -Force
+  } catch {
+    Remove-Item $tmpZip -ErrorAction SilentlyContinue
+    Warn "Couldn't download or extract Whisper from $zipUrl - check your network and retry.  ($($_.Exception.Message))"; exit 1
+  }
   Remove-Item $tmpZip -ErrorAction SilentlyContinue
   if (-not (Test-Path $whisperExe)) { Warn "whisper-server.exe not found after extract - check $zipUrl layout."; exit 1 }
 } else { Say 'Whisper already installed.' }
