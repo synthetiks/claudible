@@ -34,6 +34,7 @@ function drive(state, src, callOpts) {
     const stopAdvertiseHeartbeat = () => { rec.push(['heartbeat-stop']); advertisedWs = null; advertisedSid = null; };
     const clearPresenceWithRetry = (ws) => rec.push(['presence-clear', ws]);
     const runPresence = (op, cb, ws, o) => rec.push(['presence-clear-detached', ws, !!(o && o.detach)]);
+    const _liveTiming = () => {};   // the latency journal is inert here — this harness only observes teardown ordering
     ((opts) => { ${body}
     })(callOpts);   // closing brace on its OWN line — the body's last line may end in a // comment
   `)(calls, state.ws, state.sid, callOpts);
@@ -99,6 +100,7 @@ ok('window-all-closed quits via stopLiveSharing({ quitting: true })',
     // Inject runPresence (fails twice, then succeeds) + a synchronous setTimeout so the retry chain runs inline.
     const make = new Function('deps', `
       const console = deps.console, setTimeout = deps.setTimeout, runPresence = deps.runPresence;
+      const _liveTiming = () => {};   // the latency journal is inert — this harness observes only the retry chain
       return function clearPresenceWithRetry(ws, attempt) { ${body} };
     `);
     let calls = 0, landed = false;

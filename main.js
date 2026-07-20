@@ -1067,6 +1067,12 @@ ipcMain.handle('share:approve', (e, arg) => ({ ok: share.decideApproval(arg && a
 // tombstone could silently vanish). Reads ride the same chain too (presence-list/title-list also pull).
 // Keyed by ws.id — different projects stay fully parallel.
 const _syncQ = makeKeyedQueue();
+// Presence-only lane: presence ops are worktree-FREE plumbing commits (~1-1.5s, see sessions-sync.sh) that
+// take no index lock and merge nothing — safe to run beside any transcript sync, but they must stay strictly
+// ordered among THEMSELVES (a clear must never overtake the set it follows, or a "stopped sharing" resurrects
+// as a zombie advertisement). A separate keyed queue gives exactly that: FIFO per workspace, zero contention
+// with _syncQ — the queue-wait behind multi-second syncs was the observed 2.5-3.9s go-live stamp variance.
+const _presQ = makeKeyedQueue();
 const _beatArgs = new Map();   // ws.id -> the args of a queued-but-not-started presence beat (coalescing)
 function runPresence(args, cb, ws, opts) {
   if (!APPDIR_WSL) return cb && cb(null);
@@ -1082,20 +1088,19 @@ function runPresence(args, cb, ws, opts) {
   // front-of-queue only helps against WAITING work, so a queue slot is not enough for it.
   if (opts && (opts.detach || opts.direct)) { exec(); return; }
   const key = (w && w.id) || 'ws';
-  // Presence is seconds-critical (a "going live" stamp / the join badge refresh) and must not wait out a
-  // queued multi-second transcript sync — front of the line, still strictly serialized (see keyedQueue).
-  // Title ops share this helper but are ordinary renames: normal priority.
-  const front = /^presence-/.test(args);
+  // Presence ops ride their own lane (_presQ): worktree-free plumbing that never waits behind a transcript
+  // sync yet stays strictly ordered among itself. Title ops still touch the worktree — they stay on _syncQ.
+  const lane = /^presence-/.test(args) ? _presQ : _syncQ;
   // Heartbeat COALESCING: a queued-but-not-started beat stamps its ts at RUN time, so it is exactly as fresh
-  // as this one — piling beats behind a long sync would only burn presence commits. Coalesce ONLY on byte-
-  // identical args: a re-share mints a new url/token, and dropping THAT beat would advertise a stale handle.
+  // as this one — piling beats up would only burn presence commits. Coalesce ONLY on byte-identical args: a
+  // re-share mints a new url/token, and dropping THAT beat would advertise a stale handle.
   if (/^presence-set /.test(args)) {
     if (_beatArgs.get(key) === args) return;
     _beatArgs.set(key, args);
-    _syncQ.run(key, () => { if (_beatArgs.get(key) === args) _beatArgs.delete(key); return exec(); }, { front });
+    lane.run(key, () => { if (_beatArgs.get(key) === args) _beatArgs.delete(key); return exec(); });
     return;
   }
-  _syncQ.run(key, exec, { front });
+  lane.run(key, exec);
 }
 // Keep my presence fresh while I'm hosting. Peers age out an advertisement after LIVE_TTL (120s), so a still-live
 // host must re-stamp its ts well within that. The timer lives in MAIN on purpose — renderer timers get throttled
@@ -1116,7 +1121,9 @@ function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertis
 function clearPresenceWithRetry(ws, attempt) {
   if (!ws) return;
   attempt = attempt || 0;
+  const t0 = Date.now();
   runPresence('presence-clear', (r) => {
+    _liveTiming(`end: presence-clear ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} attempt ${attempt + 1} +${Date.now() - t0}ms`);
     if (r && r.ok) return;                                         // landed on the branch → done
     if (attempt >= 5) { console.error('[live] presence-clear did not land after retries — peers fall back to the', 120, 's TTL'); return; }
     const t = setTimeout(() => clearPresenceWithRetry(ws, attempt + 1), 2000 * (attempt + 1));   // 2s,4s,6s,8s,10s
@@ -1138,7 +1145,7 @@ function stopAdvertising(opts) {
   // never happened and peers saw us "live" until the 120s TTL (the exact bug the quit-path comment claimed was
   // fixed). A detached one-shot survives app exit — the same guarantee the pty reaper relies on — and the
   // script's own 3 internal push retries absorb transient blips.
-  if (opts && opts.quitting) runPresence('presence-clear', null, advWs, { detach: true });
+  if (opts && opts.quitting) { _liveTiming('end: quitting — detached presence-clear fired'); runPresence('presence-clear', null, advWs, { detach: true }); }
   else clearPresenceWithRetry(advWs);                             // app alive → observable, retrying clear (2s..10s backoff)
 }
 // THE full live-hosting teardown: presence down (above) + share server down. Called from share:stop (the button)

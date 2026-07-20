@@ -31,21 +31,21 @@ ok('script: remote-head answers BEFORE the gh-api author block (API-budget invar
 ok('script: presence-list under CLAUDIBLE_SKIP_FETCH is a lock-free CODE-CLONE read (no worktree, no fetch)',
   /if \[ -n "\$\{CLAUDIBLE_SKIP_FETCH:-\}" \]; then/.test(SH) && /GD="\$SDIR"/.test(SH) && /git -C "\$GD" ls-tree/.test(SH));
 ok('script: presence-starting stamps a url-less starting:true entry',
-  /"starting":true/.test(SH));
-ok('script: presence-starting still runs the one-host arbiter (live-holder)',
-  (() => { const i = SH.indexOf('presence-starting)'); return i !== -1 && SH.slice(i, SH.indexOf('presence-clear)')).includes('live-holder'); })());
-ok('script: presence stamps are optimistic push-first (no unconditional pre-push pull)', (() => {
-  // In BOTH presence-set and presence-starting, the refusal hint must be computed BEFORE any pull_branch —
-  // the pull happens only inside the hint branch (and the push-retry loop). If a pre-push pull creeps back
-  // in, the "go live" stamp regains a full network round-trip on its critical path.
-  const spans = [['presence-set)', 'presence-starting)'], ['presence-starting)', 'presence-clear)']];
+  /\\"starting\\":true/.test(SH));
+ok('script: presence-starting still runs the one-host arbiter',
+  (() => { const i = SH.indexOf('presence-starting)'); return i !== -1 && SH.slice(i, SH.indexOf('presence-clear)')).includes('presence_holder_refuse'); })());
+ok('script: presence writes are worktree-FREE plumbing (no pull, no worktree, no index on the critical path)', (() => {
+  // presence-set / presence-starting / presence-clear must build the commit directly (mktree + commit-tree +
+  // push) and never call pull_branch or gitwt inside their blocks — the worktree path is what made stamps
+  // wait behind syncs and made the app-quit clear die on index.lock corpses. Behavior: presence-plumbing.test.sh.
+  if (!/gitp commit-tree/.test(SH) || !/gitp mktree/.test(SH) || !/update-ref "refs\/remotes\/origin\/\$BR"/.test(SH)) return false;
+  const spans = [['  presence-set)', '  presence-starting)'], ['  presence-starting)', '  presence-clear)'], ['  presence-clear)', '  presence-list)']];
   for (const [from, to] of spans) {
     const i = SH.indexOf(from), j = SH.indexOf(to);
     if (i === -1 || j === -1 || j <= i) return false;
     const block = SH.slice(i, j);
-    const firstRefuse = block.indexOf('refuse="$(live_refuse)"');
-    const firstPull = block.indexOf('pull_branch || fail');
-    if (firstRefuse === -1 || firstPull === -1 || firstPull < firstRefuse) return false;
+    if (block.includes('pull_branch') || block.includes('gitwt ')) return false;
+    if (!/presence_attempt/.test(block)) return false;
   }
   return true;
 })());
@@ -66,10 +66,8 @@ ok('main: the beacon presence read skips the redundant fetch AND bypasses the qu
   /direct: true, extraEnv: 'CLAUDIBLE_SKIP_FETCH=1 '/.test(MAIN));
 ok('main: announce fires exactly once per head move (baseline advances BEFORE the sync, not after it)',
   /_beaconHeads\.set\(ws\.id, r\.head\);\s*\n\s*_beaconDirty\.set\(ws\.id, r\.head\);/.test(MAIN) && /_beaconDirty\.delete\(ws\.id\)/.test(MAIN));
-ok('main: presence ops ride the FRONT of the per-ws queue (never behind a long sync)',
-  /const front = \/\^presence-\/\.test\(args\)/.test(MAIN) && /_syncQ\.run\(key, exec, \{ front \}\)/.test(MAIN));
-ok('main: keyedQueue supports front (the priority the pin above depends on)',
-  /opts && opts\.front/.test(read('lib/keyedQueue.js')));
+ok('main: presence ops ride their OWN lane, never behind a transcript sync',
+  /const _presQ = makeKeyedQueue\(\)/.test(MAIN) && /\/\^presence-\/\.test\(args\) \? _presQ : _syncQ/.test(MAIN));
 ok('main: tunnel-down advertise pushes the phase-1 starting presence', /presence-starting '\$\{sid\}'/.test(MAIN));
 ok('main: renderer pollers survive minimize (backgroundThrottling:false)', /backgroundThrottling: false/.test(MAIN));
 

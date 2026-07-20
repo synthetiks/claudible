@@ -130,8 +130,25 @@ if [ "$op" = "remote-head" ]; then
 fi
 
 command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed in WSL"
-author="$(gh api user --jq .login 2>/dev/null)"
-case "$author" in '' | *[!A-Za-z0-9-]*) fail "gh is not authenticated — run: gh auth login" ;; esac
+# The author login is stable but `gh api user` costs a full API round-trip (~0.5-1s) — and it sat on EVERY
+# invocation, including the latency-critical presence stamps. Cache it briefly (10 min): a gh account switch
+# mid-window worst-cases as exports under the previous author dir until the TTL — identity here routes WRITE
+# paths only, never trust (trust is the foreign-marking in import_file). Atomic write, same tmp+rename
+# discipline as the machine-id.
+_ghcache="$HOME/.claudible/gh-login.cache"
+author=""
+if [ -f "$_ghcache" ]; then
+  read -r _cl _cts < "$_ghcache" 2>/dev/null || true
+  case "$_cl" in *[!A-Za-z0-9-]* | '') _cl="" ;; esac
+  case "${_cts:-}" in '' | *[!0-9]*) _cts=0 ;; esac
+  [ -n "$_cl" ] && [ $(( $(date +%s) - _cts )) -lt 600 ] && author="$_cl"
+fi
+if [ -z "$author" ]; then
+  author="$(gh api user --jq .login 2>/dev/null)"
+  case "$author" in '' | *[!A-Za-z0-9-]*) fail "gh is not authenticated — run: gh auth login" ;; esac
+  mkdir -p "$HOME/.claudible" 2>/dev/null
+  printf '%s %s\n' "$author" "$(date +%s)" > "$_ghcache.tmp.$$" 2>/dev/null && mv -f "$_ghcache.tmp.$$" "$_ghcache" 2>/dev/null
+fi
 
 # R11: a stable PER-MACHINE identity, so two of one user's machines exporting under the SAME author dir can be
 # told apart. Without it, "my login's branch copy differs from my local" was always read as this machine's own
@@ -153,6 +170,62 @@ MID="$(printf '%s' "$MID" | head -c 64)"
 
 # git in the worktree with a stable identity (the user may not have configured git globally), no editor.
 gitwt() { GIT_EDITOR=true git -C "$WT" -c user.name="$author" -c user.email="$author@users.noreply.github.com" "$@"; }
+
+# ---- plumbing presence (worktree-free) --------------------------------------------------------------------
+# Presence stamps/clears are the latency-critical live-collab writes. They commit DIRECTLY against the object
+# graph: rewrite the live/ subtree of origin/$BR, commit-tree with origin/$BR as parent, push the ref. No
+# worktree, no index, no merge. Two field-observed failure classes this kills:
+#   - a stamp waiting behind a running multi-second transcript sync (the 2.5-3.9s stamps in live-timing.log);
+#   - the app-quit presence-clear dying on an index.lock corpse a killed sync left behind - peers then watched
+#     a zombie "live" row for the full 120s TTL (the "closing Claudible takes forever" report).
+# A non-fast-forward push (someone else pushed mid-flight) refreshes the base and the caller retries.
+gitp() { GIT_AUTHOR_NAME="$author" GIT_AUTHOR_EMAIL="$author@users.noreply.github.com" GIT_COMMITTER_NAME="$author" GIT_COMMITTER_EMAIL="$author@users.noreply.github.com" git -C "$SDIR" "$@"; }
+presence_base() {   # freshest known origin/$BR commit (fetch only when we know nothing) - echoes sha, '' if no branch
+  local b; b="$(git -C "$SDIR" rev-parse -q --verify "refs/remotes/origin/$BR" 2>/dev/null)"
+  [ -n "$b" ] || { git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1; b="$(git -C "$SDIR" rev-parse -q --verify "refs/remotes/origin/$BR" 2>/dev/null)"; }
+  printf '%s' "$b"
+}
+presence_attempt() {   # $1=set|clear  $2=json line (set only). ONE build+push try. 0=pushed; on reject the base is refreshed for the next try.
+  local mode="$1" content="${2:-}" base live_ls blob newlive root_ls newroot commit
+  base="$(presence_base)"; [ -n "$base" ] || return 1
+  live_ls="$(gitp ls-tree "$base:live" 2>/dev/null | grep -v $'\t'"$author"'\.json$')" || live_ls=""
+  if [ "$mode" = set ]; then
+    blob="$(printf '%s\n' "$content" | gitp hash-object -w --stdin 2>/dev/null)"
+    [ -n "$blob" ] || return 1
+    live_ls="$(printf '%s\n%s' "$live_ls" "100644 blob $blob"$'\t'"$author.json")"
+  fi
+  newlive="$(printf '%s\n' "$live_ls" | grep -v '^$' | gitp mktree 2>/dev/null)"
+  [ -n "$newlive" ] || return 1
+  root_ls="$(gitp ls-tree "$base" 2>/dev/null | grep -v $'\t''live$')" || root_ls=""
+  newroot="$(printf '%s\n%s\n' "$root_ls" "040000 tree $newlive"$'\t'"live" | grep -v '^$' | gitp mktree 2>/dev/null)"
+  [ -n "$newroot" ] || return 1
+  commit="$(gitp commit-tree "$newroot" -p "$base" -m "claudible: presence $mode $author" 2>/dev/null)"
+  [ -n "$commit" ] || return 1
+  if gitp push origin "$commit:refs/heads/$BR" >/dev/null 2>&1; then
+    gitp update-ref "refs/remotes/origin/$BR" "$commit" >/dev/null 2>&1   # keep the local view current (the beacon and later attempts compare against it)
+    return 0
+  fi
+  git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
+  return 1
+}
+presence_holder_refuse() {   # $1=sid - the one-host arbiter over origin/$BR's live/ blobs, no worktree. Prints the refusal line or nothing.
+  local d p nd out
+  d="$(mktemp -d 2>/dev/null)" || return 0
+  while IFS= read -r -d '' p; do
+    case "$p" in live/*.json) ;; *) continue ;; esac
+    git -C "$SDIR" show "origin/$BR:$p" 2>/dev/null | head -c 4096 > "$d/$(basename "$p")"
+  done < <(git -C "$SDIR" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null)
+  nd="$d"; command -v cygpath >/dev/null 2>&1 && nd="$(cygpath -m "$d" 2>/dev/null || printf '%s' "$d")"
+  # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+  out="$( (unset MSYS_NO_PATHCONV; CL_DIR="$nd" CL_SID="$1" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null) )"
+  rm -rf "$d" 2>/dev/null
+  printf '%s' "$out"
+}
+presence_yield_own() {   # $1=sid - retract my own on-branch claim for sid (a lost race) so peers converge on ONE host now, not after the TTL
+  git -C "$SDIR" show "origin/$BR:live/$author.json" 2>/dev/null | grep -q "\"session\":\"$1\"" || return 0
+  local i; for i in 1 2 3; do presence_attempt clear && return 0; done
+  return 0
+}
 
 # R11 tag file: sessions/<login>/.machine-tags — one "id machineId" line per exported id, replaced on each
 # export. Import consults it ONLY for our own author dir: tag == this machine (or a legacy untagged row) →
@@ -491,8 +564,8 @@ case "$op" in
     ;;
   presence-set)
     # Advertise "I'm live in session $2, joinable at $3 with token $4" so a collaborator in this workspace can
-    # join natively — no link to paste. One small file per author under live/. Ignored by the session import.
-    ensure_worktree || fail "could not set up the sessions branch"
+    # join natively - no link to paste. One small blob per author under live/, committed via the worktree-free
+    # plumbing path above. Ignored by the session import.
     psid="${2:-}"; purl="${3:-}"; ptok="${4:-}"; pname_b64="${5:-}"
     case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
     case "$purl" in https://*|http://127.0.0.1:*|http://localhost:*) ;; *) fail "bad url" ;; esac
@@ -503,118 +576,50 @@ case "$op" in
     # control chars incl. newlines) so it drops safely into the one-line JSON. Renderer falls back to login if empty.
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
-    # ONE live host per session: if another collaborator already holds a FRESH claim on this session, refuse
-    # instead of publishing a second advertisement (two hosts on one session = two divergent "live" copies and
-    # an ambiguous Join target). The tool prints a complete refusal line when blocked, nothing when free — and
-    # never self-refuses (my own fresh claim = the ~2-min heartbeat re-stamping). Re-checked after every
-    # push-retry pull below: per-author files merge cleanly, so a simultaneous rival claim arrives via THAT
-    # pull — the tool's deterministic tie-break (earlier ts, then login) makes exactly one of us yield.
-    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
-    live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null); }
-    # OPTIMISTIC, push-first: no pre-push pull on the common quiet-branch case (the pull was a full network
-    # round-trip on the "go live" critical path). The local worktree may be stale, so a refusal computed from
-    # it is only a HINT — refresh and re-check before believing it (a retracted rival claim still sitting in a
-    # stale live/ must not produce a false "already live"). A stale BASE is harmless: the push simply rejects
-    # non-fast-forward and the retry loop below pulls + re-arbitrates, exactly as it always did for the
-    # mid-push race — the arbiter is enforced by the loop, not by freshness at first write.
-    refuse="$(live_refuse)"
-    if [ -n "$refuse" ]; then
-      pull_branch || fail "pull failed"
-      refuse="$(live_refuse)"
-    fi
-    if [ -n "$refuse" ]; then
-      # Yield cleanly: if OUR OWN (losing) claim for this same session is already on the branch — a lost push
-      # race being re-checked by the heartbeat, or a legacy double-share — retract it now, so peers converge on
-      # ONE live host immediately instead of showing two until the loser's stale claim ages past the TTL.
-      if [ -e "$WT/live/$author.json" ] && grep -q "\"session\":\"$psid\"" "$WT/live/$author.json" 2>/dev/null; then
-        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
-        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
-        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
-      fi
-      emit "$refuse"; exit 0
-    fi
-    mkdir -p "$WT/live" 2>/dev/null
-    printf '{"login":"%s","session":"%s","url":"%s","token":"%s","name":"%s","ts":%s}\n' "$author" "$psid" "$purl" "$ptok" "$pname" "$(date +%s)" > "$WT/live/$author.json"
-    gitwt add -A -- "live/$author.json" >/dev/null 2>&1
-    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence $author" >/dev/null 2>&1
+    # First presence ever on a repo whose sessions branch doesn't exist yet - let the worktree init create it once.
+    [ -n "$(presence_base)" ] || ensure_worktree >/dev/null 2>&1
+    # ONE live host per session, enforced per attempt: the arbiter reads origin/$BR's live/ blobs (locally -
+    # no network), and every rejected push refreshes that view before the re-check. The tool's deterministic
+    # tie-break (earlier ts, then login) makes exactly one of two simultaneous claimants yield - never both.
     pushed=0
     for i in 1 2 3; do
-      gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }
-      pull_branch || break
-      refuse="$(live_refuse)"
-      if [ -n "$refuse" ]; then
-        # A rival won the race while we were pushing: RETRACT the claim we already committed (it merged in
-        # alongside theirs — leaving it would advertise a second host) and tell the renderer who holds it.
-        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
-        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
-        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
-        emit "$refuse"; exit 0
-      fi
+      refuse="$(presence_holder_refuse "$psid")"
+      if [ -n "$refuse" ]; then presence_yield_own "$psid"; emit "$refuse"; exit 0; fi
+      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"url\":\"$purl\",\"token\":\"$ptok\",\"name\":\"$pname\",\"ts\":$(date +%s)}" && { pushed=1; break; }
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-set\"}" || emit "{\"ok\":false,\"op\":\"presence-set\",\"error\":\"push failed\"}"
     ;;
   presence-starting)
-    # Phase-1 advertise: "I'm going live in session $2 — the tunnel is still coming up." Stamped the moment
-    # the host clicks Share (a cloudflared spawn takes seconds and peers shouldn't wait for it); replaced by
-    # the full presence-set (url+token) from the heartbeat the instant the tunnel lands. No url/token yet —
-    # presence-filter passes the entry through and the renderer draws a non-joinable "going live…" row with
-    # a SHORT client-side TTL, so a tunnel that never lands can't leave a zombie row. Claims the session in
-    # live-holder exactly like a full advertisement (it matches on session+ts, not url), so two hosts can't
-    # both slip through the starting phase.
-    ensure_worktree || fail "could not set up the sessions branch"
+    # Phase-1 advertise: "I'm going live in session $2 - the tunnel is still coming up." Stamped the moment
+    # the host clicks Share; replaced by the full presence-set (url+token) from the heartbeat the instant the
+    # tunnel lands. No url/token yet - presence-filter passes the entry through and the renderer draws a
+    # non-joinable "going live..." row with a SHORT client-side TTL. Claims the session in the arbiter exactly
+    # like a full advertisement (it matches on session+ts, not url), so two hosts can't both slip through the
+    # starting window. Same worktree-free plumbing as presence-set - this is THE most latency-critical write.
     psid="${2:-}"; pname_b64="${3:-}"
     case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
     case "$pname_b64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
-    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
-    live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null); }
-    # OPTIMISTIC, push-first — the "going live" stamp is THE latency-critical write; same contract as
-    # presence-set above: a stale-state refusal is only a hint (pull + re-check before believing it), a stale
-    # base just means the push rejects and the retry loop pulls + re-arbitrates.
-    refuse="$(live_refuse)"
-    if [ -n "$refuse" ]; then
-      pull_branch || fail "pull failed"
-      refuse="$(live_refuse)"
-    fi
-    if [ -n "$refuse" ]; then
-      # Same yield as presence-set: if our OWN (losing) claim for this session is on the branch, retract it
-      # so peers converge on ONE live host now instead of after the loser's stale claim ages out.
-      if [ -e "$WT/live/$author.json" ] && grep -q "\"session\":\"$psid\"" "$WT/live/$author.json" 2>/dev/null; then
-        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
-        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
-        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
-      fi
-      emit "$refuse"; exit 0
-    fi
-    mkdir -p "$WT/live" 2>/dev/null
-    printf '{"login":"%s","session":"%s","name":"%s","starting":true,"ts":%s}\n' "$author" "$psid" "$pname" "$(date +%s)" > "$WT/live/$author.json"
-    gitwt add -A -- "live/$author.json" >/dev/null 2>&1
-    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence starting $author" >/dev/null 2>&1
+    [ -n "$(presence_base)" ] || ensure_worktree >/dev/null 2>&1
     pushed=0
     for i in 1 2 3; do
-      gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }
-      pull_branch || break
-      refuse="$(live_refuse)"
-      if [ -n "$refuse" ]; then
-        # A rival won the race while we were pushing — retract the claim we already committed and report who holds it.
-        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
-        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
-        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
-        emit "$refuse"; exit 0
-      fi
+      refuse="$(presence_holder_refuse "$psid")"
+      if [ -n "$refuse" ]; then presence_yield_own "$psid"; emit "$refuse"; exit 0; fi
+      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"name\":\"$pname\",\"starting\":true,\"ts\":$(date +%s)}" && { pushed=1; break; }
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-starting\"}" || emit "{\"ok\":false,\"op\":\"presence-starting\",\"error\":\"push failed\"}"
     ;;
   presence-clear)
-    ensure_worktree || fail "could not set up the sessions branch"
-    pull_branch || fail "pull failed"
-    pushed=1
-    if [ -e "$WT/live/$author.json" ]; then
-      gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
-      gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence clear $author" >/dev/null 2>&1
-      pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    # Pull my live/<author>.json off the branch - the "session ended" signal peers race to see. Worktree-free
+    # plumbing (see above): the app-quit detached one-shot must survive index.lock corpses and never wait
+    # behind a dying sync, or peers watch a zombie "live" row for the full TTL.
+    if [ -z "$(presence_base)" ]; then emit "{\"ok\":true,\"op\":\"presence-clear\"}"; exit 0; fi   # no branch -> nothing advertised, ever
+    if ! git -C "$SDIR" show "origin/$BR:live/$author.json" >/dev/null 2>&1; then
+      emit "{\"ok\":true,\"op\":\"presence-clear\"}"; exit 0                                        # already clear on the freshest known view
     fi
+    pushed=0
+    for i in 1 2 3; do presence_attempt clear && { pushed=1; break; }; done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-clear\"}" || emit "{\"ok\":false,\"op\":\"presence-clear\",\"error\":\"push failed\"}"
     ;;
   presence-list)

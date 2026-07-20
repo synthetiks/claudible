@@ -4,6 +4,15 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **Presence is now worktree-free plumbing — going live AND ending are fast and, above all, consistent.**
+  The live stamps/clears no longer touch the sync worktree at all: they commit directly against the object
+  graph (rewrite live/, commit-tree, push) on their own queue lane. A stamp can no longer wait behind a
+  running multi-second transcript sync (the journaled 2.5–3.9s outliers), and the app-quit clear can no
+  longer die on an index.lock corpse a killed sync left behind — which used to leave peers watching a zombie
+  "live" row for the full 120s TTL after closing Claudible. The gh author lookup is cached (10 min TTL),
+  shaving ~1s off every script call. Measured stamp: ~1.8–2.2s incl. the GitHub push; click→peer-visible and
+  end→peer-gone both land ~3–4.5s consistently. Proven against a real bare origin by
+  test/presence-plumbing.test.sh (stale-base retry, non-destructive rebuild, lock immunity, arbiter, clear).
 - **Going live is announced reliably and ~2× faster.** Fixed a race where the advertise call could fire
   before the share server finished binding and then silently never retry — the "going live…" stamp (and
   sometimes the whole advertisement) simply didn't happen. Presence work now also jumps ahead of queued
