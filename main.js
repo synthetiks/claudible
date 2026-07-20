@@ -1528,8 +1528,10 @@ function startPoll() {
 // 10s–5min (or never) to a few seconds; a quiet branch costs one cheap negotiation per tick.
 const _beaconHeads = new Map();   // ws.id -> last branch head this beacon has ANNOUNCED (presence pushed) ('' = branch absent)
 const _beaconDirty = new Map();   // ws.id -> head sha whose session-import (doSync) hasn't succeeded yet
-let _beaconBusy = false;
-const BEACON_MS = 2000, BEACON_HIDDEN_MS = 15000;
+const _beaconTimers = new Map();  // ws.id -> the armed setTimeout of that workspace's OWN probe chain
+const _beaconLive = new Set();    // ws.ids with a probe in flight (roster scan must not double-arm them)
+const _beaconErr = new Map();     // ws.id -> consecutive probe failures -> exponential backoff (a DEAD remote must not burn a spawn every tick)
+const BEACON_MS = 1500, BEACON_HIDDEN_MS = 15000;
 // Rolling latency journal for the live-collab fast path (runtime/live-timing.log): one timestamped line per
 // stage — advertise received, stamp landed, head-move detected, peers painted — so a "going live felt slow"
 // report is answered with numbers instead of guesses. Size-capped; never throws.
@@ -1540,61 +1542,82 @@ function _liveTiming(msg) {
     fs.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n');
   } catch {}
 }
-async function _beaconTick() {
-  if (_beaconBusy) return;                                  // a slow probe pass must never stack another on top
-  _beaconBusy = true;
+// PER-WORKSPACE probe chains, deliberately NOT one shared tick: a single slow probe — a huge fetch, a stalled
+// network, above all a workspace whose remote was DELETED — must only ever slow ITS OWN workspace. The shared
+// Promise.all tick this replaces made every workspace's cadence equal to the SLOWEST probe (a dead remote's
+// 8s timeout stretched a healthy project's detection to ~10s — the exact field report). The probe itself is a
+// bare ls-remote head check (~0.5-0.9s, no objects); the bounded fetch happens only when the head actually
+// moved, on the announce path, where the data is needed.
+function _beaconQualifies(id) {
+  const w = registry.workspaces.find((x) => x && x.id === id);
+  return (w && w.kind === 'repo' && w.syncSessions && !w.needsClone) ? w : null;
+}
+function _beaconArm(wsId, delay) {
+  if (_beaconTimers.has(wsId) || _beaconLive.has(wsId)) return;
+  const t = setTimeout(() => { _beaconTimers.delete(wsId); _beaconProbe(wsId); }, delay);
+  if (t.unref) t.unref();
+  _beaconTimers.set(wsId, t);
+}
+function _beaconDelay(wsId) {
+  let hidden = false; try { hidden = !(win && !win.isDestroyed() && win.isVisible()); } catch {}
+  const base = hidden ? BEACON_HIDDEN_MS : BEACON_MS;
+  const errs = Math.min(5, _beaconErr.get(wsId) || 0);
+  return Math.min(60000, base * Math.pow(2, errs));   // healthy: base cadence; failing: 2x per miss, capped at 60s; one success resets
+}
+async function _beaconProbe(wsId) {
+  let gone = true; try { gone = !win || win.isDestroyed(); } catch {}
+  if (gone) return;                                        // shutting down — a per-ws timer must not spawn against a dead window (H3)
+  const ws = _beaconQualifies(wsId);
+  if (!ws) { _beaconHeads.delete(wsId); _beaconDirty.delete(wsId); _beaconErr.delete(wsId); return; }   // sync toggled off / deleted -> chain ends; the roster scan re-arms if it comes back
+  _beaconLive.add(wsId);
   try {
-    const seen = new Set(); const targets = [];
-    for (const ws of registry.workspaces) {
-      if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) continue;
-      if (seen.has(ws.id)) continue; seen.add(ws.id); targets.push(ws);
+    const t0 = Date.now();
+    const { err, stdout } = await runner.runScript('sessions-sync.sh', 'remote-head', { ws, timeout: 12000 });
+    let r = null; if (!err) { try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {} }
+    if (!r || !r.ok || typeof r.head !== 'string') { _beaconErr.set(wsId, (_beaconErr.get(wsId) || 0) + 1); return; }
+    _beaconErr.delete(wsId);
+    const prev = _beaconHeads.get(wsId);
+    if (prev === undefined) { _beaconHeads.set(wsId, r.head); return; }   // first sighting = baseline, not a change
+    if (prev !== r.head) {
+      // ANNOUNCE EXACTLY ONCE per head move, baseline advances NOW (not after the sync — a busy workspace
+      // used to re-fire this branch every tick). The presence read fetches JUST this branch into the code
+      // clone (bounded) and reads it lock-free OUTSIDE the queue (opts.direct) — it can never wait behind a
+      // running transcript sync.
+      _beaconHeads.set(wsId, r.head);
+      _beaconDirty.set(wsId, r.head);
+      _liveTiming(`beacon: head moved ${wsId} (probe ${Date.now() - t0}ms)`);
+      runPresence('presence-list', (pr) => {
+        try { winSend('live:peers-push', { id: wsId, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
+        _liveTiming(`beacon: peers pushed ${wsId} (+${Date.now() - t0}ms)`);
+      }, ws, { direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 ' });
     }
-    // PARALLEL across workspaces: each probe is ~1s of network, and a serial pass would stretch the effective
-    // per-workspace cadence to N seconds — the exact latency this beacon exists to kill.
-    await Promise.all(targets.map(async (ws) => {
-      const t0 = Date.now();
-      const { err, stdout } = await runner.runScript('sessions-sync.sh', 'remote-head', { ws, timeout: 15000 });
-      if (err) return;                                      // offline/wedged — the adaptive poll still covers us
-      let r = null; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-      if (!r || !r.ok || typeof r.head !== 'string') return;
-      const prev = _beaconHeads.get(ws.id);
-      if (prev === undefined) { _beaconHeads.set(ws.id, r.head); return; }   // first sighting = baseline, not a change
-      if (prev !== r.head) {
-        // ANNOUNCE EXACTLY ONCE per head move, and advance the baseline NOW — not after the sync. (The old
-        // code advanced it only on a successful doSync; with the workspace busy — a tab mid-turn — the sync
-        // was skipped, the baseline never moved, and this whole branch re-fired every single tick: a
-        // presence spawn every 2.5s and, on the peer, a queue kept permanently busy — the reported >5s.)
-        _beaconHeads.set(ws.id, r.head);
-        _beaconDirty.set(ws.id, r.head);
-        _liveTiming(`beacon: head moved ${ws.id} (probe ${Date.now() - t0}ms)`);
-        // The probe was a real fetch, so the presence blobs are already local: a lock-free object-store
-        // read (skip-fetch, opts.direct = OUTSIDE the per-ws queue) — it can never wait behind a running
-        // multi-second sync, which front-of-queue alone could not guarantee.
-        runPresence('presence-list', (pr) => {
-          try { winSend('live:peers-push', { id: ws.id, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
-          _liveTiming(`beacon: peers pushed ${ws.id} (+${Date.now() - t0}ms)`);
-        }, ws, { direct: true, extraEnv: 'CLAUDIBLE_SKIP_FETCH=1 ' });
-      }
-      // Session import owed for the newest announced head — retried every tick until it lands, WITHOUT
-      // re-announcing presence. Skipped while this ws is mid-turn/mid-sync.
-      if (!_beaconDirty.has(ws.id)) return;
-      if (wsHasBusyTab(ws.id) || syncLock.has(ws.id)) return;
-      const want = _beaconDirty.get(ws.id);
-      const res = await doSync(ws, 'sync', {});
-      if (res && res.ok && _beaconDirty.get(ws.id) === want) _beaconDirty.delete(ws.id);   // a NEWER head may have arrived mid-sync — keep it owed
-    }));
+    // Session import owed for the newest announced head — retried every probe until it lands, WITHOUT
+    // re-announcing presence. Skipped while this ws is mid-turn/mid-sync.
+    if (!_beaconDirty.has(wsId)) return;
+    if (wsHasBusyTab(wsId) || syncLock.has(wsId)) return;
+    const want = _beaconDirty.get(wsId);
+    const res = await doSync(ws, 'sync', {});
+    if (res && res.ok && _beaconDirty.get(wsId) === want) _beaconDirty.delete(wsId);   // a NEWER head may have arrived mid-sync — keep it owed
   } finally {
-    _beaconBusy = false;
-    // Hidden window → ease off (nobody is watching the sidebar); visible — even unfocused — keeps the fast
-    // cadence. Main-process timer: immune to renderer background throttling by construction.
-    let hidden = false; try { hidden = !(win && !win.isDestroyed() && win.isVisible()); } catch {}
-    appTimers.beacon = setTimeout(_beaconTick, hidden ? BEACON_HIDDEN_MS : BEACON_MS);
-    if (appTimers.beacon.unref) appTimers.beacon.unref();
+    _beaconLive.delete(wsId);
+    _beaconArm(wsId, _beaconDelay(wsId));
   }
 }
 function startBeacon() {
   if (appTimers.beacon) return;
-  appTimers.beacon = setTimeout(_beaconTick, BEACON_MS);
+  // Light roster scan: arm a chain for every qualifying workspace that doesn't have one (new project, sync
+  // toggled on, app boot). Chains end themselves when a workspace stops qualifying; this brings them back.
+  const scan = () => {
+    let i = 0;
+    const seen = new Set();
+    for (const w of registry.workspaces) {
+      if (!w || seen.has(w.id) || !_beaconQualifies(w.id)) continue;
+      seen.add(w.id);
+      _beaconArm(w.id, 300 * i++);   // small stagger so a cold boot doesn't fire every probe in the same instant
+    }
+  };
+  scan();
+  appTimers.beacon = setInterval(scan, 5000);
   if (appTimers.beacon.unref) appTimers.beacon.unref();
 }
 // Hook events are also forwarded raw to the renderer; here we track per-tab turn busy/idle + push the tab's

@@ -116,15 +116,22 @@ is_live() { case " $LIVE " in *" $1 "*) return 0 ;; esac; return 1; }   # id ∈
 # stack); absent (minimal git-bash) we rely on the caller's own process timeout.
 if [ "$op" = "remote-head" ]; then
   _tmo=""; command -v timeout >/dev/null 2>&1 && _tmo="timeout 8"
-  # A narrow FETCH of just the sessions branch (not ls-remote): same one-negotiation cost on a quiet branch,
-  # but when the head HAS moved the new objects land in the shared object store right here — so the
-  # presence-list that follows a change can run with CLAUDIBLE_SKIP_FETCH=1 and zero network. SDIR and the
-  # sessions worktree share one repo, so refs/objects fetched here are visible to every other op instantly.
-  # A fetch failure (offline) leaves the ref at its last-known sha → the beacon sees "no change" and the
-  # adaptive poll remains the safety net.
-  $_tmo git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
-  head_sha="$(git -C "$SDIR" rev-parse "refs/remotes/origin/$BR" 2>/dev/null)"
-  case "$head_sha" in '' | *[!a-f0-9]*) head_sha="" ;; esac   # error text / junk / no branch yet
+  # A bare ls-remote head check — deliberately NOT a fetch: the probe fires every ~1.5s per workspace and
+  # must stay small and BOUNDED no matter what moved (a session push can be megabytes; downloading it here
+  # would stretch the probe — and with it the detection cadence — by the transfer time). The bounded fetch
+  # happens on the announce path only when the head actually moved (presence-list CLAUDIBLE_DIRECT_READ).
+  # An ls-remote failure (offline, deleted remote) emits ok:false so the caller backs off that workspace.
+  head_sha="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null | cut -f1)"
+  if [ -z "$head_sha" ]; then
+    # distinguish "no branch yet" (ls-remote succeeded, zero refs) from "remote unreachable" (backoff signal)
+    if $_tmo git -C "$SDIR" ls-remote origin HEAD >/dev/null 2>&1; then
+      emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"\"}"
+    else
+      emit "{\"ok\":false,\"op\":\"remote-head\",\"error\":\"remote unreachable\"}"
+    fi
+    exit 0
+  fi
+  case "$head_sha" in *[!a-f0-9]*) head_sha="" ;; esac   # junk → treat as no branch
   emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"$head_sha\"}"
   exit 0
 fi
@@ -625,11 +632,14 @@ case "$op" in
   presence-list)
     # Read every collaborator's live/*.json straight off origin via fetch + git show — NO worktree merge, so this
     # frequent (~10s) poll can never fight the background sync's merge on the same worktree. Renderer filters stale ts.
-    if [ -n "${CLAUDIBLE_SKIP_FETCH:-}" ]; then
-      # Beacon path: remote-head (a fetch of this branch into this SAME repo) just ran, so origin/$BR and its
-      # objects are already local — read them straight from the CODE clone. No worktree, no ensure_worktree
-      # heal, no fetch, no locks: this read can never wait behind (or disturb) a running sync's merge, which
-      # is exactly why runPresence dispatches it OUTSIDE the per-ws queue (opts.direct).
+    if [ -n "${CLAUDIBLE_DIRECT_READ:-}" ]; then
+      # Beacon announce path: the head just moved, so do ONE bounded fetch of this branch into the CODE clone
+      # and read from there. No worktree, no ensure_worktree heal, no index, no locks: this read can never
+      # wait behind (or disturb) a running sync's merge, which is exactly why runPresence dispatches it
+      # OUTSIDE the per-ws queue (opts.direct). A presence-only change fetches a few hundred bytes; a big
+      # session delta is capped by `timeout` and the sync path picks it up anyway.
+      _tmo=""; command -v timeout >/dev/null 2>&1 && _tmo="timeout 8"
+      $_tmo git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
       GD="$SDIR"
     else
       ensure_worktree || fail "could not set up the sessions branch"

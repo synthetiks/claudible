@@ -4,6 +4,12 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **One dead or slow project can no longer slow every other project's live detection.** All workspace probes
+  shared one round that waited for the slowest — a workspace whose GitHub repo was deleted (or just slow)
+  stretched every project's detection to ~10s. Each workspace now probes on its own independent chain with
+  exponential backoff on failure; the probe is a bare bounded head-check (~0.9s) at a 1.5s cadence, and the
+  bounded fetch happens only when something actually changed.
+
 - **Presence is now worktree-free plumbing — going live AND ending are fast and, above all, consistent.**
   The live stamps/clears no longer touch the sync worktree at all: they commit directly against the object
   graph (rewrite live/, commit-tree, push) on their own queue lane. A stamp can no longer wait behind a
