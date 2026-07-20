@@ -1103,6 +1103,9 @@
         <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
         <div class="out share-out" id="share-out"></div><!-- empty by default (hint is now the button tooltip); JS fills this only with live-share status -->
+        <div class="tunnel-warn" id="build-drift" style="display:none"><!-- a git pull moved the files under this RUNNING process — restart to actually run them (git-clone installs have no other update signal) -->
+          <span class="tw-txt" id="build-drift-txt"></span>
+        </div>
         <div class="tunnel-warn" id="tunnel-warn" style="display:none"><!-- standing "hosting but not reachable" warning (renderTunnelWarn) — a toast is too easy to miss for a state that silently strands every guest -->
           <span class="tw-txt" id="tunnel-warn-txt"></span>
           <button class="tw-install" id="tunnel-warn-install" type="button" title="Install cloudflared on Windows so remote guests can reach your live session">Install cloudflared</button>

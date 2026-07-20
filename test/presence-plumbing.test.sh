@@ -61,6 +61,13 @@ okc 'oshow live/tester.json | grep -q "\"url\":\"https://x.trycloudflare.com\""'
 okc 'oshow .gitattributes | grep -q binary' 'unrelated root entries survive the tree rewrite'
 okc 'oshow meta/other.json | grep -q keep' 'unrelated subtrees survive the tree rewrite'
 
+# ---- 1b. build sha (arg 6) rides the stamp; junk sha is dropped, not injected ----
+out="$(run presence-set 'sid-1' 'https://x.trycloudflare.com' 'tok1' '' 'abc123abc123')"
+ok "$out" '{"ok":true,"op":"presence-set"}' 'presence-set with sha emits ok'
+okc 'oshow live/tester.json | grep -q "\"sha\":\"abc123abc123\""' 'stamp carries the publisher build sha'
+out="$(run presence-set 'sid-1' 'https://x.trycloudflare.com' 'tok1' '' 'NOT$AFE')"
+okc 'oshow live/tester.json | grep -q "\"sha\":\"\""' 'junk sha is emptied, never injected'
+
 # ---- 2. starting variant: url-less, starting:true ----
 out="$(run presence-starting 'sid-1' '')"
 ok "$out" '{"ok":true,"op":"presence-starting"}' 'presence-starting emits ok'

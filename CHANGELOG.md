@@ -4,6 +4,18 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **Realtime presence relay (opt-in) — "went live"/"ended" reach every collaborator in under a second.** A
+  ~200-line Cloudflare Worker (relay/, free tier, deploy once with wrangler) fans presence frames out over
+  one WebSocket per shared repo; GitHub push-permission is the publish gate, the verified login is forced
+  into every frame, and repo names never appear in relay URLs/logs. Git stays the untouched source of
+  truth: frames merge in as an instant preview, the beacon's authoritative reads reconcile moments later,
+  and with no relay configured the entire layer is inert. See relay/README.md to deploy.
+- **Build drift is now visible instead of a recurring goose chase.** Presence stamps carry the publisher's
+  git sha, so a collaborator on a different build shows it right on their live badge; a persistent chip
+  says "updated on disk — restart to run it" when a pull lands under a running app (git-clone installs had
+  NO update signal at all); and the timing journal logs its own sha at boot, so every future latency report
+  self-identifies its build.
+
 - **One dead or slow project can no longer slow every other project's live detection.** All workspace probes
   shared one round that waited for the slowest — a workspace whose GitHub repo was deleted (or just slow)
   stretched every project's detection to ~10s. Each workspace now probes on its own independent chain with

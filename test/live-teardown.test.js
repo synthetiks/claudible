@@ -35,6 +35,7 @@ function drive(state, src, callOpts) {
     const clearPresenceWithRetry = (ws) => rec.push(['presence-clear', ws]);
     const runPresence = (op, cb, ws, o) => rec.push(['presence-clear-detached', ws, !!(o && o.detach)]);
     const _liveTiming = () => {};   // the latency journal is inert here — this harness only observes teardown ordering
+    const _relayPub = () => {};   // the realtime mirror is fire-and-forget by contract — inert here, the ordering pins below stay about the GIT teardown (presence-relay.test.js covers the mirror)
     ((opts) => { ${body}
     })(callOpts);   // closing brace on its OWN line — the body's last line may end in a // comment
   `)(calls, state.ws, state.sid, callOpts);
@@ -82,9 +83,17 @@ ok('window-all-closed quits via stopLiveSharing({ quitting: true })',
 // Build the buggy variant (capture AFTER the heartbeat teardown — the shipped quit-path mistake) and run it
 // through the SAME harness: it must fail to clear presence. If this ever passes, the harness has gone vacuous.
 {
-  const reordered = m[0].replace(
-    /const advWs = advertisedWs, wasAdvertising = !!advertisedSid;([^\n]*\n)(\s*)stopAdvertiseHeartbeat\(\);/,
-    'stopAdvertiseHeartbeat();\n$2const advWs = advertisedWs, wasAdvertising = !!advertisedSid;');
+  // The capture is now two lines (the const + its relay mirror, which reads the captured vars) — move BOTH
+  // below the heartbeat teardown to build the classic capture-after-stop bug without a TDZ crash.
+  const lines = m[0].split('\n');
+  const ci = lines.findIndex((l) => l.includes('const advWs = advertisedWs'));
+  const ri = lines.findIndex((l) => l.includes('_relayPub(advWs'));
+  const hi = lines.findIndex((l) => l.includes('stopAdvertiseHeartbeat();'));
+  ok('self-check precondition: capture, its relay mirror, then the heartbeat teardown — adjacent', ci !== -1 && ri === ci + 1 && hi === ci + 2);
+  const moved = lines.slice(ci, ci + 2);
+  const rest = [...lines.slice(0, ci), ...lines.slice(ci + 2)];
+  rest.splice(rest.findIndex((l) => l.includes('stopAdvertiseHeartbeat();')) + 1, 0, ...moved);
+  const reordered = rest.join('\n');
   ok('self-check: the buggy variant is genuinely different source', reordered !== m[0]);
   const calls = drive({ ws: { id: 'repo-x' }, sid: 'sess-1' }, reordered);
   ok('self-check: the capture-after-stop variant FAILS to clear presence (harness is not vacuous)',

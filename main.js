@@ -13,6 +13,11 @@ const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charse
 const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
 const { createShareServer, sanitizePaste } = require('./share/server');
+const { readGitSha } = require('./lib/buildIdentity');
+const { makePresenceRelay, mergePeerFrame } = require('./lib/presenceRelay');
+// The running build's git identity, captured AT BOOT — the process keeps executing this even after a
+// `git pull` moves the files under it, which is precisely the drift checkBuildDrift() surfaces.
+const BUILD = readGitSha(__dirname) || { sha: '', short: '', at: 0 };
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
 // A packaged (installed) build runs from a READ-ONLY app dir, so writable runtime state can't live there. On
@@ -480,6 +485,7 @@ function createWindow() {
   // focus — throttled, since focus fires constantly, and DECOUPLED from syncAllEnabled (a discovery pass must not
   // drag a full re-sync of every workspace with it; the adaptive poll already handles syncing).
   win.on('focus', maybeDiscoverOnFocus);
+  win.on('focus', checkBuildDrift);   // cheap event-driven catch — same idiom as discovery above (drift most often lands while you were away)
   // Optional diagnostics (opt-in): launch with CLAUDIBLE_DEBUG=1 to capture the renderer console + crashes
   // to .claudible-debug.log and auto-open DevTools. OFF by default, so nothing pops up in normal use.
   const DEBUG = !!process.env.CLAUDIBLE_DEBUG;
@@ -508,6 +514,9 @@ function createWindow() {
     setTimeout(() => { if (ptys.size === 0) spawnPty('main', 120, 32, activeWorkspace, ''); }, 1800);
     startPoll();            // adaptive background session sync for the active repo workspace
     startBeacon();          // remote-head fast poll — near-instant "peer went live"/"new session" visibility
+    appTimers.buildDrift = setInterval(checkBuildDrift, 5 * 60 * 1000);   // install-vs-running drift chip (git-clone installs have no other update signal)
+    if (appTimers.buildDrift.unref) appTimers.buildDrift.unref();
+    _liveTiming('boot: sha=' + (BUILD.short || 'unknown') + ' pid=' + process.pid);   // every future journal report identifies its own build
     startWorkflowPoll();    // live workflow/swarm agents for the foreground tab's Agents pane
     // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
     setTimeout(() => { _lastDiscover = Date.now(); discoverWorkspaces().then(syncAllEnabled); }, 3000);
@@ -1137,7 +1146,8 @@ function clearPresenceWithRetry(ws, attempt) {
 // path (the End button, quit, closing the shared tab, deleting the shared workspace) tears presence down the SAME
 // way instead of the copies drifting. Idempotent: a second call after advertisedSid is null does nothing.
 function stopAdvertising(opts) {
-  const advWs = advertisedWs, wasAdvertising = !!advertisedSid;   // capture BEFORE stopAdvertiseHeartbeat nulls them
+  const advWs = advertisedWs, advSid = advertisedSid, wasAdvertising = !!advertisedSid;   // capture BEFORE stopAdvertiseHeartbeat nulls them
+  if (wasAdvertising) _relayPub(advWs, { type: 'end', session: advSid });   // realtime "ended" — peers drop the row in <1s; the git clear below remains the record
   stopAdvertiseHeartbeat();                                       // no longer hosting → stop re-stamping presence
   if (!wasAdvertising) return;
   // QUITTING: the retry loop is a mirage on this path — its backoff timers are unref'd (a dying process never
@@ -1164,7 +1174,8 @@ function stopLiveSharing(opts) {
 function presenceBeatOnce() {
   const st = share.status();
   if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
-  runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+  _relayPub(advertisedWs, { type: 'live', session: advertisedSid, url: shareBaseUrl, token: st.token, name: _advNamePlain(), sha: BUILD.short });   // keeps late relay joiners current
+  runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
     _liveTiming(`heartbeat: stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'}`);
     // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
     // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
@@ -1195,11 +1206,12 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   _liveTiming(`advertise: received sid=${sid} tunnel=${isTunnelUrl(shareBaseUrl) ? 'up' : 'down'}`);
   if (!isTunnelUrl(shareBaseUrl)) {
     startAdvertiseHeartbeat(sid, ws);
+    _relayPub(ws, { type: 'live', session: sid, starting: true, name: _advNamePlain(), sha: BUILD.short });   // realtime doorbell — the git stamp below stays the record
     // Phase-1 presence: peers should see "going live…" the moment the host clicks Share — not after the
     // tunnel's multi-second spawn. presence-starting stamps a url-less claim (same one-host arbiter as the
     // full advertisement); presenceBeatOnce replaces it with the real handle the instant adoptTunnel lands.
     // A rival already holding the claim surfaces exactly like a beat-time loss (renderer un-shares + toasts).
-    runPresence(`presence-starting '${sid}' '${advertisedNameB64}'`, (r) => {
+    runPresence(`presence-starting '${sid}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
       _liveTiming(`advertise: starting stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
       if (r && r.error === 'already-live') {
         stopAdvertiseHeartbeat();
@@ -1210,7 +1222,8 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     }, ws);
     return;
   }
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+  _relayPub(ws, { type: 'live', session: sid, url: shareBaseUrl, token: st.token, name: _advNamePlain(), sha: BUILD.short });
+  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
     _liveTiming(`advertise: full stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
     if (r && r.error === 'already-live') return resolve(r);   // a collaborator already hosts this session — do NOT arm the heartbeat (it would keep re-contesting the claim every 2 min); the renderer un-shares + points the user at Join
     startAdvertiseHeartbeat(sid, ws);
@@ -1526,6 +1539,49 @@ function startPoll() {
 // read locally and PUSHED to the sidebar (live:peers-push), then doSync imports the new sessions
 // (sync:changed repaints). Peer-visible latency for "X went live" / "new session appeared" drops from
 // 10s–5min (or never) to a few seconds; a quiet branch costs one cheap negotiation per tick.
+// ---- realtime presence relay (lib/presenceRelay.js + relay/worker.js) ---------------------------
+// The <1s push layer over the authoritative git branch: one WS per shared repo, "went live"/"ended"
+// frames fan out instantly; the polling beacon below stays the truth-carrier and fallback. Inert until
+// a relay is deployed (RELAY_URL unset -> every call is a no-op).
+const _relayRooms = new Map();   // 'owner/repo' -> Set(wsId): which local workspaces a room's frames paint
+const _lastPeers = new Map();    // wsId -> last AUTHORITATIVE peers list pushed to the renderer (relay frames merge into this as a preview; the next beacon read overwrites wholesale)
+let _relayCred = { v: null, ts: 0 };
+async function _relayGetCred() {
+  if (_relayCred.v && Date.now() - _relayCred.ts < 10 * 60 * 1000) return _relayCred.v;
+  const ws = registry.workspaces.find((x) => x && x.kind === 'repo' && x.syncSessions && !x.needsClone);
+  if (!ws) return null;
+  const { err, stdout } = await runner.runScript('sessions-sync.sh', 'relay-cred', { ws, timeout: 15000 });
+  if (err) return null;
+  let r = null; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+  if (!r || !r.ok || !r.token) return null;
+  _relayCred = { v: { login: String(r.login || ''), token: String(r.token) }, ts: Date.now() };
+  return _relayCred.v;
+}
+const _relay = makePresenceRelay({
+  getCred: _relayGetCred,
+  log: (m) => _liveTiming(m),
+  onFrame: (repoStr, frame) => {
+    const me = (_relayCred.v && _relayCred.v.login) || '';
+    if (me && frame.login === me) return;             // my own presence (possibly another of my machines) — the git path's self-skip, mirrored
+    const ids = _relayRooms.get(repoStr);
+    if (!ids || !ids.size) return;
+    for (const wsId of ids) {
+      const merged = mergePeerFrame(_lastPeers.get(wsId), frame);
+      _lastPeers.set(wsId, merged);
+      try { winSend('live:peers-push', { id: wsId, peers: merged }); } catch {}
+      _liveTiming('relay: ' + frame.type + ' ' + frame.login + ' -> ' + wsId);
+    }
+  },
+});
+function _relayRepoOf(x) { return (x && x.owner) ? (x.owner + '/' + (x.repoName || x.slug)) : ''; }
+// Publish alongside the git stamps — fire-and-forget, never gates them.
+function _relayPub(x, frame) {
+  const repo = _relayRepoOf(x);
+  if (!repo) return;
+  const parts = repo.split('/');
+  try { _relay.publish(parts[0], parts[1], frame); } catch {}
+}
+function _advNamePlain() { try { return Buffer.from(advertisedNameB64 || '', 'base64').toString('utf8'); } catch { return ''; } }
 const _beaconHeads = new Map();   // ws.id -> last branch head this beacon has ANNOUNCED (presence pushed) ('' = branch absent)
 const _beaconDirty = new Map();   // ws.id -> head sha whose session-import (doSync) hasn't succeeded yet
 const _beaconTimers = new Map();  // ws.id -> the armed setTimeout of that workspace's OWN probe chain
@@ -1587,7 +1643,9 @@ async function _beaconProbe(wsId) {
       // I looked" case waited for the 10s fallback poll.
       _beaconHeads.set(wsId, r.head);
       runPresence('presence-list', (pr) => {
-        try { winSend('live:peers-push', { id: wsId, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
+        const peers = (pr && Array.isArray(pr.peers)) ? pr.peers : [];
+        _lastPeers.set(wsId, peers);
+        try { winSend('live:peers-push', { id: wsId, peers }); } catch {}
       }, ws, { direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 ' });
       return;
     }
@@ -1600,7 +1658,9 @@ async function _beaconProbe(wsId) {
       _beaconDirty.set(wsId, r.head);
       _liveTiming(`beacon: head moved ${wsId} (probe ${Date.now() - t0}ms)`);
       runPresence('presence-list', (pr) => {
-        try { winSend('live:peers-push', { id: wsId, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
+        const peers = (pr && Array.isArray(pr.peers)) ? pr.peers : [];
+        _lastPeers.set(wsId, peers);                                   // authoritative baseline relay frames merge into
+        try { winSend('live:peers-push', { id: wsId, peers }); } catch {}
         _liveTiming(`beacon: peers pushed ${wsId} (+${Date.now() - t0}ms)`);
       }, ws, { direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 ' });
     }
@@ -1623,10 +1683,21 @@ function startBeacon() {
   const scan = () => {
     let i = 0;
     const seen = new Set();
+    const want = new Map();                          // 'owner/repo' -> Set(wsId): relay rooms this roster needs
     for (const w of registry.workspaces) {
       if (!w || seen.has(w.id) || !_beaconQualifies(w.id)) continue;
       seen.add(w.id);
       _beaconArm(w.id, 300 * i++);   // small stagger so a cold boot doesn't fire every probe in the same instant
+      const repo = _relayRepoOf(w);
+      if (repo) { if (!want.has(repo)) want.set(repo, new Set()); want.get(repo).add(w.id); }
+    }
+    // Reconcile relay rooms to the roster (a no-op entirely while no relay is configured).
+    for (const [repo, ids] of want) {
+      if (!_relayRooms.has(repo)) { const pr = repo.split('/'); try { _relay.ensure(pr[0], pr[1]); } catch {} }
+      _relayRooms.set(repo, ids);
+    }
+    for (const repo of [..._relayRooms.keys()]) {
+      if (!want.has(repo)) { const pr = repo.split('/'); try { _relay.release(pr[0], pr[1]); } catch {} _relayRooms.delete(repo); }
     }
   };
   scan();
@@ -2362,7 +2433,15 @@ const appIntervals = [];   // long-lived poller intervals — cleared on window-
 // adaptive), so they never landed in appIntervals and nothing ever cleared them — the only two of six outside the
 // quit sweep. Both spawn a WSL subprocess per tick (sessions-sync.sh / workflows.sh). Today `app.quit()` masks it;
 // the day this process outlives its window (a tray icon, a background mode) they'd tick forever against nothing.
-const appTimers = { sync: null, workflow: null, trash: null, tunnelRetry: null, beacon: null };   // tunnelRetry: the live-share self-heal (armTunnelRetry); beacon: the remote-head fast poll — same contract, must die with the window
+// A `git pull` under a running app changes NOTHING about the running process — surface that drift instead
+// of letting two machines argue about "which build are you on" (package.json's version doesn't move between
+// releases, so semver is structurally blind to it). Compares the boot-time sha against the tree's current one.
+function checkBuildDrift() {
+  if (!BUILD.sha) return;
+  const fresh = readGitSha(__dirname);
+  if (fresh && fresh.sha !== BUILD.sha) { try { winSend('build:drift', { running: BUILD.short, disk: fresh.short }); } catch {} }
+}
+const appTimers = { sync: null, workflow: null, trash: null, tunnelRetry: null, beacon: null, buildDrift: null };   // tunnelRetry: the live-share self-heal (armTunnelRetry); beacon: the remote-head fast poll — same contract, must die with the window
 // Heartbeat for the app→Claude context channel: the hook drops live/typedBy from a context.json whose ts is
 // >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
 // session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.
@@ -2605,6 +2684,7 @@ ipcMain.handle('session:export-text', async (e, arg) => {
 // cached (it's stable for the app's lifetime); returns '' if claude isn't resolvable so the bar just hides it.
 let _claudeVer;   // undefined = not fetched yet
 ipcMain.handle('app:version', () => app.getVersion());   // the real Claudible version (package.json) for the status-bar badge — was hardcoded in the HTML
+ipcMain.handle('app:buildSha', () => BUILD.short || '');   // the running build's git sha — semver doesn't move between releases, this does
 ipcMain.handle('claude:version', () => {
   if (_claudeVer !== undefined) return _claudeVer;
   return new Promise((resolve) => {

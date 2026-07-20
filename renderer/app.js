@@ -119,7 +119,8 @@ let activeSession = null;                       // the ACTIVE tab's session id (
 // 12 enforces both. The per-peer wsId stamp is kept as belt-and-suspenders so a mis-bucketed entry is still inert.
 let livePeersByWs = new Map(), livePeersSig = '', advertisedSession = null;
 const LIVE_TTL_S = 120;   // a stamp older than this is aged out (host re-stamps every ~45s); MUST match wsl/sessions-sync-tool.js LIVE_TTL
-const STARTING_TTL_S = 60;   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
+const STARTING_TTL_S = 60;
+let MY_SHA = '';               // the running build's git sha (fetched at boot) — build-skew hints on live badges   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
 // Sessions a JOINED tab's OWN socket already proved offline (the host ended). Suppressed from the badge instantly,
 // ahead of the ~10s git poll / TTL — see setLiveState. Value = when it was marked (ms): the suppression self-clears
 // once git presence ALSO shows the session gone, and — as a guaranteed exit — after DEAD_SUPPRESS_MS regardless,
@@ -432,6 +433,7 @@ document.querySelectorAll('.panel button').forEach((b) =>
   // the embedded Claude Code CLI version, left of whisper/kokoro — hidden gracefully if it can't be resolved
   try { const cv = await claudible.claudeVersion(); const el = $('sb-claude'); if (el) { if (cv) { el.textContent = 'claude code ' + cv; el.style.display = ''; } else { el.style.display = 'none'; } } } catch {}
   try { const av = await claudible.appVersion(); const ve = $('app-ver'); if (ve && av) ve.textContent = 'claudible v' + av; } catch {}   // real version, not the hardcoded 'v0.2'
+  try { MY_SHA = (await claudible.buildSha()) || ''; } catch {}   // my running build — compared against the sha peers now carry in their presence stamps
 })();
 
 // ---------- session tracker ----------
@@ -3040,12 +3042,20 @@ async function pollLivePeers() {
 // joined tabs (the auto-recover path); membership changes (TTL age-out) change the sig by themselves.
 // ONE implementation, shared by the 10s poll and the beacon push — two hand-rolled copies would drift.
 function livePeersSigOf(next) {
-  return JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));
+  return JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, p.sha, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));   // p.sha: a peer finally restarting onto a new build must repaint the skew hint
 }
 setInterval(pollLivePeers, 10000);
 // Beacon push: main's remote-head probe saw the shared branch move and already read the fresh presence list
 // locally (the probe was a fetch) — the peers arrive HERE with zero extra round-trips. Same filter, bucket,
 // sig and repaint path as the 10s poll above, which stays as the drift-correcting fallback.
+// A pull updated the files under this running app — persistent chip, not a toast: the condition lasts
+// until restart, and a missed toast is how two machines spent a day arguing about which build they ran.
+try { claudible.onBuildDrift((p) => {
+  const el = $('build-drift'), tx = $('build-drift-txt');
+  if (!el || !tx) return;
+  tx.textContent = 'Claudible updated on disk (' + ((p && p.disk) || '?') + ') — restart to run it. This window is still on ' + ((p && p.running) || '?') + '.';
+  el.style.display = '';
+}); } catch (e) {}
 try { claudible.onLivePeersPush((p) => {
   if (!p || !p.id) return;
   const wsId = p.id;
@@ -3112,6 +3122,13 @@ async function pollTitles(force) {
   refreshSessions();
 }
 setInterval(pollTitles, 20000);
+// Build-skew hint: presence stamps carry the publisher's git sha, so both sides can SEE drift instead of
+// guessing. Only speaks when both shas are known and differ — silence is never proof of sameness.
+function _skewNote(peer) {
+  return (peer && peer.sha && MY_SHA && peer.sha !== MY_SHA)
+    ? ' — different build (' + String(peer.sha).slice(0, 7) + ' vs yours ' + MY_SHA.slice(0, 7) + ')'
+    : '';
+}
 function makeLiveBadge(peer, localLabel) {
   const who = peer.name || peer.login || 'host';
   if (peer.starting) {
@@ -3121,7 +3138,7 @@ function makeLiveBadge(peer, localLabel) {
     const sdot = document.createElement('span'); sdot.className = 'live-dot';
     const sliw = document.createElement('span'); sliw.className = 'liw'; sliw.textContent = 'going live · ' + who;
     s.appendChild(sdot); s.appendChild(sliw);
-    s.title = who + ' is going live — joinable in a few seconds';
+    s.title = who + ' is going live — joinable in a few seconds' + _skewNote(peer);
     s.style.opacity = '0.75';
     return s;
   }
@@ -3130,7 +3147,7 @@ function makeLiveBadge(peer, localLabel) {
   const liw = document.createElement('span'); liw.className = 'liw'; liw.textContent = 'live · ' + who;
   const jx = document.createElement('span'); jx.className = 'joinx'; jx.textContent = 'Join →';   // revealed on row hover
   b.appendChild(dot); b.appendChild(liw); b.appendChild(jx);
-  b.title = 'Join ' + who + '’s live session — co-drive it right here';
+  b.title = 'Join ' + who + '’s live session — co-drive it right here' + _skewNote(peer);
   b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer, localLabel); });   // native, in this same window — carry the clicked row's label
   return b;
 }

@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('claudible', {
   exportSessionText: (id, wsId) => ipcRenderer.invoke('session:export-text', { id, wsId }),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: () => ipcRenderer.invoke('claude:version'),   // the embedded Claude Code CLI version (for the status bar)
   appVersion: () => ipcRenderer.invoke('app:version'),   // Claudible's own version (package.json) for the status-bar badge
+  buildSha: () => ipcRenderer.invoke('app:buildSha'),    // the running build's git sha — identifies unreleased builds semver can't
   latestReply: (id) => ipcRenderer.invoke('session:latest-reply', id),   // a session's last assistant reply (for manual Speak / re-listen)
   // first-run onboarding wizard (connect Claude → workspace → GitHub)
   onboardStatus: () => ipcRenderer.invoke('onboard:status'),             // { claudeInstalled, claudeSignedIn, claudeVersion, ghInstalled, ghSignedIn, ghAccount, voiceReady, voiceProvisioning }
@@ -132,6 +133,7 @@ contextBridge.exposeInMainWorld('claudible', {
   livePeers: (wsId) => ipcRenderer.invoke('live:peers', wsId),   // peers on THIS workspace's presence branch, never main's ambient one
   onAdvertiseLost: (cb) => ipcRenderer.on('live:advertise-lost', (_e, p) => cb(p)),   // the presence heartbeat lost the one-host-per-session claim (a collaborator went live while ours was stale) — UI must stop saying "sharing"
   onLivePeersPush: (cb) => ipcRenderer.on('live:peers-push', (_e, p) => cb(p)),       // { id, peers } main's beacon saw this workspace's shared branch move and already read the fresh presence — paint it now, no extra round-trip
+  onBuildDrift: (cb) => ipcRenderer.on('build:drift', (_e, p) => cb(p)),             // { running, disk } a git pull moved the files under this running process — show the restart chip
   // native joined tab: main holds a client WebSocket to the peer; the renderer draws a normal xterm tab and
   // co-drives over IPC (the renderer's CSP forbids a wss:// socket, so the socket lives in main).
   liveConnect: (tabId, peer, name) => ipcRenderer.invoke('live:connect', { tabId, peer, name }),

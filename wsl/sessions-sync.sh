@@ -26,7 +26,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|relay-cred|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -569,12 +569,22 @@ case "$op" in
       emit "{\"ok\":true,\"op\":\"resolve\",\"strategy\":\"remote\",\"id\":\"$rid\"}"
     fi
     ;;
+  relay-cred)
+    # The presence relay's credential: the verified login + a gh token for the relay's single read-only
+    # GitHub permission check (relay/worker.js). Read-only, no worktree; the token goes to the app's own
+    # deployed relay over TLS and is never written to the branch or disk here.
+    _tok="$(gh auth token 2>/dev/null)"
+    case "$_tok" in '') fail "gh has no token — run: gh auth login" ;; esac
+    case "$_tok" in *[!A-Za-z0-9_.-]*) fail "unexpected token shape" ;; esac
+    emit "{\"ok\":true,\"op\":\"relay-cred\",\"login\":\"$author\",\"token\":\"$_tok\"}"
+    ;;
   presence-set)
     # Advertise "I'm live in session $2, joinable at $3 with token $4" so a collaborator in this workspace can
     # join natively - no link to paste. One small blob per author under live/, committed via the worktree-free
     # plumbing path above. Ignored by the session import.
-    psid="${2:-}"; purl="${3:-}"; ptok="${4:-}"; pname_b64="${5:-}"
+    psid="${2:-}"; purl="${3:-}"; ptok="${4:-}"; pname_b64="${5:-}"; psha="${6:-}"
     case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$psha" in *[!0-9a-f]*) psha="" ;; esac   # the publisher's build sha (12-hex) — skew surfacing; optional, old callers omit it
     case "$purl" in https://*|http://127.0.0.1:*|http://localhost:*) ;; *) fail "bad url" ;; esac
     case "$purl" in *[!A-Za-z0-9:/._-]*) fail "bad url" ;; esac
     case "$ptok" in '' | *[!A-Za-z0-9._~-]*) fail "bad token" ;; esac
@@ -592,7 +602,7 @@ case "$op" in
     for i in 1 2 3; do
       refuse="$(presence_holder_refuse "$psid")"
       if [ -n "$refuse" ]; then presence_yield_own "$psid"; emit "$refuse"; exit 0; fi
-      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"url\":\"$purl\",\"token\":\"$ptok\",\"name\":\"$pname\",\"ts\":$(date +%s)}" && { pushed=1; break; }
+      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"url\":\"$purl\",\"token\":\"$ptok\",\"name\":\"$pname\",\"sha\":\"$psha\",\"ts\":$(date +%s)}" && { pushed=1; break; }
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-set\"}" || emit "{\"ok\":false,\"op\":\"presence-set\",\"error\":\"push failed\"}"
     ;;
@@ -603,8 +613,9 @@ case "$op" in
     # non-joinable "going live..." row with a SHORT client-side TTL. Claims the session in the arbiter exactly
     # like a full advertisement (it matches on session+ts, not url), so two hosts can't both slip through the
     # starting window. Same worktree-free plumbing as presence-set - this is THE most latency-critical write.
-    psid="${2:-}"; pname_b64="${3:-}"
+    psid="${2:-}"; pname_b64="${3:-}"; psha="${4:-}"
     case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$psha" in *[!0-9a-f]*) psha="" ;; esac
     case "$pname_b64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
@@ -613,7 +624,7 @@ case "$op" in
     for i in 1 2 3; do
       refuse="$(presence_holder_refuse "$psid")"
       if [ -n "$refuse" ]; then presence_yield_own "$psid"; emit "$refuse"; exit 0; fi
-      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"name\":\"$pname\",\"starting\":true,\"ts\":$(date +%s)}" && { pushed=1; break; }
+      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"name\":\"$pname\",\"sha\":\"$psha\",\"starting\":true,\"ts\":$(date +%s)}" && { pushed=1; break; }
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-starting\"}" || emit "{\"ok\":false,\"op\":\"presence-starting\",\"error\":\"push failed\"}"
     ;;

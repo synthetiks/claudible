@@ -829,10 +829,13 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
   //   · the beacon's 'remote-head' probe — a narrow branch fetch the script answers before ever touching the
   //     worktree (no merge, no lock). It MUST bypass: queued behind a 120s sync it would be a dead beacon.
   //     The op string is pinned literal here so no other op can ride this exemption.
+  //   · the relay's 'relay-cred' read — one `gh auth token` + the cached author, no git at all, no worktree;
+  //     queueing it would couple relay connects to transcript syncs for nothing. Pinned literal, exactly one.
   const beaconProbes = (MAIN.match(/runner\.runScript\('sessions-sync\.sh', 'remote-head'/g) || []).length;
+  const credReads = (MAIN.match(/runner\.runScript\('sessions-sync\.sh', 'relay-cred'/g) || []).length;
   none('a sessions-sync.sh invocation escaped the per-ws serialization chain (R10)',
-    calls === queued + 1 + beaconProbes && beaconProbes === 1 && /if \(opts && \(opts\.detach \|\| opts\.direct\)\) \{ exec\(\); return; \}/.test(MAIN) ? []
-      : [`${calls} invocations, ${queued} queued, ${beaconProbes} remote-head — every site except runPresence's detach/direct-guarded exec and ONE literal remote-head probe must go through _syncQ.run`]);
+    calls === queued + 1 + beaconProbes + credReads && beaconProbes === 1 && credReads === 1 && /if \(opts && \(opts\.detach \|\| opts\.direct\)\) \{ exec\(\); return; \}/.test(MAIN) ? []
+      : [`${calls} invocations, ${queued} queued, ${beaconProbes} remote-head, ${credReads} relay-cred — every site except runPresence's detach/direct-guarded exec and the two pinned literal reads must go through _syncQ.run`]);
   none('presence-beat coalescing lost its byte-identical guard (a re-share would advertise a stale handle)',
     /_beatArgs\.get\(key\) === args\) return;/.test(MAIN) ? [] : ['coalescing must compare exact args']);
 }
