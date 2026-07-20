@@ -639,8 +639,16 @@ case "$op" in
       # OUTSIDE the per-ws queue (opts.direct). A presence-only change fetches a few hundred bytes; a big
       # session delta is capped by `timeout` and the sync path picks it up anyway.
       _tmo=""; command -v timeout >/dev/null 2>&1 && _tmo="timeout 8"
-      $_tmo git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
-      GD="$SDIR"
+      if $_tmo git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1; then
+        GD="$SDIR"
+      else
+        # The bounded fetch failed (blip, wedge): DON'T silently read a stale view as if it were fresh — a
+        # peers list missing the just-added session would paint nothing and the announce is one-shot. Fall
+        # back to the resilient worktree path, whose own fetch gets a second chance on a separate code path.
+        ensure_worktree || fail "could not set up the sessions branch"
+        git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+        GD="$WT"
+      fi
     else
       ensure_worktree || fail "could not set up the sessions branch"
       git -C "$WT" fetch origin "$BR" >/dev/null 2>&1

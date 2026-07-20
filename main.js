@@ -1531,7 +1531,10 @@ const _beaconDirty = new Map();   // ws.id -> head sha whose session-import (doS
 const _beaconTimers = new Map();  // ws.id -> the armed setTimeout of that workspace's OWN probe chain
 const _beaconLive = new Set();    // ws.ids with a probe in flight (roster scan must not double-arm them)
 const _beaconErr = new Map();     // ws.id -> consecutive probe failures -> exponential backoff (a DEAD remote must not burn a spawn every tick)
-const BEACON_MS = 1500, BEACON_HIDDEN_MS = 15000;
+// BEACON_HIDDEN_MS must stay UNDER the renderer's 10s fallback poll: the fast path losing to its own
+// fallback is worse than a few extra probes from a minimized window (audited: a chain armed with a 15s wait
+// while minimized kept that wait after restore — nothing re-arms mid-wait — so the poll painted first).
+const BEACON_MS = 1500, BEACON_HIDDEN_MS = 8000;
 // Rolling latency journal for the live-collab fast path (runtime/live-timing.log): one timestamped line per
 // stage — advertise received, stamp landed, head-move detected, peers painted — so a "going live felt slow"
 // report is answered with numbers instead of guesses. Size-capped; never throws.
@@ -1577,7 +1580,17 @@ async function _beaconProbe(wsId) {
     if (!r || !r.ok || typeof r.head !== 'string') { _beaconErr.set(wsId, (_beaconErr.get(wsId) || 0) + 1); return; }
     _beaconErr.delete(wsId);
     const prev = _beaconHeads.get(wsId);
-    if (prev === undefined) { _beaconHeads.set(wsId, r.head); return; }   // first sighting = baseline, not a change
+    if (prev === undefined) {
+      // First sighting seeds the baseline — but the CURRENT branch state may already hold a live session
+      // that went up before this app looked (fresh boot, sync just enabled). Announce that state once too:
+      // the renderer's sig dedupe makes a redundant push a no-op, and without this the "already live before
+      // I looked" case waited for the 10s fallback poll.
+      _beaconHeads.set(wsId, r.head);
+      runPresence('presence-list', (pr) => {
+        try { winSend('live:peers-push', { id: wsId, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
+      }, ws, { direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 ' });
+      return;
+    }
     if (prev !== r.head) {
       // ANNOUNCE EXACTLY ONCE per head move, baseline advances NOW (not after the sync — a busy workspace
       // used to re-fire this branch every tick). The presence read fetches JUST this branch into the code

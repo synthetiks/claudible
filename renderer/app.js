@@ -4208,7 +4208,17 @@ function expandedSet() {
   return _expandedWs;
 }
 function isWsExpanded(id) { return expandedSet().has(id); }
-function setWsExpanded(id, on) { const s = expandedSet(); if (on) s.add(id); else s.delete(id); saveExpandedWs(); }
+function setWsExpanded(id, on) {
+  const s = expandedSet(); const was = s.has(id);
+  if (on) s.add(id); else s.delete(id);
+  saveExpandedWs();
+  // Expanding a project brings its live rows ON SCREEN — fetch presence NOW, not on the next 10s tick. The
+  // beacon's push deliberately drops updates for non-visible projects with "the poll covers it if it becomes
+  // visible"; this call IS that promise being kept (audited: nothing else fulfilled it, so a peer who
+  // expanded/switched AFTER the host went live waited out the full poll interval — the recurring "~10s").
+  // pollLivePeers self-guards against overlap, so rapid toggles are cheap no-ops.
+  if (on && !was) { try { pollLivePeers(); } catch (e) {} }
+}
 const _wsSessCache = new Map();   // wsId -> { list, ts } — avoid refetching a non-active workspace's sessions on every re-render
 const _wsSessFetching = new Set();   // wsIds with a fetch in flight — dedupe concurrent fetches across rapid re-renders
 // Clicking a session that lives in ANOTHER project: give it its own tab bound to that workspace, so the session

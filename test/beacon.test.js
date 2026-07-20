@@ -90,5 +90,15 @@ ok('renderer: advertise is no longer gated on tunnelUp (two-phase advertise)',
 ok('renderer: a starting row is inert (no join handler until the full stamp)',
   /peer\.starting/.test(APP) && /going live/.test(APP));
 
+// ---- the four audited ~10s closers (2026-07-20 Opus audit) ----
+ok('renderer: EXPANDING a project fetches presence immediately (the push-gate promise, kept)',
+  /if \(on && !was\) \{ try \{ pollLivePeers\(\); \} catch \(e\) \{\} \}/.test(APP));
+ok('main: the beacon hidden-window delay stays UNDER the 10s fallback poll',
+  /BEACON_HIDDEN_MS = 8000/.test(MAIN));
+ok('main: first sighting announces current state too (already-live-before-I-looked)',
+  (MAIN.match(/direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 '/g) || []).length >= 2);
+ok('script: a failed direct-read fetch falls back to the worktree path instead of a silent stale read',
+  /if \[ -n "\$\{CLAUDIBLE_DIRECT_READ:-\}" \]; then[\s\S]{0,1600}?GD="\$WT"/.test(SH));
+
 console.log(`beacon: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
