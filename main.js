@@ -1071,7 +1071,7 @@ const _beatArgs = new Map();   // ws.id -> the args of a queued-but-not-started 
 function runPresence(args, cb, ws, opts) {
   if (!APPDIR_WSL) return cb && cb(null);
   const w = ws || activeWorkspace;   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
-  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach) }).then(({ err, stdout }) => {
+  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), extraEnv: (opts && opts.extraEnv) || '' }).then(({ err, stdout }) => {
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
@@ -1079,16 +1079,20 @@ function runPresence(args, cb, ws, opts) {
   // QUIT path (R7): the detached one-shot must never sit behind a queue that dies with the process.
   if (opts && opts.detach) { exec(); return; }
   const key = (w && w.id) || 'ws';
+  // Presence is seconds-critical (a "going live" stamp / the join badge refresh) and must not wait out a
+  // queued multi-second transcript sync — front of the line, still strictly serialized (see keyedQueue).
+  // Title ops share this helper but are ordinary renames: normal priority.
+  const front = /^presence-/.test(args);
   // Heartbeat COALESCING: a queued-but-not-started beat stamps its ts at RUN time, so it is exactly as fresh
   // as this one — piling beats behind a long sync would only burn presence commits. Coalesce ONLY on byte-
   // identical args: a re-share mints a new url/token, and dropping THAT beat would advertise a stale handle.
   if (/^presence-set /.test(args)) {
     if (_beatArgs.get(key) === args) return;
     _beatArgs.set(key, args);
-    _syncQ.run(key, () => { if (_beatArgs.get(key) === args) _beatArgs.delete(key); return exec(); });
+    _syncQ.run(key, () => { if (_beatArgs.get(key) === args) _beatArgs.delete(key); return exec(); }, { front });
     return;
   }
-  _syncQ.run(key, exec);
+  _syncQ.run(key, exec, { front });
 }
 // Keep my presence fresh while I'm hosting. Peers age out an advertisement after LIVE_TTL (120s), so a still-live
 // host must re-stamp its ts well within that. The timer lives in MAIN on purpose — renderer timers get throttled
@@ -1498,15 +1502,15 @@ function startPoll() {
 // ---- remote-head beacon: near-instant peer visibility -------------------------------------------
 // The adaptive poll above is the safety net; THIS is the fast path. Everything collaborators share —
 // session transcripts, live presence, shared titles — rides ONE branch (claudible/sessions), so "did
-// anything change anywhere?" is a single remote head-sha probe: sessions-sync.sh remote-head, one git
-// smart-HTTP round-trip, no fetch, no worktree, no lock (safe OUTSIDE _syncQ, even mid-sync), and no
-// GitHub API budget (the script answers it before its per-invocation gh-auth block). Probe every
-// ~2.5s per synced repo workspace — EVERY one, not just those with an open tab, closing the "a shared
-// project with no tab never syncs" hole — and only when the sha actually moves fire the existing
-// pipeline: doSync imports the new sessions (sync:changed repaints the sidebar) and the renderer is
-// nudged to refresh live presence NOW instead of on its next 10s tick. Peer-visible latency for
-// "X went live" / "new session appeared" drops from 10s–5min (or never) to a few seconds, while a
-// quiet branch costs one tiny probe per tick and zero fetches.
+// anything change anywhere?" is a single head-sha probe: sessions-sync.sh remote-head — a narrow
+// fetch of just that branch (so on a change the blobs are ALREADY local for the skip-fetch presence
+// read below), no worktree, no merge, no lock (safe OUTSIDE _syncQ, even mid-sync), and no GitHub API
+// budget (the script answers it before its per-invocation gh-auth block). Probe every ~2.5s per
+// synced repo workspace — EVERY one, not just those with an open tab, closing the "a shared project
+// with no tab never syncs" hole — and only when the sha actually moves fire the pipeline: presence is
+// read locally and PUSHED to the sidebar (live:peers-push), then doSync imports the new sessions
+// (sync:changed repaints). Peer-visible latency for "X went live" / "new session appeared" drops from
+// 10s–5min (or never) to a few seconds; a quiet branch costs one cheap negotiation per tick.
 const _beaconHeads = new Map();   // ws.id -> last seen branch head sha ('' = branch absent)
 let _beaconBusy = false;
 const BEACON_MS = 2500, BEACON_HIDDEN_MS = 15000;
@@ -1514,25 +1518,33 @@ async function _beaconTick() {
   if (_beaconBusy) return;                                  // a slow probe pass must never stack another on top
   _beaconBusy = true;
   try {
-    const seen = new Set();
+    const seen = new Set(); const targets = [];
     for (const ws of registry.workspaces) {
       if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) continue;
-      if (seen.has(ws.id)) continue; seen.add(ws.id);
+      if (seen.has(ws.id)) continue; seen.add(ws.id); targets.push(ws);
+    }
+    // PARALLEL across workspaces: each probe is ~1s of network, and a serial pass would stretch the effective
+    // per-workspace cadence to N seconds — the exact latency this beacon exists to kill.
+    await Promise.all(targets.map(async (ws) => {
       const { err, stdout } = await runner.runScript('sessions-sync.sh', 'remote-head', { ws, timeout: 15000 });
-      if (err) continue;                                    // offline/wedged — the adaptive poll still covers us
+      if (err) return;                                      // offline/wedged — the adaptive poll still covers us
       let r = null; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-      if (!r || !r.ok || typeof r.head !== 'string') continue;
+      if (!r || !r.ok || typeof r.head !== 'string') return;
       const prev = _beaconHeads.get(ws.id);
-      if (prev === undefined) { _beaconHeads.set(ws.id, r.head); continue; }   // first sighting = baseline, not a change
-      if (prev === r.head) continue;
-      // The branch moved. Presence first (a "going live" stamp is the latency-critical payload), then the
-      // session import — skipped while this ws is mid-turn/mid-sync, and the baseline only advances on a
-      // SUCCESSFUL sync, so the very next tick retries anything skipped or failed.
-      try { winSend('live:peers-nudge', { id: ws.id }); } catch {}
-      if (wsHasBusyTab(ws.id) || syncLock.has(ws.id)) continue;
+      if (prev === undefined) { _beaconHeads.set(ws.id, r.head); return; }   // first sighting = baseline, not a change
+      if (prev === r.head) return;
+      // The branch moved. Presence first (a "going live" stamp is the latency-critical payload): the probe was
+      // a real fetch, so the presence blobs are already local — read them WITHOUT another network round-trip
+      // (skip-fetch) at front-of-queue and push straight to the sidebar. Then the session import — skipped
+      // while this ws is mid-turn/mid-sync, and the baseline only advances on a SUCCESSFUL sync, so the very
+      // next tick retries anything skipped or failed.
+      runPresence('presence-list', (pr) => {
+        try { winSend('live:peers-push', { id: ws.id, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
+      }, ws, { extraEnv: 'CLAUDIBLE_SKIP_FETCH=1 ' });
+      if (wsHasBusyTab(ws.id) || syncLock.has(ws.id)) return;
       const res = await doSync(ws, 'sync', {});
       if (res && res.ok) _beaconHeads.set(ws.id, r.head);
-    }
+    }));
   } finally {
     _beaconBusy = false;
     // Hidden window → ease off (nobody is watching the sidebar); visible — even unfocused — keeps the fast

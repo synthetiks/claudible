@@ -2861,6 +2861,14 @@ function updateAdvertise() {
   try {
     claudible.liveAdvertise(want, collabName())
       .then((r) => {
+        if (r && r.error === 'not live') {
+          // The click's synchronous advertise RACED shareStart — main's share server hadn't bound yet, so
+          // nothing was advertised. Un-latch, or the post-start updateAdvertise (ensureTunnel's tail) no-ops
+          // on the `want === advertisedSession` guard and the session is NEVER advertised — no "going
+          // live…" stamp, no join badge, until some unrelated state change happens to re-run this.
+          if (advertisedSession === want) advertisedSession = null;
+          return;
+        }
         if (r && r.error === 'already-live') {
           // The authoritative claim check refused: a collaborator beat us to hosting this exact session (the
           // race the ~10s presence poll can miss). Roll the share back completely — keeping sharedSessionId
@@ -2876,7 +2884,7 @@ function updateAdvertise() {
         // stamp ALSO failed (offline / branch unreachable): then nobody can see or join anything.
         if (r && r.error === 'tunnel-down' && !r.starting) toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.');
       })
-      .catch(() => {});
+      .catch(() => { if (advertisedSession === want) advertisedSession = null; });   // IPC failure must not leave the latch stuck on a session that was never advertised
   } catch (e) {}
 }
 // ---- Collaboration tunnel: keep the single share server matching what's actually wanted — a manual web link
@@ -3020,21 +3028,38 @@ async function pollLivePeers() {
       const nowMs = Date.now();
       [...deadPeerSessions].forEach(([sid, at]) => { if (!live.has(sid) || nowMs - at > DEAD_SUPPRESS_MS) deadPeerSessions.delete(sid); });
     }
-    // The sig deliberately EXCLUDES p.ts: the host's advertise heartbeat re-stamps ts every ~45s with nothing
-    // else changing, and a ts-sensitive sig forced a full refreshExpandedTrees() rebuild on every beat —
-    // restarting the live/busy-dot keyframe animations in every expanded project (a metronome flicker).
-    // url+token ARE included: a host handle rotation must still change the sig so reconcileJoinedTabs re-arms
-    // joined tabs (the auto-recover path); membership changes (TTL age-out) change the sig by themselves.
-    const sig = JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));
+    const sig = livePeersSigOf(next);
     if (sig === livePeersSig) return;
     livePeersSig = sig; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(activeOk);   // repaint the active list AND every expanded tree · re-arm/auto-leave joined tabs
   } finally { _pollLiveInFlight = false; }
 }
+// The sig deliberately EXCLUDES p.ts: the host's advertise heartbeat re-stamps ts every ~45s with nothing
+// else changing, and a ts-sensitive sig forced a full refreshExpandedTrees() rebuild on every beat —
+// restarting the live/busy-dot keyframe animations in every expanded project (a metronome flicker).
+// url+token ARE included: a host handle rotation must still change the sig so reconcileJoinedTabs re-arms
+// joined tabs (the auto-recover path); membership changes (TTL age-out) change the sig by themselves.
+// ONE implementation, shared by the 10s poll and the beacon push — two hand-rolled copies would drift.
+function livePeersSigOf(next) {
+  return JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));
+}
 setInterval(pollLivePeers, 10000);
-// Beacon nudge: main's remote-head probe saw the shared branch move (a peer went live / stopped / a session
-// landed) — refresh presence NOW instead of on the next 10s tick. pollLivePeers only fetches visible (active +
-// expanded) projects and self-guards against overlap, so a nudge for an off-screen project is a cheap no-op.
-try { claudible.onLivePeersNudge(() => { pollLivePeers(); }); } catch (e) {}
+// Beacon push: main's remote-head probe saw the shared branch move and already read the fresh presence list
+// locally (the probe was a fetch) — the peers arrive HERE with zero extra round-trips. Same filter, bucket,
+// sig and repaint path as the 10s poll above, which stays as the drift-correcting fallback.
+try { claudible.onLivePeersPush((p) => {
+  if (!p || !p.id) return;
+  const wsId = p.id;
+  const aw = workspaces.find((w) => w.id === wsId && w.kind === 'repo');
+  if (!aw || !(wsId === activeWsId || isWsExpanded(wsId))) return;   // no rows for this project on screen — nothing to paint (the poll covers it if it becomes visible)
+  const now = Date.now() / 1000;
+  const peers = (p.peers || []).filter((x) => x && x.session && ((x.url && x.token) || x.starting) && (now - (x.ts || 0) < (x.url ? LIVE_TTL_S : STARTING_TTL_S)));
+  peers.forEach((x) => { x.wsId = wsId; });
+  const next = new Map(livePeersByWs); next.set(wsId, peers);
+  livePeersByWs = next;
+  const sig = livePeersSigOf(next);
+  if (sig === livePeersSig) return;
+  livePeersSig = sig; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(wsId === activeWsId);
+}); } catch (e) {}
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
 // can't spam branch reads; a forced call (after my own rename's push) bypasses the throttle. Re-render on change.
 async function pollTitles(force) {

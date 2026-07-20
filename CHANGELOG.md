@@ -4,6 +4,13 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **Going live is announced reliably and ~2× faster.** Fixed a race where the advertise call could fire
+  before the share server finished binding and then silently never retry — the "going live…" stamp (and
+  sometimes the whole advertisement) simply didn't happen. Presence work now also jumps ahead of queued
+  transcript syncs, the stamp pushes optimistically (no pre-push pull on a quiet branch), the beacon's probe
+  is a narrow fetch so a detected change is painted from already-local data with zero extra round-trips, and
+  probes run in parallel across projects. Net: a live session is typically visible to every collaborator in
+  ~3–5s of the Share click.
 - **A guest's Ctrl+V now pastes the guest's own clipboard — never the host's.** The old paste interceptor
   matched the key by NAME ('v'), which any non-Latin keyboard layout bypasses; the chord then fell through
   to xterm as a raw ^V byte, and the CLI on the host answered it by pasting the **host's** clipboard into

@@ -144,6 +144,41 @@ const noOverlap = (log) => {
     eq('the Stop snapshot never sees a half-reverted worktree', snapshotSaw, 'REVERTED');
   }
 
+  // ---- front:true — presence-critical work jumps the waiting line, without preemption or reordering itself ----
+  {
+    // A long sync is RUNNING, another waits; a front task must run after the running one but before the waiter.
+    const log = [], t = tracer(log), q = makeKeyedQueue();
+    const a = q.run('ws1', t('sync-running', 20));
+    const b = q.run('ws1', t('sync-waiting', 5));
+    await tick(1);                                          // let sync-running actually start
+    const c = q.run('ws1', t('presence', 1), { front: true });
+    await Promise.all([a, b, c]);
+    ok('front: no overlap', noOverlap(log));
+    eq('front task runs after the RUNNING task but before every waiting one', log,
+      ['+sync-running', '-sync-running', '+presence', '-presence', '+sync-waiting', '-sync-waiting']);
+  }
+  {
+    // Two front tasks stay FIFO among themselves (a presence-clear issued after a presence-set must stay after).
+    const log = [], t = tracer(log), q = makeKeyedQueue();
+    const a = q.run('ws1', t('sync', 15));
+    await tick(1);
+    const b = q.run('ws1', t('set', 1), { front: true });
+    const c = q.run('ws1', t('clear', 1), { front: true });
+    await Promise.all([a, b, c]);
+    eq('front tasks keep their own issue order', log, ['+sync', '-sync', '+set', '-set', '+clear', '-clear']);
+  }
+  {
+    // A throwing front task neither poisons the key nor reorders the rest.
+    const log = [], t = tracer(log), q = makeKeyedQueue();
+    const a = q.run('ws1', t('sync', 10));
+    await tick(1);
+    const b = q.run('ws1', t('boom', 1, { throw: true }), { front: true }).catch((e) => e.message);
+    const c = q.run('ws1', t('after', 1));
+    const [, bErr] = await Promise.all([a, b, c]);
+    eq('front rejection reaches its caller', bErr, 'boom:boom');
+    eq('queue continues past a failed front task', log.slice(-2), ['+after', '-after']);
+  }
+
   console.log(`\nkeyed-queue: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

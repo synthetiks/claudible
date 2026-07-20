@@ -272,18 +272,24 @@ none('renderer: orphanTab is never rendered',
   none('peersForWs() no longer filters by the per-peer wsId stamp (the scoping guarantee at the reader)',
     /function peersForWs\(wsId\)[^\n]*p\.wsId === wsId/.test(appNoComments) ? [] : ['peersForWs does not filter by p.wsId === wsId']);
   const poll = (appNoComments.match(/async function pollLivePeers\(\)[\s\S]*?\n\}/) || [''])[0];
-  // Only the declaration, peersForWs (reader) and pollLivePeers (writer + keep-last-known fallback) may name the
+  // The beacon's push handler is the SECOND sanctioned writer: it buckets by the PUSHED workspace id and
+  // stamps each peer with it, preserving the same scoping guarantee as the poll (asserted below).
+  const push = (appNoComments.match(/claudible\.onLivePeersPush\(\(p\) => \{[\s\S]*?\n\}\);/) || [''])[0];
+  // Only the declaration, peersForWs (reader), pollLivePeers and the beacon push handler (writers) may name the
   // cache. A render path touching livePeersByWs directly is the unscoped-read bug.
   const cacheHits = appNoComments.split('\n')
     .map((l, i) => [i + 1, l])
     .filter(([, l]) => /\blivePeersByWs\b/.test(l) && l.trim()
       && !/function peersForWs\(/.test(l)
       && !/let livePeersByWs =/.test(l)
-      && !poll.includes(l.trim()))
+      && !poll.includes(l.trim())
+      && !push.includes(l.trim()))
     .map(([n]) => 'app.js:' + n);
-  none('livePeersByWs is touched outside peersForWs()/pollLivePeers() (a project’s peers can leak into another)', cacheHits);
+  none('livePeersByWs is touched outside peersForWs()/pollLivePeers()/the beacon push (a project’s peers can leak into another)', cacheHits);
   none('pollLivePeers does not stamp peers with the ws they were FETCHED for',
     /p\.wsId = wsId/.test(poll) ? [] : ['peers never stamped with their fetched wsId']);
+  none('the beacon push handler does not stamp peers with the PUSHED wsId (its scoping guarantee)',
+    push && /x\.wsId = wsId/.test(push) ? [] : ['push handler missing or peers not stamped with the pushed wsId']);
   none('pollLivePeers does not fetch per-workspace (main would poll its own ambient one)',
     /claudible\.livePeers\(wsId\)/.test(poll) ? [] : ['livePeers() not called with each target wsId']);
   none('pollLivePeers no longer polls EXPANDED projects (a non-active project’s badge would freeze until clicked)',

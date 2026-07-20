@@ -116,8 +116,15 @@ is_live() { case " $LIVE " in *" $1 "*) return 0 ;; esac; return 1; }   # id ∈
 # stack); absent (minimal git-bash) we rely on the caller's own process timeout.
 if [ "$op" = "remote-head" ]; then
   _tmo=""; command -v timeout >/dev/null 2>&1 && _tmo="timeout 8"
-  head_sha="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null | cut -f1)"
-  case "$head_sha" in *[!a-f0-9]*) head_sha="" ;; esac   # error text / junk → treat as "no branch yet"
+  # A narrow FETCH of just the sessions branch (not ls-remote): same one-negotiation cost on a quiet branch,
+  # but when the head HAS moved the new objects land in the shared object store right here — so the
+  # presence-list that follows a change can run with CLAUDIBLE_SKIP_FETCH=1 and zero network. SDIR and the
+  # sessions worktree share one repo, so refs/objects fetched here are visible to every other op instantly.
+  # A fetch failure (offline) leaves the ref at its last-known sha → the beacon sees "no change" and the
+  # adaptive poll remains the safety net.
+  $_tmo git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
+  head_sha="$(git -C "$SDIR" rev-parse "refs/remotes/origin/$BR" 2>/dev/null)"
+  case "$head_sha" in '' | *[!a-f0-9]*) head_sha="" ;; esac   # error text / junk / no branch yet
   emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"$head_sha\"}"
   exit 0
 fi
@@ -496,7 +503,6 @@ case "$op" in
     # control chars incl. newlines) so it drops safely into the one-line JSON. Renderer falls back to login if empty.
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
-    pull_branch || fail "pull failed"
     # ONE live host per session: if another collaborator already holds a FRESH claim on this session, refuse
     # instead of publishing a second advertisement (two hosts on one session = two divergent "live" copies and
     # an ambiguous Join target). The tool prints a complete refusal line when blocked, nothing when free — and
@@ -505,7 +511,17 @@ case "$op" in
     # pull — the tool's deterministic tie-break (earlier ts, then login) makes exactly one of us yield.
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
     live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null); }
+    # OPTIMISTIC, push-first: no pre-push pull on the common quiet-branch case (the pull was a full network
+    # round-trip on the "go live" critical path). The local worktree may be stale, so a refusal computed from
+    # it is only a HINT — refresh and re-check before believing it (a retracted rival claim still sitting in a
+    # stale live/ must not produce a false "already live"). A stale BASE is harmless: the push simply rejects
+    # non-fast-forward and the retry loop below pulls + re-arbitrates, exactly as it always did for the
+    # mid-push race — the arbiter is enforced by the loop, not by freshness at first write.
     refuse="$(live_refuse)"
+    if [ -n "$refuse" ]; then
+      pull_branch || fail "pull failed"
+      refuse="$(live_refuse)"
+    fi
     if [ -n "$refuse" ]; then
       # Yield cleanly: if OUR OWN (losing) claim for this same session is already on the branch — a lost push
       # race being re-checked by the heartbeat, or a legacy double-share — retract it now, so peers converge on
@@ -551,10 +567,16 @@ case "$op" in
     case "$pname_b64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
-    pull_branch || fail "pull failed"
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
     live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null); }
+    # OPTIMISTIC, push-first — the "going live" stamp is THE latency-critical write; same contract as
+    # presence-set above: a stale-state refusal is only a hint (pull + re-check before believing it), a stale
+    # base just means the push rejects and the retry loop pulls + re-arbitrates.
     refuse="$(live_refuse)"
+    if [ -n "$refuse" ]; then
+      pull_branch || fail "pull failed"
+      refuse="$(live_refuse)"
+    fi
     if [ -n "$refuse" ]; then
       # Same yield as presence-set: if our OWN (losing) claim for this session is on the branch, retract it
       # so peers converge on ONE live host now instead of after the loser's stale claim ages out.
@@ -599,7 +621,10 @@ case "$op" in
     # Read every collaborator's live/*.json straight off origin via fetch + git show — NO worktree merge, so this
     # frequent (~10s) poll can never fight the background sync's merge on the same worktree. Renderer filters stale ts.
     ensure_worktree || fail "could not set up the sessions branch"
-    git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+    # CLAUDIBLE_SKIP_FETCH=1: the caller (the beacon, after its remote-head probe — itself a fetch of this very
+    # branch into this same repo) guarantees origin/$BR is already current — skip the redundant network
+    # round-trip and read the just-fetched refs directly. Every other caller still fetches.
+    [ -n "${CLAUDIBLE_SKIP_FETCH:-}" ] || git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
     # Emit each collaborator's live/<author>.json blob on its own line, then let node JSON-validate each so a single
     # corrupt/torn/concatenated file ("{}x{}") is DROPPED instead of poisoning the whole peers[] array — which would
     # make the renderer's JSON.parse throw and silently kill the roster / "Join live" badge (the brace-only guard

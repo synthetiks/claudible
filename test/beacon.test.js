@@ -24,14 +24,31 @@ function ok(label, c) { c ? pass++ : (fail++, console.error('  FAIL ' + label));
 // ---- script: the remote-head probe ----
 ok('script: remote-head + presence-starting are allowlisted ops',
   /case "\$op" in [^\n]*remote-head[^\n]*presence-starting[^\n]*\) ;; \*\) fail "bad op"/.test(SH));
-ok('script: remote-head probes via git ls-remote (no fetch, no worktree)',
-  /ls-remote origin "refs\/heads\/\$BR"/.test(SH));
+ok('script: remote-head probes via a narrow FETCH of the branch (objects land for skip-fetch reads)',
+  /git -C "\$SDIR" fetch origin "\$BR"/.test(SH) && /rev-parse "refs\/remotes\/origin\/\$BR"/.test(SH));
 ok('script: remote-head answers BEFORE the gh-api author block (API-budget invariant)',
   SH.indexOf('"$op" = "remote-head"') !== -1 && SH.indexOf('"$op" = "remote-head"') < SH.indexOf('author="$(gh api user'));
+ok('script: presence-list honors CLAUDIBLE_SKIP_FETCH (beacon already fetched this branch)',
+  /CLAUDIBLE_SKIP_FETCH[^\n]*\|\| git -C "\$WT" fetch origin "\$BR"/.test(SH));
 ok('script: presence-starting stamps a url-less starting:true entry',
   /"starting":true/.test(SH));
 ok('script: presence-starting still runs the one-host arbiter (live-holder)',
   (() => { const i = SH.indexOf('presence-starting)'); return i !== -1 && SH.slice(i, SH.indexOf('presence-clear)')).includes('live-holder'); })());
+ok('script: presence stamps are optimistic push-first (no unconditional pre-push pull)', (() => {
+  // In BOTH presence-set and presence-starting, the refusal hint must be computed BEFORE any pull_branch —
+  // the pull happens only inside the hint branch (and the push-retry loop). If a pre-push pull creeps back
+  // in, the "go live" stamp regains a full network round-trip on its critical path.
+  const spans = [['presence-set)', 'presence-starting)'], ['presence-starting)', 'presence-clear)']];
+  for (const [from, to] of spans) {
+    const i = SH.indexOf(from), j = SH.indexOf(to);
+    if (i === -1 || j === -1 || j <= i) return false;
+    const block = SH.slice(i, j);
+    const firstRefuse = block.indexOf('refuse="$(live_refuse)"');
+    const firstPull = block.indexOf('pull_branch || fail');
+    if (firstRefuse === -1 || firstPull === -1 || firstPull < firstRefuse) return false;
+  }
+  return true;
+})());
 
 // ---- main: the beacon loop ----
 ok('main: startBeacon exists and is started at boot', /function startBeacon\(/.test(MAIN) && /startBeacon\(\);/.test(MAIN));
@@ -44,13 +61,21 @@ ok('main: the probe does NOT ride the per-ws sync queue', (() => {
   const before = MAIN.slice(Math.max(0, probe - 200), probe);
   return !before.includes('_syncQ.run');
 })());
-ok('main: a branch change nudges the renderer presence poll', /winSend\('live:peers-nudge'/.test(MAIN));
+ok('main: a branch change pushes the fresh presence straight to the renderer', /winSend\('live:peers-push'/.test(MAIN));
+ok('main: the beacon presence read skips the redundant fetch', /CLAUDIBLE_SKIP_FETCH=1/.test(MAIN));
+ok('main: presence ops ride the FRONT of the per-ws queue (never behind a long sync)',
+  /const front = \/\^presence-\/\.test\(args\)/.test(MAIN) && /_syncQ\.run\(key, exec, \{ front \}\)/.test(MAIN));
+ok('main: keyedQueue supports front (the priority the pin above depends on)',
+  /opts && opts\.front/.test(read('lib/keyedQueue.js')));
 ok('main: tunnel-down advertise pushes the phase-1 starting presence', /presence-starting '\$\{sid\}'/.test(MAIN));
 ok('main: renderer pollers survive minimize (backgroundThrottling:false)', /backgroundThrottling: false/.test(MAIN));
 
 // ---- renderer + preload: consuming the fast path ----
-ok('preload: onLivePeersNudge bridges live:peers-nudge', /onLivePeersNudge[^\n]*live:peers-nudge/.test(PRELOAD));
-ok('renderer: the nudge triggers pollLivePeers', /onLivePeersNudge\(\(\) => \{ pollLivePeers\(\); \}\)/.test(APP));
+ok('preload: onLivePeersPush bridges live:peers-push', /onLivePeersPush[^\n]*live:peers-push/.test(PRELOAD));
+ok('renderer: the push paints through the SAME sig/repaint path as the poll',
+  /onLivePeersPush\(/.test(APP) && /function livePeersSigOf\(/.test(APP) && (APP.match(/livePeersSigOf\(next\)/g) || []).length >= 2);
+ok('renderer: a failed/raced advertise un-latches so the retry can fire',
+  /advertisedSession === want\) advertisedSession = null/.test(APP));
 ok('renderer: starting stamps pass the peers filter with their own short TTL',
   /STARTING_TTL_S/.test(APP) && /p\.starting/.test(APP));
 ok('renderer: advertise is no longer gated on tunnelUp (two-phase advertise)',
