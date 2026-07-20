@@ -822,14 +822,17 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
   const calls = (MAIN.match(/runner\.runScript\('sessions-sync\.sh'/g) || []).length;
   const queued = (MAIN.match(/_syncQ\.run\([^\n]*runner\.runScript\('sessions-sync\.sh'/g) || []).length;
   // TWO sanctioned un-queued sites, each with a reason the queue exists to protect against NOT applying:
-  //   · runPresence's exec() — queued for every op, direct ONLY when opts.detach (the quit path; R7).
-  //   · the beacon's 'remote-head' probe — a pure ls-remote the script answers before ever touching the
-  //     worktree (no fetch, no merge, no lock). It MUST bypass: queued behind a 120s sync it would be a
-  //     dead beacon. The op string is pinned literal here so no other op can ride this exemption.
+  //   · runPresence's exec() — queued for every op, direct ONLY when opts.detach (the quit path; R7) or
+  //     opts.direct (the beacon's skip-fetch presence read: a lock-free object-store read with no worktree,
+  //     no fetch, no merge — front-of-queue can't help against a RUNNING multi-second sync, so it must not
+  //     queue at all).
+  //   · the beacon's 'remote-head' probe — a narrow branch fetch the script answers before ever touching the
+  //     worktree (no merge, no lock). It MUST bypass: queued behind a 120s sync it would be a dead beacon.
+  //     The op string is pinned literal here so no other op can ride this exemption.
   const beaconProbes = (MAIN.match(/runner\.runScript\('sessions-sync\.sh', 'remote-head'/g) || []).length;
   none('a sessions-sync.sh invocation escaped the per-ws serialization chain (R10)',
-    calls === queued + 1 + beaconProbes && beaconProbes === 1 && /if \(opts && opts\.detach\) \{ exec\(\); return; \}/.test(MAIN) ? []
-      : [`${calls} invocations, ${queued} queued, ${beaconProbes} remote-head — every site except runPresence's detach-guarded exec and ONE literal remote-head probe must go through _syncQ.run`]);
+    calls === queued + 1 + beaconProbes && beaconProbes === 1 && /if \(opts && \(opts\.detach \|\| opts\.direct\)\) \{ exec\(\); return; \}/.test(MAIN) ? []
+      : [`${calls} invocations, ${queued} queued, ${beaconProbes} remote-head — every site except runPresence's detach/direct-guarded exec and ONE literal remote-head probe must go through _syncQ.run`]);
   none('presence-beat coalescing lost its byte-identical guard (a re-share would advertise a stale handle)',
     /_beatArgs\.get\(key\) === args\) return;/.test(MAIN) ? [] : ['coalescing must compare exact args']);
 }

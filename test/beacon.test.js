@@ -28,8 +28,8 @@ ok('script: remote-head probes via a narrow FETCH of the branch (objects land fo
   /git -C "\$SDIR" fetch origin "\$BR"/.test(SH) && /rev-parse "refs\/remotes\/origin\/\$BR"/.test(SH));
 ok('script: remote-head answers BEFORE the gh-api author block (API-budget invariant)',
   SH.indexOf('"$op" = "remote-head"') !== -1 && SH.indexOf('"$op" = "remote-head"') < SH.indexOf('author="$(gh api user'));
-ok('script: presence-list honors CLAUDIBLE_SKIP_FETCH (beacon already fetched this branch)',
-  /CLAUDIBLE_SKIP_FETCH[^\n]*\|\| git -C "\$WT" fetch origin "\$BR"/.test(SH));
+ok('script: presence-list under CLAUDIBLE_SKIP_FETCH is a lock-free CODE-CLONE read (no worktree, no fetch)',
+  /if \[ -n "\$\{CLAUDIBLE_SKIP_FETCH:-\}" \]; then/.test(SH) && /GD="\$SDIR"/.test(SH) && /git -C "\$GD" ls-tree/.test(SH));
 ok('script: presence-starting stamps a url-less starting:true entry',
   /"starting":true/.test(SH));
 ok('script: presence-starting still runs the one-host arbiter (live-holder)',
@@ -62,7 +62,10 @@ ok('main: the probe does NOT ride the per-ws sync queue', (() => {
   return !before.includes('_syncQ.run');
 })());
 ok('main: a branch change pushes the fresh presence straight to the renderer', /winSend\('live:peers-push'/.test(MAIN));
-ok('main: the beacon presence read skips the redundant fetch', /CLAUDIBLE_SKIP_FETCH=1/.test(MAIN));
+ok('main: the beacon presence read skips the redundant fetch AND bypasses the queue (direct)',
+  /direct: true, extraEnv: 'CLAUDIBLE_SKIP_FETCH=1 '/.test(MAIN));
+ok('main: announce fires exactly once per head move (baseline advances BEFORE the sync, not after it)',
+  /_beaconHeads\.set\(ws\.id, r\.head\);\s*\n\s*_beaconDirty\.set\(ws\.id, r\.head\);/.test(MAIN) && /_beaconDirty\.delete\(ws\.id\)/.test(MAIN));
 ok('main: presence ops ride the FRONT of the per-ws queue (never behind a long sync)',
   /const front = \/\^presence-\/\.test\(args\)/.test(MAIN) && /_syncQ\.run\(key, exec, \{ front \}\)/.test(MAIN));
 ok('main: keyedQueue supports front (the priority the pin above depends on)',

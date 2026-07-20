@@ -1077,7 +1077,10 @@ function runPresence(args, cb, ws, opts) {
       cb && cb(r);
     });
   // QUIT path (R7): the detached one-shot must never sit behind a queue that dies with the process.
-  if (opts && opts.detach) { exec(); return; }
+  // DIRECT path: the beacon's skip-fetch presence read — a lock-free object-store read (no worktree, no
+  // fetch, no merge; see presence-list's skip-fetch branch) that must never wait behind a RUNNING sync;
+  // front-of-queue only helps against WAITING work, so a queue slot is not enough for it.
+  if (opts && (opts.detach || opts.direct)) { exec(); return; }
   const key = (w && w.id) || 'ws';
   // Presence is seconds-critical (a "going live" stamp / the join badge refresh) and must not wait out a
   // queued multi-second transcript sync — front of the line, still strictly serialized (see keyedQueue).
@@ -1155,6 +1158,7 @@ function presenceBeatOnce() {
   const st = share.status();
   if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
   runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+    _liveTiming(`heartbeat: stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'}`);
     // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
     // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
     // duplicate, and tell the renderer so the UI stops saying "sharing" (it clears sharedSessionId + toasts).
@@ -1180,6 +1184,8 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   // NEVER publish a non-tunnel (loopback/dead) URL to remote peers — they'd dial their own machine. If the tunnel
   // isn't up yet, arm the heartbeat anyway so presence is pushed the instant a real *.trycloudflare.com URL appears,
   // and tell the caller so the host can be warned their share isn't remotely reachable.
+  const tAdv = Date.now();
+  _liveTiming(`advertise: received sid=${sid} tunnel=${isTunnelUrl(shareBaseUrl) ? 'up' : 'down'}`);
   if (!isTunnelUrl(shareBaseUrl)) {
     startAdvertiseHeartbeat(sid, ws);
     // Phase-1 presence: peers should see "going live…" the moment the host clicks Share — not after the
@@ -1187,6 +1193,7 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     // full advertisement); presenceBeatOnce replaces it with the real handle the instant adoptTunnel lands.
     // A rival already holding the claim surfaces exactly like a beat-time loss (renderer un-shares + toasts).
     runPresence(`presence-starting '${sid}' '${advertisedNameB64}'`, (r) => {
+      _liveTiming(`advertise: starting stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
       if (r && r.error === 'already-live') {
         stopAdvertiseHeartbeat();
         try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
@@ -1197,6 +1204,7 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     return;
   }
   runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
+    _liveTiming(`advertise: full stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
     if (r && r.error === 'already-live') return resolve(r);   // a collaborator already hosts this session — do NOT arm the heartbeat (it would keep re-contesting the claim every 2 min); the renderer un-shares + points the user at Join
     startAdvertiseHeartbeat(sid, ws);
     resolve(r || { ok: false });
@@ -1511,9 +1519,20 @@ function startPoll() {
 // read locally and PUSHED to the sidebar (live:peers-push), then doSync imports the new sessions
 // (sync:changed repaints). Peer-visible latency for "X went live" / "new session appeared" drops from
 // 10s–5min (or never) to a few seconds; a quiet branch costs one cheap negotiation per tick.
-const _beaconHeads = new Map();   // ws.id -> last seen branch head sha ('' = branch absent)
+const _beaconHeads = new Map();   // ws.id -> last branch head this beacon has ANNOUNCED (presence pushed) ('' = branch absent)
+const _beaconDirty = new Map();   // ws.id -> head sha whose session-import (doSync) hasn't succeeded yet
 let _beaconBusy = false;
-const BEACON_MS = 2500, BEACON_HIDDEN_MS = 15000;
+const BEACON_MS = 2000, BEACON_HIDDEN_MS = 15000;
+// Rolling latency journal for the live-collab fast path (runtime/live-timing.log): one timestamped line per
+// stage — advertise received, stamp landed, head-move detected, peers painted — so a "going live felt slow"
+// report is answered with numbers instead of guesses. Size-capped; never throws.
+function _liveTiming(msg) {
+  try {
+    const f = path.join(RT, 'live-timing.log');
+    try { if (fs.statSync(f).size > 256 * 1024) fs.truncateSync(f, 0); } catch {}
+    fs.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n');
+  } catch {}
+}
 async function _beaconTick() {
   if (_beaconBusy) return;                                  // a slow probe pass must never stack another on top
   _beaconBusy = true;
@@ -1526,24 +1545,36 @@ async function _beaconTick() {
     // PARALLEL across workspaces: each probe is ~1s of network, and a serial pass would stretch the effective
     // per-workspace cadence to N seconds — the exact latency this beacon exists to kill.
     await Promise.all(targets.map(async (ws) => {
+      const t0 = Date.now();
       const { err, stdout } = await runner.runScript('sessions-sync.sh', 'remote-head', { ws, timeout: 15000 });
       if (err) return;                                      // offline/wedged — the adaptive poll still covers us
       let r = null; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       if (!r || !r.ok || typeof r.head !== 'string') return;
       const prev = _beaconHeads.get(ws.id);
       if (prev === undefined) { _beaconHeads.set(ws.id, r.head); return; }   // first sighting = baseline, not a change
-      if (prev === r.head) return;
-      // The branch moved. Presence first (a "going live" stamp is the latency-critical payload): the probe was
-      // a real fetch, so the presence blobs are already local — read them WITHOUT another network round-trip
-      // (skip-fetch) at front-of-queue and push straight to the sidebar. Then the session import — skipped
-      // while this ws is mid-turn/mid-sync, and the baseline only advances on a SUCCESSFUL sync, so the very
-      // next tick retries anything skipped or failed.
-      runPresence('presence-list', (pr) => {
-        try { winSend('live:peers-push', { id: ws.id, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
-      }, ws, { extraEnv: 'CLAUDIBLE_SKIP_FETCH=1 ' });
+      if (prev !== r.head) {
+        // ANNOUNCE EXACTLY ONCE per head move, and advance the baseline NOW — not after the sync. (The old
+        // code advanced it only on a successful doSync; with the workspace busy — a tab mid-turn — the sync
+        // was skipped, the baseline never moved, and this whole branch re-fired every single tick: a
+        // presence spawn every 2.5s and, on the peer, a queue kept permanently busy — the reported >5s.)
+        _beaconHeads.set(ws.id, r.head);
+        _beaconDirty.set(ws.id, r.head);
+        _liveTiming(`beacon: head moved ${ws.id} (probe ${Date.now() - t0}ms)`);
+        // The probe was a real fetch, so the presence blobs are already local: a lock-free object-store
+        // read (skip-fetch, opts.direct = OUTSIDE the per-ws queue) — it can never wait behind a running
+        // multi-second sync, which front-of-queue alone could not guarantee.
+        runPresence('presence-list', (pr) => {
+          try { winSend('live:peers-push', { id: ws.id, peers: (pr && Array.isArray(pr.peers)) ? pr.peers : [] }); } catch {}
+          _liveTiming(`beacon: peers pushed ${ws.id} (+${Date.now() - t0}ms)`);
+        }, ws, { direct: true, extraEnv: 'CLAUDIBLE_SKIP_FETCH=1 ' });
+      }
+      // Session import owed for the newest announced head — retried every tick until it lands, WITHOUT
+      // re-announcing presence. Skipped while this ws is mid-turn/mid-sync.
+      if (!_beaconDirty.has(ws.id)) return;
       if (wsHasBusyTab(ws.id) || syncLock.has(ws.id)) return;
+      const want = _beaconDirty.get(ws.id);
       const res = await doSync(ws, 'sync', {});
-      if (res && res.ok) _beaconHeads.set(ws.id, r.head);
+      if (res && res.ok && _beaconDirty.get(ws.id) === want) _beaconDirty.delete(ws.id);   // a NEWER head may have arrived mid-sync — keep it owed
     }));
   } finally {
     _beaconBusy = false;

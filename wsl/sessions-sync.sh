@@ -620,11 +620,17 @@ case "$op" in
   presence-list)
     # Read every collaborator's live/*.json straight off origin via fetch + git show — NO worktree merge, so this
     # frequent (~10s) poll can never fight the background sync's merge on the same worktree. Renderer filters stale ts.
-    ensure_worktree || fail "could not set up the sessions branch"
-    # CLAUDIBLE_SKIP_FETCH=1: the caller (the beacon, after its remote-head probe — itself a fetch of this very
-    # branch into this same repo) guarantees origin/$BR is already current — skip the redundant network
-    # round-trip and read the just-fetched refs directly. Every other caller still fetches.
-    [ -n "${CLAUDIBLE_SKIP_FETCH:-}" ] || git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+    if [ -n "${CLAUDIBLE_SKIP_FETCH:-}" ]; then
+      # Beacon path: remote-head (a fetch of this branch into this SAME repo) just ran, so origin/$BR and its
+      # objects are already local — read them straight from the CODE clone. No worktree, no ensure_worktree
+      # heal, no fetch, no locks: this read can never wait behind (or disturb) a running sync's merge, which
+      # is exactly why runPresence dispatches it OUTSIDE the per-ws queue (opts.direct).
+      GD="$SDIR"
+    else
+      ensure_worktree || fail "could not set up the sessions branch"
+      git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+      GD="$WT"
+    fi
     # Emit each collaborator's live/<author>.json blob on its own line, then let node JSON-validate each so a single
     # corrupt/torn/concatenated file ("{}x{}") is DROPPED instead of poisoning the whole peers[] array — which would
     # make the renderer's JSON.parse throw and silently kill the roster / "Join live" badge (the brace-only guard
@@ -636,8 +642,8 @@ case "$op" in
       while IFS= read -r -d '' path; do
         case "$path" in live/*.json) ;; *) continue ;; esac
         [ "$path" = "live/$author.json" ] && continue                # skip my own advertisement
-        git -C "$WT" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r'; printf '\n'
-      done < <(git -C "$WT" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null) \
+        git -C "$GD" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r'; printf '\n'
+      done < <(git -C "$GD" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null) \
       | (unset MSYS_NO_PATHCONV; node "$HERE/sessions-sync-tool.js" presence-filter)
     )"
     [ -n "$result" ] && emit "$result" || emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[]}"   # node absent/failed → still emit a valid (empty) list so the renderer never chokes

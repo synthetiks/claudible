@@ -9,8 +9,12 @@ All notable changes to Claudible are documented here.
   sometimes the whole advertisement) simply didn't happen. Presence work now also jumps ahead of queued
   transcript syncs, the stamp pushes optimistically (no pre-push pull on a quiet branch), the beacon's probe
   is a narrow fetch so a detected change is painted from already-local data with zero extra round-trips, and
-  probes run in parallel across projects. Net: a live session is typically visible to every collaborator in
-  ~3–5s of the Share click.
+  probes run in parallel across projects. The beacon now announces exactly once per branch change (its
+  baseline used to advance only after a successful sync, so a busy workspace re-fired the announce every
+  tick and kept the peer's queue permanently churning), and its presence read is a lock-free object-store
+  read that bypasses the queue entirely — it can never wait behind a running multi-second sync. A rolling
+  `runtime/live-timing.log` journals every stage so slowness reports come with numbers. Net: a live session
+  is typically visible to every collaborator in ~3–5s of the Share click.
 - **A guest's Ctrl+V now pastes the guest's own clipboard — never the host's.** The old paste interceptor
   matched the key by NAME ('v'), which any non-Latin keyboard layout bypasses; the chord then fell through
   to xterm as a raw ^V byte, and the CLI on the host answered it by pasting the **host's** clipboard into
