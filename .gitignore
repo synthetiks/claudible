@@ -41,3 +41,6 @@ desktop.ini
 /FINAL-DEBUG-OVERHAUL-REPORT.md
 /MASTER-FIX-PLAN.md
 /MASTER-IMPLEMENTATION-PLAN.md
+
+# Claude Code runtime state injected by Claudible into the workspace
+.claude/
