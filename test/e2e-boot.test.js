@@ -179,6 +179,15 @@ async function findPage(deadline) {
   const wsList = await evaluate('window.claudible.workspaceList().then(r => JSON.stringify(r))');
   ok('workspace:list round-trips and returns a registry', typeof wsList === 'string' && wsList.includes('workspaces'));
 
+  // A fresh sandbox HOME has no prior workspaces.json, so ensureDefaultLocal() (main.js) synthesized the default
+  // Local workspace IN MEMORY with firstRun=true — but loadRegistry()/workspace:list are pure reads; main.js only
+  // calls saveRegistry() from a MUTATING path (switch/add/rename workspace, sync toggle, workspace:firstRunDone,
+  // …), by design, exactly as it did before R4 relocated WHERE the file lives. Booting alone therefore never
+  // wrote workspaces.json — the assertion below used to fail on every boot for that reason, not a HOME/R4 bug
+  // (confirmed: app.getPath('home') tracks a custom $HOME correctly on Linux). Drive the same signal a real
+  // fresh install's first-run wizard sends on dismissal, so this test actually exercises the write it asserts on.
+  await evaluate('window.claudible.workspaceFirstRunDone().then(r => JSON.stringify(r))');
+
   // Isolation is ASSERTED, not assumed — both directions.
   // R4: durable state moved OUT of the app folder to ~/.claudible/app — the sandbox's HOME anchors it here.
   ok('the app wrote its registry inside the sandbox HOME (R4: survives delete-and-reclone)',

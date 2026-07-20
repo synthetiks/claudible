@@ -19,6 +19,7 @@ case "$old"   in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad name"}';
 case "$new"   in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad new name"}'; exit 0 ;; esac
 
 command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed in WSL"}'; exit 0; }
+case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$(command -v gh 2>/dev/null)" in *.exe|/mnt/*) { printf '{"ok":false,"error":"gh resolves to a Windows gh.exe via interop — install the Linux gh inside WSL"}'; exit 0; } ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths
 me="$(gh api user --jq .login 2>/dev/null)"
 [ -z "$me" ] && { printf '{"ok":false,"error":"gh is not authenticated"}'; exit 0; }
 [ "$me" = "$owner" ] || { printf '{"ok":false,"error":"not-owner"}'; exit 0; }   # only the owner can rename a repo — the caller degrades this to a label-only rename

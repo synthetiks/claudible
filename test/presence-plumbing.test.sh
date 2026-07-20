@@ -107,5 +107,15 @@ git -C "$SDIR" fetch -q origin "$BR"
 out="$(run presence-clear)"
 ok "$out" '{"ok":true,"op":"presence-clear"}' 'clearing when already clear is an honest ok'
 
+# ---- 7. clearing the LAST live entry leaves a valid EMPTY live tree (mktree-of-nothing edge) ----
+git -C "$SCRATCH" pull -q origin "$BR" 2>/dev/null
+git -C "$SCRATCH" rm -q live/daisy.json && git -C "$SCRATCH" -c user.name=d -c user.email=d@x commit -qm bye && git -C "$SCRATCH" push -q origin "$BR"
+git -C "$SDIR" fetch -q origin "$BR"
+out="$(run presence-set 'sid-9' 'https://q.trycloudflare.com' 'tok9' '')"
+ok "$out" '{"ok":true,"op":"presence-set"}' 'stamp lands into an emptied live tree'
+out="$(run presence-clear)"
+ok "$out" '{"ok":true,"op":"presence-clear"}' 'clearing the LAST entry emits ok'
+okc '! git -C "$ORIGIN" cat-file -e "$BR:live/tester.json"' 'the last blob is gone; the branch stays valid'
+
 echo "presence-plumbing: $pass passed, $fail failed"
 exit "$((fail ? 1 : 0))"

@@ -14,6 +14,7 @@ emit() { printf '%s\n' "$1"; }
 # one user who most needs to be told WHY nothing will ever appear. Emit the reason; silent discovery paths
 # ignore it, the manual path surfaces it.
 command -v gh >/dev/null 2>&1 || { emit '{"error":"gh-missing"}'; exit 0; }
+case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$(command -v gh 2>/dev/null)" in *.exe|/mnt/*) { emit '{"error":"gh-missing"}'; exit 0; } ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths
 me="$(gh api user --jq .login 2>/dev/null)"
 case "$me" in '' | *[!A-Za-z0-9-]*) emit '{"error":"gh-auth"}'; exit 0 ;; esac
 

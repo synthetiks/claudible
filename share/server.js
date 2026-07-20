@@ -100,7 +100,7 @@ function stripCtrlV(data) {
 // injection — real risk when a guest pastes text they copied from an untrusted page). NUL and ^V bytes are
 // dropped for the same reason ^V is stripped from keystrokes.
 function sanitizePaste(text) {
-  return String(text == null ? '' : text).replace(/\x1b\[20[01]~/g, '').replace(/[\x00\x16]/g, '');
+  return String(text == null ? '' : text).replace(/\x1b\[0*20[01]~/g, '').replace(/[\x00\x16]/g, '');   // 0*: a zero-padded \x1b[0201~ isn't recognized by today's CLI, but a future terminal might — scrub the family, not the literal
 }
 const MAX_PASTE_CHARS = 200 * 1000;   // a paste, not an upload — and MAX_WS_PAYLOAD already bounds the frame
 

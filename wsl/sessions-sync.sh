@@ -121,14 +121,15 @@ if [ "$op" = "remote-head" ]; then
   # would stretch the probe — and with it the detection cadence — by the transfer time). The bounded fetch
   # happens on the announce path only when the head actually moved (presence-list CLAUDIBLE_DIRECT_READ).
   # An ls-remote failure (offline, deleted remote) emits ok:false so the caller backs off that workspace.
-  head_sha="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null | cut -f1)"
+  # ONE call, exit code honored: ls-remote itself already distinguishes "reachable, no branch yet" (rc 0,
+  # empty output) from "unreachable" (rc 128) — the old pipe through cut discarded rc and paid a SECOND
+  # ls-remote to re-learn it, doubling round-trips on the steady state and overshooting the caller's 12s
+  # exec budget (2 × timeout 8) on a slow remote.
+  raw="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null)"; rc=$?
+  head_sha="${raw%%$'\t'*}"
   if [ -z "$head_sha" ]; then
-    # distinguish "no branch yet" (ls-remote succeeded, zero refs) from "remote unreachable" (backoff signal)
-    if $_tmo git -C "$SDIR" ls-remote origin HEAD >/dev/null 2>&1; then
-      emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"\"}"
-    else
-      emit "{\"ok\":false,\"op\":\"remote-head\",\"error\":\"remote unreachable\"}"
-    fi
+    if [ "$rc" -eq 0 ]; then emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"\"}"
+    else emit "{\"ok\":false,\"op\":\"remote-head\",\"error\":\"remote unreachable\"}"; fi
     exit 0
   fi
   case "$head_sha" in *[!a-f0-9]*) head_sha="" ;; esac   # junk → treat as no branch
@@ -137,6 +138,7 @@ if [ "$op" = "remote-head" ]; then
 fi
 
 command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed in WSL"
+case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$(command -v gh 2>/dev/null)" in *.exe|/mnt/*) fail "gh resolves to a Windows gh.exe via interop — install the Linux gh inside WSL" ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths
 # The author login is stable but `gh api user` costs a full API round-trip (~0.5-1s) — and it sat on EVERY
 # invocation, including the latency-critical presence stamps. Cache it briefly (10 min): a gh account switch
 # mid-window worst-cases as exports under the previous author dir until the TTL — identity here routes WRITE
@@ -209,7 +211,8 @@ presence_attempt() {   # $1=set|clear  $2=json line (set only). ONE build+push t
   commit="$(gitp commit-tree "$newroot" -p "$base" -m "claudible: presence $mode $author" 2>/dev/null)"
   [ -n "$commit" ] || return 1
   if gitp push origin "$commit:refs/heads/$BR" >/dev/null 2>&1; then
-    gitp update-ref "refs/remotes/origin/$BR" "$commit" >/dev/null 2>&1   # keep the local view current (the beacon and later attempts compare against it)
+    gitp update-ref "refs/remotes/origin/$BR" "$commit" >/dev/null 2>&1 \
+      || git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1   # keep the local view current (the beacon and later attempts compare against it); if the ref update lost a lock race, a real fetch restores truth so presence_base never trusts a stale cache
     return 0
   fi
   git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
@@ -311,7 +314,14 @@ ensure_worktree() {
 
 # Pull remote sessions into the worktree. Disjoint per-author paths => clean auto-merge, never a conflict.
 pull_branch() {
-  git -C "$WT" fetch origin "$BR" >/dev/null 2>&1 || return 1
+  # The tracking-ref update inside this fetch does a compare-and-swap; a concurrent writer on the SAME ref
+  # (the plumbing presence path's update-ref in $SDIR — same repo, shared refs) makes it fail cleanly with
+  # "cannot lock ref". Measured under stress: ~7-25% of contended fetches. One immediate retry wins the next
+  # slot — without it every collision surfaced as a generic "pull failed" sync error.
+  local _ferr
+  if ! _ferr="$(git -C "$WT" fetch origin "$BR" 2>&1 >/dev/null)"; then
+    case "$_ferr" in *"cannot lock ref"*) git -C "$WT" fetch origin "$BR" >/dev/null 2>&1 || return 1 ;; *) return 1 ;; esac
+  fi
   git -C "$WT" show-ref --verify --quiet "refs/remotes/origin/$BR" || return 0   # nothing pushed yet
   gitwt merge --no-edit "origin/$BR" >/dev/null 2>&1 && return 0
   # A conflict should not happen (disjoint per-author paths) but must NEVER wedge sync — pull_branch is the

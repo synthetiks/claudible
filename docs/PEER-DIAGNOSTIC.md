@@ -51,7 +51,7 @@ delete the project in Claudible.
 
 **7 — Read the journal after a test (UTC timestamps, directly diffable with the host's journal):**
 ```powershell
-Get-Content "$app\runtime\live-timing.log" -Tail 80 | Select-String "advertise:|heartbeat:|beacon:|end:"
+Get-Content "$app\runtime\live-timing.log" -Tail 80 | Select-String "advertise:|heartbeat:|beacon:|end:|boot:|relay:"
 ```
 - `advertise:` / `heartbeat:` lines appear only on the HOST's journal.
 - `beacon: head moved <ws> (probe Nms)` then `beacon: peers pushed <ws> (+Nms)` — YOUR machine noticing and painting.
@@ -62,5 +62,5 @@ Get-Content "$app\runtime\live-timing.log" -Tail 80 | Select-String "advertise:|
 
 **8 — Watch live during a coordinated test** (start this, host clicks Share, Ctrl+C when done):
 ```powershell
-Get-Content "$app\runtime\live-timing.log" -Tail 5 -Wait | Select-String "advertise:|heartbeat:|beacon:|end:"
+Get-Content "$app\runtime\live-timing.log" -Tail 5 -Wait | Select-String "advertise:|heartbeat:|beacon:|end:|boot:|relay:"
 ```

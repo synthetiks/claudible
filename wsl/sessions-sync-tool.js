@@ -478,7 +478,11 @@ function liveHolder() {
     const login = String(o.login || f.replace(/\.json$/, ''));
     const ts = Number(o.ts) || 0;
     if (String(o.session || '') !== sid) continue;
-    if (now - ts >= LIVE_TTL) continue;                               // stale claim (crashed/sleeping host) never blocks
+    // A phase-1 (starting:true) claim ages at the renderer's OWN 60s window (STARTING_TTL_S) — with the
+    // full 120s here, an orphaned starting stamp kept refusing new claims for a minute AFTER every UI had
+    // already stopped showing anyone live ("already-live" with nobody visibly live).
+    const claimTtl = o.starting === true ? 60 : LIVE_TTL;
+    if (now - ts >= claimTtl) continue;                               // stale claim (crashed/sleeping host) never blocks
     claims.push({ login, ts, name: String(o.name || '') });
   }
   const mine = claims.find((c) => c.login === me);

@@ -740,6 +740,8 @@
     .tunnel-warn .tw-install{flex:none;padding:3px 9px;border-radius:6px;border:1px solid rgba(224,169,59,.4);background:rgba(224,169,59,.12);color:#e9b85a;font:inherit;font-size:10px;cursor:pointer}
     .tunnel-warn .tw-install:hover{background:rgba(224,169,59,.22)}
     .tunnel-warn .tw-install:disabled{opacity:.6;cursor:default}
+    .tunnel-warn.tw-err{background:rgba(229,86,75,.10);border-color:rgba(229,86,75,.35);color:#e58479}
+    .tunnel-warn.tw-err .tw-install{border-color:rgba(229,86,75,.4);background:rgba(229,86,75,.12);color:#e58479}
     /* live collab bar: shows that the session is live + who has joined it */
     .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
     .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#5fb487);box-shadow:0 0 8px -1px var(--ok,#5fb487);flex:none;animation:livepulse 2s ease-in-out infinite}
@@ -1105,6 +1107,7 @@
         <div class="out share-out" id="share-out"></div><!-- empty by default (hint is now the button tooltip); JS fills this only with live-share status -->
         <div class="tunnel-warn" id="build-drift" style="display:none"><!-- a git pull moved the files under this RUNNING process — restart to actually run them (git-clone installs have no other update signal) -->
           <span class="tw-txt" id="build-drift-txt"></span>
+          <button class="tw-install" id="build-drift-update" type="button" title="Pull the update and restart Claudible">Update &amp; restart</button>
         </div>
         <div class="tunnel-warn" id="tunnel-warn" style="display:none"><!-- standing "hosting but not reachable" warning (renderTunnelWarn) — a toast is too easy to miss for a state that silently strands every guest -->
           <span class="tw-txt" id="tunnel-warn-txt"></span>

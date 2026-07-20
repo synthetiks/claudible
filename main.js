@@ -14,7 +14,8 @@ const { makeKeyedQueue } = require('./lib/keyedQueue');             // serialize
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
 const { createShareServer, sanitizePaste } = require('./share/server');
 const { readGitSha } = require('./lib/buildIdentity');
-const { makePresenceRelay, mergePeerFrame } = require('./lib/presenceRelay');
+const { makePresenceRelay, mergePeerFrame, reconcilePeerLists } = require('./lib/presenceRelay');
+const selfUpdate = require('./lib/selfUpdate');
 // The running build's git identity, captured AT BOOT — the process keeps executing this even after a
 // `git pull` moves the files under it, which is precisely the drift checkBuildDrift() surfaces.
 const BUILD = readGitSha(__dirname) || { sha: '', short: '', at: 0 };
@@ -948,6 +949,7 @@ function liveDisconnect(tabId) {
 ipcMain.handle('live:connect', (e, { tabId, peer, name } = {}) => liveConnect(tabId, peer, name));
 ipcMain.handle('live:disconnect', (e, { tabId } = {}) => { liveDisconnect(tabId); return { ok: true }; });
 ipcMain.on('live:input', (e, { tabId, data } = {}) => liveForward(tabId, 'input', { data: String(data == null ? '' : data) }));   // a keystroke → the peer's foreground pty
+ipcMain.on('live:paste', (e, { tabId, data } = {}) => liveForward(tabId, 'paste', { data: String(data == null ? '' : data) }));   // native-guest paste rides the SAME typed frame as browser-guest paste — the host's onPaste sanitizes + bracket-wraps it (raw text on the keystroke channel would dodge sanitizePaste)
 ipcMain.on('live:chat-send', (e, { tabId, text } = {}) => liveForward(tabId, 'chat', { text: String(text == null ? '' : text).slice(0, 2000) }));
 ipcMain.on('live:voice', (e, { tabId, join } = {}) => liveForward(tabId, join ? 'voice-join' : 'voice-leave', {}));
 ipcMain.on('live:audio-send', (e, { tabId, data, sr } = {}) => liveForward(tabId, 'audio', { data, sr }));
@@ -1213,6 +1215,13 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     // A rival already holding the claim surfaces exactly like a beat-time loss (renderer un-shares + toasts).
     runPresence(`presence-starting '${sid}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
       _liveTiming(`advertise: starting stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
+      // ONE outer retry on a transient failure: the stamp is one-shot (the heartbeat only re-sends the FULL
+      // handle once the tunnel lands), so a blip here used to leave peers blind until tunnel-time. A refusal
+      // (already-live) is a verdict, never retried.
+      if (!(r && r.ok) && !(r && r.error === 'already-live') && advertisedSid === sid) {
+        const t = setTimeout(() => { if (advertisedSid === sid && !isTunnelUrl(shareBaseUrl)) runPresence(`presence-starting '${sid}' '${advertisedNameB64}' '${BUILD.short}'`, (r2) => _liveTiming(`advertise: starting stamp retry ${r2 && r2.ok ? 'landed' : 'failed'}`), ws); }, 2500);
+        if (t.unref) t.unref();
+      }
       if (r && r.error === 'already-live') {
         stopAdvertiseHeartbeat();
         try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
@@ -1241,7 +1250,13 @@ ipcMain.handle('live:unadvertise', () => { stopAdvertising(); return { ok: true 
 // carries. main's activeWorkspace follows tabForeground, which a joined LIVE tab deliberately skips, so the two
 // genuinely diverge. Reading ambient state here polled the wrong repo's presence branch, and one project's live
 // peers got painted into another project's sidebar (the phantom "Live session" row).
-ipcMain.handle('live:peers', (e, wsId) => new Promise((resolve) => { runPresence('presence-list', (r) => resolve((r && Array.isArray(r.peers)) ? r.peers : []), _wsById(wsId) || activeWorkspace); }));
+// REJECTS on a failed read (script error / exec timeout): resolving [] there made a transient blip
+// indistinguishable from an authoritative "nobody is live" — the renderer then ERASED known-good rows.
+// Its catch branch (keep the last-known bucket) existed for exactly this and was dead code until now.
+ipcMain.handle('live:peers', (e, wsId) => new Promise((resolve, reject) => { runPresence('presence-list', (r) => {
+  if (!r || r.ok === false || !Array.isArray(r.peers)) return reject(new Error('presence read failed'));
+  resolve(r.peers);
+}, _wsById(wsId) || activeWorkspace); }));
 // Shared session names: publish my rename to meta/<login>.json on the branch; read the merged (last-writer-wins)
 // map back. The name goes out-of-band as base64 so arbitrary text can never break the shell command.
 ipcMain.handle('title:set', (e, { id, name, wsId }) => new Promise((resolve) => {
@@ -1473,6 +1488,11 @@ async function doSync(ws, op, opts) {
   const divNow = reportsDiv ? r.diverged : divPrev;
   if (reportsDiv) _syncDivSeen.set(ws.id, divNow);
   const changed = !!(r && (r.imported || r.updated || r.pushed)) || (divNow !== divPrev);   // a divergence-only sync must notify too — but only when the fork set CHANGES (divNow is recomputed every tick, so a raw OR would refresh forever)
+  // A clone that no longer exists on disk can never sync again and used to error forever behind a
+  // color-only dot. Reroute it into the UI's existing "invited — click to clone" state (needsClone), which
+  // also ends its beacon chain (_beaconQualifies excludes needsClone). ensureClone clears the flag on
+  // success, exactly like a fresh invite.
+  if (r && r.error === 'repo workspace not found' && !ws.needsClone) { ws.needsClone = true; saveRegistry(); try { win && win.webContents.send('workspace:list-changed', {}); } catch {} }
   try { win && win.webContents.send('sync:state', { id: ws.id, status: r && r.ok ? 'idle' : 'error', synced: r && r.synced, diverged: r && r.diverged }); } catch {}
   if (changed) { try { win && win.webContents.send('sync:changed', { id: ws.id, ids: (r && r.ids) || [] }); } catch {} }   // renderer refreshes only if it's the shown workspace
   reloadChangedTabs(ws, r && r.ids);   // an OPEN tab on an imported/updated session shows stale turns until its pty respawns — do it now, not on the next manual session bounce
@@ -1612,6 +1632,7 @@ function _beaconQualifies(id) {
   return (w && w.kind === 'repo' && w.syncSessions && !w.needsClone) ? w : null;
 }
 function _beaconArm(wsId, delay) {
+  if (_quitting) return;   // teardown already swept the chains — a finally-re-arm must not resurrect one
   if (_beaconTimers.has(wsId) || _beaconLive.has(wsId)) return;
   const t = setTimeout(() => { _beaconTimers.delete(wsId); _beaconProbe(wsId); }, delay);
   if (t.unref) t.unref();
@@ -1627,7 +1648,7 @@ async function _beaconProbe(wsId) {
   let gone = true; try { gone = !win || win.isDestroyed(); } catch {}
   if (gone) return;                                        // shutting down — a per-ws timer must not spawn against a dead window (H3)
   const ws = _beaconQualifies(wsId);
-  if (!ws) { _beaconHeads.delete(wsId); _beaconDirty.delete(wsId); _beaconErr.delete(wsId); return; }   // sync toggled off / deleted -> chain ends; the roster scan re-arms if it comes back
+  if (!ws) { _beaconHeads.delete(wsId); _beaconDirty.delete(wsId); _beaconErr.delete(wsId); _lastPeers.delete(wsId); return; }   // sync toggled off / deleted -> chain ends; the roster scan re-arms if it comes back
   _beaconLive.add(wsId);
   try {
     const t0 = Date.now();
@@ -1643,7 +1664,8 @@ async function _beaconProbe(wsId) {
       // I looked" case waited for the 10s fallback poll.
       _beaconHeads.set(wsId, r.head);
       runPresence('presence-list', (pr) => {
-        const peers = (pr && Array.isArray(pr.peers)) ? pr.peers : [];
+        if (!pr || pr.ok === false || !Array.isArray(pr.peers)) return;   // failed read ≠ empty (see the head-move site)
+        const peers = reconcilePeerLists(pr.peers, _lastPeers.get(wsId));
         _lastPeers.set(wsId, peers);
         try { winSend('live:peers-push', { id: wsId, peers }); } catch {}
       }, ws, { direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 ' });
@@ -1658,8 +1680,14 @@ async function _beaconProbe(wsId) {
       _beaconDirty.set(wsId, r.head);
       _liveTiming(`beacon: head moved ${wsId} (probe ${Date.now() - t0}ms)`);
       runPresence('presence-list', (pr) => {
-        const peers = (pr && Array.isArray(pr.peers)) ? pr.peers : [];
-        _lastPeers.set(wsId, peers);                                   // authoritative baseline relay frames merge into
+        // A FAILED read must never masquerade as "nobody is live" — pushing [] here erased good rows on
+        // every peer over a local blip. Skip; _beaconDirty stays owed, the next probe retries.
+        if (!pr || pr.ok === false || !Array.isArray(pr.peers)) { _liveTiming(`beacon: presence read FAILED ${wsId} — push skipped`); return; }
+        // Git is authoritative, but a relay frame that arrived DURING this read is newer than what git has
+        // propagated yet — prefer per-login entries with a strictly newer ts (kills the 45s "flicker to
+        // gone" when an unrelated branch change races a fresh relay announce).
+        const peers = reconcilePeerLists(pr.peers, _lastPeers.get(wsId));
+        _lastPeers.set(wsId, peers);
         try { winSend('live:peers-push', { id: wsId, peers }); } catch {}
         _liveTiming(`beacon: peers pushed ${wsId} (+${Date.now() - t0}ms)`);
       }, ws, { direct: true, extraEnv: 'CLAUDIBLE_DIRECT_READ=1 ' });
@@ -2241,7 +2269,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
   const moved = [];   // EVERY tab that lived here gets repointed AND respawned — not just the foreground one. A background tab left un-respawned kept its Claude silently running inside the trashed directory while sync/checkpoint bookkeeping targeted the fallback ws.
   for (const [tid, rec] of ptys) { if (rec.ws && rec.ws.id === id) { rec.ws = fallback; moved.push(tid); } }
   const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
-  _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id);               // drop the deleted ws's leftover per-workspace state
+  _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id); _lastPeers.delete(id);   // drop the deleted ws's leftover per-workspace state (incl. its last-pushed peers)
   _lastFetch.delete(id); fetchLock.delete(id);                                         // …incl. the background-fetch throttle (a re-added project must fetch immediately, not wait out a stale 90s window)
   // NOT the worktree-write chain: a checkpoint snapshot from the just-ended turn may still be in flight, and this
   // id can recur (it's `${kind}-${slug}`) — so force-dropping the key would let a re-created same-name workspace's
@@ -2436,6 +2464,54 @@ const appIntervals = [];   // long-lived poller intervals — cleared on window-
 // A `git pull` under a running app changes NOTHING about the running process — surface that drift instead
 // of letting two machines argue about "which build are you on" (package.json's version doesn't move between
 // releases, so semver is structurally blind to it). Compares the boot-time sha against the tree's current one.
+// "Update & restart" for clone installs — the action half of the drift chip. Policy: fires ONLY on the
+// user's click (build:drift stays notice-only), refuses dirty trees with the evidence, never auto-stashes,
+// and classifies failures into actionable messages. Success is never observed by the caller: the process
+// tears down (the SAME teardownForExit the quit path runs — app.exit bypasses window-all-closed) and relaunches.
+let updateInFlight = null;
+ipcMain.handle('update:run', () => {
+  if (process.env.CLAUDIBLE_NO_UPDATE) return { ok: false, error: 'updates were disabled at install time (-NoUpdate)' };
+  if (!BUILD.sha) return { ok: false, error: 'not a clone install' };
+  if (updateInFlight) return updateInFlight;
+  const prog = (phase, msg) => { try { winSend('update:progress', { phase, msg }); } catch {} };
+  updateInFlight = (async () => {
+    try {
+      prog('checking', 'Checking…');
+      if (!(await selfUpdate.gitOk(__dirname))) return { ok: false, error: 'git is not available on this machine — install it, then retry' };
+      const d = await selfUpdate.isDirty(__dirname);
+      if (d.err) return { ok: false, error: 'git status failed: ' + d.err };
+      if (d.dirty) return { ok: false, error: 'this checkout has local changes — commit, stash, or discard them first:\n' + d.detail };
+      const before = await selfUpdate.currentSha(__dirname);
+      prog('pulling', 'Pulling update…');
+      const pr = await selfUpdate.pull(__dirname);
+      if (!pr.ok) {
+        const msg = pr.kind === 'non-ff' ? 'this checkout has diverged from the repo — re-clone (or reset) to update'
+          : pr.kind === 'offline' ? 'could not reach GitHub — check your connection and retry'
+          : pr.kind === 'no-branch' ? 'not on a tracked branch — checkout main (or re-clone) to update'
+          : 'git pull failed: ' + String(pr.detail || '').slice(-300);
+        return { ok: false, error: msg };
+      }
+      const after = await selfUpdate.currentSha(__dirname);
+      if (after === before) { prog('restarting', 'Already up to date — restarting…'); }
+      else if (await selfUpdate.electronVersionChanged(__dirname, before, after)) {
+        // The one thing npm cannot replace under a running process: our own runtime binary.
+        return { ok: false, error: 'this update changes the Electron runtime — close Claudible completely and re-run install.ps1 to finish' };
+      } else if (await selfUpdate.depsChanged(__dirname, before, after)) {
+        prog('npm-install', 'Installing dependencies…');
+        const ni = await selfUpdate.npmInstall(__dirname, (ln) => prog('npm-install', ln.slice(0, 60)));
+        if (!ni.ok) return { ok: false, error: 'npm install failed (the code is already pulled; fix npm and restart manually):\n' + String(ni.detail || '').slice(-400) };
+      }
+      prog('restarting', 'Restarting…');
+      _liveTiming('update: pulled ' + (before || '?').slice(0, 12) + ' -> ' + (after || '?').slice(0, 12) + ', restarting');
+      teardownForExit();
+      app.relaunch();
+      app.exit(0);
+      return { ok: true };   // unreachable in practice — the process is gone
+    } catch (e) { return { ok: false, error: (e && e.message) || 'update failed' }; }
+  })();
+  updateInFlight.finally(() => { updateInFlight = null; });
+  return updateInFlight;
+});
 function checkBuildDrift() {
   if (!BUILD.sha) return;
   const fresh = readGitSha(__dirname);
@@ -3185,7 +3261,14 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { try { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } } catch {} });
   app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 15000); });
 }
-app.on('window-all-closed', () => {
+// THE full exit teardown, shared by the normal quit path and the self-update restart. Every block is
+// independently idempotent; app.exit()/app.relaunch() bypass window-all-closed entirely (Electron emits no
+// before-quit/will-quit for app.exit), so any exit path that isn't the ordinary window close MUST call this
+// itself or ptys leak, presence stays advertised for the full TTL, and cloudflared is orphaned.
+let _quitting = false;   // set by teardownForExit — a probe mid-await when the window closed must not re-arm or spawn
+function teardownForExit() {
+  _quitting = true;
+  try { for (const t of _beaconTimers.values()) clearTimeout(t); _beaconTimers.clear(); _beaconLive.clear(); } catch {}
   try { for (const t of appIntervals) clearInterval(t); appIntervals.length = 0; } catch {}   // tear down pollers so none fire against a destroyed window (H3)
   try { for (const k of Object.keys(appTimers)) { if (appTimers[k]) clearTimeout(appTimers[k]); appTimers[k] = null; } } catch {}   // …and the self-rescheduling ones (sync/workflow/trash + the tunnel-retry)
   // The FULL live teardown — including presence-clear, which this path used to skip entirely: quitting while
@@ -3198,5 +3281,8 @@ app.on('window-all-closed', () => {
   try { for (const rec of ptys.values()) { try { rec.proc.kill(); } catch {} _killSessionTree(rec.runtimeId); } ptys.clear(); } catch {}
   try { for (const id of [...liveTabs.keys()]) liveDisconnect(id); } catch {}   // close any joined peer sockets
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
+}
+app.on('window-all-closed', () => {
+  teardownForExit();
   app.quit();
 });

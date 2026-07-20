@@ -1,6 +1,7 @@
 # Claudible presence relay — deploy with `npx wrangler deploy` from this directory (free Workers plan is
 # enough: Durable Objects on free require the SQLite-backed class migration below; no storage is ever used).
-# After deploying, put the printed URL (wss://claudible-presence.<account>.workers.dev) into
+# After deploying, put the printed URL (https://claudible-presence.<account>.workers.dev — the client
+# auto-upgrades it to wss) into
 # lib/presenceRelay.js DEFAULT_RELAY_URL (or set CLAUDIBLE_RELAY_URL in the app's environment).
 name = "claudible-presence"
 main = "worker.js"

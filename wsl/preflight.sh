@@ -36,7 +36,9 @@ fi
 
 # GitHub signed in: `gh auth status` exit 0; account via the API. Strip control chars / quotes / backslashes.
 gh_signed=false; gh_account=""
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+_ghreal=1
+case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$(command -v gh 2>/dev/null)" in *.exe|/mnt/*) _ghreal=0 ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths
+if [ "$_ghreal" = 1 ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   gh_signed=true
   gh_account="$(gh api user --jq .login 2>/dev/null | head -1 | tr -d '\000-\037"\\')"
 fi

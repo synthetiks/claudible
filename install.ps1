@@ -48,6 +48,15 @@ if (-not (Test-Node)) {
 # Self-update: re-running the installer on an existing clone must build the LATEST code, not the commit it was
 # cloned at (a stale build is the root cause of cross-machine live-join skew). Only when this is a CLEAN git
 # checkout (never clobber local edits); non-fatal on any failure. Opt out with -NoUpdate.
+if ($NoUpdate) {
+  # Persist the opt-out so the IN-APP "Update & restart" honors it too (same one-line env-var pattern the
+  # -Native branch already uses for CLAUDIBLE_RUNNER). Clearing it: re-run the installer without -NoUpdate.
+  [Environment]::SetEnvironmentVariable('CLAUDIBLE_NO_UPDATE','1','User')
+  $env:CLAUDIBLE_NO_UPDATE = '1'
+} else {
+  [Environment]::SetEnvironmentVariable('CLAUDIBLE_NO_UPDATE',$null,'User')
+  Remove-Item Env:CLAUDIBLE_NO_UPDATE -ErrorAction SilentlyContinue
+}
 if (-not $NoUpdate -and (Test-Path (Join-Path $app '.git')) -and (Get-Command git -ErrorAction SilentlyContinue)) {
   Step 'Update' 'Refreshing to the latest Claudible (git pull)...'
   if (& git -C $app status --porcelain) {
@@ -113,7 +122,12 @@ if ($Native) {
 
   Step '2/4' 'Building the local voice services in WSL (you may be asked for your WSL sudo password)...'
   npm run setup
-  if ($LASTEXITCODE -ne 0) { Die "Voice setup did not finish - see the messages above. Fix what it reported, then re-run: npm run setup" }
+  if ($LASTEXITCODE -ne 0) {
+    # Voice is OPTIONAL (runners/deps.js marks it required:false) and retryable from the in-app System
+    # Check - a flaky 480MB download must not strand a collaborator without a launchable app. Mirror the
+    # shortcut step's warn-and-continue pattern instead of dying here.
+    Write-Host '  Voice setup did not finish - continuing WITHOUT voice. Retry later from the in-app System Check, or run: npm run setup' -ForegroundColor Yellow
+  }
 }
 
 Step '3/4' 'Creating the Desktop shortcut...'

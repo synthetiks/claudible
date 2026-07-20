@@ -228,10 +228,13 @@ none('renderer: orphanTab is never rendered',
   none('main.js calls share.stop() outside stopLiveSharing (a teardown path that can drift again)',
     stopCalls === 1 ? [] : [`share.stop() appears ${stopCalls}× — must be exactly once, inside stopLiveSharing`]);
   const quitBlock = (MAIN.match(/app\.on\('window-all-closed'[\s\S]*?\n\}\);/) || [''])[0];
+  const teardownFn = (MAIN.match(/function teardownForExit\(\)[\s\S]*?\n\}/) || [''])[0];
   // quitting:true is load-bearing (R7): it makes the presence-clear a DETACHED one-shot that survives app exit —
   // without it a non-detached child could die with the app before its push landed (the 2-min-ghost, quit edition).
+  // The teardown now lives in ONE named function so the self-update restart path (app.exit bypasses
+  // window-all-closed entirely) can run the identical sequence — pin both the extraction and the wiring.
   none('the quit handler does not run the full live teardown (presence would outlive the app again)',
-    /stopLiveSharing\(\{ quitting: true \}\)/.test(quitBlock) ? [] : ['window-all-closed does not call stopLiveSharing({ quitting: true })']);
+    /teardownForExit\(\)/.test(quitBlock) && /stopLiveSharing\(\{ quitting: true \}\)/.test(teardownFn) ? [] : ['window-all-closed must call teardownForExit(), and teardownForExit must run stopLiveSharing({ quitting: true })']);
   none('the quit handler calls stopAdvertiseHeartbeat directly (nulls advertisedWs before any clear could use it)',
     /stopAdvertiseHeartbeat\(\)/.test(quitBlock) ? ['window-all-closed calls stopAdvertiseHeartbeat() around the helper'] : []);
 }
@@ -286,10 +289,15 @@ none('renderer: orphanTab is never rendered',
       && !push.includes(l.trim()))
     .map(([n]) => 'app.js:' + n);
   none('livePeersByWs is touched outside peersForWs()/pollLivePeers()/the beacon push (a project’s peers can leak into another)', cacheHits);
-  none('pollLivePeers does not stamp peers with the ws they were FETCHED for',
-    /p\.wsId = wsId/.test(poll) ? [] : ['peers never stamped with their fetched wsId']);
-  none('the beacon push handler does not stamp peers with the PUSHED wsId (its scoping guarantee)',
-    push && /x\.wsId = wsId/.test(push) ? [] : ['push handler missing or peers not stamped with the pushed wsId']);
+  // Both writers stamp through the ONE shared filter now (filterLivePeers) — pin the stamp inside it and
+  // pin that BOTH the poll and the push actually route through it (a hand-rolled copy would drift).
+  const filterFn = (appNoComments.match(/function filterLivePeers\([\s\S]*?\n\}/) || [''])[0];
+  none('the shared peer filter does not stamp peers with their fetched/pushed wsId',
+    /p\.wsId = wsId/.test(filterFn) ? [] : ['filterLivePeers missing or does not stamp p.wsId']);
+  none('pollLivePeers does not route through the shared peer filter',
+    /filterLivePeers\(peers, wsId, now\)/.test(poll) ? [] : ['poll no longer uses filterLivePeers']);
+  none('the beacon push handler does not route through the shared peer filter',
+    push && /filterLivePeers\(p\.peers, wsId/.test(push) ? [] : ['push handler missing or not using filterLivePeers']);
   none('pollLivePeers does not fetch per-workspace (main would poll its own ambient one)',
     /claudible\.livePeers\(wsId\)/.test(poll) ? [] : ['livePeers() not called with each target wsId']);
   none('pollLivePeers no longer polls EXPANDED projects (a non-active project’s badge would freeze until clicked)',

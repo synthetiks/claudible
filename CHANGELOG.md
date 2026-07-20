@@ -4,8 +4,26 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **11-agent master audit — every confirmed finding fixed, verified by the full suite.** Highlights: a
+  guest's Ctrl+C on a non-Latin layout could fall through as a raw interrupt and KILL the host's running
+  turn (fixed layout-independent, both guest page and cockpit, matching the paste fix); Backspace/Cut on a
+  joined live tab injected erase keystrokes into the host's input (guarded); native-peer paste bypassed the
+  paste sanitizer entirely (sealed — it now rides the same typed frame browser guests use); a transient
+  presence read painting as "nobody is live" erased good rows on every peer (failed reads are now
+  distinguishable and never painted); a relay announce racing a stale git read flickered peers to "gone"
+  (timestamp-reconciled); ref-lock contention between the plumbing and worktree fetches surfaced as fake
+  sync errors (retried); orphaned "going live…" stamps blocked re-claims for 60s after every UI stopped
+  showing them (arbiter TTL now matches the UI); the "jump to my live session" path bypassed the eager
+  presence fetch (joined); per-workspace probe chains now die at quit; the CI e2e boot-smoke red (predating
+  today) was a test bug, fixed and verified against real Electron.
+- **"Update & restart" button for clone installs.** The drift chip now carries the action: one click pulls
+  --ff-only, streams npm install when the lockfile changed, refuses dirty trees with the evidence (never a
+  silent skip, never an auto-stash), names the one case that needs the full installer (an Electron runtime
+  bump), runs the SAME teardown as a normal quit, and relaunches. Installer -NoUpdate persists an opt-out
+  the button honors. The build-drift goose chase that ate this whole day is structurally over.
+
 - **Realtime presence relay (opt-in) — "went live"/"ended" reach every collaborator in under a second.** A
-  ~200-line Cloudflare Worker (relay/, free tier, deploy once with wrangler) fans presence frames out over
+  ~130-line Cloudflare Worker (relay/, free tier, deploy once with wrangler) fans presence frames out over
   one WebSocket per shared repo; GitHub push-permission is the publish gate, the verified login is forced
   into every frame, and repo names never appear in relay URLs/logs. Git stays the untouched source of
   truth: frames merge in as an instant preview, the beacon's authoritative reads reconcile moments later,

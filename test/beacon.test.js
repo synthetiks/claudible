@@ -54,7 +54,9 @@ ok('script: presence writes are worktree-FREE plumbing (no pull, no worktree, no
 
 // ---- main: the beacon loop ----
 ok('main: startBeacon exists and is started at boot', /function startBeacon\(/.test(MAIN) && /startBeacon\(\);/.test(MAIN));
-ok('main: beacon timer is registered in appTimers (quit sweep clears it)', /appTimers = \{[^}]*beacon: null/.test(MAIN));
+ok('main: beacon roster timer is registered in appTimers (quit sweep clears it)', /appTimers = \{[^}]*beacon: null/.test(MAIN));
+ok('main: teardown sweeps the PER-WORKSPACE chains too and blocks re-arm (a mid-await probe must not resurrect one post-quit)',
+  /_beaconTimers\.values\(\)\) clearTimeout\(t\)/.test(MAIN) && /_quitting\) return;/.test(MAIN));
 ok('main: beacon calls the remote-head op', /runScript\('sessions-sync\.sh', 'remote-head'/.test(MAIN));
 ok('main: the probe does NOT ride the per-ws sync queue', (() => {
   // every _syncQ.run callsite must not wrap the remote-head probe

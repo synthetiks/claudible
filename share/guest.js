@@ -716,19 +716,34 @@ if (gchatHead) gchatHead.addEventListener('click', function () { setChatCollapse
 var isMac = /mac/i.test(navigator.platform || navigator.userAgent || '');
 function copyText(t) {
   if (!t) return;
-  try { navigator.clipboard.writeText(t); }
-  catch (e) {
+  // Three real failure modes, all covered: API absent (plain-http/LAN share -> navigator.clipboard is
+  // undefined), API throws synchronously, and — the common one — writeText REJECTS asynchronously
+  // (document unfocused, permission denied, in-app webviews). A bare try/catch cannot see an async
+  // rejection, so the legacy fallback silently never engaged and nothing was copied.
+  function legacyCopy() {
     try { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch (e2) {}
   }
+  try {
+    var p = navigator.clipboard && navigator.clipboard.writeText(t);
+    if (p && typeof p.then === 'function') p.catch(legacyCopy); else if (!p) legacyCopy();
+  } catch (e) { legacyCopy(); }
 }
 window.addEventListener('keydown', function (e) {
   var mod = isMac ? (e.metaKey && !e.ctrlKey && !e.altKey) : (e.ctrlKey && !e.metaKey && !e.altKey);
   var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  // PHYSICAL key first (e.code), key name as fallback — matching by e.key alone is layout-dependent: on a
+  // Cyrillic/Hebrew/Greek layout the same physical chord reports a non-Latin e.key, the branch is skipped,
+  // and xterm's (layout-INDEPENDENT, keyCode-based) keymap turns Ctrl+C into a raw 0x03 that rides the wire
+  // and INTERRUPTS the host's running turn — the copy chord must never degrade into SIGINT-by-layout. The
+  // inner `if (sel)` decide/fallthrough is untouched: empty selection still passes through as interrupt on
+  // every layout, exactly like Windows Terminal.
+  var isA = e.code === 'KeyA' || k === 'a';
+  var isC = e.code === 'KeyC' || k === 'c';
   var inTerm = e.target && e.target.closest && e.target.closest('#terminal');
   var field = e.target && e.target.closest && e.target.closest('input, textarea');
   if (inTerm) {
-    if (mod && k === 'a') { e.preventDefault(); e.stopPropagation(); term.selectAll(); return; }
-    if (mod && k === 'c') { var sel = term.getSelection(); if (sel) { e.preventDefault(); e.stopPropagation(); copyText(sel); } return; }
+    if (mod && isA) { e.preventDefault(); e.stopPropagation(); term.selectAll(); return; }
+    if (mod && isC) { var sel = term.getSelection(); if (sel) { e.preventDefault(); e.stopPropagation(); copyText(sel); } return; }
     // Ctrl/⌘+V is deliberately NOT intercepted here: the browser's default accelerator must run so the
     // native 'paste' event fires with the GUEST's clipboard (see the #terminal paste listener up top).
     // The old async-clipboard-API interceptor matched by KEY NAME ('v'), which non-Latin layouts bypass —
@@ -736,8 +751,8 @@ window.addEventListener('keydown', function (e) {
     return;
   }
   if (field) {
-    if (mod && k === 'a') { e.preventDefault(); field.select(); return; }   // ONLY the chat text, not the page
-    if (mod && k === 'c') {
+    if (mod && isA) { e.preventDefault(); field.select(); return; }   // ONLY the chat text, not the page
+    if (mod && isC) {
       var s = (field.value || '').substring(field.selectionStart || 0, field.selectionEnd || 0);
       if (s) { e.preventDefault(); copyText(s); }
       return;

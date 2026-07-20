@@ -40,6 +40,10 @@ t('sanitizePaste strips the end mark (paste-injection breakout)', () =>
   assert.strictEqual(sanitizePaste('safe\x1b[201~rm -rf /\r'), 'saferm -rf /\r'));
 t('sanitizePaste strips a nested start mark', () =>
   assert.strictEqual(sanitizePaste('a\x1b[200~b'), 'ab'));
+t('sanitizePaste strips EVERY occurrence of the marks (a dropped /g would leave the second breakout live)', () =>
+  assert.strictEqual(sanitizePaste('a\x1b[201~b\x1b[201~c\x1b[200~d'), 'abcd'));
+t('sanitizePaste scrubs zero-padded mark variants too', () =>
+  assert.strictEqual(sanitizePaste('a\x1b[0201~b\x1b[00200~c'), 'abc'));
 t('sanitizePaste strips NUL and ^V bytes', () =>
   assert.strictEqual(sanitizePaste('a\x00b\x16c'), 'abc'));
 t('sanitizePaste keeps newlines, tabs and plain text intact', () => {
@@ -68,6 +72,9 @@ t('guest: the readText() keydown interceptor is gone (its failure modes WERE the
 t("server: handles the 'paste' frame and gates it like keystrokes", () => {
   assert.ok(/msg\.type === 'paste'/.test(SERVER), "no 'paste' message handling");
   assert.ok(/onPaste/.test(SERVER), 'no onPaste callback');
+});
+t('server: oversized pastes are capped (MAX_PASTE_CHARS guard exists and gates the frame)', () => {
+  assert.ok(/MAX_PASTE_CHARS/.test(SERVER) && /msg\.data\.length > MAX_PASTE_CHARS/.test(SERVER), 'paste size cap missing');
 });
 t('server: keystroke channel is scrubbed with stripCtrlV', () =>
   assert.ok(/stripCtrlV\(msg\.data\)/.test(SERVER), 'input path does not strip ^V'));

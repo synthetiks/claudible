@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { mergePeerFrame, roomKeyFor } = require('../lib/presenceRelay.js');
+const { mergePeerFrame, reconcilePeerLists, roomKeyFor } = require('../lib/presenceRelay.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -57,6 +57,26 @@ t('starting frame carries starting:true and no fabricated url', () => {
   assert.strictEqual('url' in out[0], false);
 });
 
+// ---- reconcilePeerLists: git wins, except strictly-newer relay entries ----
+t('reconcile: git list replaces stale prev entries', () => {
+  const out = reconcilePeerLists([{ login: 'cd', session: 's1', ts: 10 }], [{ login: 'cd', session: 's0', ts: 5 }]);
+  assert.strictEqual(out.length, 1); assert.strictEqual(out[0].session, 's1');
+});
+t('reconcile: a strictly-newer prev (relay) entry survives the overwrite', () => {
+  const out = reconcilePeerLists([{ login: 'cd', session: 's1', ts: 10 }], [{ login: 'cd', session: 's2', ts: 99 }]);
+  assert.strictEqual(out[0].session, 's2');
+});
+t('reconcile: dropped-by-git entries stay dropped unless newer than the WHOLE read', () => {
+  const gone = reconcilePeerLists([{ login: 'mk', ts: 50 }], [{ login: 'cd', session: 's1', ts: 20 }]);
+  assert.ok(!gone.find((p) => p.login === 'cd'), 'older-than-read entry must stay gone (ended session)');
+  const kept = reconcilePeerLists([{ login: 'mk', ts: 50 }], [{ login: 'cd', session: 's1', ts: 99 }]);
+  assert.ok(kept.find((p) => p.login === 'cd'), 'newer-than-read relay announce must survive one stale git read');
+});
+t('reconcile: tolerates junk', () => {
+  assert.deepStrictEqual(reconcilePeerLists(null, null), []);
+  assert.strictEqual(reconcilePeerLists([{ login: 'x', ts: 1 }], [null, {}]).length, 1);
+});
+
 // ---- wiring contract (grep-level, zero deps) ----
 const MAIN = read('main.js');
 const SH = read('wsl/sessions-sync.sh');
@@ -74,6 +94,10 @@ t('main: beacon reads reset the authoritative baseline the relay merges into', (
   assert.ok((MAIN.match(/_lastPeers\.set\(wsId, peers\)/g) || []).length >= 2));
 t('main: relay rooms reconcile with the beacon roster scan', () =>
   assert.ok(/_relay\.ensure\(/.test(MAIN) && /_relay\.release\(/.test(MAIN)));
+t('main: a FAILED presence read never pushes (a blip must not erase live rows)', () =>
+  assert.ok((MAIN.match(/pr\.ok === false/g) || []).length >= 2 && /read FAILED/.test(MAIN)));
+t('main: beacon pushes reconcile against newer relay entries (no 45s flicker-to-gone)', () =>
+  assert.ok((MAIN.match(/reconcilePeerLists\(pr\.peers, _lastPeers\.get\(wsId\)\)/g) || []).length === 2));
 t('main: own-login frames are skipped (the git path self-skip, mirrored)', () =>
   assert.ok(/frame\.login === me\) return/.test(MAIN)));
 t('script: relay-cred is allowlisted and emits login+token', () => {
@@ -91,7 +115,7 @@ t('worker: room key is verified against the hello repo (no cross-room token reus
 t('script: presence stamps carry the publisher build sha', () =>
   assert.ok((SH.match(/\\"sha\\":\\"\$psha\\"/g) || []).length === 2));
 t('main: stamps thread BUILD.short; drift check + boot line exist', () => {
-  assert.ok((MAIN.match(/'\$\{BUILD\.short\}'/g) || []).length === 3);
+  assert.ok((MAIN.match(/'\$\{BUILD\.short\}'/g) || []).length >= 3);   // starting + full + heartbeat (+ the starting retry)
   assert.ok(/function checkBuildDrift\(/.test(MAIN) && /winSend\('build:drift'/.test(MAIN));
   assert.ok(/_liveTiming\('boot: sha='/.test(MAIN));
 });

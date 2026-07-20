@@ -67,6 +67,7 @@ EOF
 #   http.lowSpeed*      a STALLED transfer (connected, no bytes) aborts in 8s, not at the app's 15s timeout
 CFG=(-c credential.helper= -c core.askpass= -c gc.auto=0 -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=8)
 GH="$(command -v gh 2>/dev/null || printf '')"
+case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$GH" in *.exe|/mnt/*) GH="" ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths
 # The path goes inside a single-quoted string that git hands to `sh -c`, so a quote/backslash/newline in it
 # would break out. Spaces are fine (`C:/Program Files/GitHub CLI/gh.exe`) — that's what the quoting is for.
 # NB: `$'\n'`, not `"$(printf '\n')"` — command substitution strips trailing newlines, so the latter is the

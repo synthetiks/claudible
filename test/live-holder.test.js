@@ -76,6 +76,15 @@ eq('rival file with no ts → treated stale (free)', run({ daisy: { session: 's1
   const out = run({ daisy: { session: 's1', ts: FRESH, name: 'CrazyDev' }, zoe: { session: 's1', ts: FRESH - 20, name: 'Zoe' } }, 's1', 'niburu');
   eq('multiple rivals → earliest claimant named', (refusal(out) || {}).by, 'Zoe');
 }
+// ---- phase-1 TTL: an ORPHANED starting stamp stops blocking at the UI's own 60s, not 120s ----
+{
+  const AGED = NOW - 70;   // older than STARTING_TTL (60) but younger than LIVE_TTL (120)
+  eq('a 70s-old STARTING claim no longer blocks (nobody visibly live -> claimable)',
+    run({ daisy: { session: 's1', ts: AGED, starting: true } }, 's1', 'niburu'), '');
+  const out = run({ daisy: { session: 's1', ts: AGED } }, 's1', 'niburu');
+  eq('…but a 70s-old FULL claim still blocks (host re-stamps every 45s; 120s covers two missed beats)',
+    (refusal(out) || {}).error, 'already-live');
+}
 // ---- phase-1 claims: a "going live…" stamp (starting:true, no url yet) claims the session like a full one ----
 // Two hosts must not both slip through the tunnel-spawn window: the arbiter matches on session+ts, so a
 // url-less starting stamp blocks a rival exactly as a full advertisement would.

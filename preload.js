@@ -134,11 +134,14 @@ contextBridge.exposeInMainWorld('claudible', {
   onAdvertiseLost: (cb) => ipcRenderer.on('live:advertise-lost', (_e, p) => cb(p)),   // the presence heartbeat lost the one-host-per-session claim (a collaborator went live while ours was stale) — UI must stop saying "sharing"
   onLivePeersPush: (cb) => ipcRenderer.on('live:peers-push', (_e, p) => cb(p)),       // { id, peers } main's beacon saw this workspace's shared branch move and already read the fresh presence — paint it now, no extra round-trip
   onBuildDrift: (cb) => ipcRenderer.on('build:drift', (_e, p) => cb(p)),             // { running, disk } a git pull moved the files under this running process — show the restart chip
+  updateRun: () => ipcRenderer.invoke('update:run'),                                  // the chip's button: pull + (deps changed? npm install) + full teardown + relaunch; resolves ONLY on failure
+  onUpdateProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p)),      // {phase,msg} — morphs the button label while pulling/installing
   // native joined tab: main holds a client WebSocket to the peer; the renderer draws a normal xterm tab and
   // co-drives over IPC (the renderer's CSP forbids a wss:// socket, so the socket lives in main).
   liveConnect: (tabId, peer, name) => ipcRenderer.invoke('live:connect', { tabId, peer, name }),
   liveDisconnect: (tabId) => ipcRenderer.invoke('live:disconnect', { tabId }),
   liveInput: (tabId, data) => ipcRenderer.send('live:input', { tabId, data }),          // a keystroke → the peer's terminal
+  livePaste: (tabId, data) => ipcRenderer.send('live:paste', { tabId, data }),          // a PASTE → its own typed frame, so the peer's host wraps + sanitizes it like any guest paste (never raw on the keystroke channel)
   liveChatSend: (tabId, text) => ipcRenderer.send('live:chat-send', { tabId, text }),
   liveVoice: (tabId, join) => ipcRenderer.send('live:voice', { tabId, join }),
   liveAudioSend: (tabId, data, sr) => ipcRenderer.send('live:audio-send', { tabId, data, sr }),

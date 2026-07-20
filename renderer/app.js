@@ -119,8 +119,8 @@ let activeSession = null;                       // the ACTIVE tab's session id (
 // 12 enforces both. The per-peer wsId stamp is kept as belt-and-suspenders so a mis-bucketed entry is still inert.
 let livePeersByWs = new Map(), livePeersSig = '', advertisedSession = null;
 const LIVE_TTL_S = 120;   // a stamp older than this is aged out (host re-stamps every ~45s); MUST match wsl/sessions-sync-tool.js LIVE_TTL
-const STARTING_TTL_S = 60;
-let MY_SHA = '';               // the running build's git sha (fetched at boot) — build-skew hints on live badges   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
+const STARTING_TTL_S = 60;   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
+let MY_SHA = '';               // the running build's git sha (fetched at boot) — build-skew hints on live badges
 // Sessions a JOINED tab's OWN socket already proved offline (the host ended). Suppressed from the badge instantly,
 // ahead of the ~10s git poll / TTL — see setLiveState. Value = when it was marked (ms): the suppression self-clears
 // once git presence ALSO shows the session gone, and — as a guaranteed exit — after DEAD_SUPPRESS_MS regardless,
@@ -191,6 +191,16 @@ function sendInput(d) {
   const t = tabs.get(activeTabId);
   if (t && t.kind === 'live') { if (!t.liveReadOnly) claudible.liveInput(activeTabId, d); return; }
   claudible.ptyInput(activeTabId, d);
+}
+// Paste's own chokepoint. For a LIVE tab the text must travel as a typed 'paste' frame — the remote host
+// wraps it in bracketed-paste marks AND sanitizes it (sanitizePaste) exactly like a browser guest's paste;
+// pre-wrapping it onto the keystroke channel would carry attacker-influenced clipboard bytes past that
+// boundary (an embedded end-mark would run as live keystrokes on the HOST). Local tabs keep the direct wrap.
+function sendPaste(t) {
+  if (!activeTabId || !t) return;
+  const tab = tabs.get(activeTabId);
+  if (tab && tab.kind === 'live') { if (!tab.liveReadOnly) claudible.livePaste(activeTabId, t); return; }
+  sendInput('\x1b[200~' + t + '\x1b[201~');
 }
 function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
@@ -347,7 +357,7 @@ function setActiveTab(tabId) {
     // the third sighting of this wart; the pin-in-active-list design stays, the SCOPE now moves with the join).
     // main's activeWorkspace is deliberately NOT re-pointed (live tabs skip tabForeground — host-side privacy).
     const sideWs = rec.wsId || (rec.kind === 'live' && rec.peerWsId) || null;
-    if (sideWs && sideWs !== activeWsId) { activeWsId = sideWs; primeSessionListForWs(sideWs); renderWsChips(); }   // prime the new ws's rows BEFORE reconcileWsChips re-nests the list, so it can't nest the OLD project's rows under the NEW project's label for a frame (the cross-project-click "wrong content" flash)
+    if (sideWs && sideWs !== activeWsId) { activeWsId = sideWs; primeSessionListForWs(sideWs); renderWsChips(); setWsExpanded(sideWs, true); }   // prime the new ws's rows BEFORE reconcileWsChips re-nests the list (the cross-project-click "wrong content" flash) — and expand+eager-poll it: this is the ONE activeWsId writer that bypassed setWsExpanded's presence fetch (the "jump to my live session" path waited out the full 10s poll)
     refreshSessions();                                                                     // re-highlight rows for this tab's ws/session
   }
   clearTabAttention(tabId);                           // and un-pulse the row if it's already painted
@@ -1361,7 +1371,10 @@ window.addEventListener('contextmenu', (e) => {
   const sel = inTerm ? term.getSelection() : (field ? String(field.value || '').substring(fS, fE) : String(window.getSelection() || ''));
   const items = [];
   if (sel && sel.trim()) items.push({ label: 'Copy', act: () => claudible.clipWrite(sel) });
-  if (sel && sel.trim() && (inTerm || field)) items.push({ label: 'Cut', act: () => {
+  // No Cut on a LIVE tab's terminal: its "selection" is mirrored HOST output, and the terminal branch below
+  // replays the selection length as erase keystrokes — into the host's live input. Copy stays; Cut lies there.
+  const liveTerm = inTerm && !!(AT() && AT().kind === 'live');
+  if (sel && sel.trim() && ((inTerm && !liveTerm) || field)) items.push({ label: 'Cut', act: () => {
     claudible.clipWrite(sel);
     if (field) {                                                // splice the selection out of the field
       field.value = field.value.slice(0, fS) + field.value.slice(fE);
@@ -1371,7 +1384,7 @@ window.addEventListener('contextmenu', (e) => {
   } });
   if (inTerm || field) items.push({ label: 'Paste', act: async () => {
     const t = await claudible.clipRead(); if (!t) return;
-    if (inTerm) { sendInput('\x1b[200~' + t + '\x1b[201~'); term.focus(); }   // bracketed paste, no auto-submit
+    if (inTerm) { sendPaste(t); term.focus(); }   // bracketed paste, no auto-submit (live tabs: a typed frame the peer's host sanitizes)
     else insertIntoField(field, t);
   } });
   if (inTerm || field) items.push({ label: 'Select All', act: () => { if (inTerm) term.selectAll(); else field.select(); } });
@@ -2876,7 +2889,7 @@ function updateAdvertise() {
           // race the ~10s presence poll can miss). Roll the share back completely — keeping sharedSessionId
           // would leave the UI saying "sharing" while nothing is advertised.
           if (sharedSessionId === want) { sharedSessionId = null; sharedWsId = null; }
-          advertisedSession = null;
+          if (advertisedSession === want) advertisedSession = null;   // same guard as the not-live/catch rollbacks — never clobber a NEWER call's latch
           updateCollab(); refreshSessions(); refreshExpandedTrees();
           toast((r.by || 'A collaborator') + ' went live on this session first — use Join to hop in instead');
           return;
@@ -3005,6 +3018,7 @@ async function pollLivePeers() {
   try {
     const targets = workspaces.filter((w) => w && w.kind === 'repo' && (w.id === activeWsId || isWsExpanded(w.id))).map((w) => w.id);
     const now = Date.now() / 1000;
+    const genAtStart = new Map(targets.map((wsId) => [wsId, livePeersWriteGen.get(wsId) || 0]));
     let activeOk = true;                                            // did the ACTIVE ws fetch succeed? (reconcileJoinedTabs only acts on the active ws, so that's the freshness signal it needs)
     const fetched = new Map();
     await Promise.all(targets.map(async (wsId) => {
@@ -3013,14 +3027,21 @@ async function pollLivePeers() {
       catch (e) { if (wsId === activeWsId) activeOk = false; return; }   // fetch failed → keep this ws's LAST-KNOWN bucket below (a blip must not drop live rows)
       // A full advertisement carries url+token (joinable); a phase-1 stamp carries starting:true and no url yet
       // ("going live…", short TTL). Anything else — junk, or a half-written entry — is dropped.
-      peers = (peers || []).filter((p) => p && p.session && ((p.url && p.token) || p.starting) && (now - (p.ts || 0) < (p.url ? LIVE_TTL_S : STARTING_TTL_S)));
-      peers.forEach((p) => { p.wsId = wsId; });                     // STAMP with the ws it was FETCHED for — immune to an active-project switch mid-fetch (we bucket by request, not by ambient active)
-      fetched.set(wsId, peers);
+      fetched.set(wsId, filterLivePeers(peers, wsId, now));   // STAMP with the ws it was FETCHED for — immune to an active-project switch mid-fetch (we bucket by request, not by ambient active)
     }));
     // Rebuild the cache to exactly the currently-visible repos. A target we failed to fetch this round keeps its
     // previous bucket (don't flap a live row on a transient error); a project no longer visible simply drops out.
     const next = new Map();
-    for (const wsId of targets) next.set(wsId, fetched.has(wsId) ? fetched.get(wsId) : (livePeersByWs.get(wsId) || []));
+    for (const wsId of targets) {
+      // Install this poll's result ONLY if nothing (a beacon push) wrote the bucket while the fetch was in
+      // flight — the push's data is newer than ours even though ours finished later.
+      if (fetched.has(wsId) && (livePeersWriteGen.get(wsId) || 0) === genAtStart.get(wsId)) {
+        next.set(wsId, fetched.get(wsId));
+        livePeersWriteGen.set(wsId, (livePeersWriteGen.get(wsId) || 0) + 1);
+      } else {
+        next.set(wsId, livePeersByWs.get(wsId) || []);
+      }
+    }
     livePeersByWs = next;
     // Self-clean the socket-proved-dead set: drop a suppression once git presence ALSO no longer lists the session
     // (git caught up — the normal, fast path), OR after DEAD_SUPPRESS_MS as a guaranteed exit so a session re-hosted
@@ -3041,6 +3062,19 @@ async function pollLivePeers() {
 // url+token ARE included: a host handle rotation must still change the sig so reconcileJoinedTabs re-arms
 // joined tabs (the auto-recover path); membership changes (TTL age-out) change the sig by themselves.
 // ONE implementation, shared by the 10s poll and the beacon push — two hand-rolled copies would drift.
+// ONE peer filter shared by the 10s poll and the beacon push (the sig learned this lesson first — two
+// hand-rolled copies of the accept/TTL rule would drift): full stamps need url+token, phase-1 stamps need
+// starting:true, each with its own TTL.
+function filterLivePeers(list, wsId, now) {
+  const peers = (list || []).filter((p) => p && p.session && ((p.url && p.token) || p.starting) && (now - (p.ts || 0) < (p.url ? LIVE_TTL_S : STARTING_TTL_S)));
+  peers.forEach((p) => { p.wsId = wsId; });
+  return peers;
+}
+// Write-generation per workspace: a poll snapshots these before its network fetch and may only install its
+// result if NOTHING wrote that bucket meanwhile — a beacon push landing mid-fetch is FRESHER than the
+// poll's in-flight data, and the old unconditional install repainted the just-arrived live row backwards
+// (and could fire a false "Host ended" through reconcileJoinedTabs).
+const livePeersWriteGen = new Map();   // wsId -> monotonically bumped on every bucket write
 function livePeersSigOf(next) {
   return JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, p.sha, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));   // p.sha: a peer finally restarting onto a new build must repaint the skew hint
 }
@@ -3056,14 +3090,41 @@ try { claudible.onBuildDrift((p) => {
   tx.textContent = 'Claudible updated on disk (' + ((p && p.disk) || '?') + ') — restart to run it. This window is still on ' + ((p && p.running) || '?') + '.';
   el.style.display = '';
 }); } catch (e) {}
+// The chip's action: pull + restart, main-side (update:run). Success is never observed here — the process
+// exits first; anything that resolves is a refusal/failure to surface. Busy tabs / an active live share get
+// one honest confirm (restarting drops them), mirroring the shared-tab-close warning's renderer-side gate.
+try { claudible.onUpdateProgress((p) => {
+  const b = $('build-drift-update'); if (b) b.textContent = (p && p.msg) ? String(p.msg).slice(0, 44) : 'Updating…';
+}); } catch (e) {}
+{
+  const b = $('build-drift-update');
+  if (b) b.addEventListener('click', async () => {
+    const busyN = [...tabs.values()].filter((t) => t.busy).length;
+    const hosting = amHostingLive();
+    if (hosting || busyN) {
+      const bits = [];
+      if (hosting) bits.push('end your live session');
+      if (busyN) bits.push('stop Claude mid-turn in ' + busyN + ' tab(s)');
+      if (!confirm('Updating restarts Claudible now — this will ' + bits.join(' and ') + '.\n\nContinue?')) return;
+    }
+    const el = $('build-drift'), prevTxt = b.textContent;
+    b.disabled = true; b.textContent = 'Checking…';
+    let r = null;
+    try { r = await claudible.updateRun(); } catch (e) { r = { ok: false, error: (e && e.message) || 'update failed' }; }
+    if (!r || !r.ok) {
+      b.disabled = false; b.textContent = prevTxt;
+      if (el) el.classList.add('tw-err');
+      toast('Update failed: ' + humanError((r && r.error) || 'unknown'));
+    }
+  });
+}
 try { claudible.onLivePeersPush((p) => {
   if (!p || !p.id) return;
   const wsId = p.id;
   const aw = workspaces.find((w) => w.id === wsId && w.kind === 'repo');
   if (!aw || !(wsId === activeWsId || isWsExpanded(wsId))) return;   // no rows for this project on screen — nothing to paint (the poll covers it if it becomes visible)
-  const now = Date.now() / 1000;
-  const peers = (p.peers || []).filter((x) => x && x.session && ((x.url && x.token) || x.starting) && (now - (x.ts || 0) < (x.url ? LIVE_TTL_S : STARTING_TTL_S)));
-  peers.forEach((x) => { x.wsId = wsId; });
+  const peers = filterLivePeers(p.peers, wsId, Date.now() / 1000);
+  livePeersWriteGen.set(wsId, (livePeersWriteGen.get(wsId) || 0) + 1);   // supersede any in-flight poll for this bucket
   const next = new Map(livePeersByWs); next.set(wsId, peers);
   livePeersByWs = next;
   const sig = livePeersSigOf(next);
@@ -5227,43 +5288,64 @@ sidebarReady = true;   // the sessions/workspace section is now fully initialize
 // (chat / voice box) the same combos act on the field. Clipboard goes through main so it works
 // regardless of web clipboard permissions. Capture phase so we intercept before xterm.
 const isMac = /mac/i.test(navigator.platform || navigator.userAgent || '');
+let _liveCopyTipShown = false;   // one-shot: the live-tab "selection was empty, sent interrupt" explainer (mirrors the roToldOnce pattern)
 window.addEventListener('keydown', (e) => {
   const mod = isMac ? (e.metaKey && !e.ctrlKey && !e.altKey) : (e.ctrlKey && !e.metaKey && !e.altKey);
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const inTerm = e.target && e.target.closest && e.target.closest('#terminal');
   const field = e.target && e.target.closest && e.target.closest('input, textarea');
 
+  // PHYSICAL key first (e.code), key name as fallback: e.key is layout-dependent — on a Cyrillic/Hebrew/
+  // Greek layout the same physical chord reports a non-Latin character, every k==='x' gate silently missed,
+  // and the chord fell through to xterm's (layout-independent) keymap: Ctrl+C became a raw interrupt that
+  // killed the running turn, Ctrl+V became a raw 0x16. Same class as the guest-side fix in d1af16e.
+  const isA = e.code === 'KeyA' || k === 'a';
+  const isC = e.code === 'KeyC' || k === 'c';
+  const isV = e.code === 'KeyV' || k === 'v';
   if (inTerm) {
-    if (mod && k === 'c') {
+    if (mod && isC) {
       const sel = term.getSelection();
-      if (sel && sel.length) { e.preventDefault(); e.stopPropagation(); claudible.clipWrite(sel); }
-      return;                                   // empty selection → let Ctrl+C through as interrupt
-    }
-    if (mod && k === 'v') {
-      e.preventDefault(); e.stopPropagation();
-      claudible.clipRead().then((t) => { if (t) { sendInput('\x1b[200~' + t + '\x1b[201~'); term.focus(); } });
+      if (sel && sel.length) { e.preventDefault(); e.stopPropagation(); claudible.clipWrite(sel); return; }
+      // Empty selection → Ctrl+C passes through as a real interrupt (deliberate, like Windows Terminal).
+      // On a LIVE tab that interrupt lands in the HOST's session — and the usual reason the selection is
+      // empty there is xterm suppressing drag-select while the host's TUI holds mouse tracking. Say so
+      // once, instead of letting "copy did nothing and something interrupted" stay a mystery.
+      const at = AT();
+      if (at && at.kind === 'live' && !_liveCopyTipShown) {
+        _liveCopyTipShown = true;
+        toast('Nothing selected — sent as interrupt. Tip: hold Shift while dragging to select in a full-screen app, or right-click → Select All.');
+      }
       return;
     }
-    if (mod && k === 'a') { e.preventDefault(); e.stopPropagation(); term.selectAll(); return; }
+    if (mod && isV) {
+      e.preventDefault(); e.stopPropagation();
+      claudible.clipRead().then((t) => { if (t) { sendPaste(t); term.focus(); } });
+      return;
+    }
+    if (mod && isA) { e.preventDefault(); e.stopPropagation(); term.selectAll(); return; }
     if (k === 'Backspace' && !mod) {
       const sel = term.getSelection();
-      if (sel && sel.length) {
+      const at = AT();
+      // NEVER on a live tab: the selection there is arbitrary mirrored HOST output, not "your text before
+      // the cursor" — replaying its length as erase keystrokes would inject N destructive backspaces into
+      // the host's live input. Fall through to a normal single-char backspace instead (ordinary co-drive).
+      if (sel && sel.length && !(at && at.kind === 'live')) {
         e.preventDefault(); e.stopPropagation();
         sendInput('\x7f'.repeat(sel.length));   // delete the marked text
         term.clearSelection();
       }
-      return;                                   // no selection → normal single-char backspace
+      return;                                   // no selection, or a live mirror → normal single-char backspace
     }
     return;
   }
   if (field) {
-    if (mod && k === 'a') { e.preventDefault(); field.select(); return; }
-    if (mod && k === 'c') {
+    if (mod && isA) { e.preventDefault(); field.select(); return; }
+    if (mod && isC) {
       const s = (field.value || '').substring(field.selectionStart || 0, field.selectionEnd || 0);
       if (s) { e.preventDefault(); claudible.clipWrite(s); }
       return;
     }
-    if (mod && k === 'v') {
+    if (mod && isV) {
       e.preventDefault();
       claudible.clipRead().then((t) => { if (t) insertIntoField(field, t); });
       return;
@@ -5378,7 +5460,7 @@ window.addEventListener('keydown', (e) => {
   function applyGh(s) {
     const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck');
     if (s.ghSignedIn) { msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
-    else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your projects across devices and invite people. In a terminal run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
+    else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your projects across devices and invite people. In a WSL terminal (run `wsl` from PowerShell; on the native flavor any terminal) run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
   }
 
   // ---- System check (step 1): detect every dependency, install the missing ones --------------------
