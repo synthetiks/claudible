@@ -12,7 +12,7 @@ const { atomicWriteJson } = require('./lib/atomicWrite');          // every JSON
 const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
 const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
-const { createShareServer } = require('./share/server');
+const { createShareServer, sanitizePaste } = require('./share/server');
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
 // A packaged (installed) build runs from a READ-ONLY app dir, so writable runtime state can't live there. On
@@ -89,30 +89,46 @@ function reapOrphanCloudflared() {
   if (Number.isInteger(pid) && pid > 0 && _isCloudflaredPid(pid)) { try { process.kill(pid); } catch {} console.log('[claudible] reaped orphaned cloudflared pid', pid); }
   _clearCfPid();
 }
+// Tag who typed (keystroke OR paste) so history AND the context hook can attribute it. The context write
+// happens BEFORE proc.write: it's synchronous, so the Enter that submits a prompt always lands with
+// typedBy already on disk when Claude fires UserPromptSubmit. Throttled — rewrite only when the typist
+// CHANGES or every 5s during a burst (keeps typedBy.ts fresh for the hook's 20s window without a
+// per-keystroke fs write); any HOST keystroke clears it (pty:input below), so "fresh typedBy" ⇒ guest-driven.
+function _noteGuestTypist(t, who) {
+  if (!who || !who.name) return;
+  const prev = t.lastInputBy;
+  t.lastInputBy = { name: who.name, ts: Date.now() };
+  if (!prev || prev.name !== who.name || (t.lastInputBy.ts - (t.typistWrittenTs || 0)) > 5000) {
+    t.typistWrittenTs = t.lastInputBy.ts;
+    try { _writeContext(mirrorTabId()); } catch {}
+  }
+  // typist chip for the HOST's own cockpit (guests get theirs from the server's typistPing) — 1/s throttle,
+  // immediate on typist change; the renderer decays the chip so no stop event is needed.
+  if (who.name !== _typUi.name || (t.lastInputBy.ts - _typUi.ts) > 1000) {
+    _typUi.name = who.name; _typUi.ts = t.lastInputBy.ts;
+    try { winSend('share:typist', { name: who.name }); } catch {}
+  }
+}
 const share = createShareServer({
-  // A guest typed → into the FOREGROUND pty; tag who typed so history AND the context hook can attribute it.
-  // The context write happens BEFORE proc.write: it's synchronous, so the Enter that submits a prompt always
-  // lands with typedBy already on disk when Claude fires UserPromptSubmit. Throttled — rewrite only when the
-  // typist CHANGES or every 5s during a burst (keeps typedBy.ts fresh for the hook's 20s window without a
-  // per-keystroke fs write); any HOST keystroke clears it (pty:input below), so "fresh typedBy" ⇒ guest-driven.
+  // A guest typed → into the FOREGROUND pty (see _noteGuestTypist above for the attribution contract).
   onInput: (d, who) => {
     const t = ptys.get(mirrorTabId());                       // guests ALWAYS drive the SHARED tab — never whatever the host happens to be focused on
     if (!t) return;
-    if (who && who.name) {
-      const prev = t.lastInputBy;
-      t.lastInputBy = { name: who.name, ts: Date.now() };
-      if (!prev || prev.name !== who.name || (t.lastInputBy.ts - (t.typistWrittenTs || 0)) > 5000) {
-        t.typistWrittenTs = t.lastInputBy.ts;
-        try { _writeContext(mirrorTabId()); } catch {}
-      }
-      // typist chip for the HOST's own cockpit (guests get theirs from the server's typistPing) — 1/s throttle,
-      // immediate on typist change; the renderer decays the chip so no stop event is needed.
-      if (who.name !== _typUi.name || (t.lastInputBy.ts - _typUi.ts) > 1000) {
-        _typUi.name = who.name; _typUi.ts = t.lastInputBy.ts;
-        try { winSend('share:typist', { name: who.name }); } catch {}
-      }
-    }
+    _noteGuestTypist(t, who);
     try { t.proc.write(d); } catch {}
+  },
+  // A guest PASTED — their own clipboard text as one typed frame (the guest client never sends a raw ^V;
+  // the server strips one anyway). Wrapped in bracketed-paste marks HERE, exactly like the host's own
+  // Ctrl+V path (renderer sendInput('\x1b[200~'+t+'\x1b[201~')), after sanitizing: an embedded end-mark
+  // would break out of the paste block and run as live keystrokes. Attribution matches keystrokes so
+  // history and the typist chip credit the paster.
+  onPaste: (text, who) => {
+    const t = ptys.get(mirrorTabId());
+    if (!t) return;
+    const safe = sanitizePaste(text);
+    if (!safe) return;
+    _noteGuestTypist(t, who);
+    try { t.proc.write('\x1b[200~' + safe + '\x1b[201~'); } catch {}
   },
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
   onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(mirrorTabId()); } catch {} },   // presence lights; refresh the HOSTING tab's injected context so the model sees who's here
@@ -437,7 +453,11 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1320, height: 860, backgroundColor: '#070809',
     icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'claudible.ico' : 'icon.png'),   // window + taskbar branding (the headphones/mic guy); .ico decodes only on Windows
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    // backgroundThrottling:false — the renderer runs real pollers (live presence, shared titles) whose freshness
+    // collaborators depend on; Chromium's default background-timer clamp froze them the moment the window was
+    // minimized, so a peer going live was invisible until the host alt-tabbed back. Main-process timers were
+    // already immune (the advertise heartbeat lives in main for exactly this reason — see runPresence).
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
   Menu.setApplicationMenu(null);   // no default menu → no View>Reload/Force-Reload that would re-init pollers & corrupt the hook stream
   // Removing the menu also removed the stock Ctrl+Shift+I DevTools accelerator — leaving NO way to self-diagnose
@@ -487,6 +507,7 @@ function createWindow() {
     // spawn-on-size fallback: if the renderer never reports a size, seed the first tab ('main') at a default
     setTimeout(() => { if (ptys.size === 0) spawnPty('main', 120, 32, activeWorkspace, ''); }, 1800);
     startPoll();            // adaptive background session sync for the active repo workspace
+    startBeacon();          // remote-head fast poll — near-instant "peer went live"/"new session" visibility
     startWorkflowPoll();    // live workflow/swarm agents for the foreground tab's Agents pane
     // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
     setTimeout(() => { _lastDiscover = Date.now(); discoverWorkspaces().then(syncAllEnabled); }, 3000);
@@ -1155,7 +1176,22 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   // NEVER publish a non-tunnel (loopback/dead) URL to remote peers — they'd dial their own machine. If the tunnel
   // isn't up yet, arm the heartbeat anyway so presence is pushed the instant a real *.trycloudflare.com URL appears,
   // and tell the caller so the host can be warned their share isn't remotely reachable.
-  if (!isTunnelUrl(shareBaseUrl)) { startAdvertiseHeartbeat(sid, ws); return resolve({ ok: false, error: 'tunnel-down' }); }
+  if (!isTunnelUrl(shareBaseUrl)) {
+    startAdvertiseHeartbeat(sid, ws);
+    // Phase-1 presence: peers should see "going live…" the moment the host clicks Share — not after the
+    // tunnel's multi-second spawn. presence-starting stamps a url-less claim (same one-host arbiter as the
+    // full advertisement); presenceBeatOnce replaces it with the real handle the instant adoptTunnel lands.
+    // A rival already holding the claim surfaces exactly like a beat-time loss (renderer un-shares + toasts).
+    runPresence(`presence-starting '${sid}' '${advertisedNameB64}'`, (r) => {
+      if (r && r.error === 'already-live') {
+        stopAdvertiseHeartbeat();
+        try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
+        return resolve(r);
+      }
+      resolve({ ok: false, error: 'tunnel-down', starting: !!(r && r.ok) });   // starting:true → the renderer skips the "can't join yet" toast (peers already see the row)
+    }, ws);
+    return;
+  }
   runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}'`, (r) => {
     if (r && r.error === 'already-live') return resolve(r);   // a collaborator already hosts this session — do NOT arm the heartbeat (it would keep re-contesting the claim every 2 min); the renderer un-shares + points the user at Join
     startAdvertiseHeartbeat(sid, ws);
@@ -1458,6 +1494,58 @@ function startPoll() {
     appTimers.sync = setTimeout(tick, pollDelay);
   };
   appTimers.sync = setTimeout(tick, pollDelay);
+}
+// ---- remote-head beacon: near-instant peer visibility -------------------------------------------
+// The adaptive poll above is the safety net; THIS is the fast path. Everything collaborators share —
+// session transcripts, live presence, shared titles — rides ONE branch (claudible/sessions), so "did
+// anything change anywhere?" is a single remote head-sha probe: sessions-sync.sh remote-head, one git
+// smart-HTTP round-trip, no fetch, no worktree, no lock (safe OUTSIDE _syncQ, even mid-sync), and no
+// GitHub API budget (the script answers it before its per-invocation gh-auth block). Probe every
+// ~2.5s per synced repo workspace — EVERY one, not just those with an open tab, closing the "a shared
+// project with no tab never syncs" hole — and only when the sha actually moves fire the existing
+// pipeline: doSync imports the new sessions (sync:changed repaints the sidebar) and the renderer is
+// nudged to refresh live presence NOW instead of on its next 10s tick. Peer-visible latency for
+// "X went live" / "new session appeared" drops from 10s–5min (or never) to a few seconds, while a
+// quiet branch costs one tiny probe per tick and zero fetches.
+const _beaconHeads = new Map();   // ws.id -> last seen branch head sha ('' = branch absent)
+let _beaconBusy = false;
+const BEACON_MS = 2500, BEACON_HIDDEN_MS = 15000;
+async function _beaconTick() {
+  if (_beaconBusy) return;                                  // a slow probe pass must never stack another on top
+  _beaconBusy = true;
+  try {
+    const seen = new Set();
+    for (const ws of registry.workspaces) {
+      if (!ws || ws.kind !== 'repo' || !ws.syncSessions || ws.needsClone) continue;
+      if (seen.has(ws.id)) continue; seen.add(ws.id);
+      const { err, stdout } = await runner.runScript('sessions-sync.sh', 'remote-head', { ws, timeout: 15000 });
+      if (err) continue;                                    // offline/wedged — the adaptive poll still covers us
+      let r = null; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      if (!r || !r.ok || typeof r.head !== 'string') continue;
+      const prev = _beaconHeads.get(ws.id);
+      if (prev === undefined) { _beaconHeads.set(ws.id, r.head); continue; }   // first sighting = baseline, not a change
+      if (prev === r.head) continue;
+      // The branch moved. Presence first (a "going live" stamp is the latency-critical payload), then the
+      // session import — skipped while this ws is mid-turn/mid-sync, and the baseline only advances on a
+      // SUCCESSFUL sync, so the very next tick retries anything skipped or failed.
+      try { winSend('live:peers-nudge', { id: ws.id }); } catch {}
+      if (wsHasBusyTab(ws.id) || syncLock.has(ws.id)) continue;
+      const res = await doSync(ws, 'sync', {});
+      if (res && res.ok) _beaconHeads.set(ws.id, r.head);
+    }
+  } finally {
+    _beaconBusy = false;
+    // Hidden window → ease off (nobody is watching the sidebar); visible — even unfocused — keeps the fast
+    // cadence. Main-process timer: immune to renderer background throttling by construction.
+    let hidden = false; try { hidden = !(win && !win.isDestroyed() && win.isVisible()); } catch {}
+    appTimers.beacon = setTimeout(_beaconTick, hidden ? BEACON_HIDDEN_MS : BEACON_MS);
+    if (appTimers.beacon.unref) appTimers.beacon.unref();
+  }
+}
+function startBeacon() {
+  if (appTimers.beacon) return;
+  appTimers.beacon = setTimeout(_beaconTick, BEACON_MS);
+  if (appTimers.beacon.unref) appTimers.beacon.unref();
 }
 // Hook events are also forwarded raw to the renderer; here we track per-tab turn busy/idle + push the tab's
 // workspace after each turn. tabId comes from which per-tab hooks file the line was read from.
@@ -2188,7 +2276,7 @@ const appIntervals = [];   // long-lived poller intervals — cleared on window-
 // adaptive), so they never landed in appIntervals and nothing ever cleared them — the only two of six outside the
 // quit sweep. Both spawn a WSL subprocess per tick (sessions-sync.sh / workflows.sh). Today `app.quit()` masks it;
 // the day this process outlives its window (a tray icon, a background mode) they'd tick forever against nothing.
-const appTimers = { sync: null, workflow: null, trash: null, tunnelRetry: null };   // tunnelRetry: the live-share self-heal (armTunnelRetry) — same contract, must die with the window
+const appTimers = { sync: null, workflow: null, trash: null, tunnelRetry: null, beacon: null };   // tunnelRetry: the live-share self-heal (armTunnelRetry); beacon: the remote-head fast poll — same contract, must die with the window
 // Heartbeat for the app→Claude context channel: the hook drops live/typedBy from a context.json whose ts is
 // >10 min old (crashed-writer guard), so refresh the foreground tab's file every 5 min — a quiet hosting
 // session (no roster/typing/foreground events for a while) must keep its "YOU ARE HOSTING" line alive.

@@ -119,6 +119,7 @@ let activeSession = null;                       // the ACTIVE tab's session id (
 // 12 enforces both. The per-peer wsId stamp is kept as belt-and-suspenders so a mis-bucketed entry is still inert.
 let livePeersByWs = new Map(), livePeersSig = '', advertisedSession = null;
 const LIVE_TTL_S = 120;   // a stamp older than this is aged out (host re-stamps every ~45s); MUST match wsl/sessions-sync-tool.js LIVE_TTL
+const STARTING_TTL_S = 60;   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
 // Sessions a JOINED tab's OWN socket already proved offline (the host ended). Suppressed from the badge instantly,
 // ahead of the ~10s git poll / TTL — see setLiveState. Value = when it was marked (ms): the suppression self-clears
 // once git presence ALSO shows the session gone, and — as a guaranteed exit — after DEAD_SUPPRESS_MS regardless,
@@ -2847,7 +2848,11 @@ function updateAdvertise() {
   // recycled) must not unadvertise. sharedWsId is captured at Share time: the host may be browsing a
   // different (even non-repo) workspace while the shared session keeps streaming.
   const aw = workspaces.find((w) => w.id === (sharedWsId || activeWsId));
-  const want = (tunnelUp && aw && aw.kind === 'repo' && sharedSessionId) ? sharedSessionId : null;
+  // Deliberately NOT gated on tunnelUp: advertising fires the moment Share is clicked, and main answers a
+  // still-spawning tunnel with a phase-1 "going live…" presence stamp (presence-starting) — peers see the
+  // session within seconds instead of after tunnel-spawn + push + their next poll. The heartbeat publishes
+  // the real handle the instant the tunnel lands.
+  const want = (aw && aw.kind === 'repo' && sharedSessionId) ? sharedSessionId : null;
   if (want === advertisedSession) return;
   advertisedSession = want;
   if (!want) { try { claudible.liveUnadvertise(); } catch (e) {} return; }
@@ -2866,7 +2871,10 @@ function updateAdvertise() {
           toast((r.by || 'A collaborator') + ' went live on this session first — use Join to hop in instead');
           return;
         }
-        if (r && r.error === 'tunnel-down') toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.');
+        // starting:true = the phase-1 "going live…" stamp landed, peers already see the row and the tunnel is
+        // merely finishing its spawn — the scary toast would be noise on every single share. Only warn when the
+        // stamp ALSO failed (offline / branch unreachable): then nobody can see or join anything.
+        if (r && r.error === 'tunnel-down' && !r.starting) toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.');
       })
       .catch(() => {});
   } catch (e) {}
@@ -2947,6 +2955,10 @@ function reconcileJoinedTabs(pollOk) {
     if (rec.kind !== 'live' || !rec.peer || !rec.peer.session) continue;
     const fresh = peersForWs(rec.peerWsId).find((p) => p.session === rec.peer.session && p.url && p.token);   // only the branch this tab was joined from can speak about its host
     if (!fresh) {
+      // A phase-1 "going live…" stamp for this session means the host is RE-sharing right now (their new
+      // tunnel is spawning) — that's the opposite of "host ended". Hold the auto-close; the full stamp is
+      // seconds away and the re-arm branch below will pick it up, or the short starting TTL clears it.
+      if (peersForWs(rec.peerWsId).some((p) => p.session === rec.peer.session && p.starting)) continue;
       // The host stopped advertising = they ENDED the session. If our tab has already given up (offline) or is
       // futilely retrying (reconnecting) AND the presence poll genuinely succeeded, auto-leave back to the
       // single-person view instead of sitting on a dead "ended" tab. pollOk guards a transient fetch error;
@@ -2989,7 +3001,9 @@ async function pollLivePeers() {
       let peers = null;
       try { peers = await claudible.livePeers(wsId); }
       catch (e) { if (wsId === activeWsId) activeOk = false; return; }   // fetch failed → keep this ws's LAST-KNOWN bucket below (a blip must not drop live rows)
-      peers = (peers || []).filter((p) => p && p.session && p.url && p.token && (now - (p.ts || 0) < LIVE_TTL_S));
+      // A full advertisement carries url+token (joinable); a phase-1 stamp carries starting:true and no url yet
+      // ("going live…", short TTL). Anything else — junk, or a half-written entry — is dropped.
+      peers = (peers || []).filter((p) => p && p.session && ((p.url && p.token) || p.starting) && (now - (p.ts || 0) < (p.url ? LIVE_TTL_S : STARTING_TTL_S)));
       peers.forEach((p) => { p.wsId = wsId; });                     // STAMP with the ws it was FETCHED for — immune to an active-project switch mid-fetch (we bucket by request, not by ambient active)
       fetched.set(wsId, peers);
     }));
@@ -3017,6 +3031,10 @@ async function pollLivePeers() {
   } finally { _pollLiveInFlight = false; }
 }
 setInterval(pollLivePeers, 10000);
+// Beacon nudge: main's remote-head probe saw the shared branch move (a peer went live / stopped / a session
+// landed) — refresh presence NOW instead of on the next 10s tick. pollLivePeers only fetches visible (active +
+// expanded) projects and self-guards against overlap, so a nudge for an off-screen project is a cheap no-op.
+try { claudible.onLivePeersNudge(() => { pollLivePeers(); }); } catch (e) {}
 // Poll the workspace-shared session names (repo workspaces only). Throttled so the list render that calls it
 // can't spam branch reads; a forced call (after my own rename's push) bypasses the throttle. Re-render on change.
 async function pollTitles(force) {
@@ -3071,6 +3089,17 @@ async function pollTitles(force) {
 setInterval(pollTitles, 20000);
 function makeLiveBadge(peer, localLabel) {
   const who = peer.name || peer.login || 'host';
+  if (peer.starting) {
+    // Phase-1 presence: the host clicked Share and their tunnel is still spawning — visible NOW, joinable in a
+    // few seconds when the full (url+token) stamp replaces this one and the poll repaints it as a Join badge.
+    const s = document.createElement('span'); s.className = 'sess-live-ind sess-starting';
+    const sdot = document.createElement('span'); sdot.className = 'live-dot';
+    const sliw = document.createElement('span'); sliw.className = 'liw'; sliw.textContent = 'going live · ' + who;
+    s.appendChild(sdot); s.appendChild(sliw);
+    s.title = who + ' is going live — joinable in a few seconds';
+    s.style.opacity = '0.75';
+    return s;
+  }
   const b = document.createElement('button'); b.className = 'sess-live-ind sess-join';
   const dot = document.createElement('span'); dot.className = 'live-dot';
   const liw = document.createElement('span'); liw.className = 'liw'; liw.textContent = 'live · ' + who;
@@ -3086,11 +3115,14 @@ function renderLivePeerRow(peer) {
   const row = document.createElement('div'); row.className = 'sess sess-peer-live';
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = 'Live session';
   const m = document.createElement('div'); m.className = 'sess-meta';
-  const mt = document.createElement('span'); mt.className = 'sess-meta-t'; mt.textContent = (peer.name || peer.login || 'a collaborator') + ' is live now';
+  const mt = document.createElement('span'); mt.className = 'sess-meta-t';
+  mt.textContent = (peer.name || peer.login || 'a collaborator') + (peer.starting ? ' is going live…' : ' is live now');
   m.appendChild(mt); m.appendChild(makeLiveBadge(peer));
   row.appendChild(p); row.appendChild(m);
-  row.style.cursor = 'pointer';
-  row.addEventListener('click', () => openLiveTab(peer));
+  if (!peer.starting) {                       // a phase-1 row has no handle to join yet — inert until the full stamp lands
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => openLiveTab(peer));
+  }
   return row;
 }
 // ---- native joined-session tab: render + drive a peer's live session inside the cockpit -----------------
@@ -3177,6 +3209,7 @@ function repaintLiveTracker(rec) {
 function openLiveTab(peer, localLabel) {
  try {
   if (!peer) return;
+  if (!peer.url || !peer.token) return;   // a phase-1 "going live…" stamp has no handle yet — nothing to dial (its rows are inert; this is the belt)
   for (const r of tabs.values()) {
     if (r.kind === 'live' && r.peer && r.peer.session === peer.session) {
       setActiveTab(r.tabId);
@@ -3478,7 +3511,7 @@ function savedSessMenuItems(row, p, s) {
       hint: isSharingSession(s.id) ? 'End the live session — everyone viewing is disconnected.' : 'Share this session live so a collaborator can Join and co-drive it.',
       act: () => toggleShareSession(s) });
     const peer = peersForWs(activeWsId).find((x) => x.session === s.id);
-    if (peer && !isSharingSession(s.id)) items.push({ icon: SHARE_SVG, label: 'Join live · ' + (peer.name || peer.login || 'host'),
+    if (peer && peer.url && peer.token && !isSharingSession(s.id)) items.push({ icon: SHARE_SVG, label: 'Join live · ' + (peer.name || peer.login || 'host'),
       hint: 'Join this collaborator’s live session and co-drive it.', act: () => openLiveTab(peer) });
   }
   items.push(

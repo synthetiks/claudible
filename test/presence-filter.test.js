@@ -63,5 +63,13 @@ function peersOf(out) {
   ok('unicode peer survives', !p.bad && p.peers.length === 1 && p.peers[0].name === 'MØ Dev 🚀');
 }
 
+// ---- a phase-1 "going live…" stamp (starting:true, NO url/token yet) must pass the filter ----
+// The two-phase advertise depends on this: the renderer renders these as a non-joinable "going live…" row.
+// A filter that started requiring url/token would silently kill the whole fast-advertise path.
+{
+  const p = peersOf(run('{"login":"mk","session":"s1","name":"MK","starting":true,"ts":5}\n'));
+  ok('starting (url-less) stamp survives the filter', !p.bad && p.peers.length === 1 && p.peers[0].starting === true && p.peers[0].session === 's1');
+}
+
 console.log(`presence-filter: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

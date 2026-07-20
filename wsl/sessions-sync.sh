@@ -26,7 +26,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete|resolve|presence-set|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -105,6 +105,22 @@ fi
 LIVE="${CLAUDIBLE_LIVE_SESSION:-}"
 case "$LIVE" in *[!A-Za-z0-9\ -]*) LIVE="" ;; esac   # a clean id — or a SPACE-SEPARATED list of them (R13: the hosted session AND a busy tab's session can both be live writers; excluding only one exported the other mid-write)
 is_live() { case " $LIVE " in *" $1 "*) return 0 ;; esac; return 1; }   # id ∈ the exclusion list
+
+# --- remote-head: the beacon's "did the shared branch move?" probe -----------------------------------------
+# Handled BEFORE the gh-auth block on purpose: main.js fires this every ~2.5s per synced workspace, and the
+# author resolution below costs a GitHub API call per invocation (gh api user) — the probe must never pay
+# that, or the beacon alone would eat the 5000/hr API budget. One git smart-HTTP round-trip (not REST, not
+# API-rate-limited) for the branch head sha; no worktree, no fetch, no lock — safe OUTSIDE the per-ws queue
+# even while a sync/presence op holds the worktree. Uses the CODE clone's origin (same remote the worktree
+# tracks), so it works before ensure_worktree ever ran. `timeout` guards a wedged network (ticks must never
+# stack); absent (minimal git-bash) we rely on the caller's own process timeout.
+if [ "$op" = "remote-head" ]; then
+  _tmo=""; command -v timeout >/dev/null 2>&1 && _tmo="timeout 8"
+  head_sha="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null | cut -f1)"
+  case "$head_sha" in *[!a-f0-9]*) head_sha="" ;; esac   # error text / junk → treat as "no branch yet"
+  emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"$head_sha\"}"
+  exit 0
+fi
 
 command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed in WSL"
 author="$(gh api user --jq .login 2>/dev/null)"
@@ -520,6 +536,53 @@ case "$op" in
       fi
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-set\"}" || emit "{\"ok\":false,\"op\":\"presence-set\",\"error\":\"push failed\"}"
+    ;;
+  presence-starting)
+    # Phase-1 advertise: "I'm going live in session $2 — the tunnel is still coming up." Stamped the moment
+    # the host clicks Share (a cloudflared spawn takes seconds and peers shouldn't wait for it); replaced by
+    # the full presence-set (url+token) from the heartbeat the instant the tunnel lands. No url/token yet —
+    # presence-filter passes the entry through and the renderer draws a non-joinable "going live…" row with
+    # a SHORT client-side TTL, so a tunnel that never lands can't leave a zombie row. Claims the session in
+    # live-holder exactly like a full advertisement (it matches on session+ts, not url), so two hosts can't
+    # both slip through the starting phase.
+    ensure_worktree || fail "could not set up the sessions branch"
+    psid="${2:-}"; pname_b64="${3:-}"
+    case "$psid" in '' | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$pname_b64" in *[!A-Za-z0-9+/=]*) fail "bad name" ;; esac
+    pname=""
+    [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
+    pull_branch || fail "pull failed"
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+    live_refuse() { (unset MSYS_NO_PATHCONV; CL_DIR="$WT/live" CL_SID="$psid" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null); }
+    refuse="$(live_refuse)"
+    if [ -n "$refuse" ]; then
+      # Same yield as presence-set: if our OWN (losing) claim for this session is on the branch, retract it
+      # so peers converge on ONE live host now instead of after the loser's stale claim ages out.
+      if [ -e "$WT/live/$author.json" ] && grep -q "\"session\":\"$psid\"" "$WT/live/$author.json" 2>/dev/null; then
+        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
+        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
+        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+      fi
+      emit "$refuse"; exit 0
+    fi
+    mkdir -p "$WT/live" 2>/dev/null
+    printf '{"login":"%s","session":"%s","name":"%s","starting":true,"ts":%s}\n' "$author" "$psid" "$pname" "$(date +%s)" > "$WT/live/$author.json"
+    gitwt add -A -- "live/$author.json" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence starting $author" >/dev/null 2>&1
+    pushed=0
+    for i in 1 2 3; do
+      gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }
+      pull_branch || break
+      refuse="$(live_refuse)"
+      if [ -n "$refuse" ]; then
+        # A rival won the race while we were pushing — retract the claim we already committed and report who holds it.
+        gitwt rm -q --ignore-unmatch -- "live/$author.json" >/dev/null 2>&1
+        gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: presence yield $author" >/dev/null 2>&1
+        for j in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && break; pull_branch || break; done
+        emit "$refuse"; exit 0
+      fi
+    done
+    [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-starting\"}" || emit "{\"ok\":false,\"op\":\"presence-starting\",\"error\":\"push failed\"}"
     ;;
   presence-clear)
     ensure_worktree || fail "could not set up the sessions branch"

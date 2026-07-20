@@ -4,6 +4,22 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+- **A guest's Ctrl+V now pastes the guest's own clipboard — never the host's.** The old paste interceptor
+  matched the key by NAME ('v'), which any non-Latin keyboard layout bypasses; the chord then fell through
+  to xterm as a raw ^V byte, and the CLI on the host answered it by pasting the **host's** clipboard into
+  the shared terminal. Guest paste now rides the browser's native paste event (works in every browser, no
+  permission prompt, layout-independent) as its own typed frame; the host wraps it in bracketed-paste marks
+  exactly like its own paste, sanitizes embedded escape marks (no paste-block breakout), and the server
+  strips any bare ^V from the keystroke channel — so no client, stale or future, can trigger a
+  host-clipboard paste again.
+- **Collaborators see a live session (and new synced sessions) in seconds, not minutes.** Everything shared
+  rides one git branch, so main now probes that branch's head sha every ~2.5s per synced project (one cheap
+  ls-remote round-trip — no fetch, no worktree lock, no GitHub API budget) and fires the existing
+  sync/presence pipeline only when it actually moves — including for shared projects with no open tab,
+  which previously never synced at all until you opened them. Going live is announced in two phases: a
+  "going live…" row appears for peers the moment Share is clicked (before the tunnel finishes spawning) and
+  flips to a joinable badge as soon as the tunnel lands. Renderer presence/title polls also survive a
+  minimized window now (background throttling off).
 - **A Windows+WSL live share now actually reaches remote guests.** cloudflared was detected (and installed)
   inside the WSL guest but launched from the Windows host — two different machines, so the System-check row
   said "ready" while every share silently degraded to a localhost-only link nobody could join. Detection now

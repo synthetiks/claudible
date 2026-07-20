@@ -44,6 +44,32 @@ var term = new Terminal({
            selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
 });
 term.open($('terminal'));
+// GUEST PASTE, step 1 of 2: make xterm NEVER handle the paste chord itself. Its stock keymap resolves
+// Ctrl/⌘+V by PHYSICAL key into a raw 0x16 byte; relayed to the host's pty, the CLI there answers ^V by
+// reading the clipboard of the machine it runs on — the HOST's clipboard, i.e. the wrong person's paste.
+// Matching e.code (physical key) keeps this layout-independent: on a Cyrillic/Hebrew/Greek layout e.key
+// isn't 'v' for the same chord (exactly how the old key-name-matching interceptor was bypassed). Returning
+// false makes xterm skip the event WITHOUT preventDefault, so the browser's default accelerator fires the
+// native 'paste' event below — which carries the GUEST's own clipboard in every browser, no permission
+// prompt, no async clipboard API.
+term.attachCustomKeyEventHandler(function (ev) {
+  var isV = ev.code === 'KeyV' || (ev.key && String(ev.key).toLowerCase() === 'v');
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && isV) return false;
+  return true;
+});
+// GUEST PASTE, step 2 of 2: the native paste event (chord, context menu, or touch menu) delivers THIS
+// viewer's clipboard text with no permission gate. It rides its own typed frame — never the keystroke
+// channel — so the host can wrap + sanitize it as one paste. Capture phase beats xterm's internal textarea
+// paste handler; preventDefault/stopPropagation keep that handler from double-sending the text.
+$('terminal').addEventListener('paste', function (e) {
+  e.preventDefault(); e.stopPropagation();
+  if (readOnly || denied) return;
+  var t = '';
+  try { t = e.clipboardData ? e.clipboardData.getData('text/plain') : ''; } catch (x) {}
+  if (!t) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { addSystemChat('Paste not sent — reconnecting to the host.'); return; }
+  try { ws.send(JSON.stringify({ type: 'paste', data: t })); } catch (x) {}
+}, true);
 // SHARED SCROLL (deliberate, chosen over per-viewer isolation): the mirrored screen is ONE view — the TUI's
 // scroll state lives in the host's pty, so anyone scrolling pages it for everyone, exactly like typing.
 // Stock xterm wheel: in the TUI (alt buffer + mouse reports) it becomes scroll bytes that ride term.onData
@@ -633,6 +659,10 @@ function reconnect(label) { setStatus(label, 'bad'); retry = Math.min(retry + 1,
 term.onData(function (d) {
   if (readOnly || denied || !ws || ws.readyState !== WebSocket.OPEN) return;
   if (!d) return;
+  // Belt-and-braces: never ship a raw ^V byte. On the host's pty the CLI answers 0x16 by pasting the
+  // HOST's clipboard; guest paste has its own 'paste' frame (see the terminal paste listener above), so
+  // any 0x16 that still reaches onData is a keymap leak, not intent. The server strips it too.
+  if (d.indexOf('\x16') !== -1) { d = d.split('\x16').join(''); if (!d) return; }
   ws.send(JSON.stringify({ type: 'input', data: d }));   // keystrokes AND scroll bytes (Page keys, wheel reports) — shared view, shared scroll
 });
 
@@ -699,14 +729,10 @@ window.addEventListener('keydown', function (e) {
   if (inTerm) {
     if (mod && k === 'a') { e.preventDefault(); e.stopPropagation(); term.selectAll(); return; }
     if (mod && k === 'c') { var sel = term.getSelection(); if (sel) { e.preventDefault(); e.stopPropagation(); copyText(sel); } return; }
-    if (mod && k === 'v') {
-      if (readOnly || !ws || ws.readyState !== WebSocket.OPEN) return;   // view-only can't type
-      e.preventDefault(); e.stopPropagation();
-      (navigator.clipboard && navigator.clipboard.readText ? navigator.clipboard.readText() : Promise.reject())
-        .then(function (t) { if (t) ws.send(JSON.stringify({ type: 'input', data: '\x1b[200~' + t + '\x1b[201~' })); })
-        .catch(function () {});
-      return;
-    }
+    // Ctrl/⌘+V is deliberately NOT intercepted here: the browser's default accelerator must run so the
+    // native 'paste' event fires with the GUEST's clipboard (see the #terminal paste listener up top).
+    // The old async-clipboard-API interceptor matched by KEY NAME ('v'), which non-Latin layouts bypass —
+    // the chord then fell through to xterm as a raw 0x16 and pasted the HOST's clipboard at the CLI.
     return;
   }
   if (field) {

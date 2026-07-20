@@ -76,6 +76,13 @@ eq('rival file with no ts → treated stale (free)', run({ daisy: { session: 's1
   const out = run({ daisy: { session: 's1', ts: FRESH, name: 'CrazyDev' }, zoe: { session: 's1', ts: FRESH - 20, name: 'Zoe' } }, 's1', 'niburu');
   eq('multiple rivals → earliest claimant named', (refusal(out) || {}).by, 'Zoe');
 }
+// ---- phase-1 claims: a "going live…" stamp (starting:true, no url yet) claims the session like a full one ----
+// Two hosts must not both slip through the tunnel-spawn window: the arbiter matches on session+ts, so a
+// url-less starting stamp blocks a rival exactly as a full advertisement would.
+{
+  const out = run({ daisy: { session: 's1', ts: FRESH, name: 'CrazyDev', starting: true } }, 's1', 'niburu');
+  eq('fresh STARTING rival claim → refusal', (refusal(out) || {}).error, 'already-live');
+}
 
 console.log(`live-holder: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

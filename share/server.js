@@ -85,9 +85,28 @@ function uniqueName(base, isTaken, max) {
   return cleanName(b.slice(0, Math.max(1, cap - 8)) + " " + newToken().slice(0, 6), "Guest");   // pathological (998 collisions) — random tail
 }
 
-// onInput(data) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
+// ---- guest terminal-input hygiene (pure; exported for tests) ----
+// A raw ^V (0x16) from a guest must never reach the host's pty: the CLI attached to it answers ^V by
+// reading the clipboard of the machine it runs on — the HOST's — so any guest byte that triggers it is a
+// confused-deputy paste of the wrong person's clipboard. The current guest client can no longer emit one
+// (paste rides its own typed frame), but a stale cached tab or a future keymap regression dies here.
+function stripCtrlV(data) {
+  const s = String(data == null ? '' : data);
+  return s.indexOf('\x16') === -1 ? s : s.split('\x16').join('');
+}
+// One guest paste, host-wrapped: the payload is enclosed in bracketed-paste marks ON THE HOST (mirroring
+// the host's own Ctrl+V path), so the marks themselves must not appear INSIDE the payload — an embedded
+// \x1b[201~ would terminate the paste early and turn everything after it into live keystrokes (paste
+// injection — real risk when a guest pastes text they copied from an untrusted page). NUL and ^V bytes are
+// dropped for the same reason ^V is stripped from keystrokes.
+function sanitizePaste(text) {
+  return String(text == null ? '' : text).replace(/\x1b\[20[01]~/g, '').replace(/[\x00\x16]/g, '');
+}
+const MAX_PASTE_CHARS = 200 * 1000;   // a paste, not an upload — and MAX_WS_PAYLOAD already bounds the frame
+
+// onInput(data) · onPaste(text,{pid,name}) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onVoiceMembers, onAudio } = {}) {
+function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onVoiceMembers, onAudio } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let heartbeatTimer = null;   // ~30s WS ping/pong — catches SILENT disconnects (a network drop with no clean 'close')
   let linkToken = null, hostName = 'Host';
@@ -351,8 +370,19 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
       }
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (readOnly || paused) return;   // paused = host on a private/non-granted workspace; never inject into it
-        try { onInput && onInput(msg.data, { pid: ws._pid, name: ws._name }); } catch {}   // pass the typist's identity so session-history can attribute the prompt to the guest, not the host
+        const data = stripCtrlV(msg.data);   // a raw ^V would paste the HOST's clipboard at the CLI — see stripCtrlV
+        if (!data) return;
+        try { onInput && onInput(data, { pid: ws._pid, name: ws._name }); } catch {}   // pass the typist's identity so session-history can attribute the prompt to the guest, not the host
         typistPing(ws._name, ws);         // label this guest's keystrokes for every OTHER viewer (the host UI learns via onInput)
+        return;
+      }
+      // A guest's paste — THEIR clipboard text as one typed frame, kept off the keystroke channel so the
+      // host can wrap it in bracketed-paste marks and sanitize it as a unit (see onPaste in main.js).
+      if (msg.type === 'paste' && typeof msg.data === 'string') {
+        if (readOnly || paused) return;              // same gate as keystrokes — paste IS typing
+        if (msg.data.length > MAX_PASTE_CHARS) return;   // pathological payload; MAX_WS_PAYLOAD backstops the frame anyway
+        try { onPaste && onPaste(msg.data, { pid: ws._pid, name: ws._name }); } catch {}
+        typistPing(ws._name, ws);                    // a paste lights the typist chip like any other input
         return;
       }
       // ---- voice room (allowed even for VIEW-ONLY guests — talking is not terminal control) ----
@@ -622,4 +652,4 @@ function createShareServer({ onInput, onGuests, onRoster, onApprovalRequest, onA
   return { start, stop, broadcast, broadcastStatus, broadcastChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
-module.exports = { createShareServer, uniqueName, cleanName };
+module.exports = { createShareServer, uniqueName, cleanName, stripCtrlV, sanitizePaste };

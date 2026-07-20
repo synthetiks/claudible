@@ -107,8 +107,11 @@ ok('app.js: collabLive keys on sharedSessionId (not activeSession)',
   /collabLive = !!\(aw && aw\.kind === 'repo' && sharedSessionId\)/.test(APP));
 ok('app.js: updateCollab resolves the workspace from sharedWsId',
   /function updateCollab\(\)[\s\S]{0,900}?workspaces\.find\(\(w\) => w\.id === \(sharedWsId \|\| activeWsId\)\)/.test(APP));
+// NOT gated on tunnelUp (two-phase advertise): the moment Share is clicked main stamps a url-less
+// "going live…" presence; the full handle follows when the tunnel lands. The pin's real invariant is that
+// advertise keys on the SHARED session (never the viewed one) — that part must never regress.
 ok('app.js: updateAdvertise wants the SHARED session',
-  /const want = \(tunnelUp && aw && aw\.kind === 'repo' && sharedSessionId\) \? sharedSessionId : null;/.test(APP));
+  /const want = \(aw && aw\.kind === 'repo' && sharedSessionId\) \? sharedSessionId : null;/.test(APP));
 ok('app.js: sharedWsId is cleared everywhere sharedSessionId is',
   (APP.match(/sharedSessionId = null/g) || []).length === (APP.match(/sharedWsId = null/g) || []).length);
 
