@@ -13,6 +13,13 @@ on a WSL2-equipped machine. Linux/macOS packaged installers remain CI-artifact-o
 the packaged-runtime-dir work. macOS `.dmg` signing/notarization and a native-Windows runtime smoke pass are
 still open. The presence relay ships **inert** (no default URL) — it is opt-in, self-hosted per team.
 
+- **Renaming a session is no longer auto-committed by an expand/collapse click.** Clicking a project's
+  caret while a rename box was open detached the sidebar list, blurring the input and silently saving the
+  half-typed name; the caret's in-place repaint now defers while a rename is open, exactly like the full
+  sidebar rebuild already did.
+- **Presence stamps are shell-quote hardened (defense-in-depth).** The values written into the live-presence
+  git commands are now escaped at the interpolation site, not just validated by charset — so a future field
+  can't reintroduce a quoting break.
 - **11-agent master audit — every confirmed finding fixed, verified by the full suite.** Highlights: a
   guest's Ctrl+C on a non-Latin layout could fall through as a raw interrupt and KILL the host's running
   turn (fixed layout-independent, both guest page and cockpit, matching the paste fix); Backspace/Cut on a
