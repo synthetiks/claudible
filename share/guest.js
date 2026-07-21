@@ -433,7 +433,7 @@ $('browse-open').addEventListener('click', openBrowse);
 $('browse-x').addEventListener('click', closeBrowse);
 $('browse-back').addEventListener('click', browseBack);
 
-// ---- voice room: peer-to-peer audio with the host & other viewers (signaling relayed over our WS) ----
+// ---- voice room: audio RELAYED through the share server (base64 PCM over our WS) — NOT peer-to-peer ----
 // floating per-person VOLUME control — right-click (or long-press on touch) a voice member to set how loud YOU
 // hear them (0–200%). Local to this viewer; never changes what anyone else hears. Survives a rejoin.
 var volPop = null;
