@@ -1,7 +1,8 @@
 # Security
 
-Claudible is a **local desktop tool**: no accounts, no Claudible-operated servers, no telemetry. It does
-have real network surface when you use certain features — here is the honest map of it.
+Claudible is a **local desktop tool**: no accounts, no telemetry, and — in its default build — no
+Claudible-operated servers (the optional presence relay below ships **inert**; it is off unless a team
+self-hosts one). It does have real network surface when you use certain features — here is the honest map of it.
 
 ## What to know before you run it
 
@@ -29,6 +30,22 @@ have real network surface when you use certain features — here is the honest m
   keyboard, so grant that only to people you trust. The link dies when you stop sharing; **New link**
   revokes everyone who held the old one. Guest resume tokens are single-use and IP-bound; a kicked guest's
   tokens are invalidated.
+  - *Known, accepted exposure:* a guest's private resume token travels as a `?r=` query parameter on the
+    WebSocket URL and is held in the tab's `sessionStorage` (so a refresh silently reconnects). It is
+    therefore visible in that browser's own history/URL bar. This is mitigated — the token is per-guest,
+    IP-bound, single-use, revoked on kick, and expires after a short grace window — and is bounded to a
+    session the host already approved. Moving it into an `HttpOnly` cookie is deliberately deferred (it
+    would risk the reconnect flow over the `SameSite=None` tunnel) and is tracked as a hardening item.
+- **Live-session presence relay (opt-in, self-hosted, OFF by default).** A team may deploy the tiny
+  Cloudflare Worker in [`relay/`](relay/) to make "went live"/"ended" reach collaborators in under a second
+  instead of the default ~3–5s git path. When enabled (`CLAUDIBLE_RELAY_URL`, or a maintainer bakes a URL
+  into `lib/presenceRelay.js`), each connecting app sends that operator's Worker: the connecting GitHub
+  login, timestamps, a **hashed** repo identity (repo names never appear in URLs/logs), and the same
+  presence payload already committed to the `claudible/sessions` branch — never transcripts or terminal
+  content. The GitHub token is used for one read-only push-permission check per connection and is not
+  stored or logged. Git remains the source of truth; the relay is a preview layer that no-ops when unset.
+  The maintainer who deploys it becomes its operator — the "no Claudible-operated servers" line above holds
+  only while no relay URL is configured.
 - **"Share live" advertises the link to your repo collaborators.** In a *synced project*, the **Share live**
   action in a session's `▾` menu (not the plain **Share** button) additionally publishes the invite URL and
   its join token to `live/<your-login>.json` on the project's shared `claudible/sessions` branch. That is the

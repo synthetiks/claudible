@@ -25,8 +25,10 @@ to the fix loop with the step number as the repro. Steps map to `docs/FINISH-LIN
 
 ## Live session (2M-8 … 2M-13)
 7. **[2M-8]** A: open a session in the shared project → *Share live*. B sees **● LIVE · Join** on that exact
-   session within ~45s — in the right project, exactly once (no duplicate rows anywhere, no out-of-sync
-   chip on the live row).
+   session within **~5s** (near-instant if the presence relay is deployed) — in the right project, exactly
+   once (no duplicate rows anywhere, no out-of-sync chip on the live row). A "going live…" row may appear
+   within ~3s and flip to joinable when the tunnel lands. *(If B's app is on an older build, the badge will
+   also show a build-skew note — update B before treating a slow result as a regression.)*
 8. **[2M-9]** B: click Join → native tab opens: co-typing works both directions, `/model`-style pills work,
    the tracker mirrors A's, the typist chip names whoever types, scroll pages the shared view for both.
 9. **[2M-10]** A: send the web link to B (or open it in a phone browser) → approval prompt on A → approve →
@@ -35,8 +37,8 @@ to the fix loop with the step number as the repro. Steps map to `docs/FINISH-LIN
     shared session — nothing of A's private screen, tracker, or history leaks; the badge stays put.
 11. **[2M-13]** B: drop the network for ~30s (wifi off/on) mid-join → the tab reconnects by itself (or via
     its ↻), same seat, same name — no "(2)" ghost in the roster, no permanent "offline".
-12. **[2M-12]** A: End the session → B's badge and mirror clear within ~2s (not minutes). Re-share → B can
-    re-join. Then A: **quit the app entirely while sharing** → B's badge clears within ~2s again.
+12. **[2M-12]** A: End the session → B's badge and mirror clear within **~5s** (not minutes). Re-share → B can
+    re-join. Then A: **quit the app entirely while sharing** → B's badge clears within ~5s again.
 
 ## Voice (2M-14 … 2M-15)
 13. **[2M-14]** Each solo: push-to-talk transcribes; Speak reads a reply aloud.

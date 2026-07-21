@@ -115,7 +115,7 @@ t('worker: room key is verified against the hello repo (no cross-room token reus
 t('script: presence stamps carry the publisher build sha', () =>
   assert.ok((SH.match(/\\"sha\\":\\"\$psha\\"/g) || []).length === 2));
 t('main: stamps thread BUILD.short; drift check + boot line exist', () => {
-  assert.ok((MAIN.match(/'\$\{BUILD\.short\}'/g) || []).length >= 3);   // starting + full + heartbeat (+ the starting retry)
+  assert.ok((MAIN.match(/shq\(BUILD\.short\)/g) || []).length >= 3);   // starting + full + heartbeat (+ the starting retry)
   assert.ok(/function checkBuildDrift\(/.test(MAIN) && /winSend\('build:drift'/.test(MAIN));
   assert.ok(/_liveTiming\('boot: sha='/.test(MAIN));
 });

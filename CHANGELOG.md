@@ -4,6 +4,15 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-21
+
+**Known limitations (owner decisions, not defects — carried forward):** packaged installs have no in-app
+auto-updater (the new **Update & restart** button is for git-clone installs only; packaged builds still get
+a notice-only "newer release" toast). A packaged Windows build always selects the native `win` runner even
+on a WSL2-equipped machine. Linux/macOS packaged installers remain CI-artifact-only (not published) pending
+the packaged-runtime-dir work. macOS `.dmg` signing/notarization and a native-Windows runtime smoke pass are
+still open. The presence relay ships **inert** (no default URL) — it is opt-in, self-hosted per team.
+
 - **11-agent master audit — every confirmed finding fixed, verified by the full suite.** Highlights: a
   guest's Ctrl+C on a non-Latin layout could fall through as a raw interrupt and KILL the host's running
   turn (fixed layout-independent, both guest page and cockpit, matching the paste fix); Backspace/Cut on a

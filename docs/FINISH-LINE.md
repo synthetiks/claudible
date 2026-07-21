@@ -60,8 +60,8 @@ can run against an isolated copy · **[2M-n]** = step n of the two-machine manua
   resurrections, no lost sessions. **[probe: simulated with a stale worktree]**
 
 ## E. Live sessions
-- E1. Share live → link + presence advertised to collaborators (● LIVE badge on their side within
-  one poll tick). **[suite + 2M-8]**
+- E1. Share live → link + presence advertised to collaborators (● LIVE badge on their side within **~5s**
+  via the per-workspace beacon; sub-second if a presence relay is deployed). **[suite + 2M-8]**
 - E2. Join from the badge → native joined tab in the joiner's cockpit: co-typing, shortcuts, tracker,
   chat, voice, roster all work with full parity. **[2M-9]**
 - E3. Browser guest link works with approval gate, read-only mode, guest cap (enforced at admission,

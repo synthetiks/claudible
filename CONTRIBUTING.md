@@ -24,7 +24,10 @@ See [SETUP.md](SETUP.md) for full prerequisites and troubleshooting, and
 - **The from-scratch voice install is the less-travelled path.** If you touch `setup/setup.sh` or
   `wsl/services.sh`, please test it on a machine without a pre-existing `~/.voicemode`.
 - **Match the surrounding style.** The code is intentionally compact and comment-dense about *why*, not *what*.
-- Run `node --check main.js` and `bash -n wsl/*.sh setup/setup.sh` before opening a PR.
+- Before opening a PR, run what CI runs so you don't pass locally and fail CI:
+  `npm test` (the full suite), `npm run lint` (ESLint), and
+  `shellcheck --severity=error -e SC1091 wsl/*.sh setup/setup.sh`. (`node --check main.js` +
+  `bash -n wsl/*.sh` are a fast pre-check but are strictly weaker than the above.)
 
 ## License
 By contributing, you agree your contributions are licensed under the [MIT License](LICENSE).

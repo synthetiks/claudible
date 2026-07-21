@@ -227,6 +227,20 @@ collaborators shouldn't see a given session. See [SECURITY.md](SECURITY.md).
 The script fleet is **Python-free** (the JSON transforms were ported to Node, byte-parity proven), so the only
 per-OS runtime is Node + a shell. See [docs/OS-CONVERSION-PLAN.md](docs/OS-CONVERSION-PLAN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Staying up to date
+- **Build-from-source (clone) installs update themselves.** Re-running `install.ps1` does a `git pull` first
+  (skipped if you have local edits), and the app shows an **"Update & restart"** chip when a newer commit is
+  on disk under the running process — one click pulls, reinstalls dependencies if they changed, and relaunches.
+  Pass `install.ps1 -NoUpdate` to opt out of the auto-pull. *(Packaged `.exe` installs instead show a
+  notice-only "newer release available" toast — nothing installs itself there.)*
+- **Which build am I / is my collaborator on?** In a live session, a peer running a different commit shows a
+  small build-skew note on their **● LIVE** badge (e.g. *"different build abc1234 vs yours def5678"*), so
+  "did you restart onto the update?" is answered at a glance instead of guessed.
+- **Faster presence (optional, self-hosted).** By default "went live"/"ended" reaches collaborators in ~3–5s
+  over the shared git branch. A team that wants **sub-second** presence can self-host the tiny Cloudflare
+  Worker in [`relay/`](relay/) — it's off unless configured, and git stays the source of truth. See
+  [`relay/README.md`](relay/README.md) and the disclosure in [`SECURITY.md`](SECURITY.md).
+
 ## Uninstalling
 On **Windows**, uninstall from *Settings → Apps* (or the Start-menu uninstaller); that removes the app and its
 shortcuts. A few things are **intentionally left behind** so a reinstall or upgrade keeps your work — remove

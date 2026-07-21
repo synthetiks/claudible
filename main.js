@@ -13,6 +13,7 @@ const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charse
 const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
 const { createShareServer, sanitizePaste } = require('./share/server');
+const { shq } = require('./runners/_shared');   // single-quote-safe interpolation for values that ride into a bash -lc arg string (defense-in-depth on the presence stamps below)
 const { readGitSha } = require('./lib/buildIdentity');
 const { makePresenceRelay, mergePeerFrame, reconcilePeerLists } = require('./lib/presenceRelay');
 const selfUpdate = require('./lib/selfUpdate');
@@ -1177,7 +1178,7 @@ function presenceBeatOnce() {
   const st = share.status();
   if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
   _relayPub(advertisedWs, { type: 'live', session: advertisedSid, url: shareBaseUrl, token: st.token, name: _advNamePlain(), sha: BUILD.short });   // keeps late relay joiners current
-  runPresence(`presence-set '${advertisedSid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
+  runPresence(`presence-set '${shq(advertisedSid)}' '${shq(shareBaseUrl)}' '${shq(st.token)}' '${shq(advertisedNameB64)}' '${shq(BUILD.short)}'`, (r) => {
     _liveTiming(`heartbeat: stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'}`);
     // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
     // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
@@ -1213,13 +1214,13 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     // tunnel's multi-second spawn. presence-starting stamps a url-less claim (same one-host arbiter as the
     // full advertisement); presenceBeatOnce replaces it with the real handle the instant adoptTunnel lands.
     // A rival already holding the claim surfaces exactly like a beat-time loss (renderer un-shares + toasts).
-    runPresence(`presence-starting '${sid}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
+    runPresence(`presence-starting '${shq(sid)}' '${shq(advertisedNameB64)}' '${shq(BUILD.short)}'`, (r) => {
       _liveTiming(`advertise: starting stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
       // ONE outer retry on a transient failure: the stamp is one-shot (the heartbeat only re-sends the FULL
       // handle once the tunnel lands), so a blip here used to leave peers blind until tunnel-time. A refusal
       // (already-live) is a verdict, never retried.
       if (!(r && r.ok) && !(r && r.error === 'already-live') && advertisedSid === sid) {
-        const t = setTimeout(() => { if (advertisedSid === sid && !isTunnelUrl(shareBaseUrl)) runPresence(`presence-starting '${sid}' '${advertisedNameB64}' '${BUILD.short}'`, (r2) => _liveTiming(`advertise: starting stamp retry ${r2 && r2.ok ? 'landed' : 'failed'}`), ws); }, 2500);
+        const t = setTimeout(() => { if (advertisedSid === sid && !isTunnelUrl(shareBaseUrl)) runPresence(`presence-starting '${shq(sid)}' '${shq(advertisedNameB64)}' '${shq(BUILD.short)}'`, (r2) => _liveTiming(`advertise: starting stamp retry ${r2 && r2.ok ? 'landed' : 'failed'}`), ws); }, 2500);
         if (t.unref) t.unref();
       }
       if (r && r.error === 'already-live') {
@@ -1232,7 +1233,7 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
     return;
   }
   _relayPub(ws, { type: 'live', session: sid, url: shareBaseUrl, token: st.token, name: _advNamePlain(), sha: BUILD.short });
-  runPresence(`presence-set '${sid}' '${shareBaseUrl}' '${st.token}' '${advertisedNameB64}' '${BUILD.short}'`, (r) => {
+  runPresence(`presence-set '${shq(sid)}' '${shq(shareBaseUrl)}' '${shq(st.token)}' '${shq(advertisedNameB64)}' '${shq(BUILD.short)}'`, (r) => {
     _liveTiming(`advertise: full stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
     if (r && r.error === 'already-live') return resolve(r);   // a collaborator already hosts this session — do NOT arm the heartbeat (it would keep re-contesting the claim every 2 min); the renderer un-shares + points the user at Join
     startAdvertiseHeartbeat(sid, ws);

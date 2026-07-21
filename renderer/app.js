@@ -4460,7 +4460,14 @@ function renderWsChips() {
   // which chip is active/expanded differs. Recreating every chip (innerHTML='') restarts the keyframe animations on
   // busy/syncing dots (a visible stutter). When the structural signature matches, update chips IN PLACE instead.
   const sig = wsChipsSig();
-  if (sig === _wsChipsSig && el.querySelector('.ws-chip')) { reconcileWsChips(el); el.scrollTop = _scroll; return; }
+  if (sig === _wsChipsSig && el.querySelector('.ws-chip')) {
+    // Mid-rename: reconcileWsChips detaches sessListEl (`.remove()`), which blurs a focused rename input →
+    // its blur handler commit(true) silently auto-saves a half-typed name. Defer exactly like the structural
+    // rebuild below already does; the expanded/active STATE was set before this call, so nothing is lost — the
+    // next repaint after the rename commits/cancels applies it. (Closes the caret-click auto-commit quirk.)
+    if (el.querySelector('.sess-rename, .ws-rename')) return;
+    reconcileWsChips(el); el.scrollTop = _scroll; return;
+  }
   // STRUCTURAL rebuild below (innerHTML=''). Removing the ancestor of a focused rename input fires a native
   // blur → commit(true) mid-edit — a background sync-state ping was silently auto-saving half-typed names and
   // tearing the box down. Defer the rebuild while any rename is open (sig stays stale, so the next periodic

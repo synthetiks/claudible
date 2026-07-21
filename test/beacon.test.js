@@ -76,7 +76,7 @@ ok('main: a failing workspace probe backs off exponentially instead of burning a
   /_beaconErr\.set\(wsId, \(_beaconErr\.get\(wsId\) \|\| 0\) \+ 1\)/.test(MAIN) && /Math\.pow\(2, errs\)/.test(MAIN));
 ok('main: presence ops ride their OWN lane, never behind a transcript sync',
   /const _presQ = makeKeyedQueue\(\)/.test(MAIN) && /\/\^presence-\/\.test\(args\) \? _presQ : _syncQ/.test(MAIN));
-ok('main: tunnel-down advertise pushes the phase-1 starting presence', /presence-starting '\$\{sid\}'/.test(MAIN));
+ok('main: tunnel-down advertise pushes the phase-1 starting presence', /presence-starting '\$\{shq\(sid\)\}'/.test(MAIN));
 ok('main: renderer pollers survive minimize (backgroundThrottling:false)', /backgroundThrottling: false/.test(MAIN));
 
 // ---- renderer + preload: consuming the fast path ----
