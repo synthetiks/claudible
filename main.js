@@ -1201,7 +1201,10 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   const st = share.status();
   if (!sid || !st.running || !st.token) return resolve({ ok: false, error: 'not live' });
   advertisedNameB64 = Buffer.from(String((payload && payload.name) || '')).toString('base64');   // chosen display name → presence (badge/roster)
-  const ws = activeWorkspace;                             // the ws we're advertising on RIGHT NOW — pin it so a later switch can't misdirect the clear
+  // The SHARED session's project, named by the renderer — NOT main's ambient activeWorkspace, which follows
+  // the foreground tab and can legitimately be a different (or non-repo) project while the share streams on.
+  // Guessing here silently refused every presence write when the host was focused on a local project.
+  const ws = _wsById(payload && payload.wsId) || activeWorkspace;   // pinned so a later switch can't misdirect the clear
   // NEVER publish a non-tunnel (loopback/dead) URL to remote peers — they'd dial their own machine. If the tunnel
   // isn't up yet, arm the heartbeat anyway so presence is pushed the instant a real *.trycloudflare.com URL appears,
   // and tell the caller so the host can be warned their share isn't remotely reachable.

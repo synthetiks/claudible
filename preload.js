@@ -128,7 +128,7 @@ contextBridge.exposeInMainWorld('claudible', {
   voiceAudio: (b64, sr) => ipcRenderer.send('share:audio-send', { data: b64, sr }),   // cockpit mic frame (+ rate) → guests
   onShareAudio: (cb) => ipcRenderer.on('share:audio', (_e, p) => cb(p)),           // guest voice frame → cockpit
   // live sessions — advertise the session I'm hosting; discover + join a collaborator's live session natively
-  liveAdvertise: (sessionId, name) => ipcRenderer.invoke('live:advertise', { sessionId, name }),
+  liveAdvertise: (sessionId, name, wsId) => ipcRenderer.invoke('live:advertise', { sessionId, name, wsId }),   // wsId = the SHARED session's project. Never let main guess from its ambient foreground tab: the host can be focused on a different (even non-repo) project, and presence would then be written to the wrong branch — or refused outright ("sync is only available for repo workspaces"), advertising nothing at all.
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
   livePeers: (wsId) => ipcRenderer.invoke('live:peers', wsId),   // peers on THIS workspace's presence branch, never main's ambient one
   onAdvertiseLost: (cb) => ipcRenderer.on('live:advertise-lost', (_e, p) => cb(p)),   // the presence heartbeat lost the one-host-per-session claim (a collaborator went live while ours was stale) — UI must stop saying "sharing"

@@ -2087,7 +2087,7 @@ if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
     const had = !!saved, changed = v !== saved;
     saved = v; savePrefs({ collabName: v });
     renderRoster(lastRoster); renderLiveBar();
-    if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v); } catch (e) {} }
+    if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v, sharedWsId || activeWsId); } catch (e) {} }   // rename → re-stamp presence on the SAME project the share belongs to
     showView();
     if (changed) { try { toast(had ? 'Username changed' : 'Username saved'); } catch (e) {} }
   };
@@ -2874,7 +2874,7 @@ function updateAdvertise() {
   // advertise + warn the host if the tunnel isn't actually up (so they know WHY a collaborator can't join,
   // instead of silently publishing an unreachable handle). The main-process heartbeat self-heals once it connects.
   try {
-    claudible.liveAdvertise(want, collabName())
+    claudible.liveAdvertise(want, collabName(), sharedWsId || activeWsId)   // name the SHARED session's project explicitly — main must not infer it from its foreground tab (a host focused on a LOCAL project made every presence write fail: "sync is only available for repo workspaces")
       .then((r) => {
         if (r && r.error === 'not live') {
           // The click's synchronous advertise RACED shareStart — main's share server hadn't bound yet, so
