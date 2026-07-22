@@ -3006,7 +3006,7 @@ function reconcileJoinedTabs(pollOk) {
   }
   if (ended.length) { toast('Host ended the live session'); ended.forEach((id) => { try { closeTab(id); } catch {} }); }
 }
-let _pollLiveInFlight = false;
+let _pollLiveInFlight = false, _pollLiveSince = 0;
 async function pollLivePeers() {
   // Refresh presence for every repo project whose live badge is currently VISIBLE — the active one PLUS every
   // expanded one — so a collaborator going live/offline in a project you're looking at (but not active in)
@@ -3014,7 +3014,7 @@ async function pollLivePeers() {
   // wsId and bucketed under it, so peers can never cross projects. (Cost: one presence fetch per visible repo per
   // 10s; bounded by what the user has open. A clean End clears instantly via the host's retrying clear anyway.)
   if (_pollLiveInFlight) return;                                    // a prior tick's fan-out is still running (slow wsl pipe) — skip rather than pile up overlapping git fetches
-  _pollLiveInFlight = true;
+  _pollLiveInFlight = true; _pollLiveSince = Date.now();
   try {
     const targets = workspaces.filter((w) => w && w.kind === 'repo' && (w.id === activeWsId || isWsExpanded(w.id))).map((w) => w.id);
     const now = Date.now() / 1000;
@@ -3043,6 +3043,7 @@ async function pollLivePeers() {
       }
     }
     livePeersByWs = next;
+    _notePendingRows(next);
     // Self-clean the socket-proved-dead set: drop a suppression once git presence ALSO no longer lists the session
     // (git caught up — the normal, fast path), OR after DEAD_SUPPRESS_MS as a guaranteed exit so a session re-hosted
     // with the same handle (which git never drops, and whose re-arm skips setLiveState) can't stay hidden forever.
@@ -3075,10 +3076,31 @@ function filterLivePeers(list, wsId, now) {
 // poll's in-flight data, and the old unconditional install repainted the just-arrived live row backwards
 // (and could fire a false "Host ended" through reconcileJoinedTabs).
 const livePeersWriteGen = new Map();   // wsId -> monotonically bumped on every bucket write
+// "Is a transient 'going live…' row painted right now?" — recorded by the two sanctioned writers as they
+// install a bucket, so the watchdog never reaches into the peers cache itself (that cache stays confined to
+// peersForWs/pollLivePeers/the beacon push, or one project's peers could leak into another's rows).
+let _startingRowSeen = false;
+function _notePendingRows(map) {
+  let f = false;
+  map.forEach((ps) => { if (Array.isArray(ps) && ps.some((p) => p && p.starting)) f = true; });
+  _startingRowSeen = f;
+}
 function livePeersSigOf(next) {
   return JSON.stringify([...next.entries()].sort().map(([ws, ps]) => [ws, ps.map((p) => [p.session, p.login, p.url, p.token, p.sha, !!sessIndex[p.session], deadPeerSessions.has(p.session)]).sort()]));   // p.sha: a peer finally restarting onto a new build must repaint the skew hint
 }
 setInterval(pollLivePeers, 10000);
+// LIVE-ROW WATCHDOG. Two failure modes this closes, both of which strand a peer on "going live…" forever:
+//   1. `_pollLiveInFlight` latching true — if a livePeers IPC never settles (a wedged presence queue), the
+//      10s fallback poll is dead for the REST OF THE SESSION and only beacon pushes can update anything.
+//   2. A phase-1 row is transient BY CONTRACT: the host replaces it with the full joinable handle seconds
+//      later. Nothing re-read it, so if the ONE push carrying that handle was dropped (arrived while the
+//      project was off-screen, or its read failed), the peer waited on the host's next ~45s heartbeat — and
+//      if that push dropped too, indefinitely. The data was sitting on the branch the whole time.
+// Self-limiting: only re-polls while a "going live…" row is actually on screen.
+setInterval(() => {
+  if (_pollLiveInFlight && Date.now() - _pollLiveSince > 30000) _pollLiveInFlight = false;   // a poll can never latch the fallback off permanently
+  if (_startingRowSeen) { try { pollLivePeers(); } catch (e) {} }
+}, 3000);
 // Beacon push: main's remote-head probe saw the shared branch move and already read the fresh presence list
 // locally (the probe was a fetch) — the peers arrive HERE with zero extra round-trips. Same filter, bucket,
 // sig and repaint path as the 10s poll above, which stays as the drift-correcting fallback.
@@ -3127,6 +3149,7 @@ try { claudible.onLivePeersPush((p) => {
   livePeersWriteGen.set(wsId, (livePeersWriteGen.get(wsId) || 0) + 1);   // supersede any in-flight poll for this bucket
   const next = new Map(livePeersByWs); next.set(wsId, peers);
   livePeersByWs = next;
+  _notePendingRows(next);
   const sig = livePeersSigOf(next);
   if (sig === livePeersSig) return;
   livePeersSig = sig; refreshSessions(); refreshExpandedTrees(); reconcileJoinedTabs(wsId === activeWsId);

@@ -97,6 +97,8 @@ ok('renderer: starting stamps pass the peers filter with their own short TTL',
   /STARTING_TTL_S/.test(APP) && /p\.starting/.test(APP));
 ok('renderer: advertise is no longer gated on tunnelUp (two-phase advertise)',
   !/const want = \(tunnelUp && aw/.test(APP) && /const want = \(aw && aw\.kind === 'repo'/.test(APP));
+ok('renderer: a stale "going live…" row is re-read, and the fallback poll can never latch off', () =>
+  /_pollLiveInFlight && Date\.now\(\) - _pollLiveSince > 30000/.test(APP) && /_startingRowSeen\) \{ try \{ pollLivePeers/.test(APP) && (APP.match(/_notePendingRows\(next\)/g) || []).length === 2);
 ok('renderer: a starting row is inert (no join handler until the full stamp)',
   /peer\.starting/.test(APP) && /going live/.test(APP));
 

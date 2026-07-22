@@ -2488,9 +2488,17 @@ ipcMain.handle('update:run', () => {
       const before = await selfUpdate.currentSha(__dirname);
       prog('pulling', 'Pulling update…');
       const pr = await selfUpdate.pull(__dirname);
-      if (!pr.ok) {
-        const msg = pr.kind === 'non-ff' ? 'this checkout has diverged from the repo — re-clone (or reset) to update'
-          : pr.kind === 'offline' ? 'could not reach GitHub — check your connection and retry'
+      if (!pr.ok && pr.kind === 'non-ff') {
+        // Upstream history was rewritten (a force-push), so ff-only can never succeed again and `git pull`
+        // is a permanent dead end — the state that forced collaborators to run git by hand. The tree is
+        // already proven clean above and an app checkout holds nothing of the user's, so snap to the
+        // upstream tip instead of handing them a manual chore.
+        prog('pulling', 'History diverged — resetting to the latest…');
+        _liveTiming('update: non-ff — resetting clean checkout to upstream');
+        const rr = await selfUpdate.resetToUpstream(__dirname);
+        if (!rr.ok) return { ok: false, error: 'this checkout has diverged and could not be reset automatically: ' + String(rr.detail || '') };
+      } else if (!pr.ok) {
+        const msg = pr.kind === 'offline' ? 'could not reach GitHub — check your connection and retry'
           : pr.kind === 'no-branch' ? 'not on a tracked branch — checkout main (or re-clone) to update'
           : 'git pull failed: ' + String(pr.detail || '').slice(-300);
         return { ok: false, error: msg };

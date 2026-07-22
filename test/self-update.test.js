@@ -99,6 +99,23 @@ function mkrepo(files) {
     fs.rmSync(d, { recursive: true, force: true });
   }
 
+  // ---- diverged (force-pushed) clone recovers WITHOUT a human running git ----
+  {
+    const origin = mkrepo({ 'f.txt': 'v1\n' });
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-selfupd-d-'));
+    execFileSync('git', ['clone', '-q', origin, clone]);
+    // rewrite origin's history (what a force-push looks like to this clone)
+    fs.writeFileSync(path.join(origin, 'f.txt'), 'rewritten\n');
+    sh(origin, 'add', '-A');
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@x', 'commit', '-q', '--amend', '-m', 'rewritten'], { cwd: origin });
+    const pr = await su.pull(clone);
+    ok('a force-pushed upstream is classified non-ff (pull can never succeed again)', pr.ok === false && pr.kind === 'non-ff');
+    const rr = await su.resetToUpstream(clone);
+    ok('resetToUpstream recovers it automatically', rr.ok === true);
+    ok('…and the clone now matches the rewritten upstream', fs.readFileSync(path.join(clone, 'f.txt'), 'utf8').trim() === 'rewritten');
+    fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
+  }
+
   // ---- wiring pins: the restart path must reuse the ONE quit teardown; the chip button exists; opt-out honored ----
   const MAIN = read('main.js');
   const APP = read('renderer/app.js');
@@ -110,6 +127,8 @@ function mkrepo(files) {
   ok('main: the restart runs teardownForExit() then relaunch/exit (app.exit bypasses window-all-closed)',
     /teardownForExit\(\);\s*\n\s*app\.relaunch\(\);\s*\n\s*app\.exit\(0\);/.test(MAIN));
   ok('main: single-flight lock on update:run', /updateInFlight/.test(MAIN));
+  ok('main: a diverged checkout self-heals instead of telling the user to run git',
+    /pr\.kind === 'non-ff'/.test(MAIN) && /resetToUpstream\(__dirname\)/.test(MAIN));
   ok('main: an Electron runtime bump is refused before npm can touch the running binary', /electronVersionChanged/.test(MAIN) && /re-run install\.ps1/.test(MAIN));
   ok('renderer: the chip button exists and confirms before killing busy/live work', /build-drift-update/.test(HTML) && /amHostingLive\(\)/.test(APP) && /Updating restarts Claudible now/.test(APP));
   ok('preload: updateRun/onUpdateProgress bridge the new channels', /update:run/.test(PRELOAD) && /update:progress/.test(PRELOAD));
