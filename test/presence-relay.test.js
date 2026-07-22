@@ -72,6 +72,12 @@ t('reconcile: dropped-by-git entries stay dropped unless newer than the WHOLE re
   const kept = reconcilePeerLists([{ login: 'mk', ts: 50 }], [{ login: 'cd', session: 's1', ts: 99 }]);
   assert.ok(kept.find((p) => p.login === 'cd'), 'newer-than-read relay announce must survive one stale git read');
 });
+t('reconcile: an EMPTY git read clears everything (git is authoritative about "nobody is live")', () => {
+  // Regression: _maxTs([]) is 0, so every prev entry used to be resurrected — an ended (or phase-1
+  // "going live…") row was re-pushed on every beacon tick and outlived the share.
+  assert.deepStrictEqual(reconcilePeerLists([], [{ login: 'cd', session: 's1', url: 'u', token: 't', ts: 9999 }]), []);
+  assert.deepStrictEqual(reconcilePeerLists([], [{ login: 'cd', session: 's1', starting: true, ts: 9999 }]), []);
+});
 t('reconcile: tolerates junk', () => {
   assert.deepStrictEqual(reconcilePeerLists(null, null), []);
   assert.strictEqual(reconcilePeerLists([{ login: 'x', ts: 1 }], [null, {}]).length, 1);
