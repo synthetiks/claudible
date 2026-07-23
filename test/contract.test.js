@@ -1634,5 +1634,37 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['upd() still hides only the thumb, leaving the track behind']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 50. THE GUEST TERMINAL IS PINNED, AND SHOWS ONLY WHAT A GUEST CAN USE.
+//   A guest saw a second scroll OUTSIDE the terminal: the pane was overflow:auto, and the fit was computed from
+//   NOMINAL monospace metrics (0.6 advance / 1.18 line), which round differently per browser/OS/zoom — so a grid
+//   computed as "just fits" could render a couple of pixels over. Desktop is now overflow:hidden AND the fit is
+//   corrected against what actually rendered. Phones keep overflow: their grid is deliberately wider than the
+//   screen and is panned. Separately: session cost + tokens are the HOST's billing numbers, useless to a viewer.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const gflat = GUEST_HTML.replace(/\s*\n\s*/g, '');
+  none('the guest pane can still scroll outside the terminal on desktop',
+    /\.wrap\{[^}]*overflow:hidden/.test(gflat) ? [] : ['.wrap is not overflow:hidden on desktop']);
+  none('…and phones lost the horizontal pan they need (their grid is wider than the screen by design)',
+    /body\.mobile \.wrap\{[^}]*overflow:auto/.test(gflat) && /@media \(max-width:760px\)\{\s*\.wrap\{[^}]*overflow:auto/.test(gflat)
+      ? [] : ['the mobile overflow:auto overrides were lost']);
+  none('the fit trusts estimated font metrics with no correction against what actually rendered',
+    /function shrinkToFit\(left\)/.test(GUEST_JS) && /getBoundingClientRect\(\)/.test(GUEST_JS)
+      && /scheduleShrinkToFit\(\);/.test(GUEST_JS)
+      ? [] : ['recomputeFit has no measured shrink-to-fit pass']);
+  none('…and that correction can grow the font or run unbounded',
+    /if \(left <= 0 \|\| isMobile\(\)\) return;/.test(GUEST_JS) && /term\.options\.fontSize = cur - 1;/.test(GUEST_JS)
+      && !/term\.options\.fontSize = cur \+ 1;/.test(GUEST_JS)
+      ? [] : ['shrinkToFit is not bounded + shrink-only']);
+  none('the guest still shows the host’s session cost / token count',
+    !/id="trk-cost"/.test(GUEST_HTML) && !/id="trk-tokens"/.test(GUEST_HTML)
+      && !/trk-cost/.test(GUEST_JS) && !/trk-tokens/.test(GUEST_JS)
+      ? [] : ['cost/tokens readouts survive on the guest page']);
+  none('…and lost the context meter, which is the one figure a viewer can use',
+    /id="ctxbar"/.test(GUEST_HTML) && /id="ctxpct"/.test(GUEST_HTML) && /ctxPct/.test(GUEST_JS)
+      ? [] : ['the context meter was removed too']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

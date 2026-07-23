@@ -279,6 +279,31 @@ function recomputeFit() {
   var hFont = ph / (Math.max(1, hostRows) * 1.18);          // …and whose rows fit the height
   var target = Math.max(5, Math.min(40, Math.floor(Math.min(wFont, hFont))));   // contain → see everything, biggest that fits
   if (target !== cur) term.options.fontSize = target;
+  scheduleShrinkToFit();
+}
+// The target above comes from NOMINAL monospace metrics (0.6 advance, 1.18 line). Real faces round differently
+// per browser/OS/zoom, so a grid computed as "just fits" can render a pixel or two over and hand the pane a
+// scrollable area — the little scroll outside the terminal. Estimates can't be trusted across every screen and
+// resolution, so measure what actually rendered and step down until it genuinely fits. Shrink-only and bounded,
+// so it always terminates and can never fight the estimate into a loop.
+var FIT_TRIES = 6;
+function shrinkToFit(left) {
+  if (left <= 0 || isMobile()) return;                       // phones pan a deliberately-wider grid; leave them alone
+  var t = $('terminal'), wrap = t && t.closest('.wrap'); if (!t || !wrap) return;
+  var cs = getComputedStyle(wrap);
+  var availW = wrap.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+  var availH = wrap.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+  if (availW <= 0 || availH <= 0) return;
+  var r = t.getBoundingClientRect();
+  if (r.width <= availW + 0.5 && r.height <= availH + 0.5) return;   // genuinely fits — nothing to scroll
+  var cur = term.options.fontSize || BASE_FONT;
+  if (cur <= 5) return;
+  term.options.fontSize = cur - 1;
+  scheduleShrinkToFit(left - 1);
+}
+function scheduleShrinkToFit(left) {   // xterm paints on rAF — measuring before that reads the OLD size
+  var n = (left == null) ? FIT_TRIES : left;
+  requestAnimationFrame(function () { requestAnimationFrame(function () { shrinkToFit(n); }); });
 }
 // xterm renders on rAF → reading size synchronously right after term.resize() is stale. Measure on double-rAF.
 function scheduleFit() { requestAnimationFrame(function () { requestAnimationFrame(recomputeFit); }); }
@@ -334,8 +359,8 @@ function applyStatus(s) {
     bar.classList.toggle('warn', s.ctxPct >= 70 && s.ctxPct < 85);
     bar.classList.toggle('crit', s.ctxPct >= 85);
   }
-  if (s.cost != null) $('trk-cost').textContent = s.cost;
-  if (s.tokens != null) $('trk-tokens').textContent = s.tokens;
+  // s.cost / s.tokens still arrive on the wire (the host's own tracker sends one payload) — a guest simply has
+  // no readout for them any more, so they are dropped here rather than written to elements that no longer exist.
   if (s.session != null) {
     var chip = $('sess-chip');
     $('sess-chip-text').textContent = s.session || 'live session';   // keep the chip visible (it carries the connection dot)

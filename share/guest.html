@@ -58,7 +58,10 @@
     /* min-width:0 lets the wide (mirrored) terminal scroll INSIDE .wrap instead of stretching the whole
        page — without it the body grows past the viewport and mobile browsers zoom out, so the phone
        breakpoints never match. */
-    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:14px;overflow:auto;-webkit-overflow-scrolling:touch}
+    /* overflow:HIDDEN on desktop — the terminal is scaled to fit the pane, so a scrollable outer area can only
+       ever be a rounding artifact, and a phantom scroll outside the terminal is confusing. Phones/narrow layouts
+       re-enable overflow further down: there the grid is deliberately wider than the screen and you pan it. */
+    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:14px;overflow:hidden;-webkit-overflow-scrolling:touch}
     .gchat{min-width:0}
     /* guest chat — human↔human side channel with the host */
     .gchat{flex:none;width:300px;display:flex;flex-direction:column;min-height:0;margin:14px 14px 14px 0;
@@ -252,9 +255,9 @@
     <span class="pill ro" id="ro" style="display:none">read-only</span>
     <span class="sesschip" id="sess-chip" title="Connection — green when live, red if disconnected" style="display:none"><span class="dot" id="sess-dot"></span><b id="sess-chip-text"></b></span>
     <span class="trk" title="host session usage">
+      <!-- session cost + token count removed: they are the HOST's billing numbers and mean nothing to a guest
+           watching the session. Context is the one figure that tells a viewer how much room is left. -->
       <span class="ctxbar" id="ctxbar"><span class="ctxlabel">CONTEXT</span><span class="ctxsegs" id="ctxsegs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ctxpct" id="ctxpct">—</span></span>
-      <span class="trk-item"><b id="trk-cost">$0.00</b><i>session cost</i></span>
-      <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
     </span>
   </div>
   <div class="main">
