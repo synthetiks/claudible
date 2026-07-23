@@ -1454,5 +1454,29 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the denied page references an external asset']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 44. SAFE-BY-DEFAULT SHARING. Co-drive lets an approved guest type into the host pty (share/server.js gates
+//   only on readOnly), which is a shell on the host's machine. The dangerous mode must be opt-IN: view-only
+//   defaults on, and the share dialog must say — in red, scaling with the toggle — what turning it off means.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('view-only is not on by default (co-drive is the accidental default)',
+    /<input type="checkbox" id="share-ro" checked\s*\/?>/.test(HTML)
+      ? [] : ['#share-ro has no `checked` — a fresh share is co-drive']);
+  none('the share dialog carries no security warning',
+    /id="share-warn"/.test(HTML) && /function renderShareWarn\(\)/.test(APP)
+      ? [] : ['no security note element or no renderer for it']);
+  none('the warning does not escalate when co-drive is chosen',
+    /box\.classList\.toggle\('danger', !ro\)/.test(APP)
+      ? [] : ['renderShareWarn does not turn red when view-only is off']);
+  none('…and the danger copy never names the actual risk',
+    /can run commands on your computer/.test(APP) ? [] : ['the co-drive warning does not say what co-drive grants']);
+  none('…and never points at the safer GitHub path',
+    /invite them to the repo on GitHub/.test(APP) ? [] : ['no soft pointer to the repo-collaborator flow']);
+  none('the warning is painted before the dialog opens AND on every toggle',
+    /renderShareWarn\(\);\s*\/\/ paint the security note/.test(APP) && /\$\('share-ro'\)[\s\S]{0,60}?addEventListener\('change', renderShareWarn\)/.test(APP)
+      ? [] : ['the warning is not wired to open + change']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

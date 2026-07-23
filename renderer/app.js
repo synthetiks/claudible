@@ -2121,9 +2121,28 @@ shareBtn.addEventListener('click', async () => {
   }
   // ask the host for a display name before sharing (prefilled from your one Claudible username)
   $('host-name-in').value = collabName() || loadPrefs().hostName || '';
+  renderShareWarn();                                 // paint the security note for the current view-only state before the box appears
   $('namemodal').classList.add('show');
   setTimeout(() => $('host-name-in').focus(), 30);
 });
+// The share dialog's security note. Watching is low-risk; co-driving hands an approved guest a shell on this
+// machine (they type straight into the host pty — share/server.js gates only on readOnly). So the note's SEVERITY
+// tracks the toggle: a calm blue "they can see your screen" when view-only is on, a real red "they can run
+// commands" the moment it's switched off — plus the honest nudge toward the GitHub collaborator flow, which puts
+// PR review between an untrusted person and your machine.
+function renderShareWarn() {
+  const box = $('share-warn'); if (!box) return;
+  const ro = !!($('share-ro') && $('share-ro').checked);
+  box.classList.toggle('danger', !ro);
+  const txt = $('share-warn-txt'); if (!txt) return;
+  if (ro) {
+    txt.textContent = 'Guests can watch this terminal — anything on screen (file contents, keys, secrets) is visible to them. They can’t type.';
+  } else {
+    txt.innerHTML = '<b>Co-drive is on — an approved guest can run commands on your computer, as you.</b> '
+      + 'Only do this with someone you trust. To let someone you don’t fully trust work on the code, invite them to the repo on GitHub instead — you review what they change before it lands.';   // static copy, no interpolation → innerHTML is safe here
+  }
+}
+{ const ro = $('share-ro'); if (ro) ro.addEventListener('change', renderShareWarn); }
 async function doStartSharing() {
   const typed = ($('host-name-in').value || '').trim().slice(0, 40);
   hostDisplayName = typed || collabName() || 'Host';
