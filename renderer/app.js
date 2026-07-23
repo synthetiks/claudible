@@ -3475,16 +3475,15 @@ function appendConflictChip(m, s, w) {
   // textContent for the name: it's collaborator-controlled and must never be parsed as HTML.
   if (s.author) {
     const ab = document.createElement('span');
-    ab.className = 'sess-chip author'; ab.title = 'Session created by ' + s.author;
+    ab.className = 'sess-flair author'; ab.title = 'Session created by ' + s.author;   // ICON ONLY + tooltip: the name no longer eats title width. Non-interactive by design.
     ab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
-    ab.appendChild(document.createTextNode(String(s.author)));
     m.appendChild(ab);
   }
   const act = (open) => async (e) => { e.stopPropagation(); if (w && w.id !== activeWsId) await switchWorkspace(w.id, s.id); open(s); };   // AWAIT the switch so main's activeWorkspace is re-pointed BEFORE resolve/delete runs (else a fast confirm targets the old workspace's repo)
   if (s.deletedRemote) {                                             // a collaborator deleted this on GitHub → soft red "removed" chip
     const db = document.createElement('button');
-    db.className = 'sess-chip removed'; db.title = 'Deleted from GitHub by a collaborator';
-    db.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>removed';
+    db.className = 'sess-flair removed'; db.title = 'Deleted from GitHub by a collaborator — click for options';   // icon only; the tooltip carries what the label used to say
+    db.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>';
     db.addEventListener('click', act(openDeletedRemoteModal)); m.appendChild(db);
   } else if (s.diverged && !sessionIsLive(s.id, w && w.id)) {        // same session edited on both machines → soft amber "diverged" chip. Liveness is checked in THIS row's project: the active bucket knows nothing about a non-active tree's peers (the "OUT OF SYNC on a live session" screenshot)
     // NOT shown while the session is LIVE. Both resolutions are wrong there: "use the shared version" replaces the
@@ -3492,8 +3491,8 @@ function appendConflictChip(m, s, w) {
     // just silences a flag nobody can act on. Nothing about a live session is out of sync anyway — everyone is
     // watching one pty, byte for byte. The chip comes back the moment the live session ends, with the fork intact.
     const vb = document.createElement('button');
-    vb.className = 'sess-chip diverged'; vb.title = 'Out of sync — this conversation was continued on both machines; click to resolve';
-    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>out of sync';
+    vb.className = 'sess-flair diverged'; vb.title = 'Out of sync — this conversation was continued on both machines; click to resolve';   // icon only; same click, same handler
+    vb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>';
     vb.addEventListener('click', act(openDivergedInfo)); m.appendChild(vb);
   }
 }
@@ -3700,7 +3699,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sessMenu
 let sdrag = null;
 function onSessPointerDown(e, row, s) {
   if (e.button !== 0) return;
-  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || e.target.closest('.sess-live-ind') || e.target.closest('.sess-chip') || row.classList.contains('renaming')) return;   // never capture a press on the ▾, rename input, Live/Join pill, or a conflict chip — let those get their own click
+  if (e.target.closest('.sess-menu-btn') || e.target.closest('.sess-rename') || e.target.closest('.sess-live-ind') || e.target.closest('.sess-flair') || row.classList.contains('renaming')) return;   // never capture a press on the ▾, rename input, Live/Join pill, or a conflict chip — let those get their own click
   sdrag = { id: s.id, label: sessTitle(s), row, startY: e.clientY, moved: false, pid: e.pointerId };
   try { row.setPointerCapture(e.pointerId); } catch {}
 }

@@ -32,7 +32,7 @@
       --warn:#edb44a;              /* amber / warning accent */
       /* the sidebar pane's depth — ONE dial. Built from the themed surface tokens, so every theme gets its
          own hue in the darkness automatically; the outer 90%/#000 step is the "10% deeper" trim. */
-      --sidebar-glass:color-mix(in srgb,color-mix(in srgb,var(--panel) 72%,var(--bg)) 90%,#000);
+      --sidebar-glass:color-mix(in srgb,color-mix(in srgb,var(--panel) 72%,var(--bg)) 72%,#000);
     }
     /* ── Themes: subtle, low-key dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
        Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
@@ -250,7 +250,7 @@
     .live-ov.show{display:flex}
     .live-ov.bad{color:#e0a0a0}
     /* "who's typing" pill — floats on a live-shared terminal's corner, names the current typist. Identity is
-       BLUE across the app (matches .sess-chip.author); pointer-events:none so it never blocks a click/selection. */
+       BLUE across the app (matches .sess-flair.author); pointer-events:none so it never blocks a click/selection. */
     .typist-chip{position:absolute;top:6px;right:18px;z-index:6;padding:3px 10px;border-radius:999px;
       font-size:10px;font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.12);
       opacity:0;transition:opacity .18s ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:40%;
@@ -545,10 +545,32 @@
     .sess.sess-live-row,.sess.sess-peer-live{box-shadow:inset 0 1px 0 var(--sheen);background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* live row: the SAME calm box selected+live gets (flat 5% green + sheen + the green ::before wash) — identical whether or not it's selected, so clicking away never changes its costume. NO rail */
     .sess.sess-live-row::before,.sess.sess-peer-live::before,.sess.sess-joined-live::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%)}
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
-    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
-    .sess-meta{margin-top:2px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
-    .sess-meta .sess-meta-t{color:color-mix(in srgb,var(--ink-faint) 70%,transparent);transition:color .16s ease}   /* ① detail on demand: the list reads as a clean column of TITLES… */
-    .sess:hover .sess-meta .sess-meta-t,.sess.active .sess-meta .sess-meta-t{color:var(--ink-faint)}                /* …with the timestamp surfacing where you're actually looking */
+    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px;transition:-webkit-mask-image .16s ease}
+    /* the title reserves only what is ALWAYS on screen (▾ + any persistent flair + a live pill). :has() keeps
+       this declarative — no JS bookkeeping — and the reserve is exact per row instead of a worst-case gutter. */
+    .sess:has(.sess-flair:not(.author)) .sess-prev{padding-right:52px}
+    .sess:has(.sess-flair.diverged):has(.sess-flair.removed) .sess-prev{padding-right:72px}
+    .sess:has(.sess-live-ind) .sess-prev{padding-right:78px}
+    /* on hover the timestamp + author icon appear; rather than re-flowing the title (an ellipsis jump on every
+       row you sweep past), it DISSOLVES under the cluster. No layout change, no jitter. */
+    .sess:hover .sess-prev,.sess:focus-within .sess-prev{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 34px),transparent)}
+    .sess.sess-draft .sess-prev{color:var(--warn)}   /* draft keeps an AT-REST signal now that the meta line is hover-only */
+    /* ONE-LINE ROWS: the old second line is now a right-anchored cluster floating over the row. */
+    .sess-meta{position:absolute;right:30px;top:50%;transform:translateY(-50%);margin:0;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
+    .sess-meta>*{pointer-events:auto}
+    .sess:not(.sess-peer-live) .sess-meta-t{display:none}                                            /* ① title-only at rest… */
+    .sess:not(.sess-peer-live):hover .sess-meta-t,.sess:not(.sess-peer-live):focus-within .sess-meta-t{display:inline}   /* …last-used time appears on hover (peer-live rows keep their text: it IS the description) */
+    /* metadata FLAIRS are icon-only now, so they never compete with the title. Alerts (out-of-sync, removed)
+       stay visible AT REST — hover-gating a problem state would mean sweeping every row to find a conflict.
+       The author is not an alert, so it is hover-only. Live state stays TEXT: text = live, icons = metadata. */
+    .sess-flair{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0;
+      border:1px solid transparent;border-radius:6px;background:none;flex:none;box-shadow:none;transition:background .14s,opacity .16s}
+    .sess-flair svg{width:12px;height:12px;display:block}
+    .sess-flair.diverged{color:var(--warn);cursor:pointer}
+    .sess-flair.removed{color:var(--live);cursor:pointer}
+    .sess-flair.diverged:hover,.sess-flair.removed:hover{background:rgba(255,255,255,.07)}
+    .sess-flair.author{color:var(--accent);cursor:default;opacity:0}                                  /* non-interactive: the tooltip names the creator */
+    .sess:hover .sess-flair.author,.sess:focus-within .sess-flair.author{opacity:1}
     /* draft (unsaved) session rows: an amber accent so they read as "not yet saved" — deliberately NOT the
        word/blue of anything "live": LIVE is the collab-share state (green, .sess-live-row family) and this
        indicator masquerading as "live" made brand-new sessions look shared for their first turn */
@@ -585,7 +607,7 @@
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
-    .sess-menu-btn{position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;
+    .sess-menu-btn{position:absolute;top:50%;transform:translateY(-50%);right:6px;display:flex;align-items:center;justify-content:center;
       width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
       color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
       transition:opacity .15s,color .15s,border-color .15s,background .15s}
@@ -595,18 +617,9 @@
     .sess.renaming .sess-menu-btn{display:none}   /* nothing floats over the rename input while editing */
     /* conflict chips — at REST just a coloured icon+word inline after the timestamp (the colour covers ONLY the
        icon+word — no pill ribbon extending across the row); a faint pill appears on hover to show it's clickable */
-    .sess-chip{flex:none;width:auto;display:inline-flex;align-items:center;gap:3px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
-      text-transform:uppercase;border:none;border-radius:5px;padding:2px 4px;line-height:1;cursor:pointer;font-family:inherit;
-      white-space:nowrap;background:transparent;transition:background .14s}   /* width:auto OVERRIDES the global button{width:100%} so the flair hugs its word instead of stretching across the row */
-    .sess-chip svg{width:11px;height:11px;display:block;flex:none}
-    .sess-chip.author{color:#7fb3e8;background:rgba(106,166,224,.10);cursor:default}   /* who made this session — informational (not a button), blue vs the amber/red conflict chips */
-    .sess-chip.diverged{color:var(--warn)}
-    .sess-chip.diverged:hover{background:rgba(224,169,59,.16)}
-    .sess-chip.removed{color:#e58479}
-    .sess-chip.removed:hover{background:rgba(229,86,75,.18)}
-    .sess.renaming .sess-chip{display:none}
+    .sess.renaming .sess-flair{display:none}   /* nothing floats beside the rename input while editing (the old .sess-chip pill styles retired with the text labels) */
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
-    .sess-meta{display:flex;align-items:center;gap:7px}
+    .sess-meta{display:flex;align-items:center;gap:5px}
     .sess-meta-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row") */
     .sess-meta{flex-wrap:nowrap}   /* keep the tag (out-of-sync / live) on ONE line WITH the timestamp — the time (flex:0 1 auto, its OWN overflow:hidden/ellipsis) shrinks to make room, so the chip never drops to a 2nd line; its colour still hugs just the icon+word (inline-flex). No container overflow:hidden — it would clip the live pill's "Join →" hover reveal. */
     .sess-live-ind{flex:none;width:auto;display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
@@ -634,18 +647,19 @@
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
       font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
-    .ws-section-head{padding:7px 9px 3px 18px}   /* another ~10% shorter (was 9/5 vertical) — sleeker; left-aligned, title nudged in from the edge */
-    .sh-actions{display:flex;align-items:center;gap:9px}
-    .panel-close{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
-    .panel-close:hover{color:var(--ink)}
-    .ws-add{width:auto;display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;
-      font-size:15px;line-height:1;color:var(--ink-dim);background:none;
-      border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:none;transition:all .15s}
-    .ws-add:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
-    .ws-info{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0;
-      border:1px solid var(--hairline);border-radius:50%;background:transparent;color:var(--ink-faint);
-      font:italic 600 11px/1 Georgia,"Times New Roman",serif;cursor:pointer;flex:none}
-    .ws-info:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
+    .ws-section-head{padding:5px 9px 2px 18px}   /* ~20% shorter again — sleeker; left-aligned, title nudged in from the edge */
+    .sh-actions{display:flex;align-items:center;gap:6px}   /* equal gaps — the three buttons are now one size, so the rhythm reads even */
+
+
+    /* the three header controls (i / + / ‹) share ONE 20x20 borderless box so they read as a set —
+       previously a 18px circle, a ~24x19 bordered pill and a bare 22px glyph, all different heights. */
+    .sh-actions>button{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0;
+      border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer;
+      box-shadow:none;line-height:1;flex:none;transition:color .16s,background .14s}
+    .sh-actions>button:hover{color:var(--ink);background:rgba(255,255,255,.05)}
+    .sh-actions>.ws-info{font:italic 600 11px/1 Georgia,"Times New Roman",serif}
+    .sh-actions>.ws-add{font-size:15px}
+    .sh-actions>.panel-close{font-size:17px}
     /* "what's a workspace?" popover — anchored under the ⓘ by JS; teaches the concept without crowding the sidebar */
     .ws-info-pop{position:fixed;z-index:80;width:250px;padding:13px 15px;border:1px solid var(--hairline);border-radius:11px;
       background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:11.5px;line-height:1.5;color:var(--ink-dim)}
