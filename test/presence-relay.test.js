@@ -8,12 +8,53 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { mergePeerFrame, reconcilePeerLists, roomKeyFor } = require('../lib/presenceRelay.js');
+const { mergePeerFrame, reconcilePeerLists, roomKeyFor, makePresenceRelay, RELAY_URL } = require('../lib/presenceRelay.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 function t(label, fn) { try { fn(); pass++; } catch (e) { fail++; console.error(`  FAIL ${label}: ${e.message}`); } }
+
+// ---- INERTNESS: the relay must be OFF unless a team deliberately turns it on --------------------------------
+// The relay is opt-in, self-hosted, and disclosed as such in SECURITY.md and README. Nothing asserted this,
+// so a refactor that gave DEFAULT_RELAY_URL a value — or a packaging change that shipped relay/ — could have
+// silently pointed every install at a third-party host without a single test going red.
+// RELAY_URL resolves at MODULE LOAD (`process.env.CLAUDIBLE_RELAY_URL || DEFAULT_RELAY_URL`), so setting the
+// env var after require() proves nothing; the enabled-path check below runs in a child process for that reason.
+t('RELAY_URL is empty with no env override (the module ships inert)', () => {
+  assert.strictEqual(process.env.CLAUDIBLE_RELAY_URL || '', '', 'this test must run WITHOUT CLAUDIBLE_RELAY_URL set');
+  assert.strictEqual(RELAY_URL, '', 'DEFAULT_RELAY_URL must stay empty — a default here points every install at one host');
+});
+t('enabled() is false, so every publish/ensure is a no-op', () => {
+  const r = makePresenceRelay({ getCred: async () => null, onFrame: () => {}, log: () => {} });
+  assert.strictEqual(r.enabled(), false);
+});
+t('nothing in the shipped tree sets CLAUDIBLE_RELAY_URL', () => {
+  // lib/presenceRelay.js itself reads the var; anything ELSE assigning it would be a hidden default.
+  const hits = [];
+  for (const f of ['main.js', 'preload.js', 'package.json', '.github/workflows/build.yml', '.github/workflows/test.yml']) {
+    let body; try { body = read(f); } catch { continue; }
+    if (/CLAUDIBLE_RELAY_URL\s*[=:]/.test(body)) hits.push(f);
+  }
+  assert.deepStrictEqual(hits, [], 'a shipped file assigns CLAUDIBLE_RELAY_URL');
+});
+t('relay/ cannot ship in a packaged install (absent from build.files)', () => {
+  // electron-builder's allowlist is package.json BUILD.files — not the npm-publish `files` key, which this
+  // package does not even define. Checking the wrong key passed against an empty array (it did, on first write).
+  const files = (JSON.parse(read('package.json')).build || {}).files;
+  assert.ok(Array.isArray(files) && files.length, 'build.files must exist — the packaging allowlist moved');
+  const included = files.some((g) => !String(g).startsWith('!') && /^relay\b|^relay\//.test(String(g)));
+  assert.strictEqual(included, false, 'relay/ is in build.files — the inert Worker would ship inside the installer');
+});
+// Non-vacuity: prove enabled() is not simply hardcoded false. With the env set, the SAME code must go live.
+t('…and enabled() DOES flip on when a URL is configured (guard is not vacuous)', () => {
+  const { execFileSync } = require('child_process');
+  const out = execFileSync(process.execPath, ['-e',
+    "const {makePresenceRelay,RELAY_URL}=require('./lib/presenceRelay.js');" +
+    "process.stdout.write(JSON.stringify([RELAY_URL,makePresenceRelay({getCred:async()=>null,onFrame:()=>{},log:()=>{}}).enabled()]))"
+  ], { cwd: ROOT, encoding: 'utf8', env: Object.assign({}, process.env, { CLAUDIBLE_RELAY_URL: 'https://example.invalid' }) });
+  assert.deepStrictEqual(JSON.parse(out), ['https://example.invalid', true]);
+});
 
 // ---- roomKeyFor: stable, case-insensitive, name-hiding ----
 t('roomKeyFor is 20 hex and case-insensitive', () => {
