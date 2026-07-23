@@ -1359,5 +1359,66 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the PATH fallback is ordered ahead of the deterministic paths']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 42. A LINK IS NOT LIVE UNTIL IT HAS BEEN PROVEN LIVE — AND PROVING IT MUST NOT POISON DNS.
+//   MEASURED: cloudflared prints the URL at +5.5s, registers at +6.3s, but the A record only exists at +8.7s.
+//   The app used to reveal the link at registration, so the host's own test click landed in that gap and got
+//   NXDOMAIN — which trycloudflare.com's SOA pins in the resolver's negative cache for 1800s. Half an hour of
+//   "site can't be reached", surviving every fresh link, for host and guest alike. Hence: verify before
+//   revealing, and verify against the AUTHORITATIVE nameservers (which never cache) before ever asking the
+//   system resolver, so the check itself can never be what poisons the cache.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const CF = read('share/cloudflared.js');
+  const SRV = read('share/server.js');
+  none('startCloudflared hands back a URL it never checked',
+    /const v = await verifyTunnel\(got\.url, opts\);\s*\n\s*if \(v\.ok\) \{ got\.verify = v; return got; \}/.test(CF)
+      ? [] : ['startCloudflared does not gate its return on verifyTunnel']);
+  none('…and an unprovable tunnel is left running to be handed out',
+    /if \(v\.ok\) \{ got\.verify = v; return got; \}\s*\n\s*try \{ got\.proc\.kill\(\); \} catch \{\}/.test(CF)
+      ? [] : ['a failed verification does not reap the tunnel']);
+  none('the check asks the system resolver before the authoritative one (it would cache the NXDOMAIN itself)',
+    CF.indexOf('const d = await awaitDnsRecord(') < CF.indexOf('last = await probeOnce(url,')
+      ? [] : ['the HTTPS probe is ordered ahead of the poison-free authoritative check']);
+  none('the authoritative check is not actually authoritative',
+    /resolveNs\(zoneOf\(host\)\)/.test(CF) && /r\.setServers\(servers\)/.test(CF)
+      ? [] : ['awaitDnsRecord does not query the zone nameservers directly']);
+  // "We could not ask" and "we asked and the record is absent" are different facts. Conflating them condemns a
+  // working tunnel on any network that blocks outbound port 53.
+  none('an unreachable nameserver is treated as a missing DNS record',
+    /if \(!d\.ok && !d\.unavailable\) return \{ ok: false, stage: 'dns'/.test(CF)
+      ? [] : ['a blocked authoritative lookup fails the whole verification']);
+  // The inverse of the bug: record published, but THIS machine is still poisoned from an earlier click. The
+  // link is fine for guests — condemning it would be the same false report in the other direction.
+  none('a stale LOCAL cache condemns a link that works for everyone else',
+    /if \(d\.ok && \(last\.code === 'ENOTFOUND' \|\| last\.code === 'EAI_AGAIN'\)\)/.test(CF)
+      ? [] : ['verifyTunnel cannot distinguish a poisoned local resolver from a dead tunnel']);
+  none('…and the host is never told why their own link will not open here',
+    /r\.localDns === false\)/.test(APP) && /flushdns/.test(APP)
+      ? [] : ['nothing explains the stale-cache case to the host']);
+  // The probe proves OUR server answered, not merely that something did — a Cloudflare edge error page is a
+  // perfectly valid HTTP response from a route that reaches nothing.
+  none('the probe accepts any HTTP answer as proof the share is reachable',
+    /String\(res\.headers\[PROBE_HEADER\] \|\| ''\) === '1'/.test(CF)
+      ? [] : ['probeOnce does not require the Claudible marker header']);
+  none('…and the server does not emit that marker on every response',
+    /res\.setHeader\('X-Claudible-Share', '1'\);/.test(SRV)
+      ? [] : ['share/server.js never sets the marker header']);
+  // Token-free by construction: a probe that carried ?t= would burn the one-time link the host is about to send.
+  none('the probe spends the host’s one-time token',
+    /probeOnce\(url, /.test(CF) && !/probeOnce\([^)]*\?t=/.test(CF)
+      ? [] : ['the reachability probe appends a link token']);
+  // Every way a share can die must name itself in the journal, or the next failure is as blind as this one was.
+  const deaths = [
+    ['the tunnel process exiting', /share: cloudflared EXIT code=/],
+    ['an explicit share:stop', /share: STOP via share:stop IPC/],
+    ['closing the pinned tab', /share: FORCE-END — the pinned tab/],
+    ['deleting the pinned tab’s project', /share: FORCE-END — the project owning the pinned tab/],
+    ['the self-heal retry', /share: tunnel retry firing on port/],
+  ];
+  none('a share dies leaving nothing in the journal to say what killed it',
+    deaths.filter(([, re]) => !re.test(MAIN)).map(([w]) => w));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

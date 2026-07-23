@@ -1897,6 +1897,7 @@ if (claudible.onShareTunnelUp) claudible.onShareTunnelUp((p) => {   // a fresh s
   tunnelUp = true; lastShareRemote = true; lastShareNote = null;
   if (p && p.url) { lastShareUrl = p.url; if (webShare) showLink(p.url); }
   renderTunnelWarn();
+  if (p && p.localDns === false) toast('Your link works for others, but THIS computer still has the old “no such host” answer cached. Send it anyway — to open it here, run ipconfig /flushdns (or just wait a bit).');   // same caveat as a manual start; the self-heal path used to drop it
   if (wasDown) {
     toast('Live link is back — the tunnel reconnected.');
     // the #share-out line may still read "local link only" from a degraded manual start — make it honest too
@@ -2125,7 +2126,7 @@ async function doStartSharing() {
   if (typed) savePrefs({ collabName: typed });   // one identity: editing the share name updates your Claudible username
   $('namemodal').classList.remove('show');
   shareBtn.disabled = true;
-  shareOut.textContent = 'starting tunnel…'; shareOut.className = 'out';
+  shareOut.textContent = 'starting tunnel — checking the link actually works…'; shareOut.className = 'out';   // main now proves the public URL serves before calling it up, so this step is a few seconds longer AND honest
   setDot('d-share', 'work');
   webShare = true;
   await ensureTunnel();                             // starts the tunnel (or reuses the one collab already has up)
@@ -3251,10 +3252,18 @@ async function ensureTunnel() {
         // useful on your own machine. But that link means "this computer" to whoever opens it, so a
         // collaborator sees only "site can't be reached" — and the standing chip lives at the bottom of the
         // sidebar, which is easy to miss at exactly the moment you are copying a link to send someone. Say it
-        // once, loudly, at the moment it happens.
+        // once, loudly, at the moment it happens. `note` now also covers the case where a tunnel DID come up
+        // but failed main's end-to-end self-check — the same user-facing situation, so the same warning.
         if (r.remote === false) {
-          toast('This link only works on THIS machine — the public tunnel didn’t start'
-            + (r.note ? ' (' + r.note + ')' : '') + '. Don’t send it yet; Claudible is retrying in the background.');
+          toast('This link only works on THIS machine — Claudible could not get a working public link'
+            + (r.note ? ' (' + r.note + ')' : '') + '. Don’t send it yet; it’s retrying in the background.');
+        } else if (r.localDns === false) {
+          // The tunnel is PROVEN good at the source but this computer's resolver still has a stale "no such
+          // host" entry — the residue of a click made before Cloudflare published the record. Without saying
+          // so, the host opens their own link, sees "site can't be reached", and concludes the whole feature
+          // is broken when the link they just sent works fine for everyone else.
+          toast('Your link works for others, but THIS computer still has the old “no such host” answer cached. '
+            + 'Send it anyway — to open it here, run ipconfig /flushdns (or just wait a bit).');
         }
       }
     } else {

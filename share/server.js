@@ -491,6 +491,12 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
     linkToken = newToken(); resumeTokens.clear();
     ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; paused = false; workspaces = [];
     server = http.createServer((req, res) => {
+      // Identity marker on EVERY response, including the 403 and the 404. The tunnel self-check
+      // (share/cloudflared.js verifyTunnel) dials our own public URL and requires this header before it will
+      // call a tunnel usable — a bare status code can't tell "our server answered" apart from "the Cloudflare
+      // edge answered for a route that doesn't reach us yet". Set here, once, rather than at each writeHead:
+      // writeHead merges setHeader'd fields, so every branch below inherits it and no future branch can forget.
+      res.setHeader('X-Claudible-Share', '1');
       const u = (req.url || '').split('?')[0];
       if (u === '/' || u === '/index.html') {
         if (!pageAuthorized(req.url)) { res.writeHead(403); return res.end('forbidden'); }

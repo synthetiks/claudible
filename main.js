@@ -825,6 +825,7 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   // claiming "live", and guests staring at a frozen mirror of a process that no longer exists. Keep the pin on the
   // dead id (never fall back to the host's private foreground) and tell the renderer to end the share for real.
   if (sharedTabId === tabId) {
+    _liveTiming('share: FORCE-END — the pinned tab (' + tabId + ') was closed; the live link dies with it');
     try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
     stopAdvertising();                                                 // stop re-stamping + clear presence NOW, not after the renderer round-trip (else the heartbeat keeps advertising an ended session for seconds)
     try { winSend('share:force-end', { reason: 'tab-closed' }); } catch {}
@@ -981,9 +982,11 @@ let shareStartInFlight = null;                            // single-flight lock:
 // passes, so it re-publishes the moment a retry lands (plus one immediate beat from adoptTunnel).
 function armTunnelRetry(delayMs) {
   if (appTimers.tunnelRetry || cloudflaredProc) return;    // already waiting / already up — never double or reset a pending retry
-  const t = setTimeout(attemptTunnelRetry, delayMs == null ? 45000 : delayMs);
+  const ms = delayMs == null ? 45000 : delayMs;
+  const t = setTimeout(attemptTunnelRetry, ms);
   if (t.unref) t.unref();
   appTimers.tunnelRetry = t;
+  _liveTiming('share: tunnel retry armed +' + ms + 'ms');
 }
 function disarmTunnelRetry() { if (appTimers.tunnelRetry) { clearTimeout(appTimers.tunnelRetry); appTimers.tunnelRetry = null; } }
 // Right-now variant for the one moment waiting would be silly: a cloudflared install just finished and its env
@@ -992,26 +995,41 @@ function kickTunnelRetryNow() { disarmTunnelRetry(); attemptTunnelRetry(); }
 async function attemptTunnelRetry() {
   appTimers.tunnelRetry = null;                            // this firing consumed its arm (or was kicked)
   const st0 = share.status();
-  if (!st0.running || shareStartInFlight || cloudflaredProc) return;   // not hosting, or a manual (re)start owns the spawn
+  if (!st0.running || shareStartInFlight || cloudflaredProc) {   // not hosting, or a manual (re)start owns the spawn
+    _liveTiming('share: tunnel retry skipped (running=' + !!st0.running + ' startInFlight=' + !!shareStartInFlight + ' haveProc=' + !!cloudflaredProc + ')');
+    return;
+  }
+  _liveTiming('share: tunnel retry firing on port ' + st0.port);
   let r;
   try { r = await startCloudflared(st0.port); }
-  catch (e) { console.error('[claudible] tunnel retry:', (e && e.message) || e); armTunnelRetry(); return; }   // still down → next beat
+  catch (e) { _liveTiming('share: tunnel retry FAILED — ' + ((e && e.message) || e)); console.error('[claudible] tunnel retry:', (e && e.message) || e); armTunnelRetry(); return; }   // still down → next beat
   // The await was multi-second — re-validate against a world that may have moved. `running` alone is NOT enough:
   // a stop + fresh start can BOTH land inside that window, leaving running=true but on a NEW port — this tunnel
   // would point at a dead origin. The retry deliberately does not hold shareStartInFlight (a manual restart must
   // never queue behind a background attempt), which is exactly what opens that gap; the port check closes it.
   const st1 = share.status();
-  if (!st1.running || st1.port !== st0.port || shareStartInFlight || cloudflaredProc) { try { r.proc.kill(); } catch {} return; }
-  adoptTunnel(r.proc, r.url);
+  if (!st1.running || st1.port !== st0.port || shareStartInFlight || cloudflaredProc) { _liveTiming('share: tunnel retry landed but the world moved — discarding'); try { r.proc.kill(); } catch {} return; }
+  adoptTunnel(r.proc, r.url, r.verify);
 }
 // ONE adopt path for a share:start launch and a background retry — pid file, exit handler, context refresh and
 // the tunnel-up signal live here exactly once, so the two paths can never drift apart.
-function adoptTunnel(proc, url) {
+function adoptTunnel(proc, url, verify) {
   disarmTunnelRetry();                                     // a live tunnel invalidates any pending retry
   cloudflaredProc = proc; shareBaseUrl = url;
   _writeCfPid(proc.pid);                                   // record the tunnel pid so a crash-orphan can be reaped on next launch
-  cloudflaredProc.on('exit', () => {
+  _liveTiming('share: tunnel UP pid=' + proc.pid + ' ' + url
+    + (verify ? (verify.skipped ? ' [verify skipped by env]'
+        : ' verified in ' + verify.ms + 'ms (dns +' + verify.dnsMs + 'ms, ' + verify.tries + ' probe(s))'
+          + (verify.localDns === false ? ' — LOCAL DNS STALE: ' + verify.why : ', HTTP ' + verify.status))
+      : ' [unverified — no verify result]'));
+  cloudflaredProc.on('exit', (code, signal) => {
     const unexpected = share.status().running;             // still "sharing" at exit ⇒ the tunnel dropped on its own (network/crash), not a clean host-stop
+    // The one line whose absence cost four wrong diagnoses. `unexpected` reads false for a HOST-driven stop only
+    // because stopLiveSharing() flips running=false synchronously before this event fires — so "expected" here
+    // means "something in this process asked for it", and the trigger is named by whichever of the callers below
+    // logged just before us. An UNEXPECTED exit is cloudflared itself dying; the code/signal says how.
+    _liveTiming('share: cloudflared EXIT code=' + code + ' signal=' + signal + ' — '
+      + (unexpected ? 'UNEXPECTED (tunnel dropped on its own; self-heal arming)' : 'expected (this process stopped the share)'));
     cloudflaredProc = null; shareBaseUrl = null; _clearCfPid();
     if (unexpected) {
       // The advertised live/<author>.json still points at the now-dead tunnel URL; pull it off the branch
@@ -1025,7 +1043,7 @@ function adoptTunnel(proc, url) {
   });
   presenceBeatOnce();                                      // advertising? publish the fresh handle NOW — recovery is bounded by the tunnel, not tunnel + next heartbeat
   _writeAllContexts();
-  try { winSend('share:tunnel-up', { url: url + '/?t=' + share.status().token }); } catch {}   // renderer: refresh the link, drop the "local only" warning
+  try { winSend('share:tunnel-up', { url: url + '/?t=' + share.status().token, localDns: !(verify && verify.localDns === false) }); } catch {}   // renderer: refresh the link, drop the "local only" warning
 }
 
 ipcMain.handle('share:start', (e, opts) => {
@@ -1044,25 +1062,31 @@ ipcMain.handle('share:start', (e, opts) => {
       try { winSend('share:pinned', { tabId: sharedTabId }); } catch {}   // renderer mirrors THIS tab's tracker to guests from now on
       const fr0 = ptys.get(sharedTabId) || fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
       syncShare();                                        // tell guests the granted library + pause if the live ws is private
-      let base = `http://127.0.0.1:${port}`, remote = false, note = null;
+      let base = `http://127.0.0.1:${port}`, remote = false, note = null, localDns = true;
       try {
         try { cloudflaredProc && cloudflaredProc.kill(); } catch {}   // defensive: never leave a prior tunnel orphaned
         cloudflaredProc = null;
-        const { proc, url } = await startCloudflared(port);
-        if (!share.status().running) { try { proc.kill(); } catch {} return { ok: false, error: 'stopped during start' }; }   // a share:stop landed while we were spawning → reap the tunnel, don't orphan a live public URL
-        adoptTunnel(proc, url);                           // pid file + exit handler + tunnel-up signal — single adopt path, shared with the background retry
+        const { proc, url, verify } = await startCloudflared(port);
+        if (!share.status().running) { _liveTiming('share: start — stopped mid-spawn, reaping the tunnel'); try { proc.kill(); } catch {} return { ok: false, error: 'stopped during start' }; }   // a share:stop landed while we were spawning → reap the tunnel, don't orphan a live public URL
+        adoptTunnel(proc, url, verify);                   // pid file + exit handler + tunnel-up signal — single adopt path, shared with the background retry
         base = url; remote = true;                       // public link
-      } catch (tunErr) { note = String(tunErr.message || tunErr); armTunnelRetry(); }   // tunnel down → fall back to localhost/LAN, and keep trying in the background
+        localDns = !(verify && verify.localDns === false);   // verified good for guests, but THIS machine can't resolve it (stale negative cache) — the host must be told, or they'll believe the link is broken and stop sharing
+      } catch (tunErr) {   // tunnel down (or unprovable) → fall back to localhost/LAN, and keep trying in the background
+        note = String(tunErr.message || tunErr);
+        _liveTiming('share: tunnel FAILED — ' + note + ' → local-only link');
+        armTunnelRetry(10000);                            // a failed VERIFY often just means a young edge route; re-dial soon, then fall back to the 45s cadence
+      }
       shareBaseUrl = base;
       const st = share.status();
       _writeAllContexts();                                // now hosting → tell the model (the fg tab's context flips to "hosting")
-      return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, readOnly: st.readOnly };
+      return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, localDns, readOnly: st.readOnly };
     } catch (err) { return { ok: false, error: String(err.message || err) }; }
   })();
   shareStartInFlight.finally(() => { shareStartInFlight = null; });   // release the lock once this start settles
   return shareStartInFlight;
 });
 ipcMain.handle('share:stop', async () => {
+  _liveTiming('share: STOP via share:stop IPC (renderer asked to end the share)');   // the only in-process path that kills BOTH the origin server and the tunnel — name it, or a post-mortem can't tell it from a crash
   try { cloudflaredProc && cloudflaredProc.kill(); } catch {}
   cloudflaredProc = null; shareBaseUrl = null;
   // Presence must be cleared on the workspace we ACTUALLY advertised on, captured before the heartbeat teardown
@@ -2379,6 +2403,7 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
     // would re-derive the pause from a project the guests were never granted and cheerfully un-freeze the mirror.
     // (Nothing can interleave before the freeze today — JS is single-threaded and there's no await — but the
     // ordering must not depend on that.) The renderer's force-end drops the tunnel a beat later.
+    _liveTiming('share: FORCE-END — the project owning the pinned tab (' + sharedTabId + ') was deleted; the live link dies with it');
     try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
     stopAdvertising();                                                 // stop re-stamping + clear presence NOW (parity with tab-close) rather than waiting on the renderer's force-end round-trip
     try { winSend('share:force-end', { reason: 'workspace-deleted' }); } catch {}
