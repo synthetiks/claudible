@@ -606,6 +606,7 @@ claudible.onStatus((s) => {
     t.session = s.sessionId;
     t.bornNew = wasNew;
     if (t.tabId === activeTabId) activeSession = s.sessionId;
+    if (t.tabId === activeTabId) rememberLastSession(t.wsId || activeWsId, s.sessionId);   // confirmed by the pty = the session you are genuinely in
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
       const _pp = loadPrefs();
@@ -2870,6 +2871,12 @@ function lastSessionFor(wsId) {
   const m = loadPrefs().lastSession;
   return (m && typeof m === 'object' && typeof m[wsId] === 'string') ? m[wsId] : null;
 }
+function forgetLastSession(wsId) {
+  const m = Object.assign({}, loadPrefs().lastSession || {});
+  if (!(wsId in m)) return;
+  delete m[wsId];
+  savePrefs({ lastSession: m });
+}
 function rememberLastSession(wsId, sessionId) {
   if (!wsId || !sessionId || sessionId === 'new') return;   // a draft is not somewhere you can be restored to
   const m = Object.assign({}, loadPrefs().lastSession || {});   // copy: the cached prefs object may be frozen
@@ -4219,6 +4226,7 @@ async function refreshSessions() {
   if (!activeSession && list.length && !(AT() && (AT().session === 'new' || AT().kind === 'live'))) {
     const remembered = lastSessionFor(activeWsId);
     const still = remembered && list.some((x) => x && x.id === remembered);
+    if (remembered && !still) forgetLastSession(activeWsId);   // deleted since — drop it rather than let a dead id keep losing this race
     const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0];
     activeSession = still ? remembered : (mru || ordered[0]).id;
   }

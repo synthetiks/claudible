@@ -1181,6 +1181,22 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // Non-vacuity: mark_used must actually still write the sidecar the ordering now depends on.
   none('mark_used no longer writes the activation stamp the boot ordering reads',
     /touch "\$PROJ\/\.claudible-used\/\$1"/.test(SESH) ? [] : ['mark_used does not write .claudible-used/<id>']);
+
+  // THE DECIDING FIX. Both of the script's signals are self-polluting: transcript mtime moves when a pull
+  // rewrites a conversation nobody opened, and the .claudible-used stamp is written by the auto-open itself,
+  // so whatever got picked once kept re-picking itself every boot (measured: two stamps 3s apart, both from a
+  // single boot). Only the renderer knows which session was genuinely being worked in — main must prefer that
+  // record over letting the script guess, and the renderer must actually WRITE it on real activity rather than
+  // only when a session is clicked (it did not, so the pref never existed and the whole chain was inert).
+  none('main lets the script guess again instead of using the recorded session',
+    /rememberedSessionFor\(ws\) \|\| ''/.test(MAIN) && /function rememberedSessionFor/.test(MAIN) ? [] : ['pty:start does not fall back to the recorded session']);
+  none('the recorded session is only written on a click, so it never exists at boot',
+    /rememberLastSession\(t\.wsId \|\| activeWsId, s\.sessionId\)/.test(APP) ? [] : ['onStatus does not record the pty-confirmed session']);
+  none('a deleted session stays recorded and keeps losing the boot race',
+    /if \(remembered && !still\) forgetLastSession\(activeWsId\)/.test(APP) && /function forgetLastSession/.test(APP) ? [] : ['a stale recorded id is never cleared']);
+  // main interpolates this id into a shell command via spawnPty -> session.sh, so it must be charset-gated.
+  none('the recorded session id reaches the shell without a charset gate',
+    /function rememberedSessionFor[\s\S]{0,300}?\/\^\[A-Za-z0-9-\]\+\$\/\.test\(id\)/.test(MAIN) ? [] : ['rememberedSessionFor does not validate the id']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

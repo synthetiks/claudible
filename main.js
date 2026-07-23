@@ -760,10 +760,25 @@ function setForegroundTab(tabId) {
   }
   _writeAllContexts();                                    // foreground (and maybe active workspace) changed → refresh every tab's context
 }
+// The session the renderer recorded as genuinely active for a workspace (settings.lastSession[wsId], written
+// from onStatus when the pty itself reports the id). Used ONLY as the last resort below.
+function rememberedSessionFor(ws) {
+  if (!ws || !ws.id) return '';
+  const m = readSettings().lastSession;
+  const id = (m && typeof m === 'object') ? m[ws.id] : null;
+  return (typeof id === 'string' && /^[A-Za-z0-9-]+$/.test(id)) ? id : '';
+}
 ipcMain.on('pty:start', (e, { tabId, cols, rows }) => {
   const intent = tabIntent.get(tabId); tabIntent.delete(tabId);
   const rec = ptys.get(tabId);
-  spawnPty(tabId, cols, rows, (rec && rec.ws) || (intent && intent.ws) || activeWorkspace, (rec && rec.session) || (intent && intent.session) || '');
+  const ws = (rec && rec.ws) || (intent && intent.ws) || activeWorkspace;
+  // Falling through to '' let wsl/session.sh guess, and every signal available to it is polluted: the
+  // transcript's mtime moves when a sessions-sync pull rewrites a conversation nobody opened, and the
+  // .claudible-used stamp is written by the auto-open ITSELF — so whatever it picked once kept re-picking
+  // itself at every boot (measured: two stamps 3s apart, both written during one boot). Only the renderer
+  // knows which session was actually being worked in, so prefer its record and leave the script's heuristics
+  // as the fallback for a first run.
+  spawnPty(tabId, cols, rows, ws, (rec && rec.session) || (intent && intent.session) || rememberedSessionFor(ws) || '');
 });
 ipcMain.on('pty:input', (e, { tabId, data }) => {
   const t = ptys.get(tabId);
