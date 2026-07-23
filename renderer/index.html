@@ -562,7 +562,14 @@
     .sess-meta{position:absolute;right:30px;top:50%;transform:translateY(-50%);margin:0;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
     .sess-meta>*{pointer-events:auto}
     .sess:not(.sess-peer-live) .sess-meta-t{display:none}                                            /* ① title-only at rest… */
-    .sess:not(.sess-peer-live):hover .sess-meta-t,.sess:not(.sess-peer-live):focus-within .sess-meta-t{display:inline}   /* …last-used time appears on hover (peer-live rows keep their text: it IS the description) */
+    /* …last-used time appears on hover — EXCEPT while the row is live. :has(.sess-live-ind) is the exact
+       structural condition "this row is showing a live pill", so it covers your own ● Live badge and a peer's
+       Join badge alike, and un-suppresses itself the moment the pill goes. Two reasons it must yield: the pill
+       already reserves 78px of the row, leaving no room for both — and "last used 2h ago" is a stale claim about
+       a session being used RIGHT NOW. Peer-live rows are excluded throughout: their .sess-meta-t is not a
+       timestamp at all, it's the "X is live now" description, and it stays visible at rest. */
+    .sess:not(.sess-peer-live):not(:has(.sess-live-ind)):hover .sess-meta-t,
+    .sess:not(.sess-peer-live):not(:has(.sess-live-ind)):focus-within .sess-meta-t{display:inline}
     /* metadata FLAIRS are icon-only now, so they never compete with the title. Alerts (out-of-sync, removed)
        stay visible AT REST — hover-gating a problem state would mean sweeping every row to find a conflict.
        The author is not an alert, so it is hover-only. Live state stays TEXT: text = live, icons = metadata. */

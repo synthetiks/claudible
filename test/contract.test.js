@@ -514,6 +514,15 @@ none('renderer: orphanTab is never rendered',
   none('a button uses transform for centring (button:active will clobber it → the press jiggles)', jig);
   none('…and the ▾ itself must stay on the transform-free centring',
     /\.sess-menu-btn\{[^}]*top:0;bottom:0;margin:auto 0/.test(flat) ? [] : ['.sess-menu-btn is no longer centred by top/bottom + margin:auto']);
+  // A LIVE row does not show the hover timestamp: the pill already claims 78px of a one-line row (they collided),
+  // and "last used 2h ago" contradicts a session in use right now. The reveal must stay :has(.sess-live-ind)-gated.
+  const reveal = (flat.match(/[^};]*:hover \.sess-meta-t[^}]*\{[^}]*display:inline/) || [''])[0];
+  none('the hover timestamp is no longer suppressed on live rows (it collides with the Live pill)',
+    /:not\(:has\(\.sess-live-ind\)\)/.test(reveal) ? [] : [reveal ? 'the :hover .sess-meta-t reveal is not :has(.sess-live-ind)-gated' : 'no :hover .sess-meta-t reveal rule at all']);
+  // …but a peer-live row's .sess-meta-t is the "X is live now" DESCRIPTION, not a timestamp. It is not hover-gated
+  // and must never be swept up by the rules above, or a joinable row loses the only text that explains it.
+  none('peer-live rows lost their always-on description text',
+    /\.sess:not\(\.sess-peer-live\) \.sess-meta-t\{display:none\}/.test(flat) ? [] : ['the at-rest hide is not :not(.sess-peer-live)-scoped']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
