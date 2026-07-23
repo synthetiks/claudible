@@ -1566,5 +1566,45 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['webShareUI still sets shareBtn.textContent (nuking the icon) instead of the label span']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 48. THE SHARE CTA AND ITS INFO POPOVER.
+//   The "i" gave up its own row (~27px for one glyph) and now rides the button's right edge. The button wears a
+//   low-chroma green wash as the sidebar's primary action. THE TRAP: every rest-state rule must be scoped
+//   :not(.live), or it overrides the generic button.live red and "Stop sharing" silently stays green — which is
+//   exactly what the first draft did, caught only by rendering both states side by side.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('the info "i" is back to owning a row instead of riding the button',
+    /<div class="btnwrap">[\s\S]*?id="share-btn"[\s\S]*?id="share-info"[\s\S]*?<\/div>/.test(HTML)
+      && /\.btnwrap \.ws-info\{[^}]*position:absolute/.test(flat)
+      ? [] : ['#share-info is not overlaying #share-btn inside .btnwrap']);
+  none('…and it centres with a transform (button:active would clobber it → the press jiggles)',
+    /\.btnwrap \.ws-info\{[^}]*top:0;bottom:0;margin:auto 0/.test(flat) && !/\.btnwrap \.ws-info\{[^}]*translate/.test(flat)
+      ? [] : ['the overlaid "i" is not centred by top/bottom + margin:auto']);
+  // THE ONE THAT MATTERS: an unscoped rest style silently kills the red stop state.
+  none('the share button’s rest styling is not :not(.live)-scoped (Stop sharing would stay green)',
+    /\.share-btn:not\(\.live\)\{[^}]*background:linear-gradient/.test(flat) && !/\.share-btn\{[^}]*background/.test(flat)
+      ? [] : ['a rest-state background is applied unscoped and will override button.live']);
+  none('…and the live stop state lost its own red treatment',
+    /button\.live\{[^}]*border-color:var\(--live\)/.test(flat) && /\.share-btn\.live \.ico\{[^}]*color:var\(--live\)/.test(flat)
+      ? [] : ['the live/stop styling is gone']);
+  none('the accent glow is on at rest (it would compete with the live state’s glow)',
+    /\.share-btn:not\(\.live\):hover\{[^}]*box-shadow/.test(flat) && !/\.share-btn:not\(\.live\)\{[^}]*box-shadow/.test(flat)
+      ? [] : ['the glow is not hover-only']);
+  // Popover: bigger + ranked, not three equal paragraphs.
+  none('the share popover is not sized up (262px / +5% body)',
+    /\.ws-info-pop\.sharepop\{[^}]*width:262px[^}]*font-size:calc\(var\(--fs-sm\) \* 1\.05\)/.test(flat)
+      ? [] : ['.sharepop is missing its wider width or +5% font size']);
+  none('…and its title has no hierarchy over the body',
+    /\.sharepop \.wt\{[^}]*font-size:var\(--fs-md\)/.test(flat) ? [] : ['the popover title is not stepped up to --fs-md']);
+  none('the popover content is back to undifferentiated paragraphs',
+    /class="sip-lead"/.test(APP) && /class="sip-rows"/.test(APP) && /class="sip-foot"/.test(APP)
+      ? [] : ['openShareInfo no longer builds lead / rows / footer']);
+  none('…and it stopped naming the two controls, or the cheaper alternative',
+    /<b>You approve<\/b>/.test(APP) && /<b>View-only<\/b>/.test(APP) && /they can <b>Join<\/b>/.test(APP)
+      ? [] : ['the approve / view-only / Join lines are not all present']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

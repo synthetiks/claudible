@@ -793,6 +793,20 @@
     .ws-info-pop .wt{display:block;font-size:var(--fs-sm);color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
+    /* SHARE info popover: the same four facts, but ranked instead of run together as three equal paragraphs —
+       what it is → the two controls you hold → the cheaper alternative. Slightly wider/larger than the generic
+       popover because this one carries the security explanation and is the first thing a new user reads. */
+    .ws-info-pop.sharepop{width:262px;padding:15px 17px;font-size:calc(var(--fs-sm) * 1.05);line-height:1.62}
+    .sharepop .wt{font-size:var(--fs-md);font-weight:600;margin-bottom:7px;letter-spacing:.01em}
+    .sharepop .sip-lead{margin:0 0 11px;color:var(--ink-dim)}
+    .sharepop .sip-rows{display:flex;flex-direction:column;gap:9px;padding-top:11px;border-top:1px solid var(--hairline)}
+    .sharepop .sip-row{display:flex;gap:9px;align-items:flex-start}
+    .sharepop .sip-i{flex:none;width:14px;height:14px;margin-top:2px}
+    .sharepop .sip-i svg{width:14px;height:14px;display:block}
+    .sharepop .sip-i.ok{color:var(--ok)}      /* green = the control that protects you */
+    .sharepop .sip-i.warn{color:#d9a441}      /* amber = the dial that carries the risk */
+    .sharepop .sip-foot{margin-top:11px;padding-top:10px;border-top:1px solid var(--hairline);color:var(--ink-faint);font-size:var(--fs-xs);line-height:1.55}
+    .sharepop .sip-foot b{color:var(--silver)}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
       padding:6px 4px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 6px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping. The top fade tracks padding-top (6/6) so a resting row still starts fully opaque — see the centring note on .ws-section-head */
     .ws-chips::-webkit-scrollbar{width:6px}                                          /* width stays CONSTANT — animating it would reflow the rows */
@@ -890,10 +904,11 @@
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:10px 12px 12px;display:flex;flex-direction:column;gap:9px}   /* tightened to the sidebar rhythm */
-    /* The label row now carries ONLY the info "i" (the "share live" text + status dot were redundant and the
-       share icon moved into the button). Right-align the "i" so it reads as a subtle affordance above the button. */
-    .sharelbl{display:flex;align-items:center;justify-content:flex-end;gap:5px;min-height:18px;font-size:var(--fs-2xs);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}
-    .sharelbl.active{color:var(--ink)}
+    /* The info "i" rides the button's right edge instead of owning a row (~27px saved for one glyph). Centred with
+       top/bottom + margin:auto, NOT a transform: the global button:active{translateY(1px)} would clobber a
+       transform-centred button and make it jump on press (the "jiggle" bug). */
+    .btnwrap{position:relative}
+    .btnwrap .ws-info{position:absolute;right:10px;top:0;bottom:0;margin:auto 0;z-index:1}
     .share-dock .out{margin-top:1px;font-size:var(--fs-xs);line-height:1.55}
     .share-dock .out:empty{display:none}   /* no fluff line when there's no live-share status to show (the hint moved to the button's tooltip) */
     /* standing "hosting but not remotely reachable" warning — amber family matches .ctxbar.warn, persistent (not a toast) because this state strands every guest silently */
@@ -944,8 +959,19 @@
     .hvm.speaking .d{background:var(--ok);box-shadow:0 0 7px 0 var(--ok)}
     .hvm.c-connected .d{background:var(--ok)}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
     .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px}
-    .share-btn .ico{width:15px;height:15px;flex:none;color:#5a7468;transition:color var(--dur-slow),filter var(--dur-slow)}   /* the share glyph that used to sit in the label row now leads the button */
-    .share-btn.live .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}   /* icon goes live-green while sharing (mirrors the old .sharelbl.active .ico) */
+    .share-btn .ico{width:15px;height:15px;flex:none;transition:color var(--dur-slow),filter var(--dur-slow)}   /* the share glyph that used to sit in the label row now leads the button */
+    /* This is the sidebar's primary action, but it wore the plain utility-button chassis. Lift it one notch with a
+       LOW-CHROMA green wash + full-brightness label — green at rest reading against the red "Stop sharing" state as
+       go/stop. Every rest-state rule is scoped :not(.live) on purpose: written unscoped, these override .live and
+       the stop state silently stays green (caught in review by rendering both states side by side). */
+    .share-btn:not(.live){color:var(--ink);font-weight:600;
+      background:linear-gradient(180deg,color-mix(in srgb,var(--ok) 13%,transparent),color-mix(in srgb,var(--ok) 5%,transparent));
+      border-color:color-mix(in srgb,var(--ok) 32%,transparent)}
+    .share-btn:not(.live) .ico{color:var(--ok)}
+    /* the glow is reserved for INTENT (hover), never for rest — a standing glow would compete with the live state's */
+    .share-btn:not(.live):hover{border-color:color-mix(in srgb,var(--ok) 46%,transparent);
+      box-shadow:inset 0 1px 0 var(--sheen),0 6px 22px -12px color-mix(in srgb,var(--ok) 75%,transparent)}
+    .share-btn.live .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}   /* stop state: icon goes red with the button */
     .share-reset{width:100%;padding:7px;font-size:var(--fs-xs);letter-spacing:.04em;color:var(--ink-dim);
       background:none;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:color var(--dur-fast),border-color var(--dur-fast)}
     .share-reset:hover{color:var(--live-soft);border-color:rgba(229,86,75,.4)}
@@ -1278,11 +1304,12 @@
       <div class="sess-list" id="sess-list"></div>
       <button class="newsess-row" id="new-session" title="New session in this project">+ New Session</button>
       <div class="share-dock">
-        <div class="sharelbl" id="lbl-share"><!-- label text + status dot removed as redundant (the button says it); the share icon moved into the button. Only the info "i" remains. -->
+        <!-- The info "i" is a SIBLING overlaying the button's right edge, not a child: a <button> may not contain
+             another <button>. Its own row cost ~27px of height for one glyph; here it costs nothing. -->
+        <div class="btnwrap">
+          <button id="share-btn" class="share-btn" title="A web link for people without Claudible"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg><span class="sb-label" id="sb-label">Share a live link</span></button>
           <button class="ws-info" id="share-info" type="button" aria-label="About sharing a live link" title="About sharing a live link">i</button>
         </div><!-- the view-only toggle moved into the share dialog (namemodal), colocated with the security warning it governs, so the risk and the control are decided together -->
-
-        <button id="share-btn" class="share-btn" title="A web link for people without Claudible"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg><span class="sb-label" id="sb-label">Share a live link</span></button>
         <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
         <div class="out share-out" id="share-out"></div><!-- empty by default (hint is now the button tooltip); JS fills this only with live-share status -->

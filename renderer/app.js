@@ -1706,8 +1706,7 @@ const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('shar
 // The bottom-left indicator reflects ONLY a manual web link (never collab) — collaboration stays invisible here.
 function webShareUI(on) {
   { const lb = $('sb-label'); if (lb) lb.textContent = on ? 'Stop sharing' : 'Share a live link'; }   // set the LABEL span only — the button also holds the share icon, which textContent would wipe
-  shareBtn.classList.toggle('live', on);
-  setActive('lbl-share', on);
+  shareBtn.classList.toggle('live', on);   // the button IS the state now — the old .sharelbl label row it used to tint is gone
   const sr = $('share-reset'); if (sr) sr.style.display = on ? '' : 'none';   // "reset access" only while web-sharing
   if (!on) { shareLink.style.display = 'none'; shareLink.value = ''; }
   renderTunnelWarn();
@@ -5051,11 +5050,19 @@ function onShareInfoKey(e) { if (e.key === 'Escape') closeShareInfo(); }
 function openShareInfo() {
   if (shareInfoPop) { closeShareInfo(); return; }
   const anchor = $('share-info'); if (!anchor) return;
-  const pop = document.createElement('div'); pop.className = 'ws-info-pop';
-  pop.innerHTML = '<span class="wt"><b>Share a live link</b></span>'
-    + '<p>Makes a public web link (a secure tunnel) so anyone — even without Claudible — can watch this terminal live in their browser, with chat &amp; voice.</p>'
-    + '<p>You approve every viewer before they see anything, and <b>view-only</b> stops them typing.</p>'
-    + '<p>Teammates who have Claudible don’t need this — they just <b>Join</b> from the synced project.</p>';
+  const pop = document.createElement('div'); pop.className = 'ws-info-pop sharepop';
+  // Ranked, not run together: what it IS, then the two controls the host holds (green = protects you, amber =
+  // carries the risk), then the cheaper alternative. The old version was three equal-weight paragraphs, so the
+  // most actionable line — "your teammates should just Join" — read as an afterthought.
+  const CHK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+  pop.innerHTML = '<span class="wt">Share a live link</span>'
+    + '<p class="sip-lead">A private web link to this terminal — anyone can watch live in their browser, with chat and voice. No Claudible needed.</p>'
+    + '<div class="sip-rows">'
+    +   '<div class="sip-row"><span class="sip-i ok">' + CHK + '</span><span><b>You approve</b> every viewer before they see anything.</span></div>'
+    +   '<div class="sip-row"><span class="sip-i warn">' + EYE + '</span><span><b>View-only</b> is the default — turn it off and a guest can run commands on your computer.</span></div>'
+    + '</div>'
+    + '<div class="sip-foot">Teammates who have Claudible don’t need a link — they can <b>Join</b> from the synced project.</div>';
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
