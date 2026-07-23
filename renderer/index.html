@@ -88,8 +88,12 @@
     body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
       background:radial-gradient(120% 120% at 50% 40%, transparent 60%, rgba(0,0,0,.35) 100%);}
     /* top bar */
+    /* NO bottom hairline. The gradient lands on exactly --chrome at the bar's bottom edge, and the sidebar's base
+       IS --chrome, so the two now flow into one continuous chrome surface with nothing to draw. Toward the
+       terminal there is no seam to lose either: the 5px of --bg body padding is darker than --terminal-bg, so
+       that boundary is already a brightness step. (The sidebar's own top edge-light comes off with it — see there.) */
     .top{display:flex;align-items:center;gap:12px;padding:0 16px;
-      border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}   /* derived from --chrome: matches the sidebar exactly, keeps a gentle top-light */
+      background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}
     .logo{height:28px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
     .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:#f6f8fc}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
@@ -528,10 +532,13 @@
                  linear-gradient(158deg,rgba(255,255,255,.055),rgba(255,255,255,.013) 18%,transparent 46%),
                  var(--sidebar-glass);
       backdrop-filter:blur(10px) saturate(1.08);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.06),8px 0 22px -14px #000;overflow:hidden}
+      box-shadow:8px 0 22px -14px #000;overflow:hidden}
       /* ④ DARK GLASS (not frosted): the pane is DEEPER than --panel (mixed toward --bg) so it sits below the
          terminal; "glass" comes from light ON the surface — one diagonal specular graze + a crisp top/right
          edge highlight — never from a milky white fill. The color-mix keeps each theme's own hue in the dark.
+         The 1px top edge-light came OFF with the top bar's hairline: the sidebar is flush under the bar, so that
+         highlight sat exactly where the border did and would have re-drawn the seam across the sidebar's width.
+         The graze still carries the material — it starts light at the top-left and is a gradient, not a line.
          ⑤ the outer right shadow spills into the gutter so the pane dissolves toward the terminal instead of
          stopping at a hard bevel (an inner scrim was rejected: it would dim the row's ▾ and live badges). */
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
