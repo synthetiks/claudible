@@ -116,6 +116,18 @@ function stripCtrlV(data) {
   const s = String(data == null ? '' : data);
   return s.indexOf('\x16') === -1 ? s : s.split('\x16').join('');
 }
+// Not everything on the input channel is TYPING. Every full-screen TUI turns on mouse tracking, so xterm
+// forwards wheel/click REPORTS down the same path as keystrokes; and the guest's scroll gutter sends Page keys
+// there too (sendPage). Labelling those as typing is why "MK is typing…" appeared while MK was only scrolling
+// or reading. Strip the pointer/scroll noise — if nothing else is left, the frame carried no typing.
+// The bytes are still FORWARDED either way; this only decides whether to light the typist indicator.
+function isTypingBytes(data) {
+  const rest = String(data == null ? '' : data)
+    .replace(/\x1b\[M[\s\S]{3}/g, '')        // X10 mouse report: ESC [ M + 3 coordinate bytes (any byte)
+    .replace(/\x1b\[<[\d;]*[Mm]/g, '')       // SGR mouse report: ESC [ < b ; x ; y M|m
+    .replace(/\x1b\[[56]~/g, '');            // PageUp / PageDown — what the scroll gutter sends
+  return rest.length > 0;
+}
 // One guest paste, host-wrapped: the payload is enclosed in bracketed-paste marks ON THE HOST (mirroring
 // the host's own Ctrl+V path), so the marks themselves must not appear INSIDE the payload — an embedded
 // \x1b[201~ would terminate the paste early and turn everything after it into live keystrokes (paste
@@ -385,7 +397,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
         const data = stripCtrlV(msg.data);   // a raw ^V would paste the HOST's clipboard at the CLI — see stripCtrlV
         if (!data) return;
         try { onInput && onInput(data, { pid: ws._pid, name: ws._name }); } catch {}   // pass the typist's identity so session-history can attribute the prompt to the guest, not the host
-        typistPing(ws._name, ws);         // label this guest's keystrokes for every OTHER viewer (the host UI learns via onInput)
+        if (isTypingBytes(data)) typistPing(ws._name, ws);   // label real keystrokes for every OTHER viewer — but not a scroll or a click (the host UI learns via onInput either way)
         return;
       }
       // A guest's paste — THEIR clipboard text as one typed frame, kept off the keystroke channel so the
@@ -674,4 +686,4 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
   return { start, stop, broadcast, broadcastStatus, broadcastChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
-module.exports = { createShareServer, uniqueName, cleanName, stripCtrlV, sanitizePaste };
+module.exports = { createShareServer, uniqueName, cleanName, stripCtrlV, sanitizePaste, isTypingBytes };

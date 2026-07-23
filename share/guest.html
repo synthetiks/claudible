@@ -62,7 +62,10 @@
     /* overflow:HIDDEN on desktop — the terminal is scaled to fit the pane, so a scrollable outer area can only
        ever be a rounding artifact, and a phantom scroll outside the terminal is confusing. Phones/narrow layouts
        re-enable overflow further down: there the grid is deliberately wider than the screen and you pan it. */
-    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:7px 14px;overflow:hidden;-webkit-overflow-scrolling:touch}
+    /* Vertical padding is asymmetric on purpose: 11 top / 3 bottom. The total (14px) is unchanged, so the
+       terminal is exactly the same SIZE — it just sits ~4px lower, which buys the "X is typing…" banner some
+       breathing room above and takes those pixels off the dead gap below. */
+    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:11px 14px 3px;overflow:hidden;-webkit-overflow-scrolling:touch}
     .gchat{min-width:0}
     /* guest chat — human↔human side channel with the host */
     .gchat{flex:none;width:300px;display:flex;flex-direction:column;min-height:0;margin:14px 14px 14px 0;

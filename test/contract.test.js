@@ -1697,9 +1697,43 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the session label/name group or the brand separator is missing']);
   none('…and the old free-floating "shared" tag came back beside the wordmark',
     !/<span class="tag">/.test(GUEST_HTML) ? [] : ['the standalone .tag element is back']);
-  none('the vertical frame around the terminal was not tightened',
-    /\.wrap\{[^}]*padding:7px 14px/.test(gflat) && /#terminal\{[^}]*padding:5px 12px/.test(gflat)
-      ? [] : ['the .wrap / #terminal vertical padding is not halved']);
+  // 11 top / 3 bottom: the TOTAL is still 14px (so the fitted terminal is the same size) but it sits ~4px lower,
+  // giving the "is typing…" banner room above and taking those pixels off the dead gap below.
+  none('the vertical frame around the terminal was not tightened / re-balanced',
+    /\.wrap\{[^}]*padding:11px 14px 3px/.test(gflat) && /#terminal\{[^}]*padding:5px 12px/.test(gflat)
+      ? [] : ['the .wrap / #terminal vertical padding is not the tightened, top-weighted pair']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 52. SCROLLING IS NOT TYPING. Every full-screen TUI enables mouse tracking, so xterm forwards wheel and click
+//   REPORTS down the same channel as keystrokes, and the guest's scroll gutter sends Page keys there too. Both
+//   used to light the typist indicator, so "MK is typing…" appeared while MK was only scrolling. This is the
+//   one check in the file that EXERCISES the code rather than reading it — the classifier is pure, so run it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  let isTypingBytes = null;
+  try { ({ isTypingBytes } = require('../share/server')); } catch {}
+  if (typeof isTypingBytes !== 'function') {
+    none('share/server.js no longer exports the typing/scroll classifier', ['isTypingBytes is not exported']);
+  } else {
+    const TYPING = [['a', 'a printable char'], ['hello', 'a word'], ['\r', 'Enter'], ['\x7f', 'Backspace'],
+      ['\x03', 'Ctrl+C'], ['\x1b[A', 'Arrow Up'], ['\x1b[<64;1;1Mx', 'a wheel report followed by a real keystroke']];
+    const NOT_TYPING = [['\x1b[5~', 'PageUp (the scroll gutter)'], ['\x1b[6~', 'PageDown'],
+      ['\x1b[<64;12;34M', 'SGR wheel-up'], ['\x1b[<65;12;34M', 'SGR wheel-down'], ['\x1b[<0;5;7M', 'mouse press'],
+      ['\x1b[<0;5;7m', 'mouse release'], ['\x1b[M\x20\x30\x40', 'X10 mouse report'],
+      ['\x1b[<64;1;1M\x1b[<64;1;1M', 'a burst of wheel reports'], ['', 'an empty frame']];
+    none('real keystrokes are no longer counted as typing',
+      TYPING.filter(([b]) => isTypingBytes(b) !== true).map(([, d]) => d));
+    none('scrolling / clicking still counts as typing (the reported bug)',
+      NOT_TYPING.filter(([b]) => isTypingBytes(b) !== false).map(([, d]) => d));
+  }
+  // …and both trigger points must actually consult it — guest input and the host's own keystrokes alike.
+  none('a guest’s scroll can still light the typist indicator',
+    /if \(isTypingBytes\(data\)\) typistPing\(ws\._name, ws\);/.test(read('share/server.js'))
+      ? [] : ['the guest input handler does not gate typistPing on isTypingBytes']);
+  none('…and the host’s scroll can still tell every guest the host is typing',
+    /if \(tabId === mirrorTabId\(\) && isTypingBytes\(data\)\)/.test(MAIN)
+      ? [] : ['main.js does not gate broadcastTypist on isTypingBytes']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

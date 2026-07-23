@@ -12,7 +12,7 @@ const { atomicWriteJson } = require('./lib/atomicWrite');          // every JSON
 const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
 const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
-const { createShareServer, sanitizePaste } = require('./share/server');
+const { createShareServer, sanitizePaste, isTypingBytes } = require('./share/server');
 const { shq } = require('./runners/_shared');   // single-quote-safe interpolation for values that ride into a bash -lc arg string (defense-in-depth on the presence stamps below)
 const { readGitSha } = require('./lib/buildIdentity');
 const { makePresenceRelay, mergePeerFrame, reconcilePeerLists } = require('./lib/presenceRelay');
@@ -766,7 +766,9 @@ ipcMain.on('pty:input', (e, { tabId, data }) => {
   if (t.lastInputBy) { t.lastInputBy = null; t.typistWrittenTs = 0; try { _writeContext(tabId); } catch {} }
   // The host typing into the SHARED session → label those keystrokes for guests (their typist chip).
   // Only the mirrored tab — typing in a private tab emits nothing (matches the byte-mirror privacy rule).
-  if (tabId === mirrorTabId()) {
+  // …and only for actual TYPING: the host's own xterm forwards wheel/click reports on this same path, so an
+  // unfiltered broadcast told every guest "the host is typing" while the host was merely scrolling.
+  if (tabId === mirrorTabId() && isTypingBytes(data)) {
     const now = Date.now();
     if (now - _typHostTs > 1000) {
       _typHostTs = now;
