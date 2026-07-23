@@ -478,11 +478,16 @@ none('renderer: orphanTab is never rendered',
   // post-rail attempt recoloured the whole title red, which shouted (and put a red title beside the green ● LIVE
   // pill on a live row — two contradictory claims on one row). The dot is the vocabulary the row already had.
   // It now LEADS the row (::before on the title) rather than heading the right-hand meta cluster — a status light
-  // belongs at the left edge. The anchor moved; the invariant did not.
-  none('the mid-turn state lost its railless indicator (the pulsing busy dot)',
-    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*background:var\(--live\)/.test(flat) ? [] : ['no .sess.busy .sess-prev::before busy-dot rule']);
-  none('…and the busy dot must actually pulse (a static dot reads as decoration, not activity)',
-    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*animation:ws-sync-pulse/.test(flat) ? [] : ['the busy dot has no ws-sync-pulse animation']);
+  // belongs at the left edge. The anchor moved; the invariant did not. It is also --sync BLUE, not --live red:
+  // mid-turn is progress, and it shares the token with the project dot that makes the same claim.
+  none('the mid-turn state lost its railless indicator (the busy dot)',
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*background:var\(--sync\)/.test(flat) ? [] : ['no .sess.busy .sess-prev::before busy-dot rule on var(--sync)']);
+  // It must still MOVE — a wholly static dot is indistinguishable from decoration. But at one blink per 10s,
+  // not the old 1s breathe: ws-sync-pulse is 50%-duty, so reusing it at 10s reads as slow dimming, not a flash.
+  none('…and the busy dot must still animate (a static dot reads as decoration, not activity)',
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*animation:sess-busy-blink 10s/.test(flat) ? [] : ['the busy dot has no sess-busy-blink 10s animation']);
+  none('…and sess-busy-blink must hold steady and blink, not fade across the whole cycle',
+    /@keyframes sess-busy-blink\{0%,100%\{opacity:1\}[\d.]+%\{opacity:\.\d+\}/.test(styleBlk) ? [] : ['sess-busy-blink is missing or is not a short-duty blink']);
   // A DRAFT row builds its OWN .sess-draftdot span and the rule above already pulses it when .busy is set. If the
   // busy dot stops excluding draft rows, a busy draft wears TWO dots — a red one and an amber one, side by side.
   // That shipped for one commit; it must not ship twice.
@@ -535,6 +540,56 @@ none('renderer: orphanTab is never rendered',
       ? [] : [headPad.length === 2 && Number.isFinite(chipsPad)
           ? `above=${headPad[0]}px but below=${headPad[1]}+${chipsPad}=${headPad[1] + chipsPad}px`
           : 'could not read .ws-section-head / .ws-chips padding']);
+  // ── DESIGN SYSTEM: the tokens are the system. A raw value re-introduces the drift they replaced. ─────────
+  // Type scale: 19 ad-hoc sizes became 8 tokens. A stray `font-size:13px` is how the 19 came back last time.
+  // (font-size:0 is the icon-button glyph-hiding idiom, not a size — allowed.)
+  const rawFs = (styleBlk.match(/font-size:(?!0[;}\s])[0-9.]+px/g) || []);
+  none('a raw font-size px value escaped the type scale (use var(--fs-*))', rawFs);
+  // …and the scale must actually be anchored on the sidebar's own sizes, or "the sidebar does not move" breaks.
+  none('the type scale drifted off its sidebar anchors (2xs/xs/sm must stay 9 / 10.5 / 12px)',
+    /--fs-2xs:9px/.test(styleBlk) && /--fs-xs:10\.5px/.test(styleBlk) && /--fs-sm:12px/.test(styleBlk)
+      ? [] : ['--fs-2xs/--fs-xs/--fs-sm are no longer 9 / 10.5 / 12px']);
+  // Motion: the two shared curves are tokens. A literal cubic-bezier means an element animating off-system.
+  none('a raw easing curve escaped the motion system (use var(--ease-out) / var(--ease-pop))',
+    (styleBlk.match(/cubic-bezier\(\.2,\.7,\.15,1\)|cubic-bezier\(\.2,\.7,\.2,1\)/g) || []).filter((_, i, a) => a.length > 2));
+  // A custom property that references ITSELF is invalid at computed-value time and takes every consumer down
+  // with it. The scale rewrite produced exactly this (`--ease-pop:var(--ease-pop)`) from a duplicate :root.
+  const selfRef = [];
+  (styleBlk.match(/--[a-z0-9-]+:\s*var\(--[a-z0-9-]+\)/g) || []).forEach((d) => {
+    const [lhs, rhs] = d.split(':'); if (lhs.trim() === rhs.trim().slice(4, -1)) selfRef.push(d);
+  });
+  none('a design token references itself (cyclic → invalid, breaks every var() that reads it)', selfRef);
+
+  // ── COMMAND PALETTE ─────────────────────────────────────────────────────────────────────────────────────
+  // This app is a TERMINAL. Ctrl+K is readline's kill-to-end-of-line and Ctrl+P is previous-command; binding
+  // either globally would silently break them inside the shell. The chord must require Shift.
+  const cmdkKey = (APP.match(/if \(!mod \|\| !e\.shiftKey[\s\S]{0,220}?cmdkOpen/) || [''])[0];
+  none('the command palette hotkey no longer requires Shift (it would collide with the terminal’s own Ctrl+K/Ctrl+P)',
+    /!e\.shiftKey/.test(cmdkKey) && /KeyP/.test(cmdkKey) ? [] : ['the palette chord is not a Shift-guarded KeyP']);
+  none('the palette does not hand the keyboard back to the terminal on close',
+    /function cmdkOpen[\s\S]{0,400}?focusTermSoon/.test(APP) ? [] : ['cmdkOpen(false) never calls focusTermSoon']);
+
+  // ── TOAST ───────────────────────────────────────────────────────────────────────────────────────────────
+  // It is anchored over the terminal but must stay position:FIXED. The theme toast fires from inside the
+  // Settings drawer — a fixed, filtered element with its own stacking context — so an in-flow toast would
+  // render behind the very panel that triggered it.
+  none('the toast left position:fixed (it would render behind the drawer that triggered it)',
+    /\.toast\{position:fixed/.test(flat) ? [] : ['.toast is no longer position:fixed']);
+  // Scoped to toast()'s OWN body: `placeToast(t)` also appears in the resize listener, so a loose search for it
+  // passes even when toast() has stopped calling it (it did, on first write of this check).
+  none('the toast is no longer anchored to the terminal at show time',
+    /function placeToast[\s\S]{0,400}?getBoundingClientRect/.test(APP) && /function toast\(msg\)[\s\S]{0,300}?placeToast\(/.test(APP)
+      ? [] : ['placeToast is missing, or toast() no longer calls it']);
+
+  // ── SELECTION IS NEUTRAL ────────────────────────────────────────────────────────────────────────────────
+  // Selected ≠ alert. Projects were Claude-orange and sessions were --live red; both now read from --sel.
+  // comments stripped first — they trail into the next rule's selector chunk and get reported as the offender
+  const selRules = flat.replace(/\/\*[\s\S]*?\*\//g, '').split('}').filter((c) => /\.(sess\.active|ws-chip\.active)\{/.test(c));
+  none('the selected row/project is painted with an ALERT colour again (orange / --live)',
+    selRules.filter((c) => /217,119,87|var\(--live\)/.test(c)).map((c) => c.split('{')[0].trim().slice(0, 50)));
+  none('…and it must still actually paint something (via --sel)',
+    selRules.length >= 2 && selRules.every((c) => /var\(--sel\)/.test(c)) ? [] : ['.sess.active / .ws-chip.active do not both use var(--sel)']);
+
   // …and the resting first row must start past the top fade, or the vignette washes out a project name.
   const topFade = Number((flat.match(/\.ws-chips\{[^}]*?mask-image:linear-gradient\(to bottom,transparent,#000 ([\d.]+)px/) || [])[1]);
   none('the scroll vignette now eats into the first project row (top fade outruns .ws-chips padding-top)',

@@ -35,6 +35,49 @@
          so the mix re-resolves for free). The terminal stays lighter: chrome vs content. */
       --chrome:color-mix(in srgb,color-mix(in srgb,var(--panel) 72%,var(--bg)) 65%,#000);
       --sidebar-glass:var(--chrome);
+
+      /* ── SELECTION TINT ────────────────────────────────────────────────────────────────────────────────────
+         "this project / this session is the one you're on". Deliberately NEUTRAL: it was Claude-orange on
+         projects and --live red on sessions, which read as an ALERT and fought the app's cool greys. A soft
+         blue-silver says "selected" without claiming anything is wrong. Kept unthemed on purpose — a neutral
+         reads as selection in all six palettes, where a themed hue would compete with each palette's accent. */
+      --sel:#cdd9ea;
+      /* the SYNC blue, shared by the project dot and the session busy dot — they are the same claim ("work in
+         flight here"), so they are one token. The session dot used --live red, which read as an error. */
+      --sync:#6aa6e0;
+
+      /* ── TYPE SCALE ────────────────────────────────────────────────────────────────────────────────────────
+         Was 19 ad-hoc sizes (8 → 24) picked per element. Eight steps at a ~1.13 ratio. Anchored on the sidebar:
+         --fs-2xs/xs/md are exactly its meta / label / title sizes, so the surface tuned most does not move. */
+      --fs-2xs:9px;      /* meta, badges, status bar        */
+      --fs-xs:10.5px;    /* uppercase labels, section heads */
+      --fs-sm:12px;      /* row titles, body                */
+      --fs-md:13.5px;    /* buttons, inputs                 */
+      --fs-lg:15px;      /* emphasis, wordmark              */
+      --fs-xl:17px;      /* panel headings                  */
+      --fs-2xl:19px;     /* modal headings                  */
+      --fs-3xl:24px;     /* the single hero number          */
+      /* Tracking tiers to go with the sizes — small+uppercase needs air, running text needs almost none. Applied
+         to the label tier and to new work; the older per-element letter-spacing values are deliberately left
+         alone for now, since several are load-bearing for width (see .sl-text in the share dock). */
+      --tk-label:.16em;  /* uppercase micro-labels */
+      --tk-base:.01em;   /* normal running text    */
+      --tk-tight:-.01em; /* large text             */
+
+      /* ── MOTION ────────────────────────────────────────────────────────────────────────────────────────────
+         Was six durations (.14/.15/.16/.17/.18/.2) and three curves, chosen ad hoc. Three durations, two curves. */
+      --dur-fast:.14s;   /* colour / opacity swaps        */
+      --dur-base:.17s;   /* the default for anything moving */
+      --dur-slow:.22s;   /* entrances, larger travel      */
+      --ease-out:cubic-bezier(.2,.7,.15,1);   /* decelerate — the workhorse */
+      --ease-pop:cubic-bezier(.2,.7,.2,1);    /* a touch of overshoot       */
+
+      /* ── ELEVATION ─────────────────────────────────────────────────────────────────────────────────────────
+         One ladder, applied by how far a surface floats above the page. Shadows were previously tuned per
+         element, so a menu and a drawer at the same conceptual height cast different shadows. */
+      --elev-1:0 2px 5px rgba(0,0,0,.38);     /* resting control      */
+      --elev-2:0 5px 12px rgba(0,0,0,.5);     /* lifted / hovered     */
+      --elev-3:0 14px 32px rgba(0,0,0,.52);   /* floating surface     */
     }
     /* ── Themes: subtle, low-key dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
        Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
@@ -72,11 +115,11 @@
       background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
       color:var(--ink);
       font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",Consolas,monospace;
-      font-size:13px;-webkit-font-smoothing:antialiased;
+      font-size:var(--fs-md);-webkit-font-smoothing:antialiased;
       user-select:none;-webkit-user-select:none;cursor:default;
     }
     /* sleek, minimal scrollbar everywhere — thin floating thumb, no track. The few areas that hide their
-       scrollbar entirely (terminal, cmdscroll) keep their width:0 overrides via higher specificity. */
+       scrollbar entirely (the terminal) keep their width:0 overrides via higher specificity. */
     ::-webkit-scrollbar{width:9px;height:9px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
@@ -92,13 +135,18 @@
        IS --chrome, so the two now flow into one continuous chrome surface with nothing to draw. Toward the
        terminal there is no seam to lose either: the 5px of --bg body padding is darker than --terminal-bg, so
        that boundary is already a brightness step. (The sidebar's own top edge-light comes off with it — see there.) */
-    .top{display:flex;align-items:center;gap:12px;padding:0 16px;
+    /* ZONES, not one flat gap: brand · actions · voice · telemetry. The gap inside a group is tight, the gap
+       BETWEEN groups is wide, so the bar reads as four things instead of nine evenly-spaced controls. */
+    .top{display:flex;align-items:center;gap:0;padding:0 16px;
       background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}
+    .top>.topbtns{margin-left:22px}    /* brand → actions: the widest break in the bar */
+    .top>.vgroup{margin-left:18px}     /* actions → voice */
+    .top>.trk{margin-left:auto}        /* telemetry stays pinned right (unchanged) */
     .logo{height:28px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
-    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:#f6f8fc}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
+    .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:var(--fs-lg);color:#f6f8fc;margin-left:4px}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
     .topbtns{display:flex;align-items:center;gap:6px}     /* icon buttons grouped tight, right of the title */
-    .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
+    .tag{font-size:var(--fs-xs);letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
     /* session tracker */
     .trk{margin-left:auto;display:flex;align-items:center;gap:8px}   /* context↔tokens spacing matches the Talk/Speak (.vgroup) gap */
     /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
@@ -106,18 +154,18 @@
     .ctxbar{display:inline-flex;align-items:center;gap:9px;height:31px;padding:0 11px;border-radius:9px;
       background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
       transition:box-shadow .25s ease}                                                  /* box height matches the Talk/Speak (.vbox) buttons */
-    .ctxlabel{font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#f6f8fc;flex:none}  /* size = Talk/Speak label (10px); color = the CLAUDIBLE wordmark white — no green */
+    .ctxlabel{font-size:var(--fs-xs);font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#f6f8fc;flex:none}  /* size = Talk/Speak label (10px); color = the CLAUDIBLE wordmark white — no green */
     .ctxsegs{display:inline-flex;align-items:center;gap:2.5px;height:15px;flex:none}
     .ctxsegs i{width:3.5px;height:15px;border-radius:1.5px;background:rgba(132,147,166,.22);
       transition:background .25s ease}                                                  /* empty = dim; SAME height as filled (even row) */
     .ctxsegs i.lit{background:linear-gradient(180deg,color-mix(in srgb,var(--ok) 84%,#ffffff),color-mix(in srgb,var(--ok) 82%,#0a0a0a))}                  /* filled = bright green (differs by color only) */
-    .ctxpct{min-width:30px;text-align:right;font-size:14px;font-weight:700;letter-spacing:.02em;color:var(--ok);
+    .ctxpct{min-width:30px;text-align:right;font-size:var(--fs-md);font-weight:700;letter-spacing:.02em;color:var(--ok);
       font-variant-numeric:tabular-nums}                                               /* tabular so width stays steady 6%→100% */
     /* tokens readout — a sibling box that replicates the context box (height/bg/border/glow), only narrower.
        TOKENS label reuses .ctxlabel (10px, wordmark white). Value matches the % readout +2.5% to stress it. */
     .tokbar{display:inline-flex;align-items:center;gap:7px;height:31px;padding:0 11px;border-radius:9px;
       background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent)}
-    .tokval{min-width:30px;text-align:center;transform:translateX(2px);font-size:14px;font-weight:700;letter-spacing:.02em;color:#f6f8fc;
+    .tokval{min-width:30px;text-align:center;transform:translateX(2px);font-size:var(--fs-md);font-weight:700;letter-spacing:.02em;color:#f6f8fc;
       font-variant-numeric:tabular-nums}    /* white by default; JS tints it warm as raw token count climbs (easter egg). centered + a hair right so a short value sits balanced in the box; grows to fit big values */
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives segment + percent color + pulse */
     .ctxbar.warn .ctxsegs i.lit{background:linear-gradient(180deg,#f0c25a,#c8902e)}
@@ -145,8 +193,8 @@
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
     .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:2px;border-radius:9px;
       background:#14171c;border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
-    .termseg button{width:auto;padding:3px 9px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
-      background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all .15s}
+    .termseg button{width:auto;padding:3px 9px;font-size:var(--fs-xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+      background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all var(--dur-fast)}
     .termseg button:hover{color:var(--ink-dim)}
     .termseg button.on{color:var(--ink);background:linear-gradient(180deg,#22262e,#171a20)}
     .termseg .agent-badge{position:absolute;top:0;right:1px;width:6px;height:6px;border-radius:50%;
@@ -159,7 +207,7 @@
     #agents-pane.show{display:flex}
     .agents-list{max-width:1000px;margin:0 auto;width:100%}
     .termrow.agents-on .termtab{display:none}              /* hide save/git/clear tabs while the Agents pane covers the terminal */
-    .agents-empty{margin:auto;color:var(--ink-faint);font-size:11.5px;text-align:center;line-height:1.7;max-width:320px}
+    .agents-empty{margin:auto;color:var(--ink-faint);font-size:var(--fs-sm);text-align:center;line-height:1.7;max-width:320px}
     .agents-empty-ico{display:block;width:40px;height:40px;margin:0 auto 14px;opacity:.42}
     .agents-empty-ico svg{width:40px;height:40px}
     /* ── hero telemetry: the swarm read as ONE living system (count · running/done · tokens · progress) ── */
@@ -170,14 +218,14 @@
     .hero-glyph svg{width:26px;height:26px}
     .agents-hero.live .hero-glyph{color:var(--warn);animation:micpulse 1.7s ease-in-out infinite}
     .hero-main{flex:1;min-width:0}
-    .hero-title{font-size:15px;font-weight:650;letter-spacing:.01em;color:var(--ink);display:flex;align-items:center;gap:9px}
-    .hero-live-pill{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--warn);display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;background:rgba(224,169,59,.14)}
+    .hero-title{font-size:var(--fs-lg);font-weight:650;letter-spacing:.01em;color:var(--ink);display:flex;align-items:center;gap:9px}
+    .hero-live-pill{font-size:var(--fs-2xs);font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--warn);display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;background:rgba(224,169,59,.14)}
     .hero-live-pill .ld{width:6px;height:6px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px -1px var(--warn);animation:micpulse 1s ease-in-out infinite}
-    .hero-sub{margin-top:3px;font-size:10.5px;color:var(--ink-faint);letter-spacing:.02em}
+    .hero-sub{margin-top:3px;font-size:var(--fs-xs);color:var(--ink-faint);letter-spacing:.02em}
     .hero-stats{flex:none;display:flex;gap:8px}
     .hstat{min-width:54px;text-align:center;padding:6px 11px;border-radius:9px;background:rgba(255,255,255,.04)}
-    .hstat-n{font-size:16px;font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
-    .hstat-l{margin-top:4px;font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+    .hstat-n{font-size:var(--fs-xl);font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
+    .hstat-l{margin-top:4px;font-size:var(--fs-2xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
     .hstat.run .hstat-n{color:var(--warn)}
     .hstat.done .hstat-n{color:var(--ok)}
     .hstat.tok .hstat-n{color:var(--accent)}
@@ -185,11 +233,11 @@
     .hero-prog-fill{height:100%;background:linear-gradient(90deg,var(--ok),var(--accent));transition:width .5s cubic-bezier(.4,0,.2,1)}
     /* ── groups (Running / Done), each a responsive grid so parallelism is VISIBLE at a glance ── */
     .agents-group{margin-bottom:15px}
-    .agents-group-hd{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 9px 2px}
+    .agents-group-hd{font-size:var(--fs-2xs);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 9px 2px}
     .agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(234px,1fr));gap:10px}
     /* ── agent tile — a living cell you watch think: type-hued, live "now" line, drill-down detail ── */
     .agent-tile{position:relative;display:flex;flex-direction:column;gap:8px;padding:11px 12px 10px 14px;min-width:0;border-radius:11px;overflow:hidden;
-      background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.007));box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);transition:box-shadow .16s,transform .16s}
+      background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.007));box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);transition:box-shadow var(--dur-base),transform var(--dur-base)}
     .agent-tile::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--rail,#8493a6);opacity:.85}   /* type-hued edge = swarm identity at a glance */
     .agent-tile.rich{cursor:pointer}
     .agent-tile.rich:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.11),0 8px 24px -18px #000;transform:translateY(-1px)}
@@ -205,35 +253,35 @@
     .agent-tile.running .tile-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--warn);opacity:.5;animation:agentRing 1.4s ease-out infinite}
     .agent-tile.done .tile-dot{background:var(--ok);box-shadow:0 0 8px -2px var(--ok)}
     .agent-tile.err .tile-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
-    .tile-name{flex:1;min-width:0;font-size:12px;line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    .tile-type{flex:none;align-self:flex-start;font-size:8px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink);background:color-mix(in srgb,var(--rail,#8493a6) 26%,transparent)}
-    .tile-model{flex:none;align-self:flex-start;font-size:8px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink-dim);background:var(--raised-hi,rgba(255,255,255,.06))}   /* which brain runs this agent — quieter than the type pill (neutral fill, no hue) so the rail color keeps meaning "type" */
+    .tile-name{flex:1;min-width:0;font-size:var(--fs-sm);line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .tile-type{flex:none;align-self:flex-start;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink);background:color-mix(in srgb,var(--rail,#8493a6) 26%,transparent)}
+    .tile-model{flex:none;align-self:flex-start;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink-dim);background:var(--raised-hi,rgba(255,255,255,.06))}   /* which brain runs this agent — quieter than the type pill (neutral fill, no hue) so the rail color keeps meaning "type" */
     /* the "now" line — WHAT this agent is doing right now (the watch-it-think magic) */
-    .tile-now{display:flex;align-items:center;gap:6px;min-width:0;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-dim);white-space:nowrap;overflow:hidden}
+    .tile-now{display:flex;align-items:center;gap:6px;min-width:0;font-size:var(--fs-xs);font-family:ui-monospace,Consolas,monospace;color:var(--ink-dim);white-space:nowrap;overflow:hidden}
     .tile-now-ind{flex:none;width:5px;height:5px;border-radius:50%;background:var(--ink-faint)}
     .agent-tile.running .tile-now{color:var(--ink)}
     .agent-tile.running .tile-now-ind{background:var(--rail,#8493a6);box-shadow:0 0 7px -1px var(--rail,#8493a6);animation:micpulse 1.1s ease-in-out infinite}
     .tile-now .nm{color:var(--ink);font-weight:600;flex:none}
     .tile-now .tg{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-faint)}
-    .tile-foot{display:flex;align-items:center;gap:12px;font-size:9.5px;color:var(--ink-faint);letter-spacing:.02em;font-variant-numeric:tabular-nums}
+    .tile-foot{display:flex;align-items:center;gap:12px;font-size:var(--fs-2xs);color:var(--ink-faint);letter-spacing:.02em;font-variant-numeric:tabular-nums}
     .tile-foot .fm{display:inline-flex;align-items:center;gap:4px}
     .tile-foot .fm b{font-weight:650;color:var(--ink-dim)}
     .tile-foot .fm.tok b{color:var(--accent)}
     .agent-tile.running .tile-foot .fm.dur b{color:var(--warn)}
     .tile-foot .fm.err{color:var(--live)}
-    .agent-chev{margin-left:auto;flex:none;color:var(--ink-faint);font-size:13px;line-height:1;transition:transform .18s,color .14s}
+    .agent-chev{margin-left:auto;flex:none;color:var(--ink-faint);font-size:var(--fs-md);line-height:1;transition:transform var(--dur-base),color var(--dur-fast)}
     .agent-tile.rich:hover .agent-chev{color:var(--ink)}
     .agent-tile.expanded .agent-chev{transform:rotate(180deg)}
     /* drill-down detail — the agent's task, its full tool-call feed, and its final result */
     .tile-detail{display:none;margin-top:2px;padding-top:10px;border-top:1px solid var(--hairline-soft)}
     .agent-tile.expanded .tile-detail{display:block}
-    .agent-task{margin:0 0 9px;font-size:11px;line-height:1.5;color:var(--ink-dim)}
+    .agent-task{margin:0 0 9px;font-size:var(--fs-xs);line-height:1.5;color:var(--ink-dim)}
     .agent-feed{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
     .agent-tool{display:inline-flex;gap:6px;align-items:center;line-height:1.4}
-    .agent-tool .agent-tt{min-width:0;max-width:220px;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .agent-result{font-size:11px;line-height:1.55;color:var(--ink);background:rgba(0,0,0,.22);border-radius:8px;padding:9px 11px;max-height:150px;overflow:auto}
+    .agent-tool .agent-tt{min-width:0;max-width:220px;font-size:var(--fs-xs);font-family:ui-monospace,Consolas,monospace;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .agent-result{font-size:var(--fs-xs);line-height:1.55;color:var(--ink);background:rgba(0,0,0,.22);border-radius:8px;padding:9px 11px;max-height:150px;overflow:auto}
     /* tool badges — colored by kind (shared by the "now" line + the expanded feed) */
-    .tb{font-size:8.5px;font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.05);color:var(--ink-dim);white-space:nowrap}
+    .tb{font-size:var(--fs-2xs);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.05);color:var(--ink-dim);white-space:nowrap}
     .tb-sh{color:#e0a93b;background:rgba(224,169,59,.13)}
     .tb-read{color:#6aa6e0;background:rgba(106,166,224,.13)}
     .tb-find{color:#7fb0e6;background:rgba(106,166,224,.10)}
@@ -251,15 +299,15 @@
     .term-host.active{display:block}
     /* native joined-live tab: centered status overlay for the non-streaming states (connecting/paused/…) */
     .live-ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;
-      padding:0 28px;font-size:12px;line-height:1.5;color:var(--ink-faint,#9097a1);background:rgba(7,8,9,.82);
+      padding:0 28px;font-size:var(--fs-sm);line-height:1.5;color:var(--ink-faint,#9097a1);background:rgba(7,8,9,.82);
       backdrop-filter:blur(2px);z-index:5;pointer-events:none}
     .live-ov.show{display:flex}
     .live-ov.bad{color:#e0a0a0}
     /* "who's typing" pill — floats on a live-shared terminal's corner, names the current typist. Identity is
        BLUE across the app (matches .sess-flair.author); pointer-events:none so it never blocks a click/selection. */
     .typist-chip{position:absolute;top:6px;right:18px;z-index:6;padding:3px 10px;border-radius:999px;
-      font-size:10px;font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.12);
-      opacity:0;transition:opacity .18s ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:40%;
+      font-size:var(--fs-xs);font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.12);
+      opacity:0;transition:opacity var(--dur-base) ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:40%;
       overflow:hidden;text-overflow:ellipsis}
     .typist-chip.show{opacity:1}
     /* a joined peer's session, pinned atop the sidebar list */
@@ -280,46 +328,12 @@
       background:linear-gradient(180deg,#171a20,#0e1116);box-shadow:inset 0 0 0 1px var(--hairline)}
     .scroll .thumb{position:absolute;left:2px;right:2px;top:0;min-height:34px;border-radius:6px;
       background:linear-gradient(180deg,var(--steel),var(--ink-faint));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 4px -1px #000;
-      cursor:grab;opacity:.6;transition:background .15s,opacity .2s;will-change:transform,height}
+      cursor:grab;opacity:.6;transition:background var(--dur-fast),opacity var(--dur-slow);will-change:transform,height}
     .scroll:hover .thumb{opacity:.92;background:linear-gradient(180deg,var(--silver),var(--steel))}
     .scroll .thumb.drag{cursor:grabbing;opacity:1;background:linear-gradient(180deg,var(--silver),#9aa3ae)}
-    /* command bar — 5 commands visible; scroll or drag horizontally for the rest */
-    /* frameless command row — no box/corners (nothing for hovered pills to clash with); the reclaimed
-       border + padding height goes to the terminal above. Pills keep their own glow-hover. */
-    .cmdbar{display:flex;align-items:center;gap:10px;flex:none;position:relative;padding:2px 2px}   /* left padding trimmed 11→2 so the pills START at the terminal's left edge (vertically aligned) */
-    /* viewport: clips the track; edge fades cue that there's more to scroll */
-    .cmdscroll-wrap{position:relative;flex:1;min-width:0}
-    .cmdscroll-wrap::before,.cmdscroll-wrap::after{content:'';position:absolute;top:0;bottom:0;width:30px;
-      pointer-events:none;z-index:2;opacity:0;transition:opacity .2s}
-    .cmdscroll-wrap::before{left:0;background:linear-gradient(90deg,#0b0d10,transparent)}
-    .cmdscroll-wrap::after{right:0;background:linear-gradient(270deg,#0b0d10,transparent)}
-    .cmdscroll-wrap.more-l::before{opacity:1}
-    .cmdscroll-wrap.more-r::after{opacity:1}
-    /* track: equal columns sized so EXACTLY 8 fit the viewport (7 inner gaps of 6px = 42px) — narrower pills, more shown */
-    .cmdscroll{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 42px) / 8.2);gap:6px;
-      overflow-x:auto;overflow-y:hidden;cursor:grab;touch-action:pan-x;padding-bottom:4px}   /* ~8.2 pills fit → each ~2.5% narrower; a sliver of the next peeks (scroll affordance). subtle gap to the scrollbar */
-    .cmdscroll:active{cursor:grabbing}
-    /* the command scrollbar: shorter + a thinner thumb than the global 9px — sleek, barely noticeable */
-    .cmdscroll::-webkit-scrollbar{height:6px}   /* −35% (9→6) */
-    .cmdscroll::-webkit-scrollbar-thumb{border-width:1px;background:rgba(255,255,255,.085);background-clip:padding-box}   /* 4px thumb on the 6px track; −30% opacity so it stops competing with the pills */
-    .cmdscroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2);background-clip:padding-box}   /* still findable when you reach for it */
-    /* clickable scroll arrows over the edge-fades — shown only when there's more to reveal that direction */
-    .cmdarrow{position:absolute;top:0;bottom:10px;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;   /* bottom skips the 4px gap + 6px scrollbar so the arrow centers on the pill row, not the scrollbar */
-      border:none;background:none;color:var(--ink-dim);font-size:18px;line-height:1;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .16s,color .16s}
-    .cmdarrow:hover{color:var(--ink)}
-    .cmdarrow-l{left:0}
-    .cmdarrow-r{right:0}
-    .cmdscroll-wrap.more-l .cmdarrow-l{opacity:1;pointer-events:auto}
-    .cmdscroll-wrap.more-r .cmdarrow-r{opacity:1;pointer-events:auto}
-    .cmdscroll .cmdpill{min-width:0;width:auto;padding:5.5px 9px;   /* vertical padding 7→5.5 (~10% shorter pill); width comes from the grid track above */
-      font-size:11.5px;letter-spacing:.02em;color:var(--ink-dim);white-space:nowrap;
-      overflow:hidden;text-overflow:ellipsis;text-align:center;
-      background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline-soft);
-      border-radius:8px;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s,color .15s;
-      box-shadow:inset 0 1px 0 var(--sheen)}
-    .cmdscroll .cmdpill:hover{color:var(--ink);border-color:rgba(255,255,255,.22);
-      box-shadow:inset 0 1px 0 var(--sheen),0 4px 18px -8px rgba(150,180,220,.45)}
-    .cmdscroll .cmdpill:active{transform:translateY(1px)}
+    /* (the command PILL BAR lived here — 15 pills in a horizontal drag-scroller with edge fades and arrow
+       buttons, of which 5 were ever visible. Replaced by the command palette below: searchable, keyboard-first,
+       and it gave the whole row back to the terminal. Its .cmdpill / .cmdarrow / .cmdscroll rules are gone.) */
     /* control column */
     .panel{display:flex;flex-direction:column;min-height:0;position:relative}
     /* Save-session tab: tucked at the panel's left edge, pops out LEFT over the terminal on hover */
@@ -329,11 +343,11 @@
       width:auto;display:flex;align-items:center;height:30px;padding:0 9px;overflow:hidden;
       border:1px solid var(--hairline);border-radius:9px;color:var(--ink-dim);cursor:pointer;
       background:linear-gradient(180deg,#16181d,#0f1115);
-      box-shadow:inset 0 1px 0 var(--sheen),0 3px 14px -6px #000;transition:all .18s ease}
+      box-shadow:inset 0 1px 0 var(--sheen),0 3px 14px -6px #000;transition:all var(--dur-base) ease}
     .termtab.tr{top:8px}
     .termtab.br{bottom:8px}
-    .termtab .lbl{max-width:0;opacity:0;overflow:hidden;white-space:nowrap;font-size:11px;letter-spacing:.08em;
-      text-transform:uppercase;transition:max-width .2s ease,opacity .2s ease,margin .2s ease}
+    .termtab .lbl{max-width:0;opacity:0;overflow:hidden;white-space:nowrap;font-size:var(--fs-xs);letter-spacing:.08em;
+      text-transform:uppercase;transition:max-width var(--dur-slow) ease,opacity var(--dur-slow) ease,margin var(--dur-slow) ease}
     .termtab .ico{width:16px;height:16px;flex:none}
     .termtab:hover{color:var(--ink);border-color:rgba(255,255,255,.22);
       box-shadow:inset 0 1px 0 var(--sheen),0 4px 18px -6px rgba(150,180,220,.35)}
@@ -342,92 +356,121 @@
     .sec{padding:15px 4px;border-bottom:1px solid var(--hairline-soft)}
     .sec:last-child{border-bottom:0}
     .label{display:flex;align-items:center;gap:9px;margin-bottom:12px;
-      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
-    .label .ico{width:15px;height:15px;color:var(--ink-faint);transition:color .2s, filter .2s;flex:none}
+      font-size:var(--fs-xs);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .label .ico{width:15px;height:15px;color:var(--ink-faint);transition:color var(--dur-slow), filter var(--dur-slow);flex:none}
     .label.active .ico{color:var(--live);filter:drop-shadow(0 0 6px var(--live))}
     .label.active{color:var(--ink)}
     .dot{width:7px;height:7px;border-radius:50%;background:#2a2e35;flex:none;transition:.25s;margin-left:auto}
     .dot.ok{background:var(--silver);box-shadow:0 0 8px -1px var(--silver)}
     .dot.work{background:var(--steel);box-shadow:0 0 8px -1px var(--steel)}
     .dot.bad{background:var(--live);box-shadow:0 0 8px -1px var(--live)}
-    button{width:100%;font-family:inherit;font-size:12px;letter-spacing:.06em;color:var(--ink-dim);
+    button{width:100%;font-family:inherit;font-size:var(--fs-sm);letter-spacing:.06em;color:var(--ink-dim);
       background:linear-gradient(180deg,#191c22,#101216);border:1px solid var(--hairline);
-      border-radius:9px;padding:13px 14px;cursor:pointer;transition:all .16s ease;
+      border-radius:9px;padding:13px 14px;cursor:pointer;transition:all var(--dur-base) ease;
       box-shadow:inset 0 1px 0 var(--sheen)}
     button:hover{border-color:rgba(255,255,255,.22);color:var(--ink);
       box-shadow:inset 0 1px 0 var(--sheen),0 2px 16px -8px rgba(180,200,230,.25)}
     button:active{transform:translateY(1px)}
-    button.primary{color:var(--ink);font-size:13px;padding:15px}
+    button.primary{color:var(--ink);font-size:var(--fs-md);padding:15px}
     button.live{color:#fff;border-color:var(--live);
       background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 22px -6px var(--live),inset 0 1px 0 rgba(255,255,255,.06)}
     /* voice selector pills */
     .voices{display:flex;gap:6px;margin-bottom:10px}
-    .vpill{flex:1;width:auto;padding:8px 4px;font-size:11px;letter-spacing:.03em;color:var(--ink-dim);
-      background:#101216;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:all .14s;
+    .vpill{flex:1;width:auto;padding:8px 4px;font-size:var(--fs-xs);letter-spacing:.03em;color:var(--ink-dim);
+      background:#101216;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:all var(--dur-fast);
       display:flex;align-items:center;justify-content:center;gap:5px;box-shadow:none}
-    .vpill i{font-style:normal;font-size:10px;opacity:.55}
+    .vpill i{font-style:normal;font-size:var(--fs-xs);opacity:.55}
     .vpill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
     .vpill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
     .vpill.on i{opacity:.7}
     /* default-effort selector (remembered, applied to new sessions) */
     .effort-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:7px}
-    .eff-pill{width:auto;flex:none;padding:5px 11px;font-size:10.5px;letter-spacing:.04em;color:var(--ink-dim);
+    .eff-pill{width:auto;flex:none;padding:5px 11px;font-size:var(--fs-xs);letter-spacing:.04em;color:var(--ink-dim);
       background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen)}
     .eff-pill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
     .eff-pill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
     /* sleek collapse chevron + collapsible text box */
     .collapse{width:auto;padding:0 3px;background:none;border:none;box-shadow:none;color:var(--ink-dim);
-      font-size:17px;line-height:1;cursor:pointer;transition:transform .2s ease,color .15s}
+      font-size:var(--fs-xl);line-height:1;cursor:pointer;transition:transform var(--dur-slow) ease,color var(--dur-fast)}
     .collapse:hover{color:var(--ink);border:none;box-shadow:none;background:none}
     .collapse.min{transform:rotate(-90deg)}
-    .collapsible{max-height:180px;overflow:hidden;opacity:1;transition:max-height .24s ease,opacity .18s ease,margin .2s}
+    .collapsible{max-height:180px;overflow:hidden;opacity:1;transition:max-height .24s ease,opacity var(--dur-base) ease,margin var(--dur-slow)}
     .collapsible.min{max-height:0;opacity:0;margin:0}
-    .transcript{font-size:12px;line-height:1.5;color:var(--ink-dim);background:#0a0b0d;
+    .transcript{font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim);background:#0a0b0d;
       border:1px solid var(--hairline-soft);border-radius:8px;padding:9px 11px;
       white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto}
     /* Always-Speak slide toggle */
     .speakrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px}
-    .speakrow .out{margin:0;font-size:11px;color:var(--ink-faint);text-align:right;min-height:0}
+    .speakrow .out{margin:0;font-size:var(--fs-xs);color:var(--ink-faint);text-align:right;min-height:0}
     /* voice-out speed slider */
     .speedrow{display:flex;align-items:center;gap:10px;margin-top:12px}
-    .speedrow .speedlbl{font-size:11px;color:var(--ink-dim);white-space:nowrap}
-    .speedrow .speedval{font-size:10px;color:var(--ink-faint);min-width:36px;text-align:right;font-variant-numeric:tabular-nums}
+    .speedrow .speedlbl{font-size:var(--fs-xs);color:var(--ink-dim);white-space:nowrap}
+    .speedrow .speedval{font-size:var(--fs-xs);color:var(--ink-faint);min-width:36px;text-align:right;font-variant-numeric:tabular-nums}
     .speedrow input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;
       background:#181b20;box-shadow:inset 0 0 0 1px var(--hairline-soft);outline:none;cursor:pointer}
     .speedrow input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
       background:linear-gradient(180deg,#cfe6d8,var(--ok));border:none;box-shadow:0 1px 3px #000;cursor:pointer}
     .toggle{display:flex;align-items:center;gap:9px;cursor:pointer;
-      font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);transition:color .15s}
+      font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);transition:color var(--dur-fast)}
     .toggle input{display:none}
     .toggle .sw{width:34px;height:18px;border-radius:999px;background:#181b20;
-      border:1px solid var(--hairline);position:relative;transition:.18s;flex:none}
+      border:1px solid var(--hairline);position:relative;transition:var(--dur-base);flex:none}
     .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
-      background:linear-gradient(180deg,#9aa3ae,#5f656d);transition:.18s}
+      background:linear-gradient(180deg,#9aa3ae,#5f656d);transition:var(--dur-base)}
     .toggle input:checked + .sw{background:linear-gradient(90deg,#2f6b50,var(--ok));border-color:transparent}
     .toggle input:checked + .sw::after{transform:translateX(16px);background:linear-gradient(180deg,#eef5ef,#cfe6d8)}
     .toggle.on{color:var(--ink)}
-    .out{margin-top:11px;font-size:12px;color:var(--ink-dim);min-height:17px;line-height:1.5;
-      white-space:pre-wrap;word-break:break-word;transition:color .2s}
+    .out{margin-top:11px;font-size:var(--fs-sm);color:var(--ink-dim);min-height:17px;line-height:1.5;
+      white-space:pre-wrap;word-break:break-word;transition:color var(--dur-slow)}
     .out.live{color:var(--ink)}
-    input[type=text]{width:100%;font-family:inherit;font-size:12px;color:var(--ink);
-      background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color .16s}
+    input[type=text]{width:100%;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);
+      background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color var(--dur-base)}
     input[type=text]:focus{outline:none;border-color:rgba(255,255,255,.24)}
     /* status bar */
+    /* Chrome, like the top bar: same --chrome token, same top-light direction, no hairline. It was a hardcoded
+       #0c0e11→#090a0c that never re-tinted for any theme, and its border-top was the last seam in the shell. */
     .status{display:flex;align-items:center;gap:18px;padding:0 16px;
-      border-top:1px solid var(--hairline);font-size:10px;letter-spacing:.1em;color:var(--ink-faint);
-      background:linear-gradient(0deg,#0c0e11,#090a0c)}
+      font-size:var(--fs-2xs);letter-spacing:var(--tk-label);color:var(--ink-faint);
+      background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}
     .status .s{display:flex;align-items:center;gap:7px}
     .status .s .dot{margin-left:0}
     .status .end{margin-left:auto;color:var(--ink-faint)}
     .status .ver{color:var(--silver);font-weight:600;letter-spacing:.08em}   /* quiet build metadata — bare like its status-bar siblings */
+    /* ── COMMAND PALETTE ───────────────────────────────────────────────────────────────────────────────
+       Sits high in the window (18vh) rather than centred: the eye lands there naturally, and the list grows
+       DOWNWARD from a fixed anchor instead of the box re-centring itself on every keystroke. */
+    .cmdk-scrim{position:fixed;inset:0;z-index:10040;display:none;background:rgba(0,0,0,.42)}
+    .cmdk-scrim.show{display:block}
+    .cmdk{position:fixed;top:18vh;left:50%;transform:translateX(-50%) translateY(-8px);width:min(560px,88vw);z-index:10041;
+      display:none;flex-direction:column;overflow:hidden;opacity:0;
+      background:linear-gradient(180deg,color-mix(in srgb,var(--raised) 92%,#ffffff),var(--raised));
+      border:1px solid var(--hairline);border-radius:13px;
+      transition:opacity var(--dur-fast),transform var(--dur-fast) var(--ease-out)}
+    .cmdk.show{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
+    .cmdk-top{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--hairline)}
+    .cmdk-ico{width:15px;height:15px;flex:none;color:var(--ink-faint)}
+    .cmdk-top input{flex:1;min-width:0;border:none;background:none;box-shadow:none;padding:0;
+      font-family:inherit;font-size:var(--fs-md);color:var(--ink);letter-spacing:var(--tk-base)}
+    .cmdk-top input:focus{outline:none;border:none;box-shadow:none}
+    .cmdk-hint{flex:none;font-size:var(--fs-2xs);letter-spacing:var(--tk-label);text-transform:uppercase;color:var(--ink-faint);
+      border:1px solid var(--hairline);border-radius:5px;padding:2px 5px}
+    .cmdk-list{max-height:min(46vh,380px);overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:1px}
+    .cmdk-row{display:flex;align-items:center;gap:10px;width:auto;text-align:left;padding:7px 9px;border:none;border-radius:8px;
+      background:none;box-shadow:none;cursor:pointer;color:var(--ink-dim);font-size:var(--fs-sm);transition:background var(--dur-fast),color var(--dur-fast)}
+    .cmdk-row .ck-name{flex:none;color:var(--ink);font-variant-numeric:tabular-nums}
+    .cmdk-row .ck-desc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-2xs);color:var(--ink-faint);text-align:right}
+    /* keyboard cursor and mouse hover are the SAME state — two different highlights on one list is the classic
+       palette bug (you arrow down, the mouse is resting elsewhere, and two rows look selected at once). */
+    .cmdk-row.on,.cmdk-row:hover{background:color-mix(in srgb,var(--sel) 9%,transparent);color:var(--ink)}
+    .cmdk-empty{padding:14px 10px;text-align:center;font-size:var(--fs-sm);color:var(--ink-faint)}
     /* right-click menu (Copy / Paste / Select All) */
     .ctxmenu{position:fixed;z-index:9999;display:none;min-width:148px;padding:5px;
       background:var(--raised);border:1px solid var(--hairline);border-radius:9px;
       box-shadow:0 10px 30px rgba(0,0,0,.55);user-select:none;-webkit-user-select:none}
     .ctxitem{display:flex;justify-content:space-between;gap:18px;padding:7px 11px;border-radius:6px;
-      font-size:12.5px;color:var(--ink);cursor:pointer;white-space:nowrap}
+      font-size:var(--fs-sm);color:var(--ink);cursor:pointer;white-space:nowrap}
     .ctxitem:hover{background:var(--raised-hi)}
-    .ctxitem .k{color:var(--ink-faint);font-size:11px}
+    .ctxitem .k{color:var(--ink-faint);font-size:var(--fs-xs)}
     /* git push/pull dropdown (reuses .ctxmenu, position:fixed so it escapes #terminal overflow) */
     #git-btn{right:8px}                                     /* the lone terminal button, bottom-right */
     .git-menu{min-width:150px;padding:6px}
@@ -436,19 +479,19 @@
     .git-menu .gdn{color:var(--ink-dim);font-weight:700}
     /* skills + plugins manager rows (Settings drawer sections) */
     .ext-list{display:flex;flex-direction:column;gap:6px}
-    .ext-empty{color:var(--ink-faint);font-size:11px;line-height:1.55;padding:6px 2px}
+    .ext-empty{color:var(--ink-faint);font-size:var(--fs-xs);line-height:1.55;padding:6px 2px}
     .ext-row{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013)}
     .ext-row .ext-main{flex:1;min-width:0}
-    .ext-row .ext-name{font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .ext-row .ext-desc{margin-top:3px;font-size:10px;color:var(--ink-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    .ext-row .ext-meta{margin-top:3px;font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
-    .ext-tog{flex:none;width:auto;padding:3px 10px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;cursor:pointer;
-      border:1px solid var(--hairline);background:#101216;color:var(--ink-dim);box-shadow:none;transition:all .15s}
+    .ext-row .ext-name{font-size:var(--fs-sm);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ext-row .ext-desc{margin-top:3px;font-size:var(--fs-xs);color:var(--ink-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .ext-row .ext-meta{margin-top:3px;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+    .ext-tog{flex:none;width:auto;padding:3px 10px;font-size:var(--fs-2xs);letter-spacing:.06em;text-transform:uppercase;border-radius:6px;cursor:pointer;
+      border:1px solid var(--hairline);background:#101216;color:var(--ink-dim);box-shadow:none;transition:all var(--dur-fast)}
     .ext-tog.on{color:#0a0b0d;background:linear-gradient(180deg,var(--ok),#3f8f68);border-color:transparent;font-weight:700}
     .ext-tog:hover{border-color:rgba(255,255,255,.22)}
     /* official-marketplace browser (the "+" beside Skills/Plugins) */
     .mkt-box{width:480px;max-width:92vw}
-    #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:13px;color:var(--ink);background:#0a0b0d;
+    #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:var(--fs-md);color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:9px;padding:10px 12px}
     #mkt-search:focus{outline:none;border-color:rgba(255,255,255,.28)}
     .mkt-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;margin-bottom:14px;text-align:left}
@@ -457,41 +500,41 @@
     .vgroup{display:flex;align-items:center;gap:8px}
     .vbox{display:flex;align-items:center;gap:7px;height:31px;width:auto;padding:0 11px;border:1px solid var(--hairline);
       border-radius:9px;background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 1px 0 var(--sheen);
-      font-size:11px;letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}
-    .vbox .vdot{width:8px;height:8px;border-radius:50%;background:#3a3f47;flex:none;transition:.2s}
-    .vbox .vstat{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+      font-size:var(--fs-xs);letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}
+    .vbox .vdot{width:8px;height:8px;border-radius:50%;background:#3a3f47;flex:none;transition:var(--dur-slow)}
+    .vbox .vstat{font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
     /* Voice In — click to talk; lights red while recording */
-    .vin{cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s,color .16s}
+    .vin{cursor:pointer;transition:border-color var(--dur-base),box-shadow var(--dur-base),background var(--dur-base),color var(--dur-base)}
     .vin:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
     .vin.live{color:#fff;border-color:var(--live);background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 16px -5px var(--live)}
     .vin.live .vdot{background:var(--live);box-shadow:0 0 9px 0 var(--live);animation:micpulse 1s ease-in-out infinite}
     .vin.live .vstat{color:#fff}
     /* Voice Out — SPLIT into two standalone top-bar buttons, each the SAME .vbox size as Talk (Voice In):
        a Speak button (dot + SPEAK/STOP, mirrors Talk exactly) + an Auto-speak toggle (megaphone icon). */
-    .vout{cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s,color .16s}
+    .vout{cursor:pointer;transition:border-color var(--dur-base),box-shadow var(--dur-base),background var(--dur-base),color var(--dur-base)}
     .vout:hover:not(:disabled){border-color:rgba(255,255,255,.22);color:var(--ink)}
     .vout:hover:not(:disabled) .vstat{color:var(--ink)}
     .vout:disabled{opacity:.45;cursor:default}
     .vout.speaking{border-color:rgba(95,180,135,.5);background:rgba(95,180,135,.14)}   /* green = Claude is speaking; label flips to STOP */
     .vout.speaking .vstat{color:var(--ok)}
     .vout.speaking .vdot{background:var(--ok);box-shadow:0 0 9px 0 var(--ok);animation:micpulse 1s ease-in-out infinite}
-    .vauto{cursor:pointer;color:var(--ink-faint);padding:0 10px;transition:border-color .16s,background .16s,color .16s}
+    .vauto{cursor:pointer;color:var(--ink-faint);padding:0 10px;transition:border-color var(--dur-base),background var(--dur-base),color var(--dur-base)}
     .vauto svg{width:15px;height:15px;display:block}
     .vauto:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     .vauto.on{color:var(--ok);background:rgba(95,180,135,.12);border-color:rgba(95,180,135,.4)}   /* megaphone lights green when auto-speak is on */
     @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.3}}
     /* push-to-talk rebind row (in the Settings drawer) */
     .ptt-key-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;
-      font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
-    .keycap-btn{width:auto;padding:6px 12px;font-size:11px;color:var(--silver);letter-spacing:.04em;cursor:pointer;
+      font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+    .keycap-btn{width:auto;padding:6px 12px;font-size:var(--fs-xs);color:var(--silver);letter-spacing:.04em;cursor:pointer;
       background:linear-gradient(180deg,#1c1f25,#0f1115);border:1px solid var(--hairline);border-bottom-color:#05060a;border-radius:6px}
     .keycap-btn:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
     .keycap-btn.capturing{color:var(--live);border-color:var(--live);box-shadow:0 0 12px -4px var(--live)}
     /* sessions hamburger (top bar) + the left session sidebar */
-    .iconbtn{width:auto;padding:6px 11px;font-size:15.5px;line-height:1;color:var(--ink-dim);
+    .iconbtn{width:auto;padding:6px 11px;font-size:var(--fs-lg);line-height:1;color:var(--ink-dim);
       display:inline-flex;align-items:center;justify-content:center;
       background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);border-radius:9px;
-      cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all .16s var(--ease-pop)}
+      cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all var(--dur-base) var(--ease-pop)}
     .iconbtn svg{width:15.5px;height:15.5px;display:block}
     .iconbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     /* Connect-Claude button: the orange Claude Code mascot, with a small status dot (claude connection) */
@@ -512,17 +555,17 @@
     #cc-center{display:flex;flex-direction:column;gap:11px;margin:2px 0 14px;text-align:left}
     .cc-meta{display:flex;gap:22px}
     .cc-stat{display:flex;flex-direction:column;gap:3px}
-    .cc-k{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
-    .cc-v{color:var(--ink);font-size:12.5px}
+    .cc-k{font-size:var(--fs-2xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+    .cc-v{color:var(--ink);font-size:var(--fs-sm)}
     .cc-sess-list{display:flex;flex-direction:column;gap:5px;max-height:208px;overflow:auto}
     .cc-sess{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--hairline-soft);border-radius:9px;background:rgba(255,255,255,.02)}
     .cc-sess .cc-d{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}
     .cc-sess .cc-d.busy{animation:ws-sync-pulse 1s ease-in-out infinite}
     .cc-sess .cc-d.live{background:#6aa6e0;box-shadow:0 0 6px -1px #6aa6e0}
-    .cc-sess .cc-nm{flex:1;min-width:0;color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .cc-sess .cc-ws{flex:none;font-size:9px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em}
-    .cc-sess .cc-active{flex:none;font-size:8.5px;color:#7ee0a8;text-transform:uppercase;letter-spacing:.08em}
-    .cc-kill{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);font-size:13px;line-height:1;cursor:pointer;transition:all .14s}
+    .cc-sess .cc-nm{flex:1;min-width:0;color:var(--ink);font-size:var(--fs-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cc-sess .cc-ws{flex:none;font-size:var(--fs-2xs);color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em}
+    .cc-sess .cc-active{flex:none;font-size:var(--fs-2xs);color:#7ee0a8;text-transform:uppercase;letter-spacing:.08em}
+    .cc-kill{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);font-size:var(--fs-md);line-height:1;cursor:pointer;transition:all var(--dur-fast)}
     .cc-kill:hover{color:#ff8e8e;border-color:rgba(210,104,95,.4);background:rgba(210,104,95,.1)}
     .cc-kill:disabled{opacity:.3;cursor:not-allowed}
     .iconbtn:active{transform:translateY(1px)}
@@ -544,18 +587,18 @@
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .sess-list{display:flex;flex-direction:column;gap:2px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
     .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.2px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
-      background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
-    .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .17s cubic-bezier(.2,.7,.15,1);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
+      background:none;cursor:pointer;transition:background-color var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out),border-color var(--dur-base) ease,opacity var(--dur-base)}
+    .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity var(--dur-base) var(--ease-out);background-image:linear-gradient(90deg,color-mix(in srgb,var(--sel) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
-    .sess.active{background-color:color-mix(in srgb,var(--live) 7%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}    /* ③ selected session → a touch more presence + a brighter top light. Still no rail: rails are extinct */
+    .sess.active{background-color:color-mix(in srgb,var(--sel) 7%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}    /* ③ selected session → a touch more presence + a brighter top light. Still no rail: rails are extinct */
     .sess.active .sess-prev{color:#f4f7fb}                                                                     /* ③ the selected title reads brightest in the column */
-    .sess.active::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 13%,transparent),transparent 46%)}    /* the directional gradient now carries the selection (mirrors .ws-chip.active) since the rail is gone */
+    .sess.active::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--sel) 13%,transparent),transparent 46%)}    /* the directional gradient now carries the selection (mirrors .ws-chip.active) since the rail is gone */
     /* (the tree-style connector elbow lived here — removed with the .ws-children guide it branched off: with no vertical line to meet, it was a floating dash) */
-    .sess.active.sess-live-row,.sess.active.sess-peer-live,.sess.active.sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* an ACTIVE session that's LIVE (sharing, peer-live, OR a joined tab) → GREEN wash only (its ::before is green below); overrides the active tint so it's never an orange/green MIX. A not-live active session keeps the single-colour tint above. */
+    .sess.active.sess-live-row,.sess.active.sess-peer-live,.sess.active.sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* an ACTIVE session that's LIVE (sharing, peer-live, OR a joined tab) → GREEN wash only (its ::before is green below); overrides the active tint so it's never a selection/live MIX. A not-live active session keeps the single-colour tint above. */
     .sess.sess-live-row,.sess.sess-peer-live{box-shadow:inset 0 1px 0 var(--sheen);background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* live row: the SAME calm box selected+live gets (flat 5% green + sheen + the green ::before wash) — identical whether or not it's selected, so clicking away never changes its costume. NO rail */
     .sess.sess-live-row::before,.sess.sess-peer-live::before,.sess.sess-joined-live::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%)}
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
-    .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px;transition:-webkit-mask-image .16s ease}
+    .sess-prev{font-size:var(--fs-sm);color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px;transition:-webkit-mask-image var(--dur-base) ease}
     /* the title reserves only what is ALWAYS on screen (▾ + any persistent flair + a live pill). :has() keeps
        this declarative — no JS bookkeeping — and the reserve is exact per row instead of a worst-case gutter. */
     .sess:has(.sess-flair:not(.author)) .sess-prev{padding-right:52px}
@@ -563,10 +606,10 @@
     .sess:has(.sess-live-ind) .sess-prev{padding-right:78px}
     /* on hover the timestamp + author icon appear; rather than re-flowing the title (an ellipsis jump on every
        row you sweep past), it DISSOLVES under the cluster. No layout change, no jitter. */
-    .sess:hover .sess-prev,.sess:focus-within .sess-prev{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 34px),transparent)}
+    .sess:hover .sess-prev,.sess:focus-within .sess-prev,.sess.active .sess-prev{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 34px),transparent)}
     .sess.sess-draft .sess-prev{color:var(--warn)}   /* draft keeps an AT-REST signal now that the meta line is hover-only */
     /* ONE-LINE ROWS: the old second line is now a right-anchored cluster floating over the row. */
-    .sess-meta{position:absolute;right:30px;top:50%;transform:translateY(-50%);margin:0;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
+    .sess-meta{position:absolute;right:30px;top:50%;transform:translateY(-50%);margin:0;font-size:var(--fs-2xs);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
     .sess-meta>*{pointer-events:auto}
     .sess:not(.sess-peer-live) .sess-meta-t{display:none}                                            /* ① title-only at rest… */
     /* …last-used time appears on hover — EXCEPT while the row is live. :has(.sess-live-ind) is the exact
@@ -581,13 +624,13 @@
        stay visible AT REST — hover-gating a problem state would mean sweeping every row to find a conflict.
        The author is not an alert, so it is hover-only. Live state stays TEXT: text = live, icons = metadata. */
     .sess-flair{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0;
-      border:1px solid transparent;border-radius:6px;background:none;flex:none;box-shadow:none;transition:background .14s,opacity .16s}
+      border:1px solid transparent;border-radius:6px;background:none;flex:none;box-shadow:none;transition:background var(--dur-fast),opacity var(--dur-base)}
     .sess-flair svg{width:12px;height:12px;display:block}
     .sess-flair.diverged{color:var(--warn);cursor:pointer}
     .sess-flair.removed{color:var(--live);cursor:pointer}
     .sess-flair.diverged:hover,.sess-flair.removed:hover{background:rgba(255,255,255,.07)}
     .sess-flair.author{color:var(--accent);cursor:default;opacity:0}                                  /* non-interactive: the tooltip names the creator */
-    .sess:hover .sess-flair.author,.sess:focus-within .sess-flair.author{opacity:1}
+    .sess:hover .sess-flair.author,.sess:focus-within .sess-flair.author,.sess.active .sess-flair.author{opacity:1}   /* same rule as the ▾: always shown on the selected row */
     /* draft (unsaved) session rows: an amber accent so they read as "not yet saved" — deliberately NOT the
        word/blue of anything "live": LIVE is the collab-share state (green, .sess-live-row family) and this
        indicator masquerading as "live" made brand-new sessions look shared for their first turn */
@@ -614,14 +657,18 @@
        amber-pulse + "working…" they already had. They are also the only overlap that can occur: syncRowFlairs
        toggles .busy on .sess[data-id] and .sess[data-tab] alone, so a peer-live/joined row (which owns a
        .sess-livedot) never receives .busy and cannot double up either. */
+    /* ws-sync-pulse is a 50%-duty breathe; stretched to 10s it would read as slow DIMMING, not a flash. This
+       holds steady and blinks once per cycle — the dot's PRESENCE carries "working", the blink just proves it
+       is still alive. Blue (--sync), not red: mid-turn is progress, not an error. */
+    @keyframes sess-busy-blink{0%,100%{opacity:1}2.5%{opacity:.2}5%{opacity:1}}
     .sess.busy:not(.sess-draft) .sess-prev::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;vertical-align:middle;
-      background:var(--live);box-shadow:0 0 6px -1px var(--live);animation:ws-sync-pulse 1s ease-in-out infinite}   /* LEADS the row now — a status light belongs at the left edge, not buried in the right cluster */
+      background:var(--sync);box-shadow:0 0 6px -1px var(--sync);animation:sess-busy-blink 10s ease-in-out infinite}   /* LEADS the row now — a status light belongs at the left edge, not buried in the right cluster */
     .sess.sess-done.busy{animation:none}   /* it started working again → busy wins: the done-glow stops, the busy dot appears */
     .sess.sess-done.busy .sess-prev{color:var(--ink)}   /* …and the done-green title reverts to neutral, so a row that resumed work isn't still wearing "finished" */
     @keyframes sess-done-pulse{0%,100%{background-color:transparent}
       50%{background-color:color-mix(in srgb,var(--ok) 8%,transparent)}}   /* railless glow — the old frames drew an inset 2px rail-shaped shadow */
     @media (prefers-reduced-motion:reduce){.sess.sess-done{animation:none}}
-    .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
+    .sess-empty{color:var(--ink-faint);font-size:var(--fs-xs);text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
     /* Centered with top/bottom/margin:auto, NOT transform:translateY(-50%). The global button:active press is
@@ -631,9 +678,9 @@
     .sess-menu-btn{position:absolute;top:0;bottom:0;margin:auto 0;right:6px;display:flex;align-items:center;justify-content:center;
       width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
       color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
-      transition:opacity .15s,color .15s,border-color .15s,background .15s}
+      transition:opacity var(--dur-fast),color var(--dur-fast),border-color var(--dur-fast),background var(--dur-fast)}
     .sess-menu-btn svg{width:13.5px;height:13.5px;display:block}
-    .sess:hover .sess-menu-btn,.sess.menu-open .sess-menu-btn{opacity:1}   /* hover-revealed; stays lit while its menu is open */
+    .sess:hover .sess-menu-btn,.sess.active .sess-menu-btn,.sess.menu-open .sess-menu-btn{opacity:1}   /* hover-revealed — and PERSISTENT on the selected row: the row you are on shows its full controls without being hunted for */
     .sess-menu-btn:hover,.sess.menu-open .sess-menu-btn{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .sess.renaming .sess-menu-btn{display:none}   /* nothing floats over the rename input while editing */
     /* conflict chips — at REST just a coloured icon+word inline after the timestamp (the colour covers ONLY the
@@ -641,9 +688,9 @@
     .sess.renaming .sess-flair{display:none}   /* nothing floats beside the rename input while editing (the old .sess-chip pill styles retired with the text labels) */
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
     .sess-meta{display:flex;align-items:center;gap:5px}
-    .sess-meta-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row") */
+    .sess-meta-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:var(--tk-base)}   /* .sess-meta is uppercase for its BADGES; a timestamp ("now", "5m ago") and a peer line ("MK is live now") are prose, and prose in caps reads as shouting */   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row") */
     .sess-meta{flex-wrap:nowrap}   /* keep the tag (out-of-sync / live) on ONE line WITH the timestamp — the time (flex:0 1 auto, its OWN overflow:hidden/ellipsis) shrinks to make room, so the chip never drops to a 2nd line; its colour still hugs just the icon+word (inline-flex). No container overflow:hidden — it would clip the live pill's "Join →" hover reveal. */
-    .sess-live-ind{flex:none;width:auto;display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;letter-spacing:.04em;
+    .sess-live-ind{flex:none;width:auto;display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;
       text-transform:uppercase;color:var(--ok);background:none;border:none;border-radius:999px;padding:2px 4px;line-height:1}   /* width:auto: the Join-badge variant is a <button>, so override button{width:100%} */
     .sess-live-ind .liw{white-space:nowrap}
     button.sess-live-ind.sess-join{cursor:pointer;font-family:inherit}
@@ -654,20 +701,20 @@
       box-shadow:0 0 6px -1px var(--ok);flex:none;animation:livepulse 2.6s ease-in-out infinite}
     .sess.renaming .sess-live-ind{display:none}
     /* inline rename input (replaces the title while editing) */
-    .sess-rename{width:100%;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
+    .sess-rename{width:100%;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:4px 44px 4px 7px;margin-bottom:3px}
     .sess-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
     /* ✓/✗ confirm/cancel for the inline rename — sits in the top-right slot the ▾ vacates while editing */
     .sess-rename-actions{position:absolute;top:7px;right:6px;display:flex;gap:3px;z-index:4}
     .sess-rename-btn{width:16px;height:16px;display:flex;align-items:center;justify-content:center;padding:0;
-      border:1px solid var(--hairline);border-radius:5px;background:rgba(255,255,255,.05);font-size:9px;line-height:1;cursor:pointer}
+      border:1px solid var(--hairline);border-radius:5px;background:rgba(255,255,255,.05);font-size:var(--fs-2xs);line-height:1;cursor:pointer}
     .sess-rename-btn.ok{color:var(--ok)}
     .sess-rename-btn.no{color:#e58479}
     .sess-rename-btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25)}
     /* workspace bar — the two-level top of the sidebar (which library the sessions below belong to) */
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
-      font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
+      font-size:var(--fs-xs);letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
     /* VERTICALLY CENTRED, and the sum is what matters: the head's own padding-bottom is NOT the gap under it —
        .ws-chips adds its padding-top before the first project, and the two read as one space. So the balance is
        head-top === head-bottom + chips-top (7 === 1 + 6), not head-top === head-bottom. It was 3 vs 2+8=10,
@@ -681,59 +728,59 @@
        fell through to button{width:100%} and rendered as a full-width block. */
     .ws-info{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0;
       border:1px solid var(--hairline);border-radius:50%;background:transparent;color:var(--ink-faint);
-      font:italic 600 11px/1 Georgia,"Times New Roman",serif;cursor:pointer;flex:none}
+      font:italic 600 var(--fs-xs)/1 Georgia,"Times New Roman",serif;cursor:pointer;flex:none}
     .ws-info:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     /* the three header controls (i / + / ‹) share ONE 20x20 borderless box so they read as a set —
        previously a 18px circle, a ~24x19 bordered pill and a bare 22px glyph, all different heights. */
     .sh-actions>button{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0;
       border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer;
-      box-shadow:none;line-height:1;flex:none;transition:color .16s,background .14s}
+      box-shadow:none;line-height:1;flex:none;transition:color var(--dur-base),background var(--dur-fast)}
     .sh-actions>button:hover{color:var(--ink);background:rgba(255,255,255,.05)}
-    .sh-actions>.ws-info{font:italic 600 11px/1 Georgia,"Times New Roman",serif}
-    .sh-actions>.ws-add{font-size:15px}
-    .sh-actions>.panel-close{font-size:17px}
+    .sh-actions>.ws-info{font:italic 600 var(--fs-xs)/1 Georgia,"Times New Roman",serif}
+    .sh-actions>.ws-add{font-size:var(--fs-lg)}
+    .sh-actions>.panel-close{font-size:var(--fs-xl)}
     /* "what's a workspace?" popover — anchored under the ⓘ by JS; teaches the concept without crowding the sidebar */
     .ws-info-pop{position:fixed;z-index:80;width:250px;padding:13px 15px;border:1px solid var(--hairline);border-radius:11px;
-      background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:11.5px;line-height:1.5;color:var(--ink-dim)}
+      background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim)}
     .ws-info-pop b{color:var(--silver)}
-    .ws-info-pop .wt{display:block;font-size:12px;color:var(--ink);margin-bottom:5px}
+    .ws-info-pop .wt{display:block;font-size:var(--fs-sm);color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
       padding:6px 4px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 6px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping. The top fade tracks padding-top (6/6) so a resting row still starts fully opaque — see the centring note on .ws-section-head */
     .ws-chips::-webkit-scrollbar{width:6px}                                          /* width stays CONSTANT — animating it would reflow the rows */
-    .ws-chips::-webkit-scrollbar-thumb{background:transparent;border:none;border-radius:6px;transition:background .18s ease}   /* invisible at rest; the top/bottom vignette already signals "more below" */
+    .ws-chips::-webkit-scrollbar-thumb{background:transparent;border:none;border-radius:6px;transition:background var(--dur-base) ease}   /* invisible at rest; the top/bottom vignette already signals "more below" */
     .sidebar:hover .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}   /* fades in only while the sidebar is hovered */
     .ws-chips::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22)}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
     .ws-children{display:flex;flex-direction:column;gap:2px;margin:3px 0 12px 8px;padding-left:4px}   /* ⑤ no guide LINE — indentation alone carries the hierarchy, and the reclaimed 6px goes back to the row titles */
     /* "+ New Session" — inline as the last child inside the open workspace */
     .newsess-row{display:flex;align-items:center;gap:6px;width:auto;text-align:left;margin:1px 0 0;padding:7px 6px;
-      font-size:11.5px;letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
-      border-radius:6px;cursor:pointer;box-shadow:none;transition:background .14s,color .14s}
+      font-size:var(--fs-sm);letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
+      border-radius:6px;cursor:pointer;box-shadow:none;transition:background var(--dur-fast),color var(--dur-fast)}
     .newsess-row:hover{background:rgba(255,255,255,.045);color:var(--ink-dim)}
     /* SESSIONS section header — just the label + "+ New"; the active workspace is already shown above */
     .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:6px 5px;border:1px solid transparent;
       border-radius:6px;background:none;cursor:pointer;box-shadow:none;
-      transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),color .14s}
+      transition:background-color var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out),color var(--dur-fast)}
     .ws-chip:hover{background-color:rgba(255,255,255,.034);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
-    .ws-chip.active{background-color:rgba(217,119,87,.05);background-image:linear-gradient(90deg,rgba(217,119,87,.11),transparent 46%);box-shadow:inset 0 1px 0 var(--sheen)}    /* ①+② active workspace: Claude-orange wash + lift (chevron is the main expand cue) */
+    .ws-chip.active{background-color:color-mix(in srgb,var(--sel) 5%,transparent);background-image:linear-gradient(90deg,color-mix(in srgb,var(--sel) 11%,transparent),transparent 46%);box-shadow:inset 0 1px 0 var(--sheen)}    /* ①+② active workspace: Claude-orange wash + lift (chevron is the main expand cue) */
     .ws-chip.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     /* leading disclosure chevron — points right when collapsed, rotates down on the active (expanded) workspace */
-    .ws-chip .ws-caret{width:20px;height:20px;flex:none;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer;transition:color .16s,background .14s,border-color .14s}
-    .ws-chip .ws-caret svg{width:11px;height:11px;display:block;transition:transform .16s}
+    .ws-chip .ws-caret{width:20px;height:20px;flex:none;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);cursor:pointer;transition:color var(--dur-base),background var(--dur-fast),border-color var(--dur-fast)}
+    .ws-chip .ws-caret svg{width:11px;height:11px;display:block;transition:transform var(--dur-base)}
     .ws-chip .ws-caret:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .ws-chip.expanded .ws-caret{color:var(--ink-dim)}          /* expansion is independent of selection (.active) */
     .ws-chip.expanded .ws-caret svg{transform:rotate(90deg)}
     .ws-chip .ws-ico{width:13px;height:13px;flex:none;color:var(--ink-faint)}
-    .ws-chip.active .ws-ico{color:var(--live-soft)}
-    .ws-chip .ws-name{flex:1;min-width:0;font-size:11px;font-weight:600;letter-spacing:.01em;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .16s ease}   /* ② quiet section label — held back by SIZE + COLOUR, never by forced caps */
+    .ws-chip.active .ws-ico{color:var(--sel)}
+    .ws-chip .ws-name{flex:1;min-width:0;font-size:var(--fs-xs);font-weight:600;letter-spacing:.01em;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color var(--dur-base) ease}   /* ② quiet section label — held back by SIZE + COLOUR, never by forced caps */
     .ws-chip:hover .ws-name,.ws-chip.active .ws-name{color:var(--ink)}
     /* right edge: passive status dot + the ▾ options trigger (all actions moved into the dropdown) */
     .ws-chip .ws-right{flex:none;display:flex;align-items:center;gap:6px;margin-left:6px}
     .ws-chip .ws-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ink-faint)}
     .ws-chip .ws-dot.live{background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}      /* green = live screen-share */
-    .ws-chip .ws-dot.sync{background:#6aa6e0;box-shadow:0 0 6px -1px #6aa6e0}      /* blue  = session-sync on */
+    .ws-chip .ws-dot.sync{background:var(--sync);box-shadow:0 0 6px -1px var(--sync)}      /* blue  = session-sync on */
     .ws-chip .ws-dot.syncing{animation:ws-sync-pulse 1s ease-in-out infinite}
     .ws-chip .ws-dot.err{background:#d2685f;box-shadow:0 0 6px -1px #d2685f}
     .ws-chip .ws-menu-btn{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:20px;
@@ -743,7 +790,7 @@
     .ws-chip.active .ws-menu-btn{color:var(--ink-dim)}
     /* the ▾ dropdown (reuses .ctxmenu) — icon + label rows, with a danger row for delete */
     .ws-menu{min-width:184px;padding:6px;box-sizing:border-box}   /* border-box so JS width == the workspace bar's full box (exact alignment) */
-    .ws-menu .ws-mi{justify-content:flex-start;gap:8px;color:var(--ink-dim);font-size:11px;padding:6px 9px}
+    .ws-menu .ws-mi{justify-content:flex-start;gap:8px;color:var(--ink-dim);font-size:var(--fs-xs);padding:6px 9px}
     /* label flexes + ellipsizes so every row fits the bar-width box at one uniform size (no half-cut text) */
     .ws-menu .ws-mi-lb{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
     .ws-menu .ws-mi:hover{color:var(--ink)}
@@ -755,54 +802,60 @@
     .ws-menu .ws-mi.danger:hover{background:rgba(210,104,95,.12);color:#e0796f}
     .ws-menu .ws-menu-sep{height:1px;background:var(--hairline);margin:5px 6px}
     @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
-    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:11px;color:var(--ink);background:#0a0b0d;
+    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-xs);color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:2px 6px}
     .ws-chip .ws-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
-    /* transient toast (button feedback / coming-soon) */
-    .toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(12px);opacity:0;pointer-events:none;
+    /* Transient toast. Lives at the TOP-RIGHT of the terminal — the same 8px line as the Terminal|Agents
+       control, opposite vertical edge — so status appears where you are already looking instead of at the far
+       bottom of the window.
+       It stays position:FIXED rather than becoming a child of .termrow: the theme toast fires from inside the
+       Settings drawer, and a drawer is a fixed, filtered element (its own stacking context), so an in-flow
+       toast would render BEHIND the very panel that triggered it. Fixed + z-index keeps it on top; app.js
+       anchors it to the terminal's rect at show time, which also tracks the sidebar and chat panel opening. */
+    .toast{position:fixed;top:0;left:0;transform:translateY(-6px);opacity:0;pointer-events:none;
       background:linear-gradient(180deg,#191c22,#0f1115);border:1px solid var(--hairline);border-radius:10px;
-      padding:10px 16px;font-size:12px;color:var(--ink);box-shadow:0 12px 36px -12px #000;z-index:10001;
-      transition:opacity .2s,transform .2s}
-    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+      padding:8px 13px;font-size:var(--fs-sm);line-height:1.4;color:var(--ink);box-shadow:var(--elev-3);z-index:10001;
+      max-width:min(420px,42vw);transition:opacity var(--dur-slow),transform var(--dur-slow)}   /* max-width + wrapping: centred it could run the full window, at the top-right it cannot */
+    .toast.show{opacity:1;transform:translateY(0)}
     .invite-repo{color:var(--silver)}
     /* new-workspace chooser (reuses the .approve overlay shell) */
     .choice-row{display:flex;flex-direction:column;gap:9px;margin:4px 0 14px;text-align:left}
     .choice{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border:1px solid var(--hairline);border-radius:10px;
-      background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;transition:border-color .16s,box-shadow .16s}
+      background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;transition:border-color var(--dur-base),box-shadow var(--dur-base)}
     .choice:hover{border-color:rgba(255,255,255,.22)}
     .choice.sel{border-color:var(--live);box-shadow:0 0 16px -9px var(--live)}
     .choice .ci{width:18px;height:18px;flex:none;margin-top:1px;color:var(--silver)}
-    .choice .ct{font-size:12.5px;color:var(--ink);margin-bottom:3px}
-    .choice .cd{font-size:10.5px;line-height:1.45;color:var(--ink-dim)}
-    .ws-busy{font-size:11px;color:var(--ink-dim);min-height:15px;margin:-4px 0 12px;text-align:left}
-    .ws-note{display:none;font-size:10.5px;line-height:1.5;color:var(--ink-dim);text-align:left;margin:-2px 0 12px}
-    .ws-note code{font-size:10px;color:var(--silver);background:rgba(255,255,255,.05);padding:0 3px;border-radius:3px}
+    .choice .ct{font-size:var(--fs-sm);color:var(--ink);margin-bottom:3px}
+    .choice .cd{font-size:var(--fs-xs);line-height:1.45;color:var(--ink-dim)}
+    .ws-busy{font-size:var(--fs-xs);color:var(--ink-dim);min-height:15px;margin:-4px 0 12px;text-align:left}
+    .ws-note{display:none;font-size:var(--fs-xs);line-height:1.5;color:var(--ink-dim);text-align:left;margin:-2px 0 12px}
+    .ws-note code{font-size:var(--fs-xs);color:var(--silver);background:rgba(255,255,255,.05);padding:0 3px;border-radius:3px}
     /* "Been invited? Check for invites" — discovery also runs on window focus, this is the immediate manual path */
-    .ws-invite-check{font-size:11px;color:var(--ink-dim);text-align:left;margin:-4px 0 12px}
+    .ws-invite-check{font-size:var(--fs-xs);color:var(--ink-dim);text-align:left;margin:-4px 0 12px}
     .linkbtn{display:inline;width:auto;padding:0;border:none;background:none;color:var(--accent,#7bb6ee);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
     .linkbtn:hover{color:var(--ink)}
     .linkbtn:disabled{opacity:.5;cursor:default;text-decoration:none}
-    .ws-pick-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);margin:2px 0 12px;cursor:pointer;text-align:left}
+    .ws-pick-row{display:flex;align-items:center;gap:7px;font-size:var(--fs-xs);color:var(--ink-dim);margin:2px 0 12px;cursor:pointer;text-align:left}
     .ws-pick-row input{cursor:pointer}
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:10px 12px 12px;display:flex;flex-direction:column;gap:9px}   /* tightened to the sidebar rhythm */
-    .sharelbl{display:flex;align-items:center;gap:5px;font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}   /* one line: share icon · share-live · ⓘ · view-only — font −1 + tight gaps/tracking so it all fits */
+    .sharelbl{display:flex;align-items:center;gap:5px;font-size:var(--fs-2xs);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}   /* one line: share icon · share-live · ⓘ · view-only — font −1 + tight gaps/tracking so it all fits */
     /* same header LANGUAGE as the PROJECTS head (wide tracking, same faint grey) but not its exact size: this row
        also carries an icon, a dot, the ⓘ and the view-only toggle, and 10.5px/.20em overflows it at min width. */
-    .sl-text{white-space:nowrap;font-size:9.5px;letter-spacing:.14em;color:#6f7783;transition:color .2s}
-    .sharelbl .ico{width:15.4px;height:15.4px;color:#5a7468;flex:none;transition:color .2s,filter .2s}   /* ~10% larger; very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
+    .sl-text{white-space:nowrap;font-size:var(--fs-2xs);letter-spacing:.14em;color:#6f7783;transition:color var(--dur-slow)}
+    .sharelbl .ico{width:15.4px;height:15.4px;color:#5a7468;flex:none;transition:color var(--dur-slow),filter var(--dur-slow)}   /* ~10% larger; very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
     .sharelbl.active{color:var(--ink)}
     .sharelbl.active .sl-text{color:var(--ink)}   /* .sl-text sets colour DIRECTLY, so the parent's active colour no longer inherits into it — restate it here or "share live" stays grey while live */
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
-    .sharelbl .toggle{margin-left:auto;gap:6px;font-size:8.5px;letter-spacing:.04em;white-space:nowrap}   /* "view-only" — one unbroken word, tightened to sit on the same line as the rest */
+    .sharelbl .toggle{margin-left:auto;gap:6px;font-size:var(--fs-2xs);letter-spacing:.04em;white-space:nowrap}   /* "view-only" — one unbroken word, tightened to sit on the same line as the rest */
     .sharelbl .toggle .tlabel{white-space:nowrap}
     #d-share:not(.ok):not(.work):not(.bad){display:none}   /* the web-share status light: hidden AND takes no width until a link is starting/live/failed (frees room so the row fits one line) */
-    .share-dock .out{margin-top:1px;font-size:10.5px;line-height:1.55}
+    .share-dock .out{margin-top:1px;font-size:var(--fs-xs);line-height:1.55}
     .share-dock .out:empty{display:none}   /* no fluff line when there's no live-share status to show (the hint moved to the button's tooltip) */
     /* standing "hosting but not remotely reachable" warning — amber family matches .ctxbar.warn, persistent (not a toast) because this state strands every guest silently */
-    .tunnel-warn{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:8px 9px;border-radius:8px;font-size:10.5px;line-height:1.45;background:rgba(224,169,59,.10);border:1px solid rgba(224,169,59,.35);color:#e9b85a}
-    .tunnel-warn .tw-install{flex:none;padding:3px 9px;border-radius:6px;border:1px solid rgba(224,169,59,.4);background:rgba(224,169,59,.12);color:#e9b85a;font:inherit;font-size:10px;cursor:pointer}
+    .tunnel-warn{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:8px 9px;border-radius:8px;font-size:var(--fs-xs);line-height:1.45;background:rgba(224,169,59,.10);border:1px solid rgba(224,169,59,.35);color:#e9b85a}
+    .tunnel-warn .tw-install{flex:none;padding:3px 9px;border-radius:6px;border:1px solid rgba(224,169,59,.4);background:rgba(224,169,59,.12);color:#e9b85a;font:inherit;font-size:var(--fs-xs);cursor:pointer}
     .tunnel-warn .tw-install:hover{background:rgba(224,169,59,.22)}
     .tunnel-warn .tw-install:disabled{opacity:.6;cursor:default}
     .tunnel-warn.tw-err{background:rgba(229,86,75,.10);border-color:rgba(229,86,75,.35);color:#e58479}
@@ -811,13 +864,13 @@
     .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
     .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px -1px var(--ok);flex:none;animation:livepulse 2s ease-in-out infinite}
     @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.62}}   /* gentler breathe, not a hard blink */
-    .livebar .live-txt{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ok);flex:none}
+    .livebar .live-txt{font-size:var(--fs-xs);font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ok);flex:none}
     /* the host is browsing another session while their live one keeps running — a quiet reminder + a way back */
     .livebar.elsewhere{background:rgba(95,180,135,.045);border-bottom-color:rgba(95,180,135,.12)}
     .livebar.elsewhere .live-dot{animation:none;opacity:.75}
-    .live-jump{background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:11px;color:var(--ink-dim,#8b929c);text-align:left}
+    .live-jump{background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:var(--fs-xs);color:var(--ink-dim,#8b929c);text-align:left}
     .live-jump:hover{color:var(--ok);text-decoration:underline}
-    .live-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px;color:var(--ink-dim);min-width:0}
+    .live-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--ink-dim);min-width:0}
     .live-member{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.05);white-space:nowrap}   /* quiet filled pill — no stroke */
     .live-member.you{background:rgba(95,180,135,.14)}   /* distinguish "you" with a soft green FILL now that the pill has no stroke (border-color alone was inert without a border) */
     .live-member.gone{opacity:.5;text-decoration:line-through}
@@ -825,89 +878,89 @@
     .live-member .md.ok{background:var(--ok)}
     .live-member .md.idle{background:#e0a93b}
     .live-member .md.gone{background:var(--live,#e5564b)}
-    .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:var(--ink);font:inherit;font-size:12.5px;outline:none}
+    .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:var(--ink);font:inherit;font-size:var(--fs-sm);outline:none}
     .name-field:focus{border-color:rgba(95,180,135,.5)}
-    .share-dock input[type=text]{margin-bottom:0;font-size:11px;padding:9px 10px}
+    .share-dock input[type=text]{margin-bottom:0;font-size:var(--fs-xs);padding:9px 10px}
     /* voice room (host) — a compact strip at the top of the viewer chat panel */
     .voicerow{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:9px 12px;border-bottom:1px solid var(--hairline-soft);
       background:linear-gradient(180deg,#0c0e12,#0a0b0d);flex:none}
     .hv-members:empty{display:none}
-    .hv-btn,.hv-mute{width:auto;flex:none;padding:6px 11px;font-size:11px;border-radius:8px;box-shadow:none}
+    .hv-btn,.hv-mute{width:auto;flex:none;padding:6px 11px;font-size:var(--fs-xs);border-radius:8px;box-shadow:none}
     /* Join voice + End/Leave Session must read as the SAME control size (they sit in the same live cluster).
        Shared chip metrics: one height, one min-width, centered content. Join voice slims its side padding
        (it ran wide) and its mic icon renders ~10% larger than the label via .hv-ic. */
     .hv-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;min-width:112px;padding:0 8px}
-    .hv-btn .hv-ic{font-size:13px;line-height:1}
+    .hv-btn .hv-ic{font-size:var(--fs-md);line-height:1}
     .hv-btn.on{color:#fff;border-color:var(--ok);background:rgba(95,180,135,.16)}
     .hv-mute.muted{color:#fff;border-color:var(--live);background:rgba(229,86,75,.16)}
     .hv-members{display:flex;align-items:center;flex-wrap:wrap;gap:5px;width:100%}
     .hvm{display:flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border:1px solid var(--hairline);
-      border-radius:999px;background:#101216;font-size:10px;color:var(--ink-dim)}
+      border-radius:999px;background:#101216;font-size:var(--fs-xs);color:var(--ink-dim)}
     .hvm .d{width:6px;height:6px;border-radius:50%;background:#3a3f47;transition:.12s}
     .hvm.speaking{color:var(--ink);border-color:var(--ok)}
     .hvm.speaking .d{background:var(--ok);box-shadow:0 0 7px 0 var(--ok)}
     .hvm.c-connected .d{background:var(--ok)}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
     .share-btn{width:100%}
-    .share-reset{width:100%;padding:7px;font-size:10.5px;letter-spacing:.04em;color:var(--ink-dim);
-      background:none;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:color .15s,border-color .15s}
+    .share-reset{width:100%;padding:7px;font-size:var(--fs-xs);letter-spacing:.04em;color:var(--ink-dim);
+      background:none;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:color var(--dur-fast),border-color var(--dur-fast)}
     .share-reset:hover{color:var(--live-soft);border-color:rgba(229,86,75,.4)}
     /* ── settings drawer: compact, sleek, consistent (width/panel padding set on the base rule below) ── */
     .drawer .sec{padding:13px 0}
     .drawer .sec:last-child{border-bottom:none}
-    .drawer .label{margin-bottom:9px;font-size:10px;letter-spacing:.16em}
+    .drawer .label{margin-bottom:9px;font-size:var(--fs-xs);letter-spacing:.16em}
     .drawer .label .ico{width:13px;height:13px}
-    .drawer .label .collapse{font-size:15px}
-    .drawer .name-field{padding:7px 11px;font-size:12px}
+    .drawer .label .collapse{font-size:var(--fs-lg)}
+    .drawer .name-field{padding:7px 11px;font-size:var(--fs-sm)}
     .username-row{display:flex;flex-wrap:nowrap;gap:6px;align-items:stretch;margin-top:2px}
     /* input + ✓ button pinned to the SAME explicit height (border-box is global) so they match exactly —
        align-self:stretch wasn't equalizing a flex <input> against the button reliably, so don't rely on it */
     .username-row .name-field{flex:1 1 0;min-width:0;width:auto;height:31px}
-    .name-save{flex:0 0 auto;width:38px;height:31px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:var(--ok);font-size:14px;line-height:1;cursor:pointer;transition:background .14s,border-color .14s}
+    .name-save{flex:0 0 auto;width:38px;height:31px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:var(--ok);font-size:var(--fs-md);line-height:1;cursor:pointer;transition:background var(--dur-fast),border-color var(--dur-fast)}
     .name-save:hover{border-color:rgba(95,180,135,.55);background:rgba(95,180,135,.14)}
     /* saved-username display: shows the name as text with a hover edit (✎) toggle back into the input */
     .username-view{display:flex;align-items:center;gap:8px;margin-top:2px;padding:7px 11px;border:1px solid var(--hairline-soft);border-radius:8px;background:#14171c}
-    .username-text{flex:1;font-size:12.5px;color:var(--ink);font-weight:500}
-    .username-edit{flex:none;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink-faint);font-size:12px;cursor:pointer;opacity:0;transition:opacity .14s,color .14s}
+    .username-text{flex:1;font-size:var(--fs-sm);color:var(--ink);font-weight:500}
+    .username-edit{flex:none;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink-faint);font-size:var(--fs-sm);cursor:pointer;opacity:0;transition:opacity var(--dur-fast),color var(--dur-fast)}
     .username-view:hover .username-edit{opacity:1}
     .username-edit:hover{color:var(--ink)}
     /* voice in — a slim Talk button + a compact key row; the status line takes no space until it has text */
-    .drawer button.primary{padding:8px 12px;font-size:12px;border-radius:8px}
-    .drawer .ptt-key-row{margin-top:8px;font-size:10.5px}
-    .drawer .keycap-btn{padding:5px 11px;font-size:10.5px}
-    .drawer .sec > .out{margin-top:8px;min-height:0;font-size:11px}
-    .drawer .transcript{max-height:110px;font-size:11.5px;padding:8px 10px}
+    .drawer button.primary{padding:8px 12px;font-size:var(--fs-sm);border-radius:8px}
+    .drawer .ptt-key-row{margin-top:8px;font-size:var(--fs-xs)}
+    .drawer .keycap-btn{padding:5px 11px;font-size:var(--fs-xs)}
+    .drawer .sec > .out{margin-top:8px;min-height:0;font-size:var(--fs-xs)}
+    .drawer .transcript{max-height:110px;font-size:var(--fs-sm);padding:8px 10px}
     /* voice out — voice pills with an inline ▶ test button, then tight Always-Speak + speed rows */
     .drawer .voices{gap:5px;margin-bottom:0}
-    .drawer .vpill{padding:7px 4px;font-size:10.5px}
-    .drawer .vtest{width:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0 13px;font-size:12px;border-radius:8px;color:var(--ink-dim)}
+    .drawer .vpill{padding:7px 4px;font-size:var(--fs-xs)}
+    .drawer .vtest{width:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0 13px;font-size:var(--fs-sm);border-radius:8px;color:var(--ink-dim)}
     .drawer #tts-wrap:not(.min){margin-top:8px}
-    .drawer #tts-in{padding:7px 10px;font-size:11.5px}
+    .drawer #tts-in{padding:7px 10px;font-size:var(--fs-sm)}
     .drawer .speakrow{margin-top:10px}
     .drawer .speedrow{margin-top:10px}
-    .drawer .speedlbl{font-size:10.5px}
+    .drawer .speedlbl{font-size:var(--fs-xs)}
     /* alerts + effort — tighter toggles/pills */
-    .drawer .toggle{font-size:9.5px}
+    .drawer .toggle{font-size:var(--fs-2xs)}
     .drawer .effort-row{gap:5px;margin-bottom:6px}
-    .drawer .eff-pill{padding:4px 9px;font-size:10px}
+    .drawer .eff-pill{padding:4px 9px;font-size:var(--fs-xs)}
     /* Settings button (top bar) — opens the slide-in drawer holding voice/commands/share */
     /* drawer + scrim */
-    .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity .2s}
+    .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity var(--dur-slow)}
     .drawer-scrim.open{opacity:1;pointer-events:auto}
     .drawer{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:340px;max-width:92vw;display:flex;flex-direction:column;
-      transform:translateX(102%);transition:transform .22s ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
+      transform:translateX(102%);transition:transform var(--dur-slow) ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
       border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
     .drawer.open{transform:translateX(0)}
     .drawer-head{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;border-bottom:1px solid var(--hairline);
-      font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
-    .drawer-head button{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
+      font-size:var(--fs-xs);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
+    .drawer-head button{width:auto;background:none;border:none;box-shadow:none;color:var(--ink-dim);font-size:var(--fs-3xl);line-height:1;cursor:pointer;padding:0 4px}
     .drawer-head button:hover{color:var(--ink)}
     .drawer .panel{flex:1;overflow:auto;padding:0 16px 16px}
     /* Diff Review panel — a wider right-side slide-in (mirrors the drawer mechanism) */
     .diffpanel{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:540px;max-width:94vw;display:flex;flex-direction:column;
-      transform:translateX(102%);transition:transform .22s ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
+      transform:translateX(102%);transition:transform var(--dur-slow) ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
       border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
     .diffpanel.open{transform:translateX(0)}
-    .diffpanel .drawer-head button{font-size:18px}
+    .diffpanel .drawer-head button{font-size:var(--fs-2xl)}
     .diff-body{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}   /* min-height:0 so it scrolls inside the panel instead of pushing the Session History section */
     /* sleek per-section scrollbars — thinner than the global 9px so each pane reads as its own */
     .diff-body::-webkit-scrollbar,.history-feed::-webkit-scrollbar{width:7px}
@@ -919,73 +972,73 @@
     /* Project History accordion: one card per project; expand → its history feed + diff review below */
     .ph-project{border-bottom:1px solid var(--hairline-soft,rgba(255,255,255,.05))}
     .ph-head{width:100%;display:flex;align-items:center;gap:8px;padding:10px 14px;background:transparent;border:none;cursor:pointer;
-      font:inherit;font-size:12.5px;color:var(--ink);text-align:left;box-shadow:none;transition:background .14s}
+      font:inherit;font-size:var(--fs-sm);color:var(--ink);text-align:left;box-shadow:none;transition:background var(--dur-fast)}
     .ph-head:hover{background:rgba(255,255,255,.035)}
-    .ph-caret{flex:none;display:flex;color:var(--ink-faint);transition:transform .16s var(--ease-pop,ease)}
+    .ph-caret{flex:none;display:flex;color:var(--ink-faint);transition:transform var(--dur-base) var(--ease-pop,ease)}
     .ph-head.open .ph-caret{transform:rotate(90deg)}
     .ph-ico{flex:none;display:flex;color:var(--ink-dim)}
     .ph-ico svg{width:14px;height:14px}
     .ph-nm{flex:0 1 auto;min-width:0;max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;letter-spacing:.01em}
     .ph-body{padding:0 14px 8px}
     .ph-diff{display:flex;flex-direction:column;gap:8px}   /* the COMMIT HISTORY .ph-sec line above it is the divider */
-    .ph-empty{color:var(--ink-faint);font-size:11px;padding:6px 2px}
+    .ph-empty{color:var(--ink-faint);font-size:var(--fs-xs);padding:6px 2px}
     .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
-    .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:10.5px;line-height:1.4;padding-right:42px}   /* Name / Time / User on one line; right pad clears the hover expand + copy buttons */
+    .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:var(--fs-xs);line-height:1.4;padding-right:42px}   /* Name / Time / User on one line; right pad clears the hover expand + copy buttons */
     .hf-pair{white-space:nowrap}
     .hf-k{color:var(--ink-faint);letter-spacing:.02em}
     .hf-v{color:var(--silver);font-weight:600}
-    .hf-content{margin-top:3px;font-size:12px;color:var(--ink);line-height:1.45;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}   /* clamp to 3 lines to conserve space on long prompts; the ▾ expand button reveals the rest */
+    .hf-content{margin-top:3px;font-size:var(--fs-sm);color:var(--ink);line-height:1.45;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}   /* clamp to 3 lines to conserve space on long prompts; the ▾ expand button reveals the rest */
     .hf-content.expanded{display:block;-webkit-line-clamp:unset;overflow:visible}
-    .hf-copy{position:absolute;top:5px;right:6px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s}
+    .hf-copy{position:absolute;top:5px;right:6px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity var(--dur-fast),color var(--dur-fast)}
     .hf-row:hover .hf-copy{opacity:.6}
     .hf-copy:hover{opacity:1;color:var(--ink)}
     .hf-copy.done{opacity:1;color:var(--ok)}
-    .hf-more{position:absolute;top:5px;right:26px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s,transform .18s}
+    .hf-more{position:absolute;top:5px;right:26px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity var(--dur-fast),color var(--dur-fast),transform var(--dur-base)}
     .hf-row:hover .hf-more{opacity:.6}
     .hf-more:hover{opacity:1;color:var(--ink)}
     .hf-more.open{opacity:.85;transform:rotate(180deg)}   /* chevron points up = collapse; stays visible so you can close it */
-    .hf-revert{position:absolute;top:5px;right:46px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .15s,color .15s}
+    .hf-revert{position:absolute;top:5px;right:46px;width:auto;padding:2px;line-height:0;background:none;border:none;box-shadow:none;color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity var(--dur-fast),color var(--dur-fast)}
     .hf-row:hover .hf-revert{opacity:.55}
     .hf-revert:hover{opacity:1;color:var(--warn)}   /* destructive: warns on hover */
-    .hf-undo{width:auto;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin:1px 0 3px;padding:5px 11px;font-size:11px;color:var(--warn);background:rgba(150,40,40,.1);border:1px solid #7a3030;border-radius:999px;cursor:pointer;transition:all .15s}
+    .hf-undo{width:auto;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin:1px 0 3px;padding:5px 11px;font-size:var(--fs-xs);color:var(--warn);background:rgba(150,40,40,.1);border:1px solid #7a3030;border-radius:999px;cursor:pointer;transition:all var(--dur-fast)}
     .hf-undo:hover{background:rgba(150,40,40,.2);color:#ff9e9e}
-    .hf-expand{width:auto;align-self:center;margin-top:2px;padding:4px 13px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);background:none;border:1px solid var(--hairline);border-radius:999px;cursor:pointer;transition:all .15s}
+    .hf-expand{width:auto;align-self:center;margin-top:2px;padding:4px 13px;font-size:var(--fs-2xs);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);background:none;border:1px solid var(--hairline);border-radius:999px;cursor:pointer;transition:all var(--dur-fast)}
     .hf-expand:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
-    .diff-empty{color:var(--ink-faint);font-size:12.5px;text-align:center;padding:40px 20px;line-height:1.6}
-    .diff-sec-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 2px -2px}
+    .diff-empty{color:var(--ink-faint);font-size:var(--fs-sm);text-align:center;padding:40px 20px;line-height:1.6}
+    .diff-sec-lbl{font-size:var(--fs-2xs);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 2px -2px}
     /* Project History card bar extras: repo identity + open-on-GitHub + commit count live on the MAIN BAR */
-    .ph-id{flex:0 1 auto;min-width:0;font-size:10px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .ph-visit{flex:none;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;color:var(--ink-faint);cursor:pointer;transition:all .14s}
+    .ph-id{flex:0 1 auto;min-width:0;font-size:var(--fs-xs);color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ph-visit{flex:none;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;color:var(--ink-faint);cursor:pointer;transition:all var(--dur-fast)}
     .ph-visit svg{width:12px;height:12px;display:block}
     .ph-visit:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
-    .ph-stats{flex:none;margin-left:auto;font-size:9.5px;letter-spacing:.04em;color:var(--ink-dim);white-space:nowrap}
+    .ph-stats{flex:none;margin-left:auto;font-size:var(--fs-2xs);letter-spacing:.04em;color:var(--ink-dim);white-space:nowrap}
     /* section title lines inside a card — same voice as the left sidebar's section headers */
-    .ph-sec{display:flex;align-items:center;gap:6px;margin:8px 0 5px;font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    .ph-sec{display:flex;align-items:center;gap:6px;margin:8px 0 5px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
     .ph-sec svg{flex:none;opacity:.8}
     .ph-sec::after{content:'';flex:1;height:1px;background:var(--hairline-soft,rgba(255,255,255,.05));margin-left:2px}
-    .ph-sum{font-size:10.5px;color:var(--ink-dim);letter-spacing:.02em;padding:1px 0 3px}
+    .ph-sum{font-size:var(--fs-xs);color:var(--ink-dim);letter-spacing:.02em;padding:1px 0 3px}
     /* where this branch stands against its GitHub upstream (origin/<branch> as of the last background fetch) */
     .ph-sync{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:1px 0 6px}
-    .ph-sync-t{font-size:10px;color:var(--ink-faint,#565c66);font-family:var(--mono,ui-monospace,monospace)}
-    .ph-chip{flex:none;font-size:9.5px;line-height:1.6;padding:0 6px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+    .ph-sync-t{font-size:var(--fs-xs);color:var(--ink-faint,#565c66);font-family:var(--mono,ui-monospace,monospace)}
+    .ph-chip{flex:none;font-size:var(--fs-2xs);line-height:1.6;padding:0 6px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
     .ph-chip.ahead{color:#e8c37a;border-color:rgba(232,195,122,.32);background:rgba(232,195,122,.09)}
     .ph-chip.behind{color:#7f9cff;border-color:rgba(127,156,255,.32);background:rgba(127,156,255,.09)}
     .diff-file{border:1px solid var(--hairline);border-radius:10px;overflow:hidden;background:#0b0d10}
     .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:#101216;border-bottom:1px solid var(--hairline)}
-    .diff-path{font-size:12px;color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}
-    .diff-counts{flex:none;font-size:10px;font-family:ui-monospace,monospace}
+    .diff-path{font-size:var(--fs-sm);color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}
+    .diff-counts{flex:none;font-size:var(--fs-xs);font-family:ui-monospace,monospace}
     .diff-counts .add{color:var(--ok);font-style:normal}
     .diff-counts .del{color:#d2685f;font-style:normal;margin-left:4px}
-    .diff-revert-file,.diff-revert-hunk{width:auto;flex:none;padding:3px 9px;font-size:10.5px;letter-spacing:.02em;color:var(--ink-dim);
+    .diff-revert-file,.diff-revert-hunk{width:auto;flex:none;padding:3px 9px;font-size:var(--fs-xs);letter-spacing:.02em;color:var(--ink-dim);
       background:#16181d;border:1px solid var(--hairline);border-radius:6px;cursor:pointer;box-shadow:none}
     .diff-revert-file:hover,.diff-revert-hunk:hover{color:#fff;border-color:rgba(210,104,95,.5);background:rgba(210,104,95,.14)}
     .diff-revert-file:disabled,.diff-revert-hunk:disabled{opacity:.45;cursor:default}
-    .diff-binary{padding:10px 12px;font-size:11px;color:var(--ink-faint)}
+    .diff-binary{padding:10px 12px;font-size:var(--fs-xs);color:var(--ink-faint)}
     .diff-hunk{border-top:1px solid var(--hairline-soft)}
     .diff-hunk:first-of-type{border-top:0}
     .diff-hunk-head{display:flex;align-items:center;gap:9px;padding:5px 10px;background:#0d0f13}
-    .diff-hunk-lbl{flex:1;min-width:0;font-size:10.5px;color:#6aa6e0;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .diff-lines{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:11.5px;line-height:1.5;overflow-x:auto}
+    .diff-hunk-lbl{flex:1;min-width:0;font-size:var(--fs-xs);color:#6aa6e0;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .diff-lines{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:var(--fs-sm);line-height:1.5;overflow-x:auto}
     .diff-lines .dl{white-space:pre;padding:0 11px}
     .diff-lines .dl.add{background:rgba(95,180,135,.12);color:#bfe6cf}
     .diff-lines .dl.del{background:rgba(210,104,95,.12);color:#f0c3bd}
@@ -996,33 +1049,33 @@
       border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
     .body.sharing .chat{display:flex}
     .chat-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--hairline-soft)}
-    .chat-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+    .chat-title{font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
     .chat-head-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
     /* roster strip — community icon + members inline on ONE line; overflow folds into a "+N" pop-down */
     .roster-strip{position:relative;display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--hairline-soft)}
     .roster-ico{flex:none;display:flex;align-items:center;color:var(--ink-faint)}
     .roster-ico svg{width:15px;height:15px;display:block}
     .chat-roster{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:nowrap;overflow:hidden;
-      font-size:9.5px;letter-spacing:.04em;color:var(--ink-faint);text-transform:none}   /* position:relative → chips' offsetLeft is measured against THIS strip (the overflow math depends on it) */
-    .roster-more{flex:none;width:auto;display:inline-flex;align-items:center;gap:2px;padding:2px 8px;font-size:9.5px;
+      font-size:var(--fs-2xs);letter-spacing:.04em;color:var(--ink-faint);text-transform:none}   /* position:relative → chips' offsetLeft is measured against THIS strip (the overflow math depends on it) */
+    .roster-more{flex:none;width:auto;display:inline-flex;align-items:center;gap:2px;padding:2px 8px;font-size:var(--fs-2xs);
       letter-spacing:.04em;border-radius:999px;color:var(--ink-dim);background:rgba(255,255,255,.04);border:1px solid var(--hairline)}
     .roster-more:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     .roster-pop{position:absolute;top:calc(100% - 2px);right:8px;z-index:30;display:none;flex-direction:column;gap:7px;
       min-width:120px;max-height:220px;overflow:auto;padding:9px 11px;border-radius:9px;background:#14171c;
       border:1px solid var(--hairline);box-shadow:0 12px 30px -12px #000}
     .roster-pop.show{display:flex}
-    .roster-pop .rmember{font-size:10px}
+    .roster-pop .rmember{font-size:var(--fs-xs)}
     .rmember{flex:none;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
     .rmember.you{color:var(--ink-dim)}
     /* in a voice call → the person's ONE roster pill carries the mic state (never a second pill in the voice
        strip below — that duplicate row was the "two CrazyDevs" report). Pulses subtly while they speak. */
-    .rmember.invoice::after{content:'🎙';font-size:9px;margin-left:2px;opacity:.7;filter:grayscale(35%);transition:opacity .18s,filter .18s}
+    .rmember.invoice::after{content:'🎙';font-size:var(--fs-2xs);margin-left:2px;opacity:.7;filter:grayscale(35%);transition:opacity var(--dur-base),filter var(--dur-base)}
     .rmember.invoice.speaking{color:var(--ink)}
     .rmember.invoice.speaking::after{opacity:1;filter:none;text-shadow:0 0 7px rgba(95,180,135,.9)}
     /* host live-controls: a small "End live" in the chat head + a per-guest ✕ revealed on hover */
-    .chat-term{flex:none;width:auto;font:inherit;font-size:11px;font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background .14s,color .14s}   /* width:auto overrides button{width:100%}; sized to MATCH .hv-btn (same height/min-width/radius) so End/Leave and Join voice read as one control family */
+    .chat-term{flex:none;width:auto;font:inherit;font-size:var(--fs-xs);font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background var(--dur-fast),color var(--dur-fast)}   /* width:auto overrides button{width:100%}; sized to MATCH .hv-btn (same height/min-width/radius) so End/Leave and Join voice read as one control family */
     .chat-term:hover{background:rgba(229,86,75,.26);color:#ff9b91}
-    .rkick{flex:none;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin-left:1px;border:none;border-radius:4px;background:none;color:var(--ink-faint);font-size:10px;line-height:1;cursor:pointer;opacity:0;transition:opacity .14s,color .14s}
+    .rkick{flex:none;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin-left:1px;border:none;border-radius:4px;background:none;color:var(--ink-faint);font-size:var(--fs-xs);line-height:1;cursor:pointer;opacity:0;transition:opacity var(--dur-fast),color var(--dur-fast)}
     .rmember:hover .rkick{opacity:.75}
     .rkick:hover{opacity:1;color:var(--live)}
     .rmember.gone{color:var(--ink-faint);opacity:.7}
@@ -1031,21 +1084,21 @@
     .rdot.idle{background:#e0a93b;box-shadow:0 0 6px -1px #e0a93b}
     .rdot.gone{background:var(--live);opacity:.85}
     .chat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
-    .chat-msg{position:relative;max-width:88%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}
-    .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
+    .chat-msg{position:relative;max-width:88%;padding:7px 11px;border-radius:12px;font-size:var(--fs-sm);line-height:1.4;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+    .chat-msg .who{display:block;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
     .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6;border-bottom-right-radius:4px}    /* softer rounding + a subtle chat-tail toward the sender */
     .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink);border-bottom-left-radius:4px}
     /* hover-revealed copy button, bottom-right of the bubble — copy a collaborator's prompt straight to the clipboard */
-    .chat-copy{position:absolute;bottom:3px;right:3px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:6px;background:rgba(0,0,0,.28);color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity .14s,color .14s,background .14s}
+    .chat-copy{position:absolute;bottom:3px;right:3px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:6px;background:rgba(0,0,0,.28);color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity var(--dur-fast),color var(--dur-fast),background var(--dur-fast)}
     .chat-copy svg{width:12px;height:12px;display:block}
     .chat-msg:hover .chat-copy{opacity:.85}
     .chat-copy:hover{opacity:1;color:var(--ink);background:rgba(0,0,0,.42)}
-    .chat-empty{margin:auto;max-width:210px;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
+    .chat-empty{margin:auto;max-width:210px;color:var(--ink-faint);font-size:var(--fs-xs);text-align:center;padding:18px;line-height:1.5}
     .chat-empty::before{content:'';display:block;width:30px;height:23px;margin:0 auto 11px;border:1.5px solid currentColor;border-radius:9px 9px 9px 3px;opacity:.4}   /* faint speech-bubble glyph so the empty state reads as intentional */
     .chat-input{display:flex;align-items:center;gap:8px;padding:10px;border-top:1px solid var(--hairline-soft)}
     .chat-input input{margin:0;flex:1;border-radius:9px;background:#101216}
     .chat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-size:0;display:flex;align-items:center;justify-content:center}   /* circular send (text hidden via font-size:0; arrow drawn below — keeps the accessible label) */
-    .chat-input button::after{content:'→';font-size:15px;line-height:1}
+    .chat-input button::after{content:'→';font-size:var(--fs-lg);line-height:1}
     /* approve-guest prompt: a viewer can't attach to the terminal until you say yes here */
     .approve{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;
       background:rgba(5,6,8,.62);backdrop-filter:blur(2px)}
@@ -1053,11 +1106,11 @@
     .approve .box{width:344px;max-width:90vw;padding:22px 22px 18px;text-align:center;
       border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0c0e11);
       box-shadow:0 20px 60px rgba(0,0,0,.6)}
-    .approve .box h3{margin:0 0 9px;font-size:14px;letter-spacing:.03em;color:var(--ink)}
-    .approve .box p{margin:0 0 17px;font-size:12px;line-height:1.55;color:var(--ink-dim)}
+    .approve .box h3{margin:0 0 9px;font-size:var(--fs-md);letter-spacing:.03em;color:var(--ink)}
+    .approve .box p{margin:0 0 17px;font-size:var(--fs-sm);line-height:1.55;color:var(--ink-dim)}
     .approve .row{display:flex;gap:10px}
     .approve .row button{margin:0}
-    .approve input{width:100%;margin:2px 0 16px;font-family:inherit;font-size:13px;color:var(--ink);
+    .approve input{width:100%;margin:2px 0 16px;font-family:inherit;font-size:var(--fs-md);color:var(--ink);
       background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px}
     .approve input:focus{outline:none;border-color:rgba(255,255,255,.24)}
     .approve .ghost{background:none;border-color:var(--hairline-soft);color:var(--ink-dim)}
@@ -1065,50 +1118,51 @@
     .wiz-box{width:430px;text-align:left}
     .wiz-box h3,.wiz-box p{text-align:left}
     .wiz-steps{display:flex;gap:6px;justify-content:center;margin:-4px 0 15px}
-    .wiz-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.16);transition:background .2s}   /* explicit fill (NOT var(--hairline)) so the inactive dot stays visible now that hairline is a ~5% seam */
+    .wiz-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.16);transition:background var(--dur-slow)}   /* explicit fill (NOT var(--hairline)) so the inactive dot stays visible now that hairline is a ~5% seam */
     .wiz-dot.on{background:var(--accent)}
-    .wiz-opt{font-size:9px;letter-spacing:.05em;color:var(--ink-faint);border:1px solid var(--hairline-soft);border-radius:6px;padding:1px 6px;margin-left:7px;vertical-align:middle;text-transform:uppercase}
+    .wiz-opt{font-size:var(--fs-2xs);letter-spacing:.05em;color:var(--ink-faint);border:1px solid var(--hairline-soft);border-radius:6px;padding:1px 6px;margin-left:7px;vertical-align:middle;text-transform:uppercase}
     .wiz-dim{color:var(--ink-faint)}
     .wiz-box input{margin-top:6px}
     .wiz-box .row{justify-content:flex-end;margin-top:6px}
     .wiz-skip-row{margin-top:15px;text-align:center}
-    .wiz-skiplink{background:none;border:none;color:var(--ink-faint);font-size:10.5px;cursor:pointer;padding:4px;width:auto;letter-spacing:.02em}
+    .wiz-skiplink{background:none;border:none;color:var(--ink-faint);font-size:var(--fs-xs);cursor:pointer;padding:4px;width:auto;letter-spacing:.02em}
     .wiz-skiplink:hover{color:var(--ink-dim)}
     /* System-check step: one row per dependency (status pill + per-row action) */
     .dep-list{margin:4px 0 2px;display:flex;flex-direction:column;gap:1px;max-height:46vh;overflow:auto}
     .dep-row{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--hairline-soft)}
     .dep-row:last-child{border-bottom:none}
     .dep-main{flex:1;min-width:0}
-    .dep-name{font-size:12px;color:var(--ink);letter-spacing:.01em}
+    .dep-name{font-size:var(--fs-sm);color:var(--ink);letter-spacing:.01em}
     .dep-name .wiz-opt{margin-left:6px}
-    .dep-hint{font-size:10px;color:var(--ink-faint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .dep-msg{font-size:10.5px;color:var(--ink-dim);margin-top:4px;line-height:1.4;white-space:normal}
+    .dep-hint{font-size:var(--fs-xs);color:var(--ink-faint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .dep-msg{font-size:var(--fs-xs);color:var(--ink-dim);margin-top:4px;line-height:1.4;white-space:normal}
     .dep-msg.err{color:var(--live-soft)}
-    .dep-pill{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;border-radius:6px;padding:2px 7px;border:1px solid var(--hairline-soft);color:var(--ink-dim);white-space:nowrap}
+    .dep-pill{font-size:var(--fs-2xs);letter-spacing:.05em;text-transform:uppercase;border-radius:6px;padding:2px 7px;border:1px solid var(--hairline-soft);color:var(--ink-dim);white-space:nowrap}
     .dep-pill.ready{color:#7ee0a8;border-color:rgba(126,224,168,.4)}
     .dep-pill.missing,.dep-pill.outdated,.dep-pill.error{color:#e6b86a;border-color:rgba(230,184,106,.4)}
     .dep-pill.signin,.dep-pill.unconfirmed{color:#9bb4ff;border-color:rgba(155,180,255,.4)}
     .dep-pill.installing{color:var(--accent);border-color:rgba(255,255,255,.18)}
-    .dep-act{width:auto;margin:0;padding:0 10px;height:26px;font-size:11px;background:none;border:1px solid var(--hairline-soft);color:var(--ink-dim);border-radius:7px;cursor:pointer;white-space:nowrap}
+    .dep-act{width:auto;margin:0;padding:0 10px;height:26px;font-size:var(--fs-xs);background:none;border:1px solid var(--hairline-soft);color:var(--ink-dim);border-radius:7px;cursor:pointer;white-space:nowrap}
     .dep-act:hover:not(:disabled){color:var(--ink);border-color:rgba(255,255,255,.24)}
     .dep-act:disabled{opacity:.5;cursor:default}
     /* system chat lines ("X joined" / "X left") */
-    .chat-sys{align-self:center;font-size:9.5px;letter-spacing:.04em;color:var(--ink-faint);padding:3px 10px;text-align:center;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:999px;margin:1px 0}   /* system notices ("X joined") → a clean centered pill */
+    .chat-sys{align-self:center;font-size:var(--fs-2xs);letter-spacing:.04em;color:var(--ink-faint);padding:3px 10px;text-align:center;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:999px;margin:1px 0}   /* system notices ("X joined") → a clean centered pill */
     /* ============================================================
        PREMIUM POLISH (reversible) — purely additive depth, hover lift,
        focus rings, and easing. No layout / size / placement changes.
        To revert: delete this whole block (or `git revert` its commit).
        ============================================================ */
-    :root{ --ease-pop:cubic-bezier(.2,.7,.2,1) }
+    /* (--ease-pop moved to the token block at the top — one motion system; a second :root declaration here
+       would now be a self-reference and would invalidate the token everywhere it is used.) */
     /* 1 — buttons: weighted easing + a 1px hover lift, settling on press (transform only → never clips) */
-    .iconbtn,.vbox,.ws-chip,.ext-tog,.ws-add,.share-btn{ transition:all .16s var(--ease-pop) }
+    .iconbtn,.vbox,.ws-chip,.ext-tog,.ws-add,.share-btn{ transition:all var(--dur-base) var(--ease-pop) }
     .iconbtn:hover,.vbox:hover,.ext-tog:hover,.ws-add:hover,.share-btn:hover{ transform:translateY(-1px) }
     .iconbtn:active,.ext-tog:active,.ws-add:active,.share-btn:active{ transform:translateY(0) }
     /* depth on the most-visible buttons (top bar = visible overflow, shadow renders clean; keeps the inset sheen) */
-    .iconbtn{ box-shadow:inset 0 1px 0 var(--sheen),0 2px 5px rgba(0,0,0,.38) }
-    .iconbtn:hover{ box-shadow:inset 0 1px 0 var(--sheen),0 5px 12px rgba(0,0,0,.5) }
+    .iconbtn{ box-shadow:inset 0 1px 0 var(--sheen),var(--elev-1) }
+    .iconbtn:hover{ box-shadow:inset 0 1px 0 var(--sheen),var(--elev-2) }
     /* 2 — floating surfaces read as stacked cards (filter = separate from their box-shadow, so insets stay) */
-    .drawer,.ctxmenu,#agents-pane{ filter:drop-shadow(0 14px 32px rgba(0,0,0,.52)) }
+    .drawer,.ctxmenu,#agents-pane,.cmdk{ filter:drop-shadow(var(--elev-3)) }   /* every floating surface on the SAME rung — a menu and a drawer used to cast different shadows */
     #agents-pane{ border-top-color:rgba(255,255,255,.12) }   /* light-from-above top edge */
     /* 3 — cohesive keyboard focus ring (outline = separate from box-shadow; clobbers nothing) */
     .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.share-btn:focus-visible,
@@ -1124,14 +1178,15 @@
       <button class="iconbtn" id="sessions-btn" title="Projects">☰</button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
       <button class="iconbtn" id="diff-btn" title="Project History — pick a project, see its session history + changes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></button>
+      <button class="iconbtn" id="cmdk-btn" title="Commands (Ctrl+Shift+P)" aria-label="Commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H7a3 3 0 1 0 3 3v10a3 3 0 1 1-3-3h10a3 3 0 1 1-3 3V7a3 3 0 1 1 3 3H7"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div class="vgroup">
       <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
         <span class="vdot"></span><span class="vstat" id="vin-stat">Talk</span>
       </button>
-      <button class="vbox vout" id="vout-stop" type="button" title="Speak Claude's latest reply" disabled>
-        <span class="vdot" id="vout-dot"></span><span class="vstat" id="vout-label">Speak</span>
+      <button class="vbox vout" id="vout-stop" type="button" title="Read Claude's latest reply aloud" disabled>
+        <span class="vdot" id="vout-dot"></span><span class="vstat" id="vout-label">Read</span>
       </button>
       <button class="vbox vauto on" id="vout-auto" type="button" aria-pressed="true" title="Auto-speak Claude's replies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
     </div>
@@ -1199,29 +1254,6 @@
       </div>
       <div id="agents-pane"><div class="agents-list" id="agents-list"></div></div>
       </div><!-- /termrow -->
-      <div class="cmdbar" title="One-tap commands — runs in the live terminal · scroll or drag for more">
-        <div class="cmdscroll-wrap">
-          <button class="cmdarrow cmdarrow-l" id="cmd-left" type="button" aria-label="Scroll commands left">‹</button>
-          <button class="cmdarrow cmdarrow-r" id="cmd-right" type="button" aria-label="Scroll commands right">›</button>
-          <div class="cmdscroll" id="cmdscroll">
-            <button class="cmdpill" data-cmd="/model">/model</button>
-            <button class="cmdpill" data-cmd="/effort">/effort</button>
-            <button class="cmdpill" data-cmd="/compact">/compact</button>
-            <button class="cmdpill" data-cmd="/clear">/clear</button>
-            <button class="cmdpill" data-cmd="/loop">/loop</button>
-            <button class="cmdpill" data-cmd="/context">/context</button>
-            <button class="cmdpill" data-cmd="/mcp">/mcp</button>
-            <button class="cmdpill" data-cmd="/agents">/agents</button>
-            <button class="cmdpill" data-cmd="/plan">/plan</button>
-            <button class="cmdpill" data-cmd="/status">/status</button>
-            <button class="cmdpill" data-cmd="/resume">/resume</button>
-            <button class="cmdpill" data-cmd="/init">/init</button>
-            <button class="cmdpill" data-cmd="/review">/review</button>
-            <button class="cmdpill" data-cmd="/cost">/cost</button>
-            <button class="cmdpill" data-cmd="/help">/help</button>
-          </div>
-        </div>
-      </div>
     </div><!-- /center -->
     <div class="chat" id="chat">
       <div class="chat-head">
@@ -1398,7 +1430,7 @@
           <button class="eff-pill" data-theme="aurora">Aurora</button>
           <button class="eff-pill" data-theme="evergreen">Evergreen</button>
         </div>
-        <div style="font-size:10px;color:var(--ink-faint);margin-top:4px">re-tints the interface and the terminal · applied instantly</div>
+        <div style="font-size:var(--fs-xs);color:var(--ink-faint);margin-top:4px">re-tints the interface and the terminal · applied instantly</div>
       </div>
 
     </div>
@@ -1413,6 +1445,18 @@
     <span class="s" id="sb-voice" style="display:none"><span class="dot" id="d-voice"></span> <span id="voice-note">voice</span></span>
     <span class="end" id="meta">connecting…</span>
     <span class="ver" id="app-ver">claudible</span>
+  </div>
+
+  <!-- COMMAND PALETTE — replaced the 15-pill horizontal scroller. Ctrl/Cmd+Shift+P (NOT Ctrl+K: that is
+       readline's kill-to-end-of-line and binding it would break it inside the terminal). -->
+  <div class="cmdk-scrim" id="cmdk-scrim"></div>
+  <div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Commands">
+    <div class="cmdk-top">
+      <svg class="cmdk-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="text" id="cmdk-in" placeholder="Run a command…" autocomplete="off" spellcheck="false" />
+      <span class="cmdk-hint">esc</span>
+    </div>
+    <div class="cmdk-list" id="cmdk-list"></div>
   </div>
 
   <div id="ctxmenu" class="ctxmenu"></div>

@@ -4,12 +4,26 @@ const $ = (id) => document.getElementById(id);
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
 const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
 // transient toast (button feedback / coming-soon placeholders)
+// Anchored to the TOP-RIGHT of the terminal (the Terminal|Agents control owns the top-left). Measured at show
+// time rather than expressed in CSS because the terminal's right edge moves: the sidebar and the chat panel are
+// grid columns that open and close, and no fixed-position CSS can track that. Falls back to the old
+// bottom-centre placement if the terminal isn't mounted yet (early-boot toasts).
+function placeToast(t) {
+  const row = document.querySelector('.termrow');
+  const r = row && row.getBoundingClientRect();
+  if (!r || !r.width) { t.style.left = ''; t.style.right = '16px'; t.style.top = ''; t.style.bottom = '32px'; return; }
+  t.style.left = ''; t.style.bottom = '';
+  t.style.right = Math.max(8, Math.round(window.innerWidth - r.right + 8)) + 'px';
+  t.style.top = Math.round(r.top + 8) + 'px';
+}
 function toast(msg) {
   let t = $('toast');
   if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
-  t.textContent = msg; t.classList.add('show');
+  t.textContent = msg; placeToast(t); t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
+// a resize (or a panel opening) while a toast is up would strand it off the terminal's edge
+window.addEventListener('resize', () => { const t = $('toast'); if (t && t.classList.contains('show')) placeToast(t); });
 // Map internal error CODES (from main.js / the wsl scripts) to plain-English sentences so a toast never shows a
 // raw code like 'bad handle' or a raw JS exception. Already-human messages (a space, sane length, no JSON/stack
 // junk) pass through unchanged; anything else becomes a generic line.
@@ -784,7 +798,7 @@ let announceOn = true, chimeOn = true;               // factory-on: spoken "task
 function updateVoiceOutBtn() {
   const b = $('vout-stop'); if (!b) return;
   const speaking = ttsBusy || !!ttsAudio;
-  const lbl = $('vout-label'); if (lbl) lbl.textContent = speaking ? 'Stop' : 'Speak';   // update only the label span (keep the dot intact)
+  const lbl = $('vout-label'); if (lbl) lbl.textContent = speaking ? 'Stop' : 'Read';   // update only the label span (keep the dot intact). "Read" names what the MODEL does, next to "Talk" for what you do — "Speak" read as a second instruction to the user
   b.disabled = false;   // ALWAYS clickable — on click it reads lastReply, else fetches the open session's latest reply, else toasts "no text detected to read"
   b.title = speaking ? 'Stop speaking' : 'Read the latest reply aloud';
 }
@@ -993,45 +1007,105 @@ const send = (cmd) => {
   setTimeout(() => sendInput(cmd + '\r'), 120);        // then run the command
   focusTermSoon(150);                                     // keyboard back in the terminal
 };
-// Command bar: 5 pills visible, the rest reached by horizontal scroll/drag in the same width.
-// Fire on pointer-UP (so a drag scrolls instead of triggering); preventDefault on pointer-DOWN
-// holds focus in the terminal (keeps the click-twice focus-war fix above).
-const cmdscroll = $('cmdscroll'), cmdwrap = cmdscroll.parentElement;
-let cdrag = null;
-function cmdEdges() {                                          // fade + arrow the side(s) that have more off-screen
-  const max = cmdscroll.scrollWidth - cmdscroll.clientWidth;
-  cmdwrap.classList.toggle('more-l', cmdscroll.scrollLeft > 2);
-  cmdwrap.classList.toggle('more-r', cmdscroll.scrollLeft < max - 2);
+// ---------- COMMAND PALETTE (replaced the horizontal pill bar) ----------
+// The pill bar showed 5 of 15 commands and hid the rest behind a drag/scroll nobody discovers, and it cost a
+// full row of terminal height. This is keyboard-first, searches every command at once, and can also drive the
+// app's own panels — a pill could only ever type into the terminal.
+// Hotkey is Ctrl/Cmd+Shift+P. NOT Ctrl+K: that is readline's kill-to-end-of-line, and this app is a terminal.
+const CMDK_ITEMS = [
+  { name: '/model',   desc: 'switch model' },
+  { name: '/effort',  desc: 'reasoning effort' },
+  { name: '/compact', desc: 'compact the context' },
+  { name: '/clear',   desc: 'clear the conversation' },
+  { name: '/loop',    desc: 'run on an interval' },
+  { name: '/context', desc: 'context breakdown' },
+  { name: '/mcp',     desc: 'MCP servers' },
+  { name: '/agents',  desc: 'subagents' },
+  { name: '/plan',    desc: 'plan mode' },
+  { name: '/status',  desc: 'session status' },
+  { name: '/resume',  desc: 'resume a session' },
+  { name: '/init',    desc: 'write CLAUDE.md' },
+  { name: '/review',  desc: 'review a pull request' },
+  { name: '/cost',    desc: 'session cost' },
+  { name: '/help',    desc: 'all commands' },
+  // app actions — these were never reachable from the pill bar at all
+  { name: 'Settings',        desc: 'voice, alerts, effort, skills', act: () => $('settings-btn').click() },
+  { name: 'Project History', desc: 'sessions and changes',          act: () => $('diff-btn').click() },
+  { name: 'New session',     desc: 'in the active project',         act: () => $('new-session').click() },
+  { name: 'Share a live link', desc: 'invite someone to watch',     act: () => $('share-btn').click() },
+  { name: 'Toggle projects', desc: 'show or hide the sidebar',      act: () => $('sessions-btn').click() },
+];
+let cmdkOn = -1, cmdkRows = [];
+function cmdkOpen(on) {
+  const box = $('cmdk'), scrim = $('cmdk-scrim'), inp = $('cmdk-in');
+  box.classList.toggle('show', on); scrim.classList.toggle('show', on);
+  if (on) { inp.value = ''; cmdkRender(''); inp.focus(); }
+  else { focusTermSoon(0); }                                   // hand the keyboard straight back to the terminal
 }
-{ const cl = $('cmd-left'), cr = $('cmd-right');             // arrow buttons (the existing scroll listener below keeps arrows/fades synced)
-  if (cl) cl.addEventListener('click', () => cmdscroll.scrollBy({ left: -cmdscroll.clientWidth * 0.8, behavior: 'smooth' }));
-  if (cr) cr.addEventListener('click', () => cmdscroll.scrollBy({ left: cmdscroll.clientWidth * 0.8, behavior: 'smooth' })); }
-cmdscroll.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  e.preventDefault();
-  cdrag = { x: e.clientX, sl: cmdscroll.scrollLeft, moved: false, pill: e.target.closest('.cmdpill'), pid: e.pointerId };
-  try { cmdscroll.setPointerCapture(e.pointerId); } catch {}
+// Subsequence match ("cmp" finds /compact), so you never have to remember the exact prefix. Rank: earlier first
+// match wins, so typing "co" puts /compact above /context rather than in list order.
+function cmdkScore(hay, q) {
+  if (!q) return 0;
+  let i = 0, first = -1;
+  for (let c = 0; c < hay.length && i < q.length; c++) {
+    if (hay[c] === q[i]) { if (first < 0) first = c; i++; }
+  }
+  return i === q.length ? first : -1;
+}
+function cmdkRender(q) {
+  const list = $('cmdk-list'); const ql = q.trim().toLowerCase();
+  const hits = CMDK_ITEMS
+    .map((it) => ({ it, s: cmdkScore(it.name.toLowerCase(), ql) }))
+    .filter((r) => r.s >= 0)
+    .sort((a, b) => a.s - b.s);
+  list.innerHTML = '';
+  cmdkRows = [];
+  if (!hits.length) { list.innerHTML = '<div class="cmdk-empty">no matching command</div>'; cmdkOn = -1; return; }
+  hits.forEach((r, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'cmdk-row' + (i === 0 ? ' on' : '');
+    b.innerHTML = '<span class="ck-name"></span><span class="ck-desc"></span>';
+    b.querySelector('.ck-name').textContent = r.it.name;
+    b.querySelector('.ck-desc').textContent = r.it.desc;
+    b.addEventListener('mousemove', () => cmdkMove(i, false));
+    b.addEventListener('click', () => cmdkRun(r.it));
+    list.appendChild(b); cmdkRows.push({ el: b, it: r.it });
+  });
+  cmdkOn = 0;
+}
+function cmdkMove(i, scroll) {
+  if (!cmdkRows.length) return;
+  cmdkOn = (i + cmdkRows.length) % cmdkRows.length;
+  cmdkRows.forEach((r, k) => r.el.classList.toggle('on', k === cmdkOn));
+  if (scroll) cmdkRows[cmdkOn].el.scrollIntoView({ block: 'nearest' });
+}
+function cmdkRun(it) {
+  cmdkOpen(false);
+  if (it.act) { it.act(); return; }
+  send(it.name);
+  // R39: a joined mirror's tracker is the HOST's (re-broadcast) — resetting the local copy painted zeros
+  // until the next status frame. Carried over verbatim from the pill bar.
+  if (it.name === '/clear' && !(AT() && AT().kind === 'live')) resetStats();
+}
+$('cmdk-btn').addEventListener('click', () => cmdkOpen(true));
+$('cmdk-scrim').addEventListener('click', () => cmdkOpen(false));
+$('cmdk-in').addEventListener('input', (e) => cmdkRender(e.target.value));
+$('cmdk-in').addEventListener('keydown', (e) => {
+  e.stopPropagation();                                          // never let the terminal's global handlers see this
+  if (e.key === 'Escape') { e.preventDefault(); cmdkOpen(false); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); cmdkMove(cmdkOn + 1, true); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkMove(cmdkOn - 1, true); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (cmdkRows[cmdkOn]) cmdkRun(cmdkRows[cmdkOn].it); }
 });
-cmdscroll.addEventListener('pointermove', (e) => {
-  if (!cdrag) return;
-  const dx = e.clientX - cdrag.x;
-  if (Math.abs(dx) > 4) cdrag.moved = true;
-  cmdscroll.scrollLeft = cdrag.sl - dx; cmdEdges();
-});
-const cmdUp = () => {
-  if (!cdrag) return;
-  const { moved, pill, pid } = cdrag; cdrag = null;
-  try { cmdscroll.releasePointerCapture(pid); } catch {}
-  if (!moved && pill && pill.dataset.cmd) { send(pill.dataset.cmd); if (pill.dataset.cmd === '/clear' && !(AT() && AT().kind === 'live')) resetStats(); }   // R39: a joined mirror's tracker is the HOST's (re-broadcast) — resetting the local copy painted zeros until the next status frame
-};
-cmdscroll.addEventListener('pointerup', cmdUp);
-cmdscroll.addEventListener('pointercancel', cmdUp);
-cmdscroll.addEventListener('wheel', (e) => {                   // vertical wheel → horizontal scroll over the bar
-  if (!e.deltaY) return;
-  cmdscroll.scrollLeft += e.deltaY; e.preventDefault(); cmdEdges();
-}, { passive: false });
-cmdscroll.addEventListener('scroll', cmdEdges);
-new ResizeObserver(cmdEdges).observe(cmdscroll);              // recompute on width changes (sharing/sessions toggles)
+// Capture phase so xterm never sees the chord. Shift is required, which is what keeps it clear of the
+// terminal's own Ctrl+P (previous-command) and Ctrl+K (kill-to-EOL).
+window.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod || !e.shiftKey || e.altKey) return;
+  if (e.code !== 'KeyP' && (e.key || '').toLowerCase() !== 'p') return;
+  e.preventDefault(); e.stopPropagation();
+  cmdkOpen(!$('cmdk').classList.contains('show'));
+}, true);
 
 // Context guardrail: the ctx bar becomes a one-tap /compact shortcut only once it's in the warn/crit zone.
 // The context meter is display-only — clicking it must NOT auto-compact (removed by request).
@@ -2747,7 +2821,7 @@ function orderedSessionsFor(wsId, list) {
 function relTime(sec) {
   if (!sec) return '';
   const d = Math.max(0, Date.now() / 1000 - sec);
-  if (d < 60) return 'just now';
+  if (d < 60) return 'now';   // shortest true form — the row is one line and 'JUST NOW' was both the longest and the least informative value this ever returns
   if (d < 3600) return Math.floor(d / 60) + 'm ago';
   if (d < 86400) return Math.floor(d / 3600) + 'h ago';
   if (d < 86400 * 7) return Math.floor(d / 86400) + 'd ago';
