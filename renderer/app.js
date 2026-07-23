@@ -678,6 +678,12 @@ function setOwnRate(r) {
   const prev = _ownRate && _ownRate.five_hour && _ownRate.five_hour.resets_at;
   if (typeof prev === 'number' && typeof five.resets_at === 'number' && five.resets_at < prev) return;
   _ownRate = r;
+  // Cached for the next launch (see the restore below). Written only when the reading actually moves — status
+  // arrives every turn, and persisting an identical blob each time would be a disk write per message.
+  try {
+    const c = loadPrefs().lastRate, cf = c && c.five_hour;
+    if (!cf || cf.used_percentage !== five.used_percentage || cf.resets_at !== five.resets_at) savePrefs({ lastRate: r });
+  } catch (e) {}
   const pct = Math.max(0, Math.min(100, Math.round(five.used_percentage)));
   box.style.display = '';                                          // first real payload reveals it (hidden for API-key users forever, by design)
   box.className = 'usagebar ' + rateClass(pct);
@@ -705,6 +711,15 @@ function renderRateStale() {
 // One cheap timestamp comparison, no IO and no network: the ONLY thing that can change while you sit idle is
 // the clock passing resets_at. 30s is well under any window and costs nothing measurable.
 setInterval(() => { if (_ownRate && rateExpired(_ownRate, Date.now())) renderRateStale(); }, 30000);
+// LAUNCH. Claude Code only reports rate_limits "after the first API response", so a freshly spawned session's
+// status.json carries none and the gauge sat hidden until you typed — unlike context and tokens, which have
+// values immediately. The last good reading is still true until its window closes, so replay it now and let
+// the first real status overwrite it. Expired ones fall through to the honest stale state rather than
+// resurrecting yesterday's number.
+try {
+  const cached = loadPrefs().lastRate;
+  if (cached && cached.five_hour) { if (rateExpired(cached, Date.now())) { _ownRate = cached; renderRateStale(); } else setOwnRate(cached); }
+} catch (e) {}
 let _usagePopOpen = false;
 function renderUsagePop() {
   const pop = $('usage-pop'); if (!pop || !_ownRate) return;
@@ -3463,7 +3478,7 @@ function makeLiveBadge(peer, localLabel) {
     // few seconds when the full (url+token) stamp replaces this one and the poll repaints it as a Join badge.
     const s = document.createElement('span'); s.className = 'sess-live-ind sess-starting';
     const sdot = document.createElement('span'); sdot.className = 'live-dot';
-    const sliw = document.createElement('span'); sliw.className = 'liw'; sliw.textContent = 'going live · ' + who;
+    const sliw = document.createElement('span'); sliw.className = 'liw'; sliw.textContent = 'live';   // ONE displayed state. "going live · <name>" overflowed a one-line row, and the two-state vocabulary made a 3-second transition look like a status the reader had to learn. Who it is lives in the tooltip.
     s.appendChild(sdot); s.appendChild(sliw);
     s.title = who + ' is going live — joinable in a few seconds' + _skewNote(peer);
     s.style.opacity = '0.75';
@@ -3471,7 +3486,7 @@ function makeLiveBadge(peer, localLabel) {
   }
   const b = document.createElement('button'); b.className = 'sess-live-ind sess-join';
   const dot = document.createElement('span'); dot.className = 'live-dot';
-  const liw = document.createElement('span'); liw.className = 'liw'; liw.textContent = 'live · ' + who;
+  const liw = document.createElement('span'); liw.className = 'liw'; liw.textContent = 'live';   // name dropped: the row is one line and the tooltip already names the host
   const jx = document.createElement('span'); jx.className = 'joinx'; jx.textContent = 'Join →';   // revealed on row hover
   b.appendChild(dot); b.appendChild(liw); b.appendChild(jx);
   b.title = 'Join ' + who + '’s live session — co-drive it right here' + _skewNote(peer);

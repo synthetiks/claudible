@@ -140,7 +140,7 @@
     .top{display:flex;align-items:center;gap:0;padding:0 16px;
       background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}
     .top>.topbtns{margin-left:22px}    /* brand → actions: the widest break in the bar */
-    .top>.vgroup{margin-left:18px}     /* actions → voice */
+    .top>.vgroup{margin-left:6px}      /* voice sits in the SAME rhythm as the icon buttons (topbtns gap:6px) — it read as a detached cluster at 18px */
     .top>.trk{margin-left:auto}        /* telemetry stays pinned right (unchanged) */
     .logo{height:28px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
@@ -194,12 +194,12 @@
     .usage-pop .up-sub{display:block;margin-top:2px;font-size:var(--fs-2xs);color:var(--ink-dim);text-transform:none;letter-spacing:var(--tk-base)}
     /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
        Heights tuned to sit level with the adjacent tokens stat (15px digits) rather than tower over it. */
-    .ctxbar{display:inline-flex;align-items:center;gap:9px;height:31px;padding:0 11px;border-radius:9px;
+    .ctxbar{display:inline-flex;align-items:center;gap:8px;height:31px;padding:0 10px;border-radius:9px;
       background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
       transition:box-shadow .25s ease}                                                  /* box height matches the Talk/Speak (.vbox) buttons */
-    .ctxlabel{font-size:var(--fs-xs);font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#f6f8fc;flex:none}  /* size = Talk/Speak label (10px); color = the CLAUDIBLE wordmark white — no green */
-    .ctxsegs{display:inline-flex;align-items:center;gap:2.5px;height:15px;flex:none}
-    .ctxsegs i{width:3.5px;height:15px;border-radius:1.5px;background:rgba(132,147,166,.22);
+    .ctxlabel{font-size:var(--fs-2xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#f6f8fc;flex:none}  /* size = Talk/Speak label (10px); color = the CLAUDIBLE wordmark white — no green */
+    .ctxsegs{display:inline-flex;align-items:center;gap:2px;height:11px;flex:none}   /* shorter, tighter bars — the gauge reads as an instrument rather than a fence */
+    .ctxsegs i{width:3px;height:11px;border-radius:1.5px;background:rgba(132,147,166,.22);
       transition:background .25s ease}                                                  /* empty = dim; SAME height as filled (even row) */
     .ctxsegs i.lit{background:linear-gradient(180deg,color-mix(in srgb,var(--ok) 84%,#ffffff),color-mix(in srgb,var(--ok) 82%,#0a0a0a))}                  /* filled = bright green (differs by color only) */
     .ctxpct{min-width:30px;text-align:right;font-size:var(--fs-md);font-weight:700;letter-spacing:.02em;color:var(--ok);
@@ -389,6 +389,11 @@
       box-shadow:inset 0 1px 0 var(--sheen),0 3px 14px -6px #000;transition:all var(--dur-base) ease}
     .termtab.tr{top:8px}
     .termtab.br{bottom:8px}
+    /* the palette trigger rides beside the git tab (both bottom-right of the terminal) rather than in the top
+       bar — it is a TERMINAL action, so it belongs with the other terminal-corner controls. Offset by the git
+       tab's own footprint; both are fixed-size icon tabs, so the constant is stable. */
+    .termtab.cmdk-tab{right:50px}
+    .termtab.cmdk-tab svg{width:15px;height:15px;display:block}
     .termtab .lbl{max-width:0;opacity:0;overflow:hidden;white-space:nowrap;font-size:var(--fs-xs);letter-spacing:.08em;
       text-transform:uppercase;transition:max-width var(--dur-slow) ease,opacity var(--dur-slow) ease,margin var(--dur-slow) ease}
     .termtab .ico{width:16px;height:16px;flex:none}
@@ -540,7 +545,7 @@
     .mkt-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;margin-bottom:14px;text-align:left}
     /* push-to-talk indicator (top bar) — always visible so you can see when you're talking */
     /* top-bar voice boxes — equal-height with the Settings button. Voice In = mic; Voice Out = TTS + controls */
-    .vgroup{display:flex;align-items:center;gap:8px}
+    .vgroup{display:flex;align-items:center;gap:6px}   /* match .topbtns so Talk/Read/speaker space exactly like History/Settings */
     .vbox{display:flex;align-items:center;gap:7px;height:31px;width:auto;padding:0 11px;border:1px solid var(--hairline);
       border-radius:9px;background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 1px 0 var(--sheen);
       font-size:var(--fs-xs);letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}
@@ -574,7 +579,7 @@
     .keycap-btn:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
     .keycap-btn.capturing{color:var(--live);border-color:var(--live);box-shadow:0 0 12px -4px var(--live)}
     /* sessions hamburger (top bar) + the left session sidebar */
-    .iconbtn{width:auto;padding:6px 11px;font-size:var(--fs-lg);line-height:1;color:var(--ink-dim);
+    .iconbtn{width:auto;height:31px;padding:0 11px;font-size:var(--fs-lg);line-height:1;color:var(--ink-dim);   /* 31px = the ctxbar/tokbar/usagebar/vbox height. It was 6+6 padding + a 15px glyph = 29px, so the voice boxes stood 2px proud of the icon buttons. */
       display:inline-flex;align-items:center;justify-content:center;
       background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);border-radius:9px;
       cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all var(--dur-base) var(--ease-pop)}
@@ -1224,7 +1229,6 @@
       <button class="iconbtn" id="sessions-btn" title="Projects">☰</button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
       <button class="iconbtn" id="diff-btn" title="Project History — pick a project, see its session history + changes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></button>
-      <button class="iconbtn" id="cmdk-btn" title="Commands (Ctrl+Shift+P)" aria-label="Commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H7a3 3 0 1 0 3 3v10a3 3 0 1 1-3-3h10a3 3 0 1 1-3 3V7a3 3 0 1 1 3 3H7"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div class="vgroup">
@@ -1301,6 +1305,7 @@
       </div>
       <div class="termrow">
       <div id="terminal">
+      <button class="termtab br cmdk-tab" id="cmdk-btn" type="button" title="Commands (Ctrl+Shift+P)" aria-label="Commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H7a3 3 0 1 0 3 3v10a3 3 0 1 1-3-3h10a3 3 0 1 1-3 3V7a3 3 0 1 1 3 3H7"/></svg></button>
       <button class="termtab br" id="git-btn" title="Git — push / pull">
         <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.21 11.16.6.11.82-.26.82-.58 0-.28-.01-1.04-.02-2.04-3.34.72-4.04-1.6-4.04-1.6-.55-1.38-1.34-1.75-1.34-1.75-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.23 1.84 1.23 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.29C24 5.78 18.63.5 12 .5z"/></svg>
       </button>

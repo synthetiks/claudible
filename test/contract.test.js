@@ -1207,5 +1207,60 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /function rememberedSessionFor[\s\S]{0,300}?\/\^\[A-Za-z0-9-\]\+\$\/\.test\(id\)/.test(MAIN) ? [] : ['rememberedSessionFor does not validate the id']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 38. TOP-BAR / LIVE-ROW PRESENTATION INVARIANTS.
+//   · ONE live state. "going live · <name>" and "live · <name>" overflowed a one-line session row, and the
+//     two-state vocabulary made a ~3-second transition look like a status the reader had to learn.
+//   · The usage gauge must be up at LAUNCH like context and tokens. Claude Code reports rate_limits only
+//     "after the first API response", so a freshly spawned status.json has none and the box stayed hidden
+//     until the user typed.
+//   · Every top-bar control shares one height. The icon buttons were 29px (6+6 padding + a 15px glyph) next
+//     to 31px voice/telemetry boxes, so the row sat unevenly.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const styleBlk2 = (HTML.match(/<style>[\s\S]*?<\/style>/) || [''])[0];
+  none('the live badge shows the peer name again (it never fit the one-line row)',
+    /textContent = 'live · ' \+ who|textContent = 'going live · ' \+ who/.test(APP) ? ['makeLiveBadge still interpolates the host name'] : []);
+  none('…and both presence phases must render the SAME word',
+    (APP.match(/liw\.textContent = 'live';|sliw\.textContent = 'live';/g) || []).length === 2 ? [] : ['the starting and joinable badges no longer share one label']);
+  none('hovering a joinable live row no longer offers Join',
+    /jx\.textContent = 'Join →'/.test(APP) ? [] : ['the joinx hover affordance is gone']);
+
+  // Must pin the RESTORE block, not the identifier: `loadPrefs().lastRate` also appears in the write-on-change
+  // check inside setOwnRate, so a loose match passed with the restore deleted (it did, on first write).
+  none('the usage gauge is hidden at launch again (nothing replays the last reading)',
+    /const cached = loadPrefs\(\)\.lastRate;[\s\S]{0,300}?cached\.five_hour/.test(APP) && /savePrefs\(\{ lastRate: r \}\)/.test(APP)
+      ? [] : ['no launch restore for the usage gauge']);
+  // …and the replay must respect expiry, or launch resurrects yesterday's number — the exact bug we just fixed.
+  none('the launch replay resurrects an expired window',
+    /if \(rateExpired\(cached, Date\.now\(\)\)\) \{ _ownRate = cached; renderRateStale\(\); \} else setOwnRate\(cached\)/.test(APP)
+      ? [] : ['the cached reading is replayed without an expiry check']);
+  // Status arrives every turn; persisting an identical blob each time would be a disk write per message.
+  none('the usage cache is rewritten on every status (a disk write per message)',
+    /cf\.used_percentage !== five\.used_percentage \|\| cf\.resets_at !== five\.resets_at\) savePrefs/.test(APP)
+      ? [] : ['lastRate is saved unconditionally']);
+
+  // One height across the whole top row. 31px is set by .ctxbar/.tokbar/.usagebar/.vbox; .iconbtn must match.
+  const h = (re) => { const m = styleBlk2.match(re); return m ? m[1] : null; };
+  const heights = {
+    iconbtn: h(/\.iconbtn\{[^}]*height:(\d+)px/), vbox: h(/\.vbox\{[^}]*height:(\d+)px/),
+    ctxbar: h(/\.ctxbar\{[^}]*height:(\d+)px/), tokbar: h(/\.tokbar\{[^}]*height:(\d+)px/),
+    usagebar: h(/\.usagebar\{[^}]*height:(\d+)px/),
+  };
+  const odd = Object.entries(heights).filter(([, v]) => v !== '31').map(([k, v]) => `${k}=${v}`);
+  none('the top-bar controls drifted off one shared height', odd);
+  // …and one shared rhythm: the voice group must space like the icon buttons, not as a detached cluster.
+  none('the voice group spaces differently from the icon buttons again',
+    /\.vgroup\{[^}]*gap:6px/.test(styleBlk2) && /\.top>\.vgroup\{margin-left:6px\}/.test(styleBlk2)
+      ? [] : ['.vgroup gap / margin no longer matches .topbtns']);
+
+  // The palette trigger moved to the terminal corner; wherever it lives it must still be wired.
+  none('the command-palette trigger lost its click handler in the move',
+    /\$\('cmdk-btn'\)\.addEventListener\('click'/.test(APP) && /id="cmdk-btn"/.test(HTML) ? [] : ['cmdk-btn is unbound or missing']);
+  none('…and it must not overlap the git tab it sits beside',
+    /\.termtab\.cmdk-tab\{right:(\d+)px\}/.test(styleBlk2) && Number((styleBlk2.match(/\.termtab\.cmdk-tab\{right:(\d+)px\}/) || [])[1]) >= 44
+      ? [] : ['cmdk-tab is not clear of the git tab (16px icon + 18px padding + 2px border + 8px offset = 44)']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
