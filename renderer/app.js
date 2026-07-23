@@ -631,9 +631,84 @@ claudible.onStatus((s) => {
     if (t.lastUsageKey !== null) t.sessTok += (s.newTok || 0);
     t.lastUsageKey = s.usageKey;
   }
+  if (s.rate) setOwnRate(s.rate);   // ACCOUNT-scoped, so it is deliberately NOT gated on the foreground tab
   if (t.tabId === activeTabId) repaintTracker(t);                      // only the foreground tab paints the DOM gauges
   if (t.tabId === activeTabId || t.tabId === sharedTabIdR) pushTracker(t);   // ...but the SHARED tab keeps mirroring to guests even while backgrounded (main drops non-mirrored pushes)
 });
+
+// ---------- plan usage (5-hour + weekly limits) ----------
+// YOUR account's limits, never a peer's. Safe by construction: onStatus is fed only by main's LOCAL pty
+// poller — a guest viewing a host's session receives that host's tracker through repaintLiveTracker on a
+// separate path (see R39), which never reaches here. So this can only ever hold this machine's own usage,
+// and it is painted regardless of which tab is focused: your limits apply to you even while you're watching
+// someone else's session. It is likewise never pushed to guests — pushTracker doesn't carry it.
+let _ownRate = null;
+function fmtReset(sec) {
+  if (!sec) return '';
+  const d = new Date(sec * 1000), ms = d - Date.now();
+  if (ms <= 0) return 'any moment';
+  // Under a day the useful answer is a clock time; past that, the weekday. Both beat a raw countdown for
+  // "can I keep working after lunch?".
+  return ms < 86400000
+    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString([], { weekday: 'short', hour: 'numeric' });
+}
+function rateClass(pct) {
+  return pct >= 90 ? 'u-crit' : pct >= 75 ? 'u-warn' : pct >= 60 ? 'u-warm' : pct >= 40 ? 'u-mid' : 'u-lo';
+}
+function setOwnRate(r) {
+  _ownRate = r;
+  const box = $('trk-usage'); if (!box) return;
+  const five = r && r.five_hour;
+  if (!five || typeof five.used_percentage !== 'number') return;   // absent = UNKNOWN; leave the box as-is rather than painting a false 0%
+  const pct = Math.max(0, Math.min(100, Math.round(five.used_percentage)));
+  box.style.display = '';                                          // first real payload reveals it (hidden for API-key users forever, by design)
+  box.className = 'usagebar ' + rateClass(pct);
+  // 0% lights nothing; anything above lights at least one cell — a nonzero reading must never look empty.
+  box.dataset.cells = String(pct === 0 ? 0 : Math.min(4, Math.ceil(pct / 25)));
+  $('ub-pct').textContent = pct + '%';
+  const wk = r.seven_day;
+  box.title = `Plan usage — ${pct}% of your 5-hour limit used`
+    + (five.resets_at ? `, resets ${fmtReset(five.resets_at)}` : '')
+    + (wk && typeof wk.used_percentage === 'number' ? `\nWeekly: ${Math.round(wk.used_percentage)}% used` : '')
+    + '\nClick for detail';
+  if (_usagePopOpen) renderUsagePop();                             // keep an open popover live rather than stale
+}
+let _usagePopOpen = false;
+function renderUsagePop() {
+  const pop = $('usage-pop'); if (!pop || !_ownRate) return;
+  const row = (k, pct, resets) => {
+    if (!pct && pct !== 0) return '';
+    return `<p class="up-row"><span class="up-k">${k}${resets ? `<span class="up-sub">resets ${fmtReset(resets)}</span>` : ''}</span>`
+         + `<span class="up-v">${Math.round(pct)}%</span></p>`;
+  };
+  const f = _ownRate.five_hour || {}, w = _ownRate.seven_day || {};
+  pop.innerHTML = '<span class="wt">Plan usage</span>'
+    + row('5-hour window', f.used_percentage, f.resets_at)
+    + row('This week', w.used_percentage, w.resets_at)
+    + (f.used_percentage == null && w.used_percentage == null ? '<p>No limit data reported yet.</p>' : '');
+}
+function toggleUsagePop(on) {
+  let pop = $('usage-pop');
+  if (!pop) { pop = document.createElement('div'); pop.id = 'usage-pop'; pop.className = 'ws-info-pop usage-pop'; pop.style.display = 'none'; document.body.appendChild(pop); }
+  _usagePopOpen = on;
+  if (!on) { pop.style.display = 'none'; return; }
+  renderUsagePop();
+  const r = $('trk-usage').getBoundingClientRect();
+  pop.style.display = '';
+  pop.style.top = Math.round(r.bottom + 8) + 'px';
+  // right-anchored: the box lives at the top-right, so a left-anchored popover would hang off-screen
+  pop.style.left = Math.round(Math.max(8, r.right - pop.offsetWidth)) + 'px';
+}
+{
+  const ub = $('trk-usage');
+  if (ub) {
+    ub.addEventListener('click', (e) => { e.stopPropagation(); toggleUsagePop(!_usagePopOpen); });
+    document.addEventListener('click', (e) => { if (_usagePopOpen && !e.target.closest('#usage-pop') && !e.target.closest('#trk-usage')) toggleUsagePop(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _usagePopOpen) toggleUsagePop(false); });
+    window.addEventListener('resize', () => { if (_usagePopOpen) toggleUsagePop(true); });
+  }
+}
 
 // ---------- (b) mic -> Whisper STT  (shared by the Talk button + the Left-Ctrl push-to-talk hold) ----------
 let mediaRecorder = null, chunks = [], recording = false, micStream = null, discardClip = false, micIdleTimer = null, micPending = null;

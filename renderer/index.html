@@ -149,6 +149,39 @@
     .tag{font-size:var(--fs-xs);letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
     /* session tracker */
     .trk{margin-left:auto;display:flex;align-items:center;gap:8px}   /* context↔tokens spacing matches the Talk/Speak (.vgroup) gap */
+    /* ── PLAN USAGE gauge ──────────────────────────────────────────────────────────────────────────────
+       A sibling of .ctxbar (same 31px box, bg and inset ring) so the three telemetry boxes read as one set.
+       The battery FILLS as you consume — cells light 0→4 and the number is `used_percentage`, the same
+       figure /usage prints. Both move in the same direction on purpose: a battery that drained while the
+       number climbed would make the reader do arithmetic to reconcile them. Colour carries "is this bad",
+       not the direction. */
+    .usagebar{width:auto;display:inline-flex;align-items:center;gap:8px;height:31px;padding:0 11px;border-radius:9px;
+      border:none;cursor:pointer;color:var(--ok);
+      background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
+      transition:box-shadow var(--dur-slow) ease,color var(--dur-slow) ease}
+    .usagebar:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 40%,transparent)}
+    .ub-batt{flex:none;display:inline-flex;align-items:center}
+    .ub-batt svg{width:22px;height:12px;display:block}
+    .ub-cells rect{fill:currentColor;opacity:.14;transition:opacity var(--dur-slow) ease}   /* unlit cells stay visible as an empty track — same trick as .ctxsegs i */
+    .usagebar[data-cells="1"] .ub-cells rect:nth-child(-n+1),
+    .usagebar[data-cells="2"] .ub-cells rect:nth-child(-n+2),
+    .usagebar[data-cells="3"] .ub-cells rect:nth-child(-n+3),
+    .usagebar[data-cells="4"] .ub-cells rect:nth-child(-n+4){opacity:1}
+    .ubpct{min-width:34px;text-align:right;font-size:var(--fs-md);font-weight:700;letter-spacing:.02em;color:currentColor;
+      font-variant-numeric:tabular-nums}   /* tabular so the box doesn't twitch 9%→100% */
+    /* One class drives the battery AND the number — they can never disagree about severity. */
+    .usagebar.u-lo{color:var(--ok)}                    /* plenty left            */
+    .usagebar.u-mid{color:#dfe6ef}                     /* halfway — neutral      */
+    .usagebar.u-warm{color:#e8c98a}                    /* getting on            */
+    .usagebar.u-warn{color:var(--warn)}                /* running down          */
+    .usagebar.u-crit{color:var(--live)}                /* nearly out            */
+    /* the detail popover reuses the .ws-info-pop shell; only the row grid is new */
+    .usage-pop{width:264px}
+    .usage-pop .up-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 9px}
+    .usage-pop .up-row:last-child{margin-bottom:0}
+    .usage-pop .up-k{font-size:var(--fs-2xs);letter-spacing:var(--tk-label);text-transform:uppercase;color:var(--ink-faint)}
+    .usage-pop .up-v{font-size:var(--fs-md);font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+    .usage-pop .up-sub{display:block;margin-top:1px;font-size:var(--fs-2xs);color:var(--ink-faint);text-transform:none;letter-spacing:var(--tk-base)}
     /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
        Heights tuned to sit level with the adjacent tokens stat (15px digits) rather than tower over it. */
     .ctxbar{display:inline-flex;align-items:center;gap:9px;height:31px;padding:0 11px;border-radius:9px;
@@ -1194,6 +1227,15 @@
       <button class="vbox vauto on" id="vout-auto" type="button" aria-pressed="true" title="Auto-speak Claude's replies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
     </div>
     <span class="trk" title="session usage">
+      <!-- USAGE: your Claude.ai plan limits (account-scoped, NOT per-session). Hidden until the first payload
+           carries rate_limits — absent for API-key users, so an always-on "—" would be permanent noise. -->
+      <button class="usagebar" id="trk-usage" type="button" style="display:none" title="Your Claude plan usage — click for detail" aria-label="Plan usage">
+        <span class="ub-batt" aria-hidden="true">
+          <svg viewBox="0 0 26 14" fill="none"><rect x="0.6" y="0.6" width="21.8" height="12.8" rx="3.2" stroke="currentColor" stroke-width="1.2"/><path d="M24 5v4a2 2 0 0 0 0-4z" fill="currentColor"/><g class="ub-cells"><rect x="2.7" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="7.4" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="12.1" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="16.8" y="2.7" width="3.9" height="8.6" rx="1"/></g></svg>
+        </span>
+        <span class="ctxlabel">USAGE</span>
+        <span class="ubpct" id="ub-pct">—</span>
+      </button>
       <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxlabel">CONTEXT</span><span class="ctxsegs" id="trk-ctxsegs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ctxpct" id="trk-ctx">—</span></span>
       <b id="trk-cost" hidden>$0.00</b><!-- session cost now lives in the context-bar tooltip; tokens stay visible -->
       <span class="tokbar" id="trk-tokbar" title="tokens used this session"><span class="ctxlabel">TOKENS</span><span class="tokval" id="trk-tokens">—</span></span>

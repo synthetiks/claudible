@@ -2560,6 +2560,11 @@ function pollStatus() {
           newTok: cu ? ((cu.input_tokens || 0) + (cu.output_tokens || 0)) : null,  // genuinely-new tokens, excl. cache
           usageKey: cu ? `${cu.input_tokens}:${cu.output_tokens}:${cu.cache_read_input_tokens}:${cu.cache_creation_input_tokens}` : null,
           model: d.model && d.model.display_name, fast: d.fast_mode,
+          // Claude.ai subscription limits, straight from the statusLine payload we already persist verbatim.
+          // ACCOUNT-scoped, not per-tab: the renderer keeps one copy for this machine and never mirrors it to
+          // guests (a guest's own limits are their own). Optional upstream — absent for API-key/Bedrock/Vertex
+          // users and until the first API response of a session — so `null` means UNKNOWN, never zero.
+          rate: d.rate_limits || null,
         });
       } catch {}
     }

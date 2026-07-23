@@ -1047,5 +1047,43 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /m\.id === 'voice' && runnerId === 'win'\) return true/.test(DEPS) ? [] : ['voice must be installable on the win runner']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 35. PLAN USAGE (5-hour / weekly limits) is ACCOUNT-scoped, not session-scoped. Three ways it silently lies:
+//
+//   (a) leaking to guests. A joined mirror already receives the HOST's tracker by design (R39). Rate limits
+//       are per-ACCOUNT, so mirroring them would tell a guest they've burned 65% of a limit that isn't theirs.
+//       The value must never enter pushTracker.
+//   (b) painting absent-as-zero. The upstream field is optional — missing for API-key/Bedrock/Vertex users and
+//       until the first API response — so a missing reading must leave the gauge alone, never render a
+//       reassuring green 0%.
+//   (c) the epoch unit. `resets_at` is seconds; treating it as milliseconds puts every reset in 1970 and the
+//       "resets at" line silently reads "any moment" forever.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('main.js stopped forwarding rate_limits from the statusLine payload',
+    /rate:\s*d\.rate_limits\s*\|\|\s*null/.test(MAIN) ? [] : ['pollStatus no longer sends d.rate_limits']);
+  // (a) — scan pushTracker's body for any usage reference.
+  const pt = (APP.match(/function pushTracker\([\s\S]*?\n\}/) || [''])[0];
+  none('plan usage leaks into the guest mirror (a guest would see the HOST’s limits as their own)',
+    pt && /_ownRate|rate_limits|\brate\b/.test(pt) ? ['pushTracker references plan-usage state'] : []);
+  // (b) — the guard must sit BEFORE any DOM write in setOwnRate.
+  const sor = (APP.match(/function setOwnRate\([\s\S]*?\n\}/) || [''])[0];
+  const guardAt = sor.indexOf("typeof five.used_percentage !== 'number'");
+  const paintAt = sor.indexOf('box.style.display');
+  none('an absent usage reading paints a false 0% (the field is optional upstream)',
+    guardAt >= 0 && paintAt > guardAt ? [] : ['setOwnRate writes the DOM before checking the reading exists']);
+  // (c) — seconds, not milliseconds.
+  none('resets_at is treated as milliseconds (every reset lands in 1970)',
+    /function fmtReset[\s\S]{0,200}?sec \* 1000/.test(APP) ? [] : ['fmtReset does not convert resets_at seconds -> ms']);
+  // Non-vacuity + the invariant that the battery and the number can never disagree: ONE class sets both.
+  none('the battery fill and the percentage stopped sharing one severity class',
+    /box\.className = 'usagebar ' \+ rateClass\(pct\)/.test(APP) && /\.ubpct\{[^}]*color:currentColor/.test(HTML)
+      ? [] : ['the gauge colour and the number are no longer driven by the same class']);
+  // The fill must track the SAME direction as the number (both rise with usage) — an inverted fill was the
+  // "how much is left" reading we explicitly rejected, and it reads as correct until you compare the two.
+  none('a nonzero usage reading can light zero cells (a used plan would look untouched)',
+    /pct === 0 \? 0 : Math\.min\(4, Math\.ceil\(pct \/ 25\)\)/.test(APP) ? [] : ['the cell count is not ceil(pct/25) with an explicit 0 case']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
