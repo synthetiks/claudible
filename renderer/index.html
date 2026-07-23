@@ -346,13 +346,18 @@
       backdrop-filter:blur(2px);z-index:5;pointer-events:none}
     .live-ov.show{display:flex}
     .live-ov.bad{color:#e0a0a0}
-    /* "who's typing" pill — floats on a live-shared terminal's corner, names the current typist. Identity is
-       BLUE across the app (matches .sess-flair.author); pointer-events:none so it never blocks a click/selection. */
-    .typist-chip{position:absolute;top:6px;right:18px;z-index:6;padding:3px 10px;border-radius:999px;
-      font-size:var(--fs-xs);font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.12);
-      opacity:0;transition:opacity var(--dur-base) ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:40%;
+    /* "who's typing" — floats on a live-shared terminal's corner so the HOST can see which guest is driving.
+       Same shape as the guest page's banner (share/guest.html): a readable sentence on a soft scrim, NOT a pill
+       badge, so the two surfaces read as one product. Identity stays BLUE across the app (matches
+       .sess-flair.author); pointer-events:none so it never blocks a click/selection. */
+    .typist-chip{position:absolute;top:6px;right:18px;z-index:6;padding:4px 11px 5px;border-radius:8px;
+      font-size:var(--fs-sm);letter-spacing:.02em;color:var(--ink-dim);
+      background:linear-gradient(180deg,rgba(10,12,16,.94),rgba(10,12,16,.74));
+      backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+      opacity:0;transition:opacity var(--dur-base) ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:46%;
       overflow:hidden;text-overflow:ellipsis}
     .typist-chip.show{opacity:1}
+    .typist-chip b{font-weight:600;color:#9fc6ef}   /* the name carries the emphasis; "is typing…" stays quiet */
     /* a joined peer's session, pinned atop the sidebar list */
     .sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}   /* calm flat tint — NO rail (see the rails-are-extinct note below) */
     .sess-joined-live .sess-prev{color:#cfe8da}

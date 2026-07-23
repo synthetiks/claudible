@@ -1736,5 +1736,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['main.js does not gate broadcastTypist on isTypingBytes']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 53. THE COCKPIT'S TYPING INDICATOR MATCHES THE GUEST PAGE. Two surfaces, one product: the host's chip read
+//   "✎ MK" as a pill badge while the guest page read "MK is typing…" on a scrim. Same wording, same emphasis,
+//   no pencil, no pill on either. (Placement differs on purpose — corner in the cockpit, top-centre on the
+//   guest page — because only the guest page has a terminal that owns the whole pane.)
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('the cockpit typing indicator is still a pencil pill',
+    !/\.typist-chip\{[^}]*border-radius:999px/.test(flat) && !/'✎ ' \+ name/.test(APP)
+      ? [] : ['the cockpit chip is still pill-shaped or still prefixes a pencil']);
+  none('…and does not use the same "<name> is typing…" wording as the guest page',
+    /' is typing…'/.test(APP) && /' is typing…'/.test(GUEST_JS)
+      ? [] : ['the two surfaces disagree on the typing wording']);
+  none('…and emphasises the name differently on the two surfaces',
+    /\.typist-chip b\{font-weight:600/.test(flat) && /\.typist-chip b\{font-weight:600/.test(GUEST_HTML.replace(/\s*\n\s*/g, ''))
+      ? [] : ['only one surface emphasises the typist name']);
+  // Same XSS rule as the guest page: the name arrives over the wire from another machine.
+  none('the cockpit builds the typing line by interpolating a remote name into HTML',
+    /const who = document\.createElement\('b'\); who\.textContent = String\(name\)/.test(APP)
+      ? [] : ['the cockpit typist name is not built from text nodes']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

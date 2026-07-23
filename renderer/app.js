@@ -536,7 +536,11 @@ function showTypist(rec, name) {
   if (!rec || !name) return;
   let chip = rec._typChip;
   if (!chip || !chip.isConnected) { chip = document.createElement('div'); chip.className = 'typist-chip'; rec.container.appendChild(chip); rec._typChip = chip; }
-  chip.textContent = '✎ ' + name;                            // textContent — names are collaborator-supplied
+  // "<name> is typing…" — identical wording to the guest page. Built from NODES, never innerHTML: the name is
+  // collaborator-supplied and arrives over the wire.
+  chip.textContent = '';
+  const who = document.createElement('b'); who.textContent = String(name).slice(0, 40);
+  chip.appendChild(who); chip.appendChild(document.createTextNode(' is typing…'));
   chip.classList.add('show');
   clearTimeout(rec._typT);
   rec._typT = setTimeout(() => { try { chip.classList.remove('show'); } catch {} }, 3000);
