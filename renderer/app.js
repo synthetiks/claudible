@@ -716,10 +716,18 @@ setInterval(() => { if (_ownRate && rateExpired(_ownRate, Date.now())) renderRat
 // values immediately. The last good reading is still true until its window closes, so replay it now and let
 // the first real status overwrite it. Expired ones fall through to the honest stale state rather than
 // resurrecting yesterday's number.
-try {
-  const cached = loadPrefs().lastRate;
-  if (cached && cached.five_hour) { if (rateExpired(cached, Date.now())) { _ownRate = cached; renderRateStale(); } else setOwnRate(cached); }
-} catch (e) {}
+// DEFERRED to the next macrotask, and that is load-bearing rather than tidy: this block sits far above
+// `const PREFS_KEY` / loadPrefs(), so calling it during module evaluation threw a temporal-dead-zone
+// ReferenceError every single launch — which an empty catch then swallowed, so the gauge simply never
+// appeared and nothing said why. Deferring runs it after the whole module has evaluated, which makes it
+// independent of where in the file it happens to live.
+setTimeout(() => {
+  if (_ownRate) return;                       // a real status already landed — never let the cache overwrite fresher data
+  let cached = null;
+  try { cached = loadPrefs().lastRate; } catch (e) { console.error('[claudible] usage cache unreadable:', e && e.message); return; }
+  if (!cached || !cached.five_hour) return;   // nothing cached yet (first run, or an API-key user) — stay hidden
+  if (rateExpired(cached, Date.now())) { _ownRate = cached; renderRateStale(); } else setOwnRate(cached);
+}, 0);
 let _usagePopOpen = false;
 function renderUsagePop() {
   const pop = $('usage-pop'); if (!pop || !_ownRate) return;

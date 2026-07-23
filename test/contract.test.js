@@ -1229,8 +1229,18 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // Must pin the RESTORE block, not the identifier: `loadPrefs().lastRate` also appears in the write-on-change
   // check inside setOwnRate, so a loose match passed with the restore deleted (it did, on first write).
   none('the usage gauge is hidden at launch again (nothing replays the last reading)',
-    /const cached = loadPrefs\(\)\.lastRate;[\s\S]{0,300}?cached\.five_hour/.test(APP) && /savePrefs\(\{ lastRate: r \}\)/.test(APP)
+    /cached = loadPrefs\(\)\.lastRate/.test(APP) && /savePrefs\(\{ lastRate: r \}\)/.test(APP)
       ? [] : ['no launch restore for the usage gauge']);
+  // The restore sits ABOVE `const PREFS_KEY`, so running it during module evaluation throws a temporal-dead-zone
+  // ReferenceError on every launch. It shipped that way and an empty catch hid it: the gauge never appeared and
+  // nothing reported why. It must stay deferred past module evaluation, and must never swallow the failure.
+  none('the launch restore runs during module evaluation again (TDZ: it is above PREFS_KEY)',
+    /setTimeout\(\(\) => \{\s*\n\s*if \(_ownRate\) return;[\s\S]{0,600}?loadPrefs\(\)\.lastRate/.test(APP)
+      ? [] : ['the restore is not deferred to a macrotask']);
+  none('…and a failing restore is silent again (an empty catch is why this took a rebuild to find)',
+    /catch \(e\) \{ console\.error\('\[claudible\] usage cache unreadable:'/.test(APP) ? [] : ['the restore swallows its error']);
+  none('…and the cache can overwrite a fresher live reading',
+    /setTimeout\(\(\) => \{\s*\n\s*if \(_ownRate\) return;/.test(APP) ? [] : ['the deferred restore does not yield to a real status']);
   // …and the replay must respect expiry, or launch resurrects yesterday's number — the exact bug we just fixed.
   none('the launch replay resurrects an expired window',
     /if \(rateExpired\(cached, Date\.now\(\)\)\) \{ _ownRate = cached; renderRateStale\(\); \} else setOwnRate\(cached\)/.test(APP)
