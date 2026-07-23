@@ -314,12 +314,26 @@ fi
 # (newest mtime, skipping foreign ids) instead of --continue — so a synced collaborator session can never
 # be auto-opened, and never auto-run under --dangerously-skip-permissions.
 LATEST=""
-while IFS= read -r f; do
-  cand="$(basename "$f" .jsonl)"
-  case "$cand" in -*) continue ;; esac
+# Order by the ACTIVATION stamps (.claudible-used/<id>, written by mark_used on every real resume) BEFORE
+# falling back to the transcript's own mtime. A .jsonl is rewritten by things the user never did — a
+# sessions-sync pull rewriting an untouched conversation made it win `ls -1t` at every boot, so the cockpit
+# reopened a session that had never been worked in. The stamp moves only when Claudible actually opened it.
+# (`used` in sessions-tool.js cannot serve here: it is Math.max(lastTs, act, mtime), so the mtime leaks back.)
+while IFS= read -r cand; do
+  case "$cand" in '' | -* | *[!A-Za-z0-9-]*) continue ;; esac
+  [ -f "$PROJ/$cand.jsonl" ] || continue          # stamp outlived its transcript (session deleted since)
   is_foreign "$cand" && continue
   LATEST="$cand"; break
-done < <(ls -1t "$PROJ"/*.jsonl 2>/dev/null)
+done < <(ls -1t "$PROJ/.claudible-used" 2>/dev/null)
+# No stamps at all (fresh install, or conversations predating the sidecar) → the old mtime ordering.
+if [ -z "$LATEST" ]; then
+  while IFS= read -r f; do
+    cand="$(basename "$f" .jsonl)"
+    case "$cand" in -*) continue ;; esac
+    is_foreign "$cand" && continue
+    LATEST="$cand"; break
+  done < <(ls -1t "$PROJ"/*.jsonl 2>/dev/null)
+fi
 if [ -n "$LATEST" ]; then
   mark_used "$LATEST"
   START=$(date +%s)

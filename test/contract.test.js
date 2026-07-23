@@ -1164,6 +1164,23 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // A draft has no id to come back to; persisting it would restore you to nothing.
   none('a draft session is remembered as somewhere to restore to',
     /function rememberLastSession[\s\S]{0,300}?sessionId === 'new'\) return;/.test(APP) ? [] : ['rememberLastSession does not skip drafts']);
+
+  // …and the TERMINAL half of the same bug, which is the one the user actually sees. The renderer's
+  // activeSession only drives the sidebar highlight; which conversation the pty RESUMES is decided in
+  // wsl/session.sh, because main boots the first tab with an empty session argument. That default used
+  // `ls -1t` over the transcripts — raw mtime again — so a sessions-sync pull that rewrote an untouched
+  // .jsonl made it win at every boot. .claudible-used/<id> (written by mark_used on every real resume) is
+  // the only signal that moves when Claudible actually opens a session.
+  const SESH = read('wsl/session.sh');
+  none('the default resume orders by transcript mtime again (a pulled session steals the boot tab)',
+    /ls -1t "\$PROJ\/\.claudible-used"/.test(SESH) ? [] : ['session.sh does not order the default resume by activation stamps']);
+  none('…and the activation ordering must come BEFORE the mtime fallback, not after',
+    SESH.indexOf('.claudible-used"') < SESH.indexOf('ls -1t "$PROJ"/*.jsonl') ? [] : ['the mtime scan runs first, so the stamps can never win']);
+  none('a stamp whose transcript was deleted resumes a session that no longer exists',
+    /\[ -f "\$PROJ\/\$cand\.jsonl" \] \|\| continue/.test(SESH) ? [] : ['no existence check on the stamped id']);
+  // Non-vacuity: mark_used must actually still write the sidecar the ordering now depends on.
+  none('mark_used no longer writes the activation stamp the boot ordering reads',
+    /touch "\$PROJ\/\.claudible-used\/\$1"/.test(SESH) ? [] : ['mark_used does not write .claudible-used/<id>']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
