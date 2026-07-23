@@ -668,7 +668,11 @@
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
       font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
-    .ws-section-head{padding:3px 9px 2px 18px}   /* ~10% shorter again — sleeker; left-aligned, title nudged in from the edge */
+    /* VERTICALLY CENTRED, and the sum is what matters: the head's own padding-bottom is NOT the gap under it —
+       .ws-chips adds its padding-top before the first project, and the two read as one space. So the balance is
+       head-top === head-bottom + chips-top (7 === 1 + 6), not head-top === head-bottom. It was 3 vs 2+8=10,
+       which is why the row sat high. Change one of the three and you must re-solve the other two. */
+    .ws-section-head{padding:7px 9px 1px 18px}   /* left-aligned, title nudged in from the edge */
     .sh-actions{display:flex;align-items:center;gap:6px}   /* equal gaps — the three buttons are now one size, so the rhythm reads even */
 
 
@@ -696,7 +700,7 @@
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
-      padding:8px 4px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */
+      padding:6px 4px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 6px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping. The top fade tracks padding-top (6/6) so a resting row still starts fully opaque — see the centring note on .ws-section-head */
     .ws-chips::-webkit-scrollbar{width:6px}                                          /* width stays CONSTANT — animating it would reflow the rows */
     .ws-chips::-webkit-scrollbar-thumb{background:transparent;border:none;border-radius:6px;transition:background .18s ease}   /* invisible at rest; the top/bottom vignette already signals "more below" */
     .sidebar:hover .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}   /* fades in only while the sidebar is hovered */

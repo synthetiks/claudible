@@ -523,6 +523,23 @@ none('renderer: orphanTab is never rendered',
   // and must never be swept up by the rules above, or a joinable row loses the only text that explains it.
   none('peer-live rows lost their always-on description text',
     /\.sess:not\(\.sess-peer-live\) \.sess-meta-t\{display:none\}/.test(flat) ? [] : ['the at-rest hide is not :not(.sess-peer-live)-scoped']);
+  // THE PROJECTS HEAD IS CENTRED BY A SUM, NOT BY ITS OWN PADDING. .ws-chips' padding-top continues the gap under
+  // the head — no border or background divides them, so the eye reads one space. Balance is therefore
+  //     head-padding-top === head-padding-bottom + chips-padding-top
+  // It shipped as 3 vs 2+8=10 and visibly sat high. These three numbers have each been tuned in isolation more
+  // than once, which is exactly how it drifted; this check makes the coupling fail loudly instead of silently.
+  const headPad = (flat.match(/\.ws-section-head\{padding:([\d.]+)px [\d.]+px ([\d.]+)px/) || []).slice(1).map(Number);
+  const chipsPad = Number((flat.match(/\.ws-chips\{[^}]*?padding:([\d.]+)px/) || [])[1]);
+  none('the projects head is no longer optically centred (head-top must equal head-bottom + chips-top)',
+    headPad.length === 2 && Number.isFinite(chipsPad) && headPad[0] === headPad[1] + chipsPad
+      ? [] : [headPad.length === 2 && Number.isFinite(chipsPad)
+          ? `above=${headPad[0]}px but below=${headPad[1]}+${chipsPad}=${headPad[1] + chipsPad}px`
+          : 'could not read .ws-section-head / .ws-chips padding']);
+  // …and the resting first row must start past the top fade, or the vignette washes out a project name.
+  const topFade = Number((flat.match(/\.ws-chips\{[^}]*?mask-image:linear-gradient\(to bottom,transparent,#000 ([\d.]+)px/) || [])[1]);
+  none('the scroll vignette now eats into the first project row (top fade outruns .ws-chips padding-top)',
+    Number.isFinite(topFade) && Number.isFinite(chipsPad) && topFade <= chipsPad
+      ? [] : [`top fade ${topFade}px > padding-top ${chipsPad}px`]);
 }
 
 // ---------------------------------------------------------------------------------------------------------
