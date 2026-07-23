@@ -104,19 +104,23 @@ $('terminal').addEventListener('paste', function (e) {
     altFrac = Math.max(0, Math.min(1, altFrac + (dir < 0 ? 1 : -1) * ALT_PAGE * n));
     upd();
   }
+  // The whole gutter (track included) is shown only when it can actually do something. An always-visible empty
+  // track reads as a broken scrollbar — and for a view-only guest in a full-screen app, which is now the DEFAULT
+  // sharing mode, the thumb is permanently suppressed, so the strip could never be anything but decoration.
+  function show(on) { sc.classList.toggle('on', !!on); thumb.style.opacity = on ? '1' : '0'; }
   function upd() {
-    if (isAlt() && !canPage()) { thumb.style.opacity = '0'; return; }   // read-only + full-screen: nothing honest for the thumb to show
-    var trackH = sc.clientHeight; if (trackH <= 0) { thumb.style.opacity = '0'; return; }
+    if (isAlt() && !canPage()) { show(false); return; }   // read-only + full-screen: nothing honest to show
+    var trackH = sc.clientHeight; if (trackH <= 0) { show(false); return; }
     if (isAlt()) {              // full-screen app → draggable thumb pages the shared view, positioned from the estimate
       var thumbH = Math.max(40, trackH * 0.20);
-      thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
+      show(true); thumb.style.height = thumbH + 'px';
       if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (1 - altFrac)) + 'px)';
       return;
     }
     var b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
-    if (baseY <= 0 || total <= rows) { thumb.style.opacity = '0'; return; }
+    if (baseY <= 0 || total <= rows) { show(false); return; }   // nothing scrolled off the top yet
     var thumbH = Math.max(26, trackH * (rows / total));
-    thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
+    show(true); thumb.style.height = thumbH + 'px';
     thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (b.viewportY / baseY)) + 'px)';
   }
   term.onScroll(upd); setInterval(upd, 150);

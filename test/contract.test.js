@@ -1615,5 +1615,24 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the approve / view-only / Join lines are not all present']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 49. THE GUEST SCROLL GUTTER ONLY EXISTS WHEN IT CAN DO SOMETHING.
+//   Only the THUMB used to hide itself; the 7px track stayed painted. A view-only guest (now the default) in a
+//   full-screen app can never page, so the thumb is permanently suppressed and the strip was pure decoration
+//   that read as a broken scrollbar. THE TRAP: it must hide with opacity, never display:none — a display-hidden
+//   track reports clientHeight 0, upd() takes its "no room" branch, and it can never come back.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const gflat = GUEST_HTML.replace(/\s*\n\s*/g, '');
+  none('the gutter track stays painted when there is nothing to scroll',
+    /\.gutter\{[^}]*opacity:0;pointer-events:none/.test(gflat) && /\.gutter\.on\{opacity:1/.test(gflat)
+      ? [] : ['the track is not opacity-gated behind .on']);
+  none('…and it hides with display, so clientHeight would read 0 and it could never come back',
+    !/\.gutter\.on\{[^}]*display:/.test(gflat) ? [] : ['the .on toggle switches display instead of opacity']);
+  none('…and nothing shows/hides the track alongside the thumb',
+    /function show\(on\) \{ sc\.classList\.toggle\('on'/.test(GUEST_JS) && !/thumb\.style\.opacity = '0'; return;/.test(GUEST_JS)
+      ? [] : ['upd() still hides only the thumb, leaving the track behind']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
