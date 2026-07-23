@@ -106,7 +106,13 @@ function runScript(name, argStr = '', opts = {}) {
     try {
       const child = cp.execFile('wsl.exe', ['-e', 'bash', '-lc', cmd], o,
         (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
-      if (opts.detach && child && child.unref) child.unref();
+      if (opts.detach && child && child.unref) {
+        // Tell the caller the moment the OS has actually CREATED the process. A quit-path caller must not
+        // exit before this: app.exit() is a hard kill, and a spawn that has not reached the OS yet simply
+        // never happens (on Windows the wsl.exe interop bridge takes hundreds of ms to come up).
+        try { if (opts.onSpawn) child.once('spawn', () => { try { opts.onSpawn(); } catch {} }); } catch {}
+        child.unref();
+      }
     } catch (e) { resolve({ err: e, stdout: '' }); }
   });
 }

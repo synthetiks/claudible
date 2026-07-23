@@ -1315,5 +1315,26 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.vbox\{[^}]*color:var\(--ink-dim\)/.test(HTML) ? [] : ['.vbox base colour no longer matches .iconbtn']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 40. A LIVE LINK DIES WITH THE PROCESS — say so, and clean up after yourself.
+//   A trycloudflare URL is single-use and cloudflared is killed on exit, so a link already pasted to a
+//   collaborator is dead the instant the app restarts. That failed silently: both ends saw a bare connection
+//   error with nothing to explain it. An app self-update is enough to trigger it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('a live link dies on exit with nothing recorded, so the next boot cannot explain it',
+    /share\.status\(\)\.running\) writeSettings\(Object\.assign\(readSettings\(\), \{ shareEndedByExit/.test(MAIN)
+      ? [] : ['the exit path does not record that a live share was running']);
+  none('…and nothing tells the user on the way back in',
+    /shareEndedByExit/.test(APP) && /trycloudflare links are single-use/.test(APP) ? [] : ['no boot notice for a share killed by restart']);
+  none('…and the notice must fire once, not on every boot',
+    /savePrefs\(\{ shareEndedByExit: 0 \}\)/.test(APP) ? [] : ['the notice never clears its flag']);
+  // The runner must be able to confirm a detached child actually reached the OS — the whole quit-path fix
+  // rests on it, and all three backends implement one contract.
+  const runners = ['runners/wsl.js', 'runners/win.js', 'runners/posix.js'];
+  none('a runner cannot confirm a detached spawn reached the OS',
+    runners.filter((f) => !/child\.once\('spawn', \(\) => \{ try \{ opts\.onSpawn\(\)/.test(read(f))));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

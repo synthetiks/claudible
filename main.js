@@ -1104,7 +1104,7 @@ const _beatArgs = new Map();   // ws.id -> the args of a queued-but-not-started 
 function runPresence(args, cb, ws, opts) {
   if (!APPDIR_WSL) return cb && cb(null);
   const w = ws || activeWorkspace;   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
-  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), extraEnv: (opts && opts.extraEnv) || '' }).then(({ err, stdout }) => {
+  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), onSpawn: opts && opts.onSpawn, extraEnv: (opts && opts.extraEnv) || '' }).then(({ err, stdout }) => {
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
@@ -1138,6 +1138,7 @@ function runPresence(args, cb, ws, opts) {
 // advertisedWs = the workspace we advertised ON (its live/<login>.json lives on THAT repo's sessions branch). Pinned
 // here so a later presence-set/clear targets it even after the user switches the cockpit to another workspace — else
 // the clear runs against the new active ws (nothing there) and the OLD ws stays "live" until its ~2-min TTL expires.
+let _quitClearAck = null;   // resolves once the quit-path presence-clear has actually reached the OS
 let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '', advertisedWs = null;
 function stopAdvertiseHeartbeat() {
   if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; }
@@ -1177,7 +1178,20 @@ function stopAdvertising(opts) {
   // never happened and peers saw us "live" until the 120s TTL (the exact bug the quit-path comment claimed was
   // fixed). A detached one-shot survives app exit — the same guarantee the pty reaper relies on — and the
   // script's own 3 internal push retries absorb transient blips.
-  if (opts && opts.quitting) { _liveTiming('end: quitting — detached presence-clear fired'); runPresence('presence-clear', null, advWs, { detach: true }); }
+  if (opts && opts.quitting) {
+    // Return a promise the caller can await: resolved once the OS confirms the detached child exists, or after
+    // a hard 2s cap so a wedged spawn can never block shutdown. update:run MUST await this — it follows
+    // teardownForExit() with app.exit(0), a hard kill, so before this the clear was fired into a process that
+    // died microseconds later and the entry stayed on the branch. window-all-closed was fine only because
+    // app.quit() happens to yield to the event loop first; that was luck, not design.
+    _quitClearAck = new Promise((res) => {
+      let done = false;
+      const fin = (how) => { if (done) return; done = true; _liveTiming('end: quitting — presence-clear ' + how); res(); };
+      const t = setTimeout(() => fin('spawn NOT confirmed within 2s (entry may survive on the branch)'), 2000);
+      if (t.unref) t.unref();
+      runPresence('presence-clear', null, advWs, { detach: true, onSpawn: () => { clearTimeout(t); fin('spawned'); } });
+    });
+  }
   else clearPresenceWithRetry(advWs);                             // app alive → observable, retrying clear (2s..10s backoff)
 }
 // THE full live-hosting teardown: presence down (above) + share server down. Called from share:stop (the button)
@@ -2567,6 +2581,11 @@ ipcMain.handle('update:run', () => {
       _liveTiming('update: pulled ' + (before || '?').slice(0, 12) + ' -> ' + (after || '?').slice(0, 12) + ', restarting');
       teardownForExit();
       app.relaunch();
+      // app.exit() is a HARD kill — it waits for nothing. teardownForExit fires a DETACHED presence-clear, and
+      // on Windows spawning wsl.exe takes hundreds of ms, so exiting on the next line meant the clear never
+      // reached the OS and the host stayed advertised on the branch after every self-update. Bounded by the
+      // ack's own 2s cap, so a broken spawn still cannot wedge the restart.
+      try { await _quitClearAck; } catch {}
       app.exit(0);
       return { ok: true };   // unreachable in practice — the process is gone
     } catch (e) { return { ok: false, error: (e && e.message) || 'update failed' }; }
@@ -3342,6 +3361,10 @@ function teardownForExit() {
   // hosting left live/<login>.json on the branch, so collaborators saw "live · Join" for up to 5 minutes after
   // the app was gone. quitting:true makes the clear a DETACHED one-shot — a non-detached child (the old default
   // here) could die with the app before its push landed, silently reverting this exact bug to the 2-min TTL.
+  // A live link dies with the process: cloudflared is killed below and a trycloudflare URL is single-use, so
+  // the link the host already pasted to a collaborator is dead the moment we exit. That was invisible — the
+  // host handed out a URL and both ends just saw a connection failure. Record it so the next boot can say so.
+  try { if (share.status().running) writeSettings(Object.assign(readSettings(), { shareEndedByExit: Date.now() })); } catch {}
   try { stopLiveSharing({ quitting: true }); } catch {}
   // Kill Windows-side ptys AND reap each WSL-side tree — the execFile'd wsl.exe survives our exit, so the
   // reap completes even though the app is quitting (this is how zombies stopped accumulating across restarts).

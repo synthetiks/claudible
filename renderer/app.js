@@ -711,6 +711,17 @@ function renderRateStale() {
 // One cheap timestamp comparison, no IO and no network: the ONLY thing that can change while you sit idle is
 // the clock passing resets_at. 30s is well under any window and costs nothing measurable.
 setInterval(() => { if (_ownRate && rateExpired(_ownRate, Date.now())) renderRateStale(); }, 30000);
+// A live link does not survive a restart: cloudflared is killed and a trycloudflare URL is single-use, so any
+// URL already handed to a collaborator is dead. That failed SILENTLY — the host had pasted a link, restarted
+// (an app update is enough), and then both ends saw only a connection error with nothing to explain it. main
+// records the fact on the way out; say it plainly on the way back in, once.
+setTimeout(() => {
+  let p = null;
+  try { p = loadPrefs(); } catch (e) { return; }
+  if (!p || !p.shareEndedByExit) return;
+  try { savePrefs({ shareEndedByExit: 0 }); } catch (e) {}
+  toast('Your live link ended when Claudible restarted — trycloudflare links are single-use. Share again to get a new one.');
+}, 1200);   // after the boot toasts settle, so it is not buried
 // LAUNCH. Claude Code only reports rate_limits "after the first API response", so a freshly spawned session's
 // status.json carries none and the gauge sat hidden until you typed — unlike context and tokens, which have
 // values immediately. The last good reading is still true until its window closes, so replay it now and let

@@ -125,7 +125,18 @@ function mkrepo(files) {
   ok('main: update:run refuses when -NoUpdate was persisted', /CLAUDIBLE_NO_UPDATE/.test(MAIN));
   ok('main: update:run refuses dirty trees and never stashes', /commit, stash, or discard/.test(MAIN) && !/git.*stash/.test(MAIN));
   ok('main: the restart runs teardownForExit() then relaunch/exit (app.exit bypasses window-all-closed)',
-    /teardownForExit\(\);\s*\n\s*app\.relaunch\(\);\s*\n\s*app\.exit\(0\);/.test(MAIN));
+    /teardownForExit\(\);\s*\n\s*app\.relaunch\(\);[\s\S]{0,600}?app\.exit\(0\);/.test(MAIN));
+  // …and it must AWAIT the quit-path presence-clear's spawn ack before that hard exit. app.exit() waits for
+  // nothing, and teardownForExit fires the clear as a DETACHED spawn — on Windows, bringing up the wsl.exe
+  // interop bridge takes hundreds of ms, so exiting on the next line meant the clear never reached the OS and
+  // the host stayed advertised on the branch after every self-update. window-all-closed escaped this only
+  // because app.quit() happens to yield to the event loop first, which is luck rather than design.
+  ok('main: the self-update exit waits for the presence-clear to actually reach the OS',
+    /await _quitClearAck;[\s\S]{0,200}?app\.exit\(0\);/.test(MAIN));
+  ok('main: …and the ack is bounded, so a wedged spawn cannot block the restart',
+    /setTimeout\(\(\) => fin\('spawn NOT confirmed within 2s/.test(MAIN));
+  ok('main: …and the quit-path clear reports its OUTCOME, not just that it fired',
+    /presence-clear ' \+ how/.test(MAIN));
   ok('main: single-flight lock on update:run', /updateInFlight/.test(MAIN));
   ok('main: a diverged checkout self-heals instead of telling the user to run git',
     /pr\.kind === 'non-ff'/.test(MAIN) && /resetToUpstream\(__dirname\)/.test(MAIN));
