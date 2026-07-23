@@ -77,13 +77,15 @@ function awaitUrl(proc, timeoutMs) {
       buf += chunk.toString();
       if (!url) { const m = buf.match(URL_RE); if (m) url = m[0]; }
       if (!registered && REGISTERED_RE.test(buf)) registered = true;
-      if (url && registered) finish(resolve, { proc, url });
+      if (url && registered) finish(resolve, { proc, url, registered: true });
     };
     proc.stdout && proc.stdout.on('data', scan);
     proc.stderr && proc.stderr.on('data', scan);   // cloudflared logs to stderr
     proc.on('exit', (code) => finish(reject, new Error('cloudflared exited (code ' + code + ') before a tunnel URL appeared')));
     const timer = setTimeout(() => {
-      if (url) return finish(resolve, { proc, url });   // got a URL but no registration line — hand it back anyway
+      // A URL with no registration line is NOT proof of a routable tunnel. Hand it back flagged, and let
+      // startCloudflared decide — it now demands positive DNS confirmation before shipping an unregistered URL.
+      if (url) return finish(resolve, { proc, url, registered: false });
       try { proc.kill(); } catch {}
       finish(reject, new Error('timed out waiting for the cloudflared tunnel URL'));
     }, timeoutMs);
@@ -125,45 +127,84 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // of tunnel domain doesn't silently send every query to the wrong nameservers.
 function zoneOf(host) { return String(host).split('.').slice(-2).join('.'); }
 
-// IPs of the zone's authoritative nameservers, via the ordinary resolver. Safe to cache-miss: NS and their
-// addresses are long-lived records that exist well before any tunnel does, so this lookup can never NXDOMAIN
-// the way the tunnel hostname can.
+// PUBLIC bootstrap resolvers, set EXPLICITLY. This line is the whole bug fix: a bare `new dns.Resolver()`
+// inherits the OS resolver config, and inside Electron (42 / Node 24 on Windows) c-ares comes up with NO
+// servers configured, so every query dies instantly with ECONNREFUSED. Plain Node on the same machine works,
+// which is exactly why this passed review and still shipped broken — the whole authoritative stage was inert
+// in the app, and verification silently fell through to the OS-resolver probe it was written to avoid.
+const BOOTSTRAP_DNS = ['1.1.1.1', '8.8.8.8'];
+// IPs of the zone's authoritative nameservers. Safe to cache-miss: NS records are long-lived and exist well
+// before any tunnel does, so this lookup can never NXDOMAIN the way the tunnel hostname can.
 async function authoritativeServers(host) {
-  const r = new dns.promises.Resolver();
+  const r = new dns.promises.Resolver({ timeout: 3000, tries: 1 });
+  r.setServers(BOOTSTRAP_DNS);
   const names = await r.resolveNs(zoneOf(host));
   const ips = [];
   for (const n of names) { try { ips.push(...(await r.resolve4(n))); } catch {} }
   return ips;
+}
+// Fallback existence check for networks that block outbound port 53 (hotel/corporate Wi-Fi, some VPNs): ask
+// Cloudflare's resolver over HTTPS instead. Rides the same transport we already know works, and — like the
+// authoritative query — it answers WITHOUT touching this machine's resolver cache, so it cannot poison it.
+// Returns true (exists) / false (NXDOMAIN) / null (couldn't ask).
+function dohHasRecord(host, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false, req = null;
+    const done = (v) => { if (settled) return; settled = true; try { req && req.destroy(); } catch {} resolve(v); };
+    try {
+      req = https.request('https://cloudflare-dns.com/dns-query?name=' + encodeURIComponent(host) + '&type=A',
+        { headers: { accept: 'application/dns-json' }, timeout: timeoutMs || 4000 }, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; if (body.length > 64 * 1024) done(null); });
+          res.on('end', () => {
+            try { const j = JSON.parse(body); done(j.Status === 0 ? (j.Answer || []).length > 0 : (j.Status === 3 ? false : null)); }
+            catch { done(null); }
+          });
+        });
+    } catch { return resolve(null); }
+    req.on('timeout', () => done(null));
+    req.on('error', () => done(null));
+    req.end();
+  });
 }
 
 // Stage 2. Resolves {ok, ms, tries, ips} once the record exists at the source, or {ok:false, why} on timeout.
 // `unavailable:true` distinguishes "we could not ask" (blocked port 53, hijacked DNS) from "we asked and the
 // record is not there" — the caller must not treat the former as a broken tunnel.
 async function awaitDnsRecord(host, budgetMs, gapMs) {
-  let servers;
-  try { servers = await authoritativeServers(host); }
-  catch (e) { return { ok: false, unavailable: true, why: 'could not find the authoritative nameservers (' + ((e && e.code) || (e && e.message)) + ')' }; }
-  if (!servers.length) return { ok: false, unavailable: true, why: 'the authoritative nameservers have no reachable address' };
-  let r;
-  try { r = new dns.promises.Resolver({ timeout: 3000, tries: 1 }); r.setServers(servers); }
-  catch { return { ok: false, unavailable: true, why: 'this Node build cannot query a nameserver directly' }; }
   const t0 = Date.now();
-  let tries = 0, lastCode = 'none', asked = false;
+  // Two independent ways to ask, both cache-free. c-ares straight to the zone's own nameservers is the primary;
+  // DNS-over-HTTPS is the fallback for networks that block outbound 53. If BOTH are unreachable we say so
+  // (unavailable) rather than pretending the record is missing.
+  let r = null;
+  try {
+    const servers = await authoritativeServers(host);
+    if (servers.length) { r = new dns.promises.Resolver({ timeout: 3000, tries: 1 }); r.setServers(servers); }
+  } catch { r = null; }
+  let tries = 0, answered = false, lastCode = 'none';
   while (Date.now() - t0 < budgetMs) {
     tries++;
-    try { const ips = await r.resolve4(host); asked = true; if (ips && ips.length) return { ok: true, ms: Date.now() - t0, tries, ips }; }
-    catch (e) {
-      lastCode = (e && e.code) || 'unknown';
-      // NXDOMAIN/NODATA = the record genuinely isn't published yet — keep asking, it costs nothing. Anything
-      // else (timeout, refused, connection error) means we never got a real answer from the source.
-      if (lastCode === 'ENOTFOUND' || lastCode === 'ENODATA' || lastCode === 'NXDOMAIN') asked = true;
+    if (r) {
+      try { const ips = await r.resolve4(host); answered = true; if (ips && ips.length) return { ok: true, via: 'authoritative', ms: Date.now() - t0, tries, ips }; }
+      catch (e) {
+        lastCode = (e && e.code) || 'unknown';
+        // NXDOMAIN/NODATA = a real answer meaning "not published yet" — keep asking, it costs nothing.
+        if (lastCode === 'ENOTFOUND' || lastCode === 'ENODATA' || lastCode === 'NXDOMAIN') answered = true;
+        else r = null;   // refused/timeout/no servers → this channel is dead, stop paying for it and let DoH carry
+      }
+    }
+    if (!r) {
+      const doh = await dohHasRecord(host, 4000);
+      if (doh === true) return { ok: true, via: 'doh', ms: Date.now() - t0, tries, ips: [] };
+      if (doh === false) answered = true;                 // a real NXDOMAIN from Cloudflare's own resolver
+      else if (!answered) lastCode = lastCode === 'none' ? 'doh-unreachable' : lastCode;
     }
     if (Date.now() - t0 + gapMs >= budgetMs) break;
     await sleep(gapMs);
   }
-  return asked
-    ? { ok: false, ms: Date.now() - t0, tries, why: 'no A record after ' + tries + ' authoritative queries over ' + Math.round((Date.now() - t0) / 1000) + 's' }
-    : { ok: false, unavailable: true, ms: Date.now() - t0, tries, why: 'the authoritative nameservers did not answer (' + lastCode + ')' };
+  return answered
+    ? { ok: false, ms: Date.now() - t0, tries, why: 'no A record after ' + tries + ' cache-free queries over ' + Math.round((Date.now() - t0) / 1000) + 's' }
+    : { ok: false, unavailable: true, ms: Date.now() - t0, tries, why: 'no cache-free way to check DNS from here (' + lastCode + ')' };
 }
 
 // Stage 3. One end-to-end HTTPS request through the SYSTEM resolver.
@@ -200,26 +241,29 @@ async function verifyTunnel(url, opts = {}) {
   // during a burst of tunnel creation had still not published at 25s. Waiting is cheap and only happens on the
   // slow path; giving up early means telling a host their working tunnel is local-only.
   const d = await awaitDnsRecord(host, opts.dnsMs || 45000, opts.dnsGapMs || 1500);
-  if (!d.ok && !d.unavailable) return { ok: false, stage: 'dns', ms: Date.now() - t0, tries: d.tries || 0, why: d.why };
-  // d.unavailable → we could not consult the source. Fall through to the HTTPS probe as the only evidence
-  // available, accepting that on such a network an early probe may cache a negative. The grace above is why
-  // that risk is small, and it beats refusing to share at all.
+  // A cache-free source said the record does NOT exist. That is the one genuinely damning verdict: the hostname
+  // is not routable and the link would be a dud.
+  if (!d.ok && !d.unavailable) return { ok: false, published: false, stage: 'dns', ms: Date.now() - t0, tries: d.tries || 0, why: d.why };
+  // Record exists (or we couldn't ask). Now the end-to-end probe — but its failure is NOT authoritative about
+  // the tunnel: it goes through THIS machine's resolver, which may hold a stale negative from an earlier click.
+  // A guest on another network is unaffected by that, so a probe failure downgrades confidence, never the link.
   const httpBudget = opts.verifyMs || 12000, gapMs = opts.verifyGapMs || 1500;
   const tHttp = Date.now();
   let last = { ok: false, why: 'never probed' }, tries = 0;
   while (Date.now() - tHttp < httpBudget) {
     tries++;
     last = await probeOnce(url, Math.max(1500, Math.min(5000, httpBudget - (Date.now() - tHttp))));
-    if (last.ok) return { ok: true, localDns: true, ms: Date.now() - t0, dnsMs: d.ms || 0, tries, status: last.status };
+    if (last.ok) return { ok: true, published: !!d.ok, reachable: true, via: d.via || null, ms: Date.now() - t0, dnsMs: d.ms || 0, tries, status: last.status };
     if (Date.now() - tHttp + gapMs >= httpBudget) break;
     await sleep(gapMs);
   }
-  // Cloudflare published the record but this machine's resolver still says the name doesn't exist ⇒ a stale
-  // negative cache entry HERE, not a broken tunnel. Report the link as usable and let the caller say so.
-  if (d.ok && (last.code === 'ENOTFOUND' || last.code === 'EAI_AGAIN')) {
-    return { ok: true, localDns: false, ms: Date.now() - t0, dnsMs: d.ms || 0, tries, why: 'this machine has a stale DNS cache entry for the tunnel hostname (' + last.code + ')' };
-  }
-  return { ok: false, stage: 'http', ms: Date.now() - t0, tries, why: last.why };
+  // Reachability unproven from here. Two very different situations:
+  //   • DNS confirmed the record → the link is live; only THIS machine can't see it (stale cache). Ship it.
+  //   • We couldn't check DNS at all → we know nothing. Ship it only if the caller has other evidence
+  //     (cloudflared registered with the edge); startCloudflared decides, not us.
+  return { ok: true, published: !!d.ok, reachable: false, via: d.via || null, ms: Date.now() - t0, dnsMs: d.ms || 0, tries,
+    why: d.ok ? ('the tunnel is published but this machine cannot resolve it yet (' + (last.code || last.why) + ')')
+              : ('could not confirm the link from this machine (' + d.why + ')') };
 }
 
 // Resolves { proc, url, verify }; rejects with a clear message if no binary launches, no URL appears, or the URL
@@ -238,18 +282,39 @@ async function startCloudflared(port, opts = {}) {
     // but not back in through it). Named in the failure message below so it's discoverable when it's needed.
     if (opts.verify === false || process.env.CLAUDIBLE_SKIP_TUNNEL_VERIFY === '1') { got.verify = { ok: true, skipped: true, ms: 0, tries: 0 }; return got; }
     const v = await verifyTunnel(got.url, opts);
-    if (v.ok) { got.verify = v; return got; }
-    try { got.proc.kill(); } catch {}                    // an unprovable tunnel is worse than none — it gets handed to a colleague
-    const err = new Error((v.stage === 'dns' ? 'Cloudflare never published DNS for this tunnel' : 'the tunnel started but its public URL never answered')
-      + ' (' + v.why + ') after ' + Math.round(v.ms / 1000) + 's'
-      + ' — set CLAUDIBLE_SKIP_TUNNEL_VERIFY=1 to share the link unchecked anyway');
-    err.verify = v;
-    throw err;
+    // THE DECISION TABLE. What matters is what we actually KNOW, not whether one probe happened to succeed:
+    //
+    //   DNS says NO RECORD          → dud. Kill it. (the only damning verdict)
+    //   registered + DNS confirms   → ship, confirmed
+    //   registered + probe worked   → ship, confirmed
+    //   registered + can't confirm  → SHIP with an advisory. A failed probe goes through THIS machine's
+    //                                 resolver; it says nothing about a guest on another network, and the edge
+    //                                 acknowledged the route. Substituting a 127.0.0.1 link here would MANUFACTURE
+    //                                 the very dud this check exists to prevent — which is what it used to do.
+    //   NOT registered + confirmed  → ship (DNS is independent proof)
+    //   NOT registered + unconfirmed→ dud. Kill it. A URL banner alone proves nothing.
+    //
+    const confirmed = !!(v.published || v.reachable);
+    if (!v.ok || (!got.registered && !confirmed)) {
+      try { got.proc.kill(); } catch {}
+      const err = new Error(!v.ok
+        ? ('Cloudflare never published DNS for this tunnel (' + v.why + ') after ' + Math.round(v.ms / 1000) + 's')
+        : ('the tunnel never registered with Cloudflare and could not be confirmed (' + v.why + ')'));
+      err.verify = v; err.reason = 'unverified';
+      throw err;
+    }
+    got.verify = Object.assign({ confirmed }, v);
+    return got;
   }
-  const hint = (lastErr && lastErr.code === 'ENOENT')
-    ? 'cloudflared not found — install it (winget install Cloudflare.cloudflared) or set CLAUDIBLE_CLOUDFLARED to its path'
-    : ('could not launch cloudflared' + (lastErr ? ': ' + lastErr.message : ''));
-  throw new Error(hint);
+  // Distinguish "not installed" from "wouldn't start". The caller shows an install prompt ONLY for the former —
+  // offering "Install cloudflared" to someone who already has it (because a probe timed out) is the false alarm
+  // this whole pass exists to kill.
+  const missing = !!(lastErr && lastErr.code === 'ENOENT');
+  const err = new Error(missing
+    ? 'cloudflared is not installed — install it (winget install Cloudflare.cloudflared) or set CLAUDIBLE_CLOUDFLARED to its path'
+    : ('could not launch cloudflared' + (lastErr ? ': ' + lastErr.message : '')));
+  err.reason = missing ? 'missing' : 'launch-failed';
+  throw err;
 }
 
 // One candidate, detection-grade: does `<bin> --version` actually run HERE? Async execFile — this feeds

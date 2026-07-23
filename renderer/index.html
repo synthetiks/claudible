@@ -476,6 +476,11 @@
     .out{margin-top:11px;font-size:var(--fs-sm);color:var(--ink-dim);min-height:17px;line-height:1.5;
       white-space:pre-wrap;word-break:break-word;transition:color var(--dur-slow)}
     .out.live{color:var(--ink)}
+    /* in-progress status (creating a live link): brighter than idle so a 5–10s wait reads as WORK, not a stall */
+    .out.work{color:var(--silver)}
+    .out.work::after{content:'';display:inline-block;width:5px;height:5px;margin-left:7px;border-radius:50%;
+      background:currentColor;vertical-align:middle;animation:out-work-pulse 1.1s ease-in-out infinite}
+    @keyframes out-work-pulse{0%,100%{opacity:.25}50%{opacity:1}}
     input[type=text]{width:100%;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);
       background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color var(--dur-base)}
     input[type=text]:focus{outline:none;border-color:rgba(255,255,255,.24)}

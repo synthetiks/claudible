@@ -1706,6 +1706,9 @@ let collabLive = false;      // active workspace is a synced repo session → wa
 let tunnelUp = false, tunnelBusy = false;          // is the share server actually running / a start-stop in flight
 let guestCount = 0, chatPanelShown = false;
 let lastShareUrl = '', lastShareRemote = true, lastShareNote = null, lastShareReadOnly = false;
+// WHY the tunnel isn't up, not just THAT it isn't: 'missing' (cloudflared absent) is the only state that should
+// ever offer an install button. Every other failure offering one is the false "install cloudflared" alarm.
+let lastShareReason = null;
 const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out');
 // The bottom-left indicator reflects ONLY a manual web link (never collab) — collaboration stays invisible here.
 function webShareUI(on) {
@@ -1918,9 +1921,15 @@ function renderTunnelWarn() {
   const chip = $('tunnel-warn'); if (!chip) return;
   const show = tunnelUp && (webShare || !!sharedSessionId) && lastShareRemote === false;
   chip.style.display = show ? '' : 'none';   // '' → the .tunnel-warn class's flex display takes over
+  // The install button is for ONE state: cloudflared genuinely absent. It used to show for every degraded
+  // start, so a slow tunnel on a machine that HAS cloudflared told the user to install it — the false alarm.
+  const missing = lastShareReason === 'missing';
+  { const b = $('tunnel-warn-install'); if (b) b.style.display = missing ? '' : 'none'; }
   if (!show) return;
   const t = $('tunnel-warn-txt');
-  if (t) t.textContent = 'Your live link only works on this machine — remote guests can’t reach it' + (lastShareNote ? ' (' + lastShareNote + ')' : '') + '.';
+  if (t) t.textContent = missing
+    ? 'cloudflared isn’t installed, so there’s no public link — install it and share again.'
+    : ('Your live link only works on this machine — remote guests can’t reach it' + (lastShareNote ? ' (' + lastShareNote + ')' : '') + '.');
 }
 // PRESENCE HEALTH chip. main raises this after 2 consecutive failed presence pushes while hosting, and clears it
 // on the first success or on teardown. Before this, a failing push was completely invisible: the host's UI said
@@ -2151,13 +2160,21 @@ async function doStartSharing() {
   if (typed) savePrefs({ collabName: typed });   // one identity: editing the share name updates your Claudible username
   $('namemodal').classList.remove('show');
   shareBtn.disabled = true;
-  shareOut.textContent = 'starting tunnel — checking the link actually works…'; shareOut.className = 'out';   // main now proves the public URL serves before calling it up, so this step is a few seconds longer AND honest
+  // Name the wait. Building a quick tunnel and confirming it is genuinely a 5–10s job, and silence for that long
+  // reads as a hang — which is half of why a transient failure felt like a broken feature.
+  shareOut.textContent = 'creating your live link… this usually takes 5–10 seconds'; shareOut.className = 'out work';
   webShare = true;
   await ensureTunnel();                             // starts the tunnel (or reuses the one collab already has up)
   shareBtn.disabled = false;
   if (!tunnelUp) {
     webShare = false; webShareUI(false); await ensureTunnel();
-    shareOut.textContent = 'share failed — could not start the tunnel'; shareOut.className = 'out';
+    // Only ONE failure means "go install something". Everything else is a network/timing problem, and telling
+    // someone to install software they already have is worse than saying nothing.
+    shareOut.textContent = (lastShareReason === 'missing')
+      ? 'cloudflared isn’t installed — install it, then share again'
+      : 'couldn’t create a live link just now — check your connection and try again';
+    shareOut.className = 'out';
+    renderTunnelWarn();                             // surfaces the install button ONLY for the missing case
     return;
   }
   webShareUI(true);
@@ -3284,6 +3301,7 @@ async function ensureTunnel() {
       const ro = (!collabLive && webShare) ? !!$('share-ro').checked : false;   // collab is always co-drive
       const nm = collabName() || hostDisplayName || 'Host';   // one Claudible username, used hosting + joining
       const r = await claudible.shareStart({ readOnly: ro, name: nm });
+      lastShareReason = (r && r.reason) || null;          // 'missing' = cloudflared genuinely absent; anything else must NOT offer an install button
       if (r && r.ok) {
         tunnelUp = true; lastShareUrl = r.url; lastShareRemote = r.remote; lastShareNote = r.note; lastShareReadOnly = !!r.readOnly;
         // A tunnel failure still returns ok:true with a 127.0.0.1 URL, because a local link is genuinely

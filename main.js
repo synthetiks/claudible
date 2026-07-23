@@ -998,8 +998,9 @@ function adoptTunnel(proc, url, verify) {
   _writeCfPid(proc.pid);                                   // record the tunnel pid so a crash-orphan can be reaped on next launch
   _liveTiming('share: tunnel UP pid=' + proc.pid + ' ' + url
     + (verify ? (verify.skipped ? ' [verify skipped by env]'
-        : ' verified in ' + verify.ms + 'ms (dns +' + verify.dnsMs + 'ms, ' + verify.tries + ' probe(s))'
-          + (verify.localDns === false ? ' — LOCAL DNS STALE: ' + verify.why : ', HTTP ' + verify.status))
+        : ' in ' + verify.ms + 'ms — dns=' + (verify.published ? ('published via ' + (verify.via || '?') + ' +' + verify.dnsMs + 'ms') : 'unconfirmed')
+          + ', reachable=' + (verify.reachable ? ('yes HTTP ' + verify.status) : 'no')
+          + (verify.confirmed ? '' : ' [ADVISORY: ' + verify.why + ']'))
       : ' [unverified — no verify result]'));
   cloudflaredProc.on('exit', (code, signal) => {
     const unexpected = share.status().running;             // still "sharing" at exit ⇒ the tunnel dropped on its own (network/crash), not a clean host-stop
@@ -1022,7 +1023,7 @@ function adoptTunnel(proc, url, verify) {
   });
   presenceBeatOnce();                                      // advertising? publish the fresh handle NOW — recovery is bounded by the tunnel, not tunnel + next heartbeat
   _writeAllContexts();
-  try { winSend('share:tunnel-up', { url: url + '/?t=' + share.status().token, localDns: !(verify && verify.localDns === false) }); } catch {}   // renderer: refresh the link, drop the "local only" warning
+  try { winSend('share:tunnel-up', { url: url + '/?t=' + share.status().token, localDns: !(verify && verify.published && verify.reachable === false) }); } catch {}   // renderer: refresh the link, drop the "local only" warning
 }
 
 ipcMain.handle('share:start', (e, opts) => {
@@ -1041,7 +1042,7 @@ ipcMain.handle('share:start', (e, opts) => {
       try { winSend('share:pinned', { tabId: sharedTabId }); } catch {}   // renderer mirrors THIS tab's tracker to guests from now on
       const fr0 = ptys.get(sharedTabId) || fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
       syncShare();                                        // tell guests the granted library + pause if the live ws is private
-      let base = `http://127.0.0.1:${port}`, remote = false, note = null, localDns = true;
+      let base = `http://127.0.0.1:${port}`, remote = false, note = null, localDns = true, reason = null;
       try {
         try { cloudflaredProc && cloudflaredProc.kill(); } catch {}   // defensive: never leave a prior tunnel orphaned
         cloudflaredProc = null;
@@ -1049,16 +1050,27 @@ ipcMain.handle('share:start', (e, opts) => {
         if (!share.status().running) { _liveTiming('share: start — stopped mid-spawn, reaping the tunnel'); try { proc.kill(); } catch {} return { ok: false, error: 'stopped during start' }; }   // a share:stop landed while we were spawning → reap the tunnel, don't orphan a live public URL
         adoptTunnel(proc, url, verify);                   // pid file + exit handler + tunnel-up signal — single adopt path, shared with the background retry
         base = url; remote = true;                       // public link
-        localDns = !(verify && verify.localDns === false);   // verified good for guests, but THIS machine can't resolve it (stale negative cache) — the host must be told, or they'll believe the link is broken and stop sharing
-      } catch (tunErr) {   // tunnel down (or unprovable) → fall back to localhost/LAN, and keep trying in the background
+        // The link is live either way; `localDns:false` only means THIS machine can't resolve it yet (a stale
+        // negative cache from an earlier premature click). Guests elsewhere are unaffected — say so, don't retract.
+        localDns = !(verify && verify.published && verify.reachable === false);
+        if (verify && !verify.confirmed) note = verify.why || null;   // shipped on registration alone → advisory, not a failure
+      } catch (tunErr) {
+        reason = tunErr && tunErr.reason ? tunErr.reason : 'unverified';
         note = String(tunErr.message || tunErr);
-        _liveTiming('share: tunnel FAILED — ' + note + ' → local-only link');
-        armTunnelRetry(10000);                            // a failed VERIFY often just means a young edge route; re-dial soon, then fall back to the 45s cadence
+        _liveTiming('share: tunnel FAILED (' + reason + ') — ' + note);
+        // cloudflared ISN'T INSTALLED → refuse to share rather than hand back a 127.0.0.1 link. That link is
+        // useless to the colleague it gets sent to, and dressing it up as a share is the original dud bug.
+        if (reason === 'missing') {
+          try { stopLiveSharing(); } catch {}            // the ONE sanctioned teardown — never tear the server down directly, or the paths drift
+          _liveTiming('share: refused — cloudflared not installed, no loopback link handed out');
+          return { ok: false, error: note, reason: 'missing' };
+        }
+        armTunnelRetry(10000);                            // a young edge route often just needs another go
       }
       shareBaseUrl = base;
       const st = share.status();
       _writeAllContexts();                                // now hosting → tell the model (the fg tab's context flips to "hosting")
-      return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, localDns, readOnly: st.readOnly };
+      return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, localDns, reason, readOnly: st.readOnly };
     } catch (err) { return { ok: false, error: String(err.message || err) }; }
   })();
   shareStartInFlight.finally(() => { shareStartInFlight = null; });   // release the lock once this start settles

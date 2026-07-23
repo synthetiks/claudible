@@ -1375,11 +1375,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   const CF = read('share/cloudflared.js');
   const SRV = read('share/server.js');
   none('startCloudflared hands back a URL it never checked',
-    /const v = await verifyTunnel\(got\.url, opts\);\s*\n\s*if \(v\.ok\) \{ got\.verify = v; return got; \}/.test(CF)
+    /const v = await verifyTunnel\(got\.url, opts\);/.test(CF) && /got\.verify = Object\.assign\(\{ confirmed \}, v\);/.test(CF)
       ? [] : ['startCloudflared does not gate its return on verifyTunnel']);
   none('…and an unprovable tunnel is left running to be handed out',
-    /if \(v\.ok\) \{ got\.verify = v; return got; \}\s*\n\s*try \{ got\.proc\.kill\(\); \} catch \{\}/.test(CF)
-      ? [] : ['a failed verification does not reap the tunnel']);
+    /if \(!v\.ok \|\| \(!got\.registered && !confirmed\)\) \{\s*\n\s*try \{ got\.proc\.kill\(\); \} catch \{\}/.test(CF)
+      ? [] : ['a rejected tunnel is not reaped']);
   none('the check asks the system resolver before the authoritative one (it would cache the NXDOMAIN itself)',
     CF.indexOf('const d = await awaitDnsRecord(') < CF.indexOf('last = await probeOnce(url,')
       ? [] : ['the HTTPS probe is ordered ahead of the poison-free authoritative check']);
@@ -1389,13 +1389,16 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // "We could not ask" and "we asked and the record is absent" are different facts. Conflating them condemns a
   // working tunnel on any network that blocks outbound port 53.
   none('an unreachable nameserver is treated as a missing DNS record',
-    /if \(!d\.ok && !d\.unavailable\) return \{ ok: false, stage: 'dns'/.test(CF)
+    /if \(!d\.ok && !d\.unavailable\) return \{ ok: false, published: false, stage: 'dns'/.test(CF)
       ? [] : ['a blocked authoritative lookup fails the whole verification']);
   // The inverse of the bug: record published, but THIS machine is still poisoned from an earlier click. The
   // link is fine for guests — condemning it would be the same false report in the other direction.
+  // The old special-case branch is gone because the GENERAL rule now subsumes it: an unreachable probe never
+  // condemns a link (it only lowers confidence); ONLY a cache-free "no such record" does.
   none('a stale LOCAL cache condemns a link that works for everyone else',
-    /if \(d\.ok && \(last\.code === 'ENOTFOUND' \|\| last\.code === 'EAI_AGAIN'\)\)/.test(CF)
-      ? [] : ['verifyTunnel cannot distinguish a poisoned local resolver from a dead tunnel']);
+    /return \{ ok: true, published: !!d\.ok, reachable: false/.test(CF)
+      && /this machine cannot resolve it yet/.test(CF)
+      ? [] : ['an unreachable probe still condemns a published tunnel']);
   none('…and the host is never told why their own link will not open here',
     /r\.localDns === false\)/.test(APP) && /flushdns/.test(APP)
       ? [] : ['nothing explains the stale-cache case to the host']);
@@ -1757,6 +1760,48 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the cockpit builds the typing line by interpolating a remote name into HTML',
     /const who = document\.createElement\('b'\); who\.textContent = String\(name\)/.test(APP)
       ? [] : ['the cockpit typist name is not built from text nodes']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 54. THE TUNNEL CHECK MUST WORK IN ELECTRON, AND "UNSURE" MUST NOT MEAN "BROKEN".
+//   A bare `new dns.Resolver()` inherits the OS resolver config — and inside Electron (42 / Node 24, Windows)
+//   c-ares comes up with NO servers, so every query died with ECONNREFUSED. Plain Node on the same machine
+//   works, which is why this shipped: the authoritative stage was INERT in the app, verification fell through
+//   to the OS-resolver probe it existed to avoid, that probe poisoned the cache, and the failure was then
+//   reported to the user as "install cloudflared". Servers are now set EXPLICITLY, with DoH as a fallback.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const CF = read('share/cloudflared.js');
+  none('the DNS check trusts the OS resolver config (ECONNREFUSED inside Electron → the whole stage is inert)',
+    /const BOOTSTRAP_DNS = \['1\.1\.1\.1', '8\.8\.8\.8'\]/.test(CF) && /r\.setServers\(BOOTSTRAP_DNS\)/.test(CF)
+      ? [] : ['authoritativeServers does not set its nameservers explicitly']);
+  none('…and has no fallback when outbound port 53 is blocked',
+    /function dohHasRecord\(/.test(CF) && /cloudflare-dns\.com\/dns-query/.test(CF)
+      ? [] : ['no DNS-over-HTTPS fallback for the DNS check']);
+  // THE DECISION TABLE. "Couldn't confirm from here" must never discard a live tunnel — substituting a
+  // 127.0.0.1 link MANUFACTURES the dud the check exists to prevent, which is exactly what it used to do.
+  none('an unconfirmed but REGISTERED tunnel is still thrown away (manufacturing a loopback dud)',
+    /const confirmed = !!\(v\.published \|\| v\.reachable\);/.test(CF)
+      && /if \(!v\.ok \|\| \(!got\.registered && !confirmed\)\)/.test(CF)
+      ? [] : ['startCloudflared does not ship a registered-but-unconfirmed tunnel']);
+  none('…and an UNREGISTERED url ships without positive DNS proof (a banner is not a routable tunnel)',
+    /registered: false/.test(CF) && /!got\.registered && !confirmed/.test(CF)
+      ? [] : ['an unregistered URL can be shipped unconfirmed']);
+  none('a DNS verdict of "no such record" no longer condemns the link',
+    /if \(!d\.ok && !d\.unavailable\) return \{ ok: false, published: false, stage: 'dns'/.test(CF)
+      ? [] : ['a definitive NXDOMAIN is not treated as a dud']);
+  // "Install cloudflared" is for ONE state. Offering it because a probe timed out is the false alarm.
+  none('a failed tunnel cannot be told apart from a missing binary',
+    /err\.reason = missing \? 'missing' : 'launch-failed';/.test(CF) ? [] : ['startCloudflared does not tag ENOENT distinctly']);
+  none('…so main still hands out a loopback link when cloudflared is absent',
+    /if \(reason === 'missing'\)[\s\S]{0,500}?return \{ ok: false, error: note, reason: 'missing' \}/.test(MAIN)
+      ? [] : ['main.js still returns a 127.0.0.1 link when cloudflared is missing']);
+  none('…and the renderer offers "Install cloudflared" for failures that are not a missing binary',
+    /const missing = lastShareReason === 'missing';/.test(APP)
+      && /\$\('tunnel-warn-install'\); if \(b\) b\.style\.display = missing \? '' : 'none'/.test(APP)
+      ? [] : ['the install button is not gated on the missing-binary reason']);
+  none('the 5–10s wait is unexplained (silence reads as a hang)',
+    /creating your live link… this usually takes 5–10 seconds/.test(APP) ? [] : ['no progress message naming the expected duration']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
