@@ -1272,5 +1272,43 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['cmdk-tab is not clear of the git tab (16px icon + 18px padding + 2px border + 8px offset = 44)']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 39. THE COMMAND PALETTE IS CLAUDE CODE'S COMMAND LIST — nothing else.
+//   App actions (Settings, Project History, New session, Share) live in the top bar and sidebar; mixing them
+//   in made the palette a grab-bag rather than "the terminal's commands". The list is transcribed from the
+//   INSTALLED build's own registry, so entries must stay slash-prefixed and carry no click handlers.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const items = (APP.match(/const CMDK_ITEMS = \[[\s\S]*?\n\];/) || [''])[0];
+  const names = [...items.matchAll(/name: '([^']+)'/g)].map((m) => m[1]);
+  none('the palette lists a non-slash entry (app actions belong in the chrome, not here)',
+    names.filter((n) => !n.startsWith('/')));
+  none('a palette entry carries a click handler again (it should only ever type into the terminal)',
+    /act:\s*\(\)/.test(items) ? ['CMDK_ITEMS contains an act() entry'] : []);
+  none('cmdkRun can still invoke an app action instead of sending the command',
+    /function cmdkRun[\s\S]{0,200}?it\.act/.test(APP) ? ['cmdkRun still branches on it.act'] : []);
+  none('the palette shrank to a token list (it should cover the installed command surface)',
+    names.length >= 40 ? [] : [`only ${names.length} commands listed`]);
+  none('duplicate commands in the palette', (() => {
+    const seen = new Set(), dup = [];
+    names.forEach((n) => (seen.has(n) ? dup.push(n) : seen.add(n)));
+    return dup;
+  })());
+  // Anchored to its trigger, not centred: the trigger sits in the terminal's bottom-right corner, so a
+  // screen-centre panel made the eye travel the whole window for a control just clicked.
+  none('the palette centres on the window again instead of opening at its trigger',
+    /function placeCmdk[\s\S]{0,400}?getBoundingClientRect/.test(APP) && /if \(on\) \{ placeCmdk\(\);/.test(APP)
+      ? [] : ['placeCmdk is missing or never called on open']);
+  // The stylesheet must NOT re-add translateX(-50%): it would fight the measured left placeCmdk sets.
+  none('the centring transform is back, fighting the measured position',
+    /\.cmdk\.show\{[^}]*translateX\(-50%\)/.test(HTML) ? ['.cmdk.show still applies translateX(-50%)'] : []);
+  // The voice labels were --ink-faint on the box background: 2.85:1, below even the 3:1 large-text floor.
+  none('the Talk/Read labels faded back to near-invisible',
+    /\.vbox \.vstat\{[^}]*color:var\(--ink-dim\)/.test(HTML) ? [] : ['.vbox .vstat is not --ink-dim']);
+  // …while the glyphs must still match the icon buttons beside them.
+  none('the voice glyphs outshine the icon buttons they sit beside',
+    /\.vbox\{[^}]*color:var\(--ink-dim\)/.test(HTML) ? [] : ['.vbox base colour no longer matches .iconbtn']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1146,34 +1146,91 @@ const send = (cmd) => {
 // full row of terminal height. This is keyboard-first, searches every command at once, and can also drive the
 // app's own panels — a pill could only ever type into the terminal.
 // Hotkey is Ctrl/Cmd+Shift+P. NOT Ctrl+K: that is readline's kill-to-end-of-line, and this app is a terminal.
+// Claude Code slash commands ONLY — no Claudible app actions. Those live in the top bar and the sidebar where
+// they belong; mixing them in made the palette a grab-bag rather than "the terminal's command list".
+// Extracted from the INSTALLED Claude Code build's own command registry (2.1.218) rather than written from
+// memory, and every entry below was verified present in that binary. Internal/one-shot entries are excluded on
+// purpose: setup wizards (setup-bedrock, web-setup, install-*), hidden states (pro-trial-expired,
+// rate-limit-options, workflow-launch-exec), debug tooling (heapdump), and renamed aliases (extra-usage).
 const CMDK_ITEMS = [
-  { name: '/model',   desc: 'switch model' },
-  { name: '/effort',  desc: 'reasoning effort' },
-  { name: '/compact', desc: 'compact the context' },
-  { name: '/clear',   desc: 'clear the conversation' },
-  { name: '/loop',    desc: 'run on an interval' },
-  { name: '/context', desc: 'context breakdown' },
-  { name: '/mcp',     desc: 'MCP servers' },
-  { name: '/agents',  desc: 'subagents' },
-  { name: '/plan',    desc: 'plan mode' },
-  { name: '/status',  desc: 'session status' },
-  { name: '/resume',  desc: 'resume a session' },
-  { name: '/init',    desc: 'write CLAUDE.md' },
-  { name: '/review',  desc: 'review a pull request' },
-  { name: '/cost',    desc: 'session cost' },
-  { name: '/help',    desc: 'all commands' },
-  // app actions — these were never reachable from the pill bar at all
-  { name: 'Settings',        desc: 'voice, alerts, effort, skills', act: () => $('settings-btn').click() },
-  { name: 'Project History', desc: 'sessions and changes',          act: () => $('diff-btn').click() },
-  { name: 'New session',     desc: 'in the active project',         act: () => $('new-session').click() },
-  { name: 'Share a live link', desc: 'invite someone to watch',     act: () => $('share-btn').click() },
-  { name: 'Toggle projects', desc: 'show or hide the sidebar',      act: () => $('sessions-btn').click() },
+  // --- everyday driving ---
+  { name: '/model',    desc: 'set the model for this session' },
+  { name: '/effort',   desc: 'set effort level for model usage' },
+  { name: '/context',  desc: 'visualise current context usage' },
+  { name: '/compact',  desc: 'free up context by summarising so far' },
+  { name: '/autocompact', desc: 'how full context gets before auto-summarising' },
+  { name: '/clear',    desc: 'clear the conversation' },
+  { name: '/usage',    desc: 'plan usage and rate limits' },
+  { name: '/status',   desc: 'session status' },
+  { name: '/todos',    desc: 'this session’s todo list' },
+  { name: '/recap',    desc: 'one-line session recap' },
+  { name: '/insights', desc: 'report analysing your sessions' },
+  // --- conversation shape ---
+  { name: '/resume',   desc: 'resume a previous conversation' },
+  { name: '/branch',   desc: 'branch the conversation at this point' },
+  { name: '/fork',     desc: 'copy this conversation into a background session' },
+  { name: '/subtask',  desc: 'send a subagent off with your full context' },
+  { name: '/btw',      desc: 'quick side question, main thread untouched' },
+  { name: '/goal',     desc: 'set a goal Claude checks before stopping' },
+  { name: '/plan',     desc: 'enable plan mode / view the session plan' },
+  { name: '/brief',    desc: 'toggle brief-only mode' },
+  { name: '/focus',    desc: 'toggle focus view' },
+  { name: '/export',   desc: 'export this conversation' },
+  { name: '/copy',     desc: 'copy Claude’s last response' },
+  // --- code + repo ---
+  { name: '/init',     desc: 'write a CLAUDE.md for this repo' },
+  { name: '/diff',     desc: 'uncommitted changes and per-turn diffs' },
+  { name: '/review',   desc: 'review a GitHub pull request' },
+  { name: '/security-review', desc: 'security review of pending changes' },
+  { name: '/autofix-pr',  desc: 'monitor and autofix the current PR' },
+  { name: '/add-dir',  desc: 'add another working directory' },
+  { name: '/cd',       desc: 'move this session to another directory' },
+  // --- extending Claude ---
+  { name: '/agents',   desc: 'create and manage subagents' },
+  { name: '/mcp',      desc: 'manage MCP servers' },
+  { name: '/skills',   desc: 'list available skills' },
+  { name: '/reload-skills', desc: 'pick up skills changed on disk' },
+  { name: '/reload-plugins', desc: 'activate pending plugin changes' },
+  { name: '/skill-doctor', desc: 'skills that are unused and costing context' },
+  { name: '/hooks',    desc: 'hook configurations for tool events' },
+  { name: '/memory',   desc: 'open a memory file' },
+  { name: '/loops',    desc: 'list, create and delete loops' },
+  { name: '/daemon',   desc: 'background services and routines' },
+  { name: '/advisor',  desc: 'let Claude consult a stronger model' },
+  // --- environment ---
+  { name: '/config',   desc: 'open settings' },
+  { name: '/permissions', desc: 'tool permission rules' },
+  { name: '/theme',    desc: 'change the theme' },
+  { name: '/keybindings', desc: 'open your keyboard shortcuts file' },
+  { name: '/statusline', desc: 'set up the status line' },
+  { name: '/terminal-setup', desc: 'configure terminal integration' },
+  { name: '/ide',      desc: 'IDE integrations and status' },
+  { name: '/doctor',   desc: 'check your Claude Code install' },
+  { name: '/help',     desc: 'all commands' },
+  { name: '/release-notes', desc: 'what changed in this version' },
+  { name: '/bug',      desc: 'report a bug or share the conversation' },
+  { name: '/feedback', desc: 'send feedback to Anthropic' },
+  { name: '/login',    desc: 'sign in to your Anthropic account' },
+  { name: '/logout',   desc: 'sign out' },
 ];
 let cmdkOn = -1, cmdkRows = [];
+// Anchored to the trigger, not centred on the window: the button now lives in the terminal's bottom-right
+// corner, so a screen-centre panel meant your eye (and the pointer) had to travel the full window for a
+// control you just clicked. Opens UPWARD from a bottom-corner trigger, clamped inside the viewport.
+function placeCmdk() {
+  const box = $('cmdk'), btn = $('cmdk-btn');
+  if (!box) return;
+  if (!btn) { box.style.left = '50%'; box.style.top = '18vh'; box.style.bottom = ''; return; }   // trigger gone (agents pane) → centre
+  const r = btn.getBoundingClientRect();
+  box.style.top = '';
+  box.style.bottom = Math.round(Math.max(8, window.innerHeight - r.top + 8)) + 'px';   // sit ABOVE the button
+  const w = box.offsetWidth || 560;
+  box.style.left = Math.round(Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)) + 'px';   // right-align to the trigger, clamped
+}
 function cmdkOpen(on) {
   const box = $('cmdk'), scrim = $('cmdk-scrim'), inp = $('cmdk-in');
   box.classList.toggle('show', on); scrim.classList.toggle('show', on);
-  if (on) { inp.value = ''; cmdkRender(''); inp.focus(); }
+  if (on) { placeCmdk(); inp.value = ''; cmdkRender(''); inp.focus(); }
   else { focusTermSoon(0); }                                   // hand the keyboard straight back to the terminal
 }
 // Subsequence match ("cmp" finds /compact), so you never have to remember the exact prefix. Rank: earlier first
@@ -1215,7 +1272,6 @@ function cmdkMove(i, scroll) {
 }
 function cmdkRun(it) {
   cmdkOpen(false);
-  if (it.act) { it.act(); return; }
   send(it.name);
   // R39: a joined mirror's tracker is the HOST's (re-broadcast) — resetting the local copy painted zeros
   // until the next status frame. Carried over verbatim from the pill bar.
