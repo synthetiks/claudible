@@ -958,7 +958,11 @@
     .hvm.speaking{color:var(--ink);border-color:var(--ok)}
     .hvm.speaking .d{background:var(--ok);box-shadow:0 0 7px 0 var(--ok)}
     .hvm.c-connected .d{background:var(--ok)}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
-    .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+    /* Reserve room on BOTH sides for the overlaid "i" (it occupies 10–28px in from the right). Symmetric, not just
+       padding-right, so the label stays optically centred in the button instead of drifting left — and the label
+       still fits at the narrowest sidebar (clamp floor 228px → a 204px button), verified at both extremes. */
+    .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding-left:34px;padding-right:34px}
+    .sb-label{white-space:nowrap}   /* never wrap to a second line and change the button's height */
     .share-btn .ico{width:15px;height:15px;flex:none;transition:color var(--dur-slow),filter var(--dur-slow)}   /* the share glyph that used to sit in the label row now leads the button */
     /* This is the sidebar's primary action, but it wore the plain utility-button chassis. Lift it one notch with a
        LOW-CHROMA green wash + full-brightness label — green at rest reading against the red "Stop sharing" state as
