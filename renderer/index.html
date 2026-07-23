@@ -636,7 +636,7 @@
          stopping at a hard bevel (an inner scrim was rejected: it would dim the row's ▾ and live badges). */
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .sess-list{display:flex;flex-direction:column;gap:2px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
-    .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.2px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
+    .sess{position:relative;isolation:isolate;display:flex;align-items:center;gap:6px;width:auto;text-align:left;padding:5.2px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
       background:none;cursor:pointer;transition:background-color var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out),border-color var(--dur-base) ease,opacity var(--dur-base)}
     .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity var(--dur-base) var(--ease-out);background-image:linear-gradient(90deg,color-mix(in srgb,var(--sel) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
@@ -648,18 +648,15 @@
     .sess.sess-live-row,.sess.sess-peer-live{box-shadow:inset 0 1px 0 var(--sheen);background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* live row: the SAME calm box selected+live gets (flat 5% green + sheen + the green ::before wash) — identical whether or not it's selected, so clicking away never changes its costume. NO rail */
     .sess.sess-live-row::before,.sess.sess-peer-live::before,.sess.sess-joined-live::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%)}
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
-    .sess-prev{font-size:var(--fs-sm);color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px;transition:-webkit-mask-image var(--dur-base) ease}
-    /* the title reserves only what is ALWAYS on screen (▾ + any persistent flair + a live pill). :has() keeps
-       this declarative — no JS bookkeeping — and the reserve is exact per row instead of a worst-case gutter. */
-    .sess:has(.sess-flair:not(.author)) .sess-prev{padding-right:52px}
-    .sess:has(.sess-flair.diverged):has(.sess-flair.removed) .sess-prev{padding-right:72px}
-    .sess:has(.sess-live-ind) .sess-prev{padding-right:78px}
-    /* on hover the timestamp + author icon appear; rather than re-flowing the title (an ellipsis jump on every
-       row you sweep past), it DISSOLVES under the cluster. No layout change, no jitter. */
-    .sess:hover .sess-prev,.sess:focus-within .sess-prev,.sess.active .sess-prev{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 34px),transparent)}
+    /* title = flex:1 with min-width:0 so it ellipsizes to EXACTLY the space the meta cluster leaves — no fixed
+       padding guesses, no :has() bookkeeping. A long name becomes "MK-Session 235…" precisely at the boundary,
+       and the timestamp/author/out-of-sync cluster can never be squished. Same pattern as .ws-chip's .ws-name. */
+    .sess-prev{flex:1;min-width:0;font-size:var(--fs-sm);color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .sess.sess-draft .sess-prev{color:var(--warn)}   /* draft keeps an AT-REST signal now that the meta line is hover-only */
-    /* ONE-LINE ROWS: the old second line is now a right-anchored cluster floating over the row. */
-    .sess-meta{position:absolute;right:30px;top:50%;transform:translateY(-50%);margin:0;font-size:var(--fs-2xs);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
+    /* ONE-LINE ROWS: title (flex:1, ellipsis) then a flex:none cluster [timestamp · chips · live pill]. The
+       cluster reserves its real width; the title yields to it, so the two never collide on any combination of
+       author + out-of-sync + live badge. Absolute positioning + fixed reserves (the old squish) are gone. */
+    .sess-meta{flex:none;margin:0;font-size:var(--fs-2xs);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
     .sess-meta>*{pointer-events:auto}
     .sess:not(.sess-peer-live) .sess-meta-t{display:none}                                            /* ① title-only at rest… */
     /* …last-used time appears on hover — EXCEPT while the row is live. :has(.sess-live-ind) is the exact
@@ -725,7 +722,7 @@
        `transform:translateY(1px)` at higher specificity, so a centering transform gets REPLACED on mousedown —
        the button jumped from mid-row to the row's top edge and back (the "jiggle"). transform is the press
        animation's alone; layout must never borrow it. */
-    .sess-menu-btn{position:absolute;top:0;bottom:0;margin:auto 0;right:6px;display:flex;align-items:center;justify-content:center;
+    .sess-menu-btn{flex:none;margin-left:2px;display:flex;align-items:center;justify-content:center;
       width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
       color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
       transition:opacity var(--dur-fast),color var(--dur-fast),border-color var(--dur-fast),background var(--dur-fast)}
@@ -738,7 +735,7 @@
     .sess.renaming .sess-flair{display:none}   /* nothing floats beside the rename input while editing (the old .sess-chip pill styles retired with the text labels) */
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
     .sess-meta{display:flex;align-items:center;gap:5px}
-    .sess-meta-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:var(--tk-base)}   /* .sess-meta is uppercase for its BADGES; a timestamp ("now", "5m ago") and a peer line ("MK is live now") are prose, and prose in caps reads as shouting */   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row") */
+    .sess-meta-t{flex:0 1 auto;min-width:0;max-width:13em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:var(--tk-base)}   /* .sess-meta is uppercase for its BADGES; a timestamp ("now", "5m ago") and a peer line ("MK is live now") are prose, and prose in caps reads as shouting */   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row"). max-width bounds a long peer line ("someVeryLongName is live now") so the flex:none cluster can't eat the whole row and starve the title. */
     .sess-meta{flex-wrap:nowrap}   /* keep the tag (out-of-sync / live) on ONE line WITH the timestamp — the time (flex:0 1 auto, its OWN overflow:hidden/ellipsis) shrinks to make room, so the chip never drops to a 2nd line; its colour still hugs just the icon+word (inline-flex). No container overflow:hidden — it would clip the live pill's "Join →" hover reveal. */
     .sess-live-ind{flex:none;width:auto;display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;
       text-transform:uppercase;color:var(--ok);background:none;border:none;border-radius:999px;padding:2px 4px;line-height:1}   /* width:auto: the Join-badge variant is a <button>, so override button{width:100%} */
@@ -751,7 +748,7 @@
       box-shadow:0 0 6px -1px var(--ok);flex:none;animation:livepulse 2.6s ease-in-out infinite}
     .sess.renaming .sess-live-ind{display:none}
     /* inline rename input (replaces the title while editing) */
-    .sess-rename{width:100%;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);background:#0a0b0d;
+    .sess-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:4px 44px 4px 7px;margin-bottom:3px}
     .sess-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
     /* ✓/✗ confirm/cancel for the inline rename — sits in the top-right slot the ▾ vacates while editing */

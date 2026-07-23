@@ -517,8 +517,11 @@ none('renderer: orphanTab is never rendered',
     if (/transform\s*:\s*[^;]*translate[^;]*-50%/.test(body)) jig.push(sel.trim().slice(0, 60) + ' centres with transform');
   });
   none('a button uses transform for centring (button:active will clobber it → the press jiggles)', jig);
-  none('…and the ▾ itself must stay on the transform-free centring',
-    /\.sess-menu-btn\{[^}]*top:0;bottom:0;margin:auto 0/.test(flat) ? [] : ['.sess-menu-btn is no longer centred by top/bottom + margin:auto']);
+  // The ▾ is now an in-flow flex child of the row, centred by the row's align-items:center — still transform-free,
+  // so button:active can't clobber its centring (the original "jiggle" fix, preserved by a different mechanism).
+  none('…and the ▾ itself must stay transform-free centred (via the flex row now, not absolute + margin:auto)',
+    /\.sess\{[^}]*display:flex;align-items:center/.test(flat) && /\.sess-menu-btn\{[^}]*flex:none/.test(flat) && !/\.sess-menu-btn\{[^}]*translate/.test(flat)
+      ? [] : ['.sess-menu-btn is not centred by the flex row without a transform']);
   // A LIVE row does not show the hover timestamp: the pill already claims 78px of a one-line row (they collided),
   // and "last used 2h ago" contradicts a session in use right now. The reveal must stay :has(.sess-live-ind)-gated.
   const reveal = (flat.match(/[^};]*:hover \.sess-meta-t[^}]*\{[^}]*display:inline/) || [''])[0];
@@ -1511,6 +1514,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the end card offers no way back',
     /id="ov-rejoin"/.test(GUEST_HTML) && /getElementById|\$\('ov-rejoin'\)/.test(GUEST_JS) && /location\.reload\(\)/.test(GUEST_JS)
       ? [] : ['no Rejoin affordance on the end card']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 46. SESSION-NAME TRUNCATION IS PIXEL-ACCURATE, NOT A GUESS. The row was an absolute meta cluster over a
+//   title padded by fixed :has() reserves (30/52/72/78px). When timestamp + author + out-of-sync all showed,
+//   the cluster overran the reserve and squished the timestamp. Now it's a flexbox (title flex:1 min-width:0,
+//   meta flex:none) — the same pattern .ws-chip already uses — so the name ellipsizes to exactly what's left.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('the session row is not a flex layout (name can still overrun the meta)',
+    /\.sess\{[^}]*display:flex;align-items:center/.test(flat) ? [] : ['.sess is not display:flex']);
+  none('the title does not flex-shrink to ellipsis (it needs flex:1 + min-width:0)',
+    /\.sess-prev\{[^}]*flex:1;min-width:0[^}]*text-overflow:ellipsis/.test(flat) ? [] : ['.sess-prev is not a flex:1 min-width:0 ellipsis']);
+  none('the meta cluster is still absolutely positioned (the old overlap bug)',
+    /\.sess-meta\{[^}]*flex:none/.test(flat) && !/\.sess-meta\{[^}]*position:absolute/.test(flat)
+      ? [] : ['.sess-meta is not a flex:none in-flow cluster']);
+  none('the fixed :has() padding guesses are still present (they undercount the real cluster)',
+    !/\.sess:has\(\.sess-flair:not\(\.author\)\) \.sess-prev\{padding-right/.test(flat) && !/\.sess:has\(\.sess-live-ind\) \.sess-prev\{padding-right/.test(flat)
+      ? [] : ['the old per-row padding-right reserves were left behind']);
+  none('a long peer-live line can starve the title (no cap on the timestamp width)',
+    /\.sess-meta-t\{[^}]*max-width:\d/.test(flat) ? [] : ['.sess-meta-t has no max-width bound']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
