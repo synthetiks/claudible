@@ -4,17 +4,18 @@ const $ = (id) => document.getElementById(id);
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
 const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
 // transient toast (button feedback / coming-soon placeholders)
-// Anchored to the TOP-RIGHT of the terminal (the Terminal|Agents control owns the top-left). Measured at show
-// time rather than expressed in CSS because the terminal's right edge moves: the sidebar and the chat panel are
-// grid columns that open and close, and no fixed-position CSS can track that. Falls back to the old
-// bottom-centre placement if the terminal isn't mounted yet (early-boot toasts).
+// Centred over the TOP of the terminal. Measured at show time rather than expressed in CSS because the
+// terminal's midpoint moves: the sidebar and the chat panel are grid columns that open and close, and no
+// fixed-position CSS can track that. Falls back to the window centre before the terminal mounts.
+// Only ONE horizontal edge is ever set (`left`) — translateX(-50%) in the stylesheet does the centring. Pinning
+// left AND right stretches the box to max-width and is what made every toast 420px wide regardless of its text.
 function placeToast(t) {
   const row = document.querySelector('.termrow');
   const r = row && row.getBoundingClientRect();
-  if (!r || !r.width) { t.style.left = ''; t.style.right = '16px'; t.style.top = ''; t.style.bottom = '32px'; return; }
-  t.style.left = ''; t.style.bottom = '';
-  t.style.right = Math.max(8, Math.round(window.innerWidth - r.right + 8)) + 'px';
+  if (!r || !r.width) { t.style.left = Math.round(window.innerWidth / 2) + 'px'; t.style.top = '14px'; t.style.maxWidth = ''; return; }
+  t.style.left = Math.round(r.left + r.width / 2) + 'px';
   t.style.top = Math.round(r.top + 8) + 'px';
+  t.style.maxWidth = Math.max(220, Math.round(Math.min(420, r.width - 24))) + 'px';   // never wider than the terminal it sits on
 }
 function toast(msg) {
   let t = $('toast');

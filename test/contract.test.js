@@ -575,6 +575,15 @@ none('renderer: orphanTab is never rendered',
   // render behind the very panel that triggered it.
   none('the toast left position:fixed (it would render behind the drawer that triggered it)',
     /\.toast\{position:fixed/.test(flat) ? [] : ['.toast is no longer position:fixed']);
+  // The box must HUG its text. It is anchored by `left` alone; if a rule also pins `right` (or drops
+  // width:max-content), the two edges stretch it to max-width and a three-word message wears a 420px box.
+  const toastRule = (flat.match(/\.toast\{[^}]*\}/) || [''])[0];
+  none('the toast box no longer hugs its text (width:max-content lost → it stretches to max-width)',
+    /width:max-content/.test(toastRule) ? [] : ['.toast has no width:max-content']);
+  none('the toast pins BOTH horizontal edges (left+right stretches the box instead of centring it)',
+    /(^|;)left:/.test(toastRule) && /(^|;)right:/.test(toastRule) ? ['.toast sets both left and right'] : []);
+  none('…and app.js must anchor by one edge only, letting translateX centre it',
+    /placeToast[\s\S]{0,600}?style\.right\s*=/.test(APP) ? ['placeToast still sets style.right'] : []);
   // Scoped to toast()'s OWN body: `placeToast(t)` also appears in the resize listener, so a loose search for it
   // passes even when toast() has stopped calling it (it did, on first write of this check).
   none('the toast is no longer anchored to the terminal at show time',

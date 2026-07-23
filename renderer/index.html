@@ -805,18 +805,21 @@
     .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-xs);color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:2px 6px}
     .ws-chip .ws-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
-    /* Transient toast. Lives at the TOP-RIGHT of the terminal — the same 8px line as the Terminal|Agents
-       control, opposite vertical edge — so status appears where you are already looking instead of at the far
-       bottom of the window.
+    /* Transient toast. Centred over the TOP of the terminal — the same line as the Terminal|Agents control,
+       but mid-span, which is the calmest spot on screen: nothing lives there and the eye is already in the
+       column. app.js sets `left` to the terminal's midpoint and translateX(-50%) does the centring.
        It stays position:FIXED rather than becoming a child of .termrow: the theme toast fires from inside the
        Settings drawer, and a drawer is a fixed, filtered element (its own stacking context), so an in-flow
        toast would render BEHIND the very panel that triggered it. Fixed + z-index keeps it on top; app.js
-       anchors it to the terminal's rect at show time, which also tracks the sidebar and chat panel opening. */
-    .toast{position:fixed;top:0;left:0;transform:translateY(-6px);opacity:0;pointer-events:none;
+       anchors it to the terminal's rect at show time, which also tracks the sidebar and chat panel opening.
+       width:max-content is load-bearing — the box must HUG its text. Anchoring by `left` while the stylesheet
+       also set `left:0` pinned both edges at once and stretched every toast to the full max-width, so a
+       three-word message wore a 420px box. Never set both edges; translateX does the centring instead. */
+    .toast{position:fixed;top:0;left:0;transform:translateX(-50%) translateY(-6px);opacity:0;pointer-events:none;
       background:linear-gradient(180deg,#191c22,#0f1115);border:1px solid var(--hairline);border-radius:10px;
       padding:8px 13px;font-size:var(--fs-sm);line-height:1.4;color:var(--ink);box-shadow:var(--elev-3);z-index:10001;
-      max-width:min(420px,42vw);transition:opacity var(--dur-slow),transform var(--dur-slow)}   /* max-width + wrapping: centred it could run the full window, at the top-right it cannot */
-    .toast.show{opacity:1;transform:translateY(0)}
+      width:max-content;max-width:420px;transition:opacity var(--dur-slow),transform var(--dur-slow)}   /* max-width caps the long ones (they wrap); short ones shrink to the text */
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
     .invite-repo{color:var(--silver)}
     /* new-workspace chooser (reuses the .approve overlay shell) */
     .choice-row{display:flex;flex-direction:column;gap:9px;margin:4px 0 14px;text-align:left}
