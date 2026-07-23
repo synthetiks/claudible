@@ -1582,10 +1582,15 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and it centres with a transform (button:active would clobber it → the press jiggles)',
     /\.btnwrap \.ws-info\{[^}]*top:0;bottom:0;margin:auto 0/.test(flat) && !/\.btnwrap \.ws-info\{[^}]*translate/.test(flat)
       ? [] : ['the overlaid "i" is not centred by top/bottom + margin:auto']);
-  // The label is centred across the FULL button, so without a reserve it runs right up against the overlaid "i"
-  // (the reported "squeezed" state). Symmetric, so clearing the icon doesn't drift the label off-centre.
+  // MEASURED: at the sidebar clamp floor (228px → 204px button) the label is ~124px of MONOSPACE. Symmetric
+  // padding did NOT fix the reported clash — once content exceeds the padding box it overflows both ways and
+  // lands on the icon. The reserve has to be on the right (the icon's side), with the tracking trimmed to buy
+  // back width, plus an ellipsis guard because monospace metrics differ per machine.
   none('the button reserves no room for the overlaid "i" (the label collides with it)',
-    /\.share-btn\{[^}]*padding-left:34px;padding-right:34px/.test(flat) ? [] : ['.share-btn has no symmetric padding reserve for the "i"']);
+    /\.share-btn\{[^}]*padding-right:38px/.test(flat) && /\.share-btn\{[^}]*letter-spacing:\.02em/.test(flat)
+      ? [] : ['no right-side reserve for the "i", or the width-saving tracking was reverted']);
+  none('…and the label cannot ellipsize, so a wider mono face would collide again',
+    /\.sb-label\{[^}]*text-overflow:ellipsis/.test(flat) ? [] : ['.sb-label has no ellipsis guard']);
   // THE ONE THAT MATTERS: an unscoped rest style silently kills the red stop state.
   none('the share button’s rest styling is not :not(.live)-scoped (Stop sharing would stay green)',
     /\.share-btn:not\(\.live\)\{[^}]*background:linear-gradient/.test(flat) && !/\.share-btn\{[^}]*background/.test(flat)

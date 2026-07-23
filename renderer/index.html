@@ -958,11 +958,18 @@
     .hvm.speaking{color:var(--ink);border-color:var(--ok)}
     .hvm.speaking .d{background:var(--ok);box-shadow:0 0 7px 0 var(--ok)}
     .hvm.c-connected .d{background:var(--ok)}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
-    /* Reserve room on BOTH sides for the overlaid "i" (it occupies 10–28px in from the right). Symmetric, not just
-       padding-right, so the label stays optically centred in the button instead of drifting left — and the label
-       still fits at the narrowest sidebar (clamp floor 228px → a 204px button), verified at both extremes. */
-    .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding-left:34px;padding-right:34px}
-    .sb-label{white-space:nowrap}   /* never wrap to a second line and change the button's height */
+    /* Room for the overlaid "i", which occupies 10–28px in from the right edge. MEASURED, not eyeballed: at the
+       sidebar's clamp floor (228px → a 204px button) the label is 131.8px in the app's MONOSPACE face, so content
+       was 153.8px against a 136px box — it overflowed the padding symmetrically and landed ON the icon (a −2.9px
+       gap). Symmetric padding cannot fix that; once content exceeds the box it just spills both ways. So: reserve
+       the icon's zone on the right only, and claw back the width by trimming the button's .06em tracking (~8px on
+       this label) and the icon gap. The label now centres in the space LEFT OF the icon, which reads balanced
+       because the icon fills the right. Verified by measurement at 228 / 262 / 316px. */
+    .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+      padding-left:14px;padding-right:38px;letter-spacing:.02em}
+    /* last-resort guard: monospace metrics differ per machine (Consolas / SF Mono / JetBrains Mono are not the
+       same width), so the label must be able to ellipsize rather than ever touch the icon again. */
+    .sb-label{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
     .share-btn .ico{width:15px;height:15px;flex:none;transition:color var(--dur-slow),filter var(--dur-slow)}   /* the share glyph that used to sit in the label row now leads the button */
     /* This is the sidebar's primary action, but it wore the plain utility-button chassis. Lift it one notch with a
        LOW-CHROMA green wash + full-brightness label — green at rest reading against the red "Stop sharing" state as
