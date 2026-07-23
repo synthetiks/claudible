@@ -657,11 +657,27 @@ function fmtReset(sec) {
 function rateClass(pct) {
   return pct >= 90 ? 'u-crit' : pct >= 75 ? 'u-warn' : pct >= 60 ? 'u-warm' : pct >= 40 ? 'u-mid' : 'u-lo';
 }
+// A reading is only true for the window it was taken in, and `resets_at` names exactly when that window dies.
+// This matters because status.json is written by Claude Code's statusLine, which fires on spawn and on
+// activity — NEVER on a timer. Verified on this machine: an idle tab's file sat 375 minutes untouched with a
+// live Claude process attached. So polling it harder cannot help; there is no fresher data to find until the
+// next message. What we CAN do is refuse to keep asserting a number whose window has already rolled over —
+// otherwise you come back in the morning to yesterday's 96% and believe it.
+function rateExpired(r, now) {
+  const at = r && r.five_hour && r.five_hour.resets_at;
+  return typeof at === 'number' && at > 0 && (now / 1000) >= at;
+}
 function setOwnRate(r) {
-  _ownRate = r;
   const box = $('trk-usage'); if (!box) return;
   const five = r && r.five_hour;
   if (!five || typeof five.used_percentage !== 'number') return;   // absent = UNKNOWN; leave the box as-is rather than painting a false 0%
+  if (rateExpired(r, Date.now())) { _ownRate = _ownRate || r; renderRateStale(); return; }   // a dead window's number is not news
+  // Several tabs report independently and an IDLE tab's file never changes, so main sends its stale copy once
+  // at boot and never again — last-writer-wins let that clobber a fresh one purely on poll order. resets_at is
+  // the window's identity: a later reset means a newer window, so it decides which reading is authoritative.
+  const prev = _ownRate && _ownRate.five_hour && _ownRate.five_hour.resets_at;
+  if (typeof prev === 'number' && typeof five.resets_at === 'number' && five.resets_at < prev) return;
+  _ownRate = r;
   const pct = Math.max(0, Math.min(100, Math.round(five.used_percentage)));
   box.style.display = '';                                          // first real payload reveals it (hidden for API-key users forever, by design)
   box.className = 'usagebar ' + rateClass(pct);
@@ -675,6 +691,20 @@ function setOwnRate(r) {
     + '\nClick for detail';
   if (_usagePopOpen) renderUsagePop();                             // keep an open popover live rather than stale
 }
+// Deliberately "—", not 0%. The limit is ACCOUNT-wide, so after a reset we genuinely do not know what has been
+// consumed elsewhere; 0% would be right most mornings and a confident lie the rest. Dimmed, no cells lit.
+function renderRateStale() {
+  const box = $('trk-usage'); if (!box) return;
+  box.style.display = '';
+  box.className = 'usagebar u-stale';
+  box.dataset.cells = '0';
+  const el = $('ub-pct'); if (el) el.textContent = '—';
+  box.title = 'Your usage window has reset — this refreshes on your next message.';
+  if (_usagePopOpen) renderUsagePop();
+}
+// One cheap timestamp comparison, no IO and no network: the ONLY thing that can change while you sit idle is
+// the clock passing resets_at. 30s is well under any window and costs nothing measurable.
+setInterval(() => { if (_ownRate && rateExpired(_ownRate, Date.now())) renderRateStale(); }, 30000);
 let _usagePopOpen = false;
 function renderUsagePop() {
   const pop = $('usage-pop'); if (!pop || !_ownRate) return;
@@ -684,6 +714,10 @@ function renderUsagePop() {
          + `<span class="up-v">${Math.round(pct)}%</span></p>`;
   };
   const f = _ownRate.five_hour || {}, w = _ownRate.seven_day || {};
+  if (rateExpired(_ownRate, Date.now())) {
+    pop.innerHTML = '<span class="wt">Plan usage</span><p>Your 5-hour window has reset. The figures refresh on your next message — Claude only reports them when it is working.</p>';
+    return;
+  }
   pop.innerHTML = '<span class="wt">Plan usage</span>'
     + row('5-hour window', f.used_percentage, f.resets_at)
     + row('This week', w.used_percentage, w.resets_at)
@@ -2828,6 +2862,21 @@ function loadPrefs() {
   }
   return loadPrefs._cache;
 }
+// LAST-ACTIVE SESSION, per workspace. Kept in prefs rather than derived at boot: "the one I had open" is a
+// fact about the user, and every filesystem proxy for it (mtime, and `used`, which folds mtime in) is mutated
+// by background work like a sessions-sync pull. Bounded — one id per workspace, and workspaces are few.
+function lastSessionFor(wsId) {
+  if (!wsId) return null;
+  const m = loadPrefs().lastSession;
+  return (m && typeof m === 'object' && typeof m[wsId] === 'string') ? m[wsId] : null;
+}
+function rememberLastSession(wsId, sessionId) {
+  if (!wsId || !sessionId || sessionId === 'new') return;   // a draft is not somewhere you can be restored to
+  const m = Object.assign({}, loadPrefs().lastSession || {});   // copy: the cached prefs object may be frozen
+  if (m[wsId] === sessionId) return;                            // no write when nothing changed
+  m[wsId] = sessionId;
+  savePrefs({ lastSession: m });
+}
 function savePrefs(patch) {
   const p = loadPrefs(); Object.assign(p, patch);
   try { if (window.claudible && claudible.settingsSave) claudible.settingsSave(p); } catch {}   // durable, synchronous file write
@@ -4161,7 +4210,18 @@ async function refreshSessions() {
   // live tab is on screen: it has no local session id (permanently ''), so this guess used to paint the orange
   // you-are-here highlight on whatever unrelated old session had the newest file mtime (the "'bro join' shows
   // as selected" bug). A joined tab's own pinned row already carries the active highlight via dataset.tab.
-  if (!activeSession && list.length && !(AT() && (AT().session === 'new' || AT().kind === 'live'))) { const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]; activeSession = (mru || ordered[0]).id; }
+  // Boot highlight. FIRST choice is the session you were genuinely last in, remembered on every switch —
+  // because no filesystem timestamp can express that: raw `mtime` moves whenever anything rewrites the
+  // transcript (a sessions-sync pull rewrote an untouched session and it won this race at every boot), and
+  // `used` cannot rescue it either, being Math.max(lastTs, act, mtime) in wsl/sessions-tool.js — the mtime
+  // leaks straight back in. The old newest-mtime guess stays only as the fallback for a first run, or when
+  // the remembered session has since been deleted.
+  if (!activeSession && list.length && !(AT() && (AT().session === 'new' || AT().kind === 'live'))) {
+    const remembered = lastSessionFor(activeWsId);
+    const still = remembered && list.some((x) => x && x.id === remembered);
+    const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0];
+    activeSession = still ? remembered : (mru || ordered[0]).id;
+  }
   const act = sessIndex[activeSession];
   const at = AT();
   if (at && act && !at.curSessionLabel) { at.curSessionLabel = sessTitle(act); pushTracker(); }    // tell guests which session is live — by its SHARED name (sessTitle), not the raw first-prompt preview, so a joiner sees the same title the sidebar shows everywhere (preview-seeding was why MK and a joiner could see two different names for one session)
@@ -4463,6 +4523,7 @@ async function openSession(id, label, opts) {
   t.label = (id === 'new') ? 'New session' : (label || 'Session');
   t.curSessionLabel = (id === 'new') ? 'New session' : (label || '');      // mirrored to guests
   activeSession = (id === 'new') ? null : id;
+  rememberLastSession(t.wsId || activeWsId, activeSession);   // boot restores THIS, not a filesystem-timestamp guess
   updateAdvertise();                                  // if I'm sharing in a repo workspace, advertise the now-active session
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
   t.term.reset(); t.altFrac = 0;                       // clear this tab's view (the new pty repaints it) + reset its scroll estimate

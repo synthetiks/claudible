@@ -1129,5 +1129,42 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     tolTool && tolApp && tolTool === tolApp ? [] : [`SKEW_TOL=${tolTool} vs SKEW_TOL_S=${tolApp}`]);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 37. TWO "THE APP IS CONFIDENTLY WRONG AFTER SITTING IDLE" BUGS.
+//
+//   (a) The usage gauge asserted a DEAD window. status.json is written by Claude Code's statusLine, which
+//       fires on spawn and on activity and NEVER on a timer — an idle tab's file was measured 375 minutes
+//       untouched with a live Claude attached. So it cannot be polled fresher; the only defence is to stop
+//       trusting a reading once resets_at has passed. Two separate failures fed the reported 96%-all-morning:
+//       an expired reading was painted at boot, and — because main dedupes unchanged files and sends a stale
+//       one exactly once — whichever tab reported LAST won, regardless of which reading was newer.
+//   (b) The boot highlight guessed from raw file mtime, which any background rewrite (a sessions-sync pull)
+//       bumps on a session the user never opened. `used` is NOT a fix: sessions-tool.js defines it as
+//       Math.max(lastTs, act, mtime), so the mtime leaks straight back in.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('an expired usage window is painted as if it were current',
+    /if \(rateExpired\(r, Date\.now\(\)\)\) \{[^}]*renderRateStale\(\); return; \}/.test(APP) ? [] : ['setOwnRate does not reject an expired reading before painting']);
+  none('nothing re-checks expiry while the app sits idle (the whole reported bug)',
+    /setInterval\(\(\) => \{ if \(_ownRate && rateExpired\(_ownRate, Date\.now\(\)\)\) renderRateStale\(\); \}/.test(APP) ? [] : ['no idle re-check timer']);
+  none('a stale reading can clobber a fresher one again (last-writer-wins across tabs)',
+    /five\.resets_at < prev\) return;/.test(APP) ? [] : ['setOwnRate no longer prefers the newer window by resets_at']);
+  // The stale state must read as UNKNOWN, not as a reassuring 0% — the limit is account-wide, so what was
+  // consumed on another machine after the reset is genuinely unknowable from here.
+  none('the stale gauge asserts a number instead of admitting it does not know',
+    /function renderRateStale[\s\S]{0,400}?textContent = '—'/.test(APP) ? [] : ['renderRateStale does not blank the reading']);
+  none('…and the popover still reports a dead window as current',
+    /renderUsagePop[\s\S]{0,600}?rateExpired\(_ownRate, Date\.now\(\)\)/.test(APP) ? [] : ['the popover does not check expiry']);
+
+  // (b) boot session restore
+  none('the boot highlight guesses from raw file mtime again (a synced session steals it)',
+    /const remembered = lastSessionFor\(activeWsId\);[\s\S]{0,300}?activeSession = still \? remembered :/.test(APP) ? [] : ['boot no longer prefers the remembered session']);
+  none('nothing records which session you were actually in',
+    /rememberLastSession\(t\.wsId \|\| activeWsId, activeSession\)/.test(APP) && /function rememberLastSession/.test(APP) ? [] : ['openSession does not remember the switch']);
+  // A draft has no id to come back to; persisting it would restore you to nothing.
+  none('a draft session is remembered as somewhere to restore to',
+    /function rememberLastSession[\s\S]{0,300}?sessionId === 'new'\) return;/.test(APP) ? [] : ['rememberLastSession does not skip drafts']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
