@@ -1302,6 +1302,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // The stylesheet must NOT re-add translateX(-50%): it would fight the measured left placeCmdk sets.
   none('the centring transform is back, fighting the measured position',
     /\.cmdk\.show\{[^}]*translateX\(-50%\)/.test(HTML) ? ['.cmdk.show still applies translateX(-50%)'] : []);
+  // Anchoring by `bottom` must also RELEASE `top`, and release it to 'auto' rather than ''. Clearing an inline
+  // value falls back to the stylesheet's top:18vh, and a box pinned at both edges stretches to span them —
+  // which renders as dead space under the list. Exactly the trap the toast hit; caught here a second time.
+  none('the palette pins top AND bottom again (it stretches, leaving dead space below the list)',
+    /box\.style\.top = 'auto';/.test(APP) ? [] : ["placeCmdk does not release top to 'auto'"]);
   // The voice labels were --ink-faint on the box background: 2.85:1, below even the 3:1 large-text floor.
   none('the Talk/Read labels faded back to near-invisible',
     /\.vbox \.vstat\{[^}]*color:var\(--ink-dim\)/.test(HTML) ? [] : ['.vbox .vstat is not --ink-dim']);

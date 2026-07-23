@@ -1222,7 +1222,9 @@ function placeCmdk() {
   if (!box) return;
   if (!btn) { box.style.left = '50%'; box.style.top = '18vh'; box.style.bottom = ''; return; }   // trigger gone (agents pane) → centre
   const r = btn.getBoundingClientRect();
-  box.style.top = '';
+  box.style.top = 'auto';   // 'auto', NOT '': clearing the inline value falls back to the stylesheet's top:18vh, and a
+                            // box pinned at BOTH top and bottom stretches to span them — which is the empty space
+                            // below the list. Same trap the toast hit; one edge only.
   box.style.bottom = Math.round(Math.max(8, window.innerHeight - r.top + 8)) + 'px';   // sit ABOVE the button
   const w = box.offsetWidth || 560;
   box.style.left = Math.round(Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)) + 'px';   // right-align to the trigger, clamped
