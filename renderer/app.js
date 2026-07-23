@@ -3664,6 +3664,43 @@ function renderLivePeerRow(peer) {
 }
 // ---- native joined-session tab: render + drive a peer's live session inside the cockpit -----------------
 const LIVE_STATE_LABEL = { '': 'live', live: 'live', connecting: 'connecting…', pending: 'waiting for host…', reconnecting: 'reconnecting…', paused: 'paused', denied: 'declined', offline: 'ended' };
+// ---- the joined row's meta: ONE builder, used by both paths that paint it ------------------------------
+// renderJoinedTabRow() creates the row and setLiveState() rebuilds this line on every state change. They used
+// to hold two copies of the same markup, so a fix to one silently reverted the moment the state moved. They
+// share this now.
+//
+// It renders the SAME component the host's own live row uses — .sess-live-ind → .live-dot + .liw — so a joined
+// session reads exactly like a shared one, one word different: "Session Name … ● Joined". The old line was
+// "● joined · CRAZY · live": a literal ● baked into the TITLE string, a second .sess-livedot span, and ~150px
+// of prose in a flex:none cluster. On a narrow sidebar that starved the flex:1 title down to a bare "…".
+function joinedWho(rec) { return (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator'; }
+// "Joined" only while actually joined. Every other state keeps its existing LIVE_STATE_LABEL word, because a
+// badge that always says "Joined" would claim you are connected while you are reconnecting, declined or ended.
+function joinedBadgeWord(rec) {
+  if (rec.sessMismatch) return 'host moved';
+  const st = rec.liveState || '';
+  if (st !== '' && st !== 'live') return LIVE_STATE_LABEL[st] || 'joined';
+  // R26: a read-only mirror that doesn't SAY so is a trap — you type and nothing happens, with no explanation.
+  // The one-off join toast isn't enough on its own, so the row keeps a persistent word. Still one short word,
+  // and 'view-only' is the vocabulary the rest of the product already uses.
+  return rec.liveReadOnly ? 'view-only' : 'joined';
+}
+function joinedBadge(rec) {
+  const lv = document.createElement('span'); lv.className = 'sess-live-ind';
+  const d = document.createElement('span'); d.className = 'live-dot';
+  const w = document.createElement('span'); w.className = 'liw'; w.textContent = joinedBadgeWord(rec);
+  lv.appendChild(d); lv.appendChild(w);
+  return lv;
+}
+// The detail that used to eat the row moves here: hovering costs no width. rec.liveReason is host-controlled,
+// so this is assembled as a plain string and assigned to .title (an attribute, never parsed as markup).
+function joinedTooltip(rec) {
+  const bits = ['Joined ' + joinedWho(rec) + '’s live session'];
+  if (rec.sessMismatch) bits.push('the host moved to another session');
+  if (rec.liveReadOnly) bits.push('view-only');
+  if ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) bits.push(liveReasonText(rec.liveReason));
+  return bits.join(' · ');
+}
 // R30: the server's denial/offline reasons are bare wire codes ('full', 'busy', 'removed', 'revoked') and used
 // to paint onto the joined row verbatim (" — full"). Map the known codes; anything else — a host-controlled
 // string — goes through humanError so a raw code or junk can never render (textContent already escapes it).
@@ -3701,12 +3738,12 @@ function setLiveState(rec, state, detail) {
     else if (rec.liveState === 'connecting' || rec.liveState === 'live' || rec.liveState === '') deadPeerSessions.delete(sid);
     if (deadPeerSessions.has(sid) !== was) { try { livePeersSig = ''; refreshSessions(); refreshExpandedTrees(); } catch (e) {} }   // force the badge to recompute through peersForWs on the next paint
   }
-  const meta = document.querySelector('[data-livetab="' + rec.tabId + '"] .sess-meta');
-  if (meta) {   // build via text nodes — rec.liveReason is a host-controlled ('denied') string; textContent escapes it (CSP is not the only XSS guard)
+  const jrow = document.querySelector('[data-livetab="' + rec.tabId + '"]');
+  const meta = jrow && jrow.querySelector('.sess-meta');
+  if (meta) {   // SAME builder as renderJoinedTabRow — this path repaints on every state change and must not drift
     meta.textContent = '';
-    const dot = document.createElement('span'); dot.className = 'sess-livedot'; meta.appendChild(dot);
-    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + liveReasonText(rec.liveReason) : '';   // R30: wire codes become sentences
-    meta.appendChild(document.createTextNode('joined · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + reason));
+    meta.appendChild(joinedBadge(rec));
+    jrow.title = joinedTooltip(rec);
   }
   let ov = rec.container.querySelector('.live-ov');
   if (!(state && state !== 'live')) { if (ov) ov.classList.remove('show'); return; }
@@ -3793,16 +3830,14 @@ function renderJoinedTabRow(rec) {
   const row = document.createElement('div');
   row.className = 'sess sess-joined-live' + (rec.tabId === activeTabId ? ' active' : '');
   row.dataset.livetab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
-  const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'collaborator';
+  const who = joinedWho(rec);
   const sessName = rec.liveSessName || '';                                          // host's real current session name (once reported), else a host-name placeholder
-  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = '● ' + (sessName || rec.joinedAsLabel || (who + '’s session'));
-  const m = document.createElement('div'); m.className = 'sess-meta';   // who (peer name) + rec.liveReason are host-controlled → build via text nodes so they're escaped (CSP is not the only XSS guard)
-  const mdot = document.createElement('span'); mdot.className = 'sess-livedot'; m.appendChild(mdot);
-  if (rec.sessMismatch) m.appendChild(document.createTextNode('⚠ host moved to another session · ' + who));
-  else {
-    const reason = ((rec.liveState === 'offline' || rec.liveState === 'denied') && rec.liveReason) ? ' — ' + liveReasonText(rec.liveReason) : '';   // R30: wire codes become sentences
-    m.appendChild(document.createTextNode('joined · ' + who + ' · ' + (LIVE_STATE_LABEL[rec.liveState] || 'live') + (rec.liveReadOnly ? ' · view-only' : '') + reason));   // R26
-  }
+  // No literal '● ' prefix: it was a SECOND live dot, and being the title's first character it was the glyph
+  // that survived truncation — which is why a starved row rendered as "● …" instead of the session name.
+  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = (sessName || rec.joinedAsLabel || (who + '’s session'));
+  const m = document.createElement('div'); m.className = 'sess-meta';
+  m.appendChild(joinedBadge(rec));                                                  // SAME builder as setLiveState
+  row.title = joinedTooltip(rec);                                                   // host name / view-only / reason live here now — no row width spent on them
   row.appendChild(p); row.appendChild(m);
   // R14: a dead mirror had NO rejoin affordance — the row offered only focus and ✕ Leave, so a guest whose
   // reconnect budget ran out had to leave and re-find the Join badge (which needs live presence). ↻ re-dials:

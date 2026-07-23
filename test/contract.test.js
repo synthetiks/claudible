@@ -805,7 +805,10 @@ none('renderer: orphanTab is never rendered',
   none('openLiveTab toasts a raw JS exception on a join crash (R16)',
     /toast\('Join failed: ' \+ humanError\(e && e\.message\)\)/.test(APP) ? [] : ['join catch bypasses humanError']);
   none('the joined row paints raw wire denial codes (R30)',
-    /function liveReasonText\(/.test(APP) && (APP.match(/liveReasonText\(rec\.liveReason\)/g) || []).length === 2 ? [] : ['both row sites must map through liveReasonText']);
+    /function liveReasonText\(/.test(APP)
+      && /function joinedTooltip\(rec\)[\s\S]{0,400}?liveReasonText\(rec\.liveReason\)/.test(APP)
+      && (APP.match(/appendChild\(joinedBadge\(rec\)\)/g) || []).length === 2   // BOTH paint paths go through the one builder (calls, not the definition)
+      ? [] : ['wire codes must map through liveReasonText in the shared joined-row builder, used by both sites']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1023,7 +1026,9 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 {
   const DISC = read('wsl/sessions-discover.sh');
   none('a read-only mirror is indistinguishable again (R26)',
-    /View-only — the host shared a watch link/.test(APP) && /rec\.liveReadOnly \? ' · view-only' : ''/.test(APP) ? [] : ['toast + row label required']);
+    /View-only — the host shared a watch link/.test(APP)
+      && /return rec\.liveReadOnly \? 'view-only' : 'joined';/.test(APP)   // persistent ROW word, not just the join toast
+      ? [] : ['toast + a persistent read-only word on the joined row are both required']);
   none('a hard reconnect strands the voice room again (R27)',
     /rec\.liveWasLost\) \{ try \{ liveVoice\.leave\(\); liveVoice\.join\(\)/.test(APP) && /rec\.liveWasLost = true/.test(APP) ? [] : ['loss flag + hello re-arm required']);
   none('discovery reports [] when it cannot look (R31 — "all caught up" on a machine with no gh)',
@@ -1802,6 +1807,38 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the install button is not gated on the missing-binary reason']);
   none('the 5–10s wait is unexplained (silence reads as a hang)',
     /creating your live link… this usually takes 5–10 seconds/.test(APP) ? [] : ['no progress message naming the expected duration']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 55. A JOINED ROW READS LIKE A SHARED ONE — ONE NAME, ONE DOT, ONE WORD.
+//   It used to render "● joined · CRAZY · live": a literal ● baked into the TITLE STRING, a second .sess-livedot
+//   span, and ~150px of prose in a flex:none cluster. Against the flex:1 title that starved the session name to
+//   a bare "…" on a narrow sidebar — and the ● survived, being the title's first glyph. It now uses the SAME
+//   .sess-live-ind badge the host's own live row uses, so the two read alike.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the joined title carries a literal ● that duplicates the dot and eats the truncation budget',
+    !/sess-prev'; p\.textContent = '● '/.test(APP) ? [] : ['the joined row still prefixes a ● character to its title']);
+  none('…and a second .sess-livedot span is still built beside the badge',
+    !/sess-livedot/.test(APP.replace(/\/\/[^\n]*/g, '')) ? [] : ['.sess-livedot is still created in the renderer']);
+  none('the joined row does not reuse the host live row’s badge component',
+    /function joinedBadge\(rec\)[\s\S]{0,300}?className = 'sess-live-ind'/.test(APP)
+      && /className = 'live-dot'/.test(APP) && /className = 'liw'/.test(APP)
+      ? [] : ['the joined badge is not built from .sess-live-ind + .live-dot + .liw']);
+  // THE TRAP: renderJoinedTabRow() builds this line and setLiveState() REBUILDS it on every state change.
+  // Fixing one leaves the row reverting to the old shape the moment the connection state moves.
+  none('only one of the two paint paths was fixed (the other reverts on the next state change)',
+    (APP.match(/appendChild\(joinedBadge\(rec\)\)/g) || []).length === 2
+      ? [] : ['both renderJoinedTabRow and setLiveState must paint via the shared builder']);
+  none('…and the host username / prose is back on the row, starving the title again',
+    !/'joined · '/.test(APP) ? [] : ['the joined row rebuilt its prose meta line']);
+  // The badge must not claim "joined" while the mirror is anything but live.
+  none('the badge claims "joined" while reconnecting, declined or ended',
+    /if \(st !== '' && st !== 'live'\) return LIVE_STATE_LABEL\[st\] \|\| 'joined';/.test(APP)
+      ? [] : ['joinedBadgeWord ignores the live state']);
+  none('…and the detail it dropped is not reachable at all',
+    /function joinedTooltip\(rec\)/.test(APP) && /[^a-zA-Z]row\.title = joinedTooltip\(rec\)/.test(APP) && /jrow\.title = joinedTooltip\(rec\)/.test(APP)
+      ? [] : ['host name / view-only / reason are not preserved in the row tooltip on both paths']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
