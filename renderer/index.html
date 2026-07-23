@@ -610,7 +610,11 @@
     .sess-empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:20px;line-height:1.5}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
-    .sess-menu-btn{position:absolute;top:50%;transform:translateY(-50%);right:6px;display:flex;align-items:center;justify-content:center;
+    /* Centered with top/bottom/margin:auto, NOT transform:translateY(-50%). The global button:active press is
+       `transform:translateY(1px)` at higher specificity, so a centering transform gets REPLACED on mousedown —
+       the button jumped from mid-row to the row's top edge and back (the "jiggle"). transform is the press
+       animation's alone; layout must never borrow it. */
+    .sess-menu-btn{position:absolute;top:0;bottom:0;margin:auto 0;right:6px;display:flex;align-items:center;justify-content:center;
       width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
       color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
       transition:opacity .15s,color .15s,border-color .15s,background .15s}

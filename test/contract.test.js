@@ -498,6 +498,22 @@ none('renderer: orphanTab is never rendered',
   const gi = flat.indexOf('.sess.sess-done .sess-prev'), bi = flat.indexOf('.sess.sess-done.busy .sess-prev');
   none('a resumed row still wears done’s green title (cascade order regressed)',
     gi >= 0 && bi > gi ? [] : ['.sess.sess-done.busy .sess-prev must come AFTER .sess.sess-done .sess-prev']);
+  // TRANSFORM BELONGS TO THE PRESS, NOT TO LAYOUT. `button:active{transform:translateY(1px)}` is global and
+  // outranks a plain class rule, so any BUTTON centered with transform:translate*(-50%) gets its centering
+  // REPLACED on mousedown — it leaps to the container's edge and back. The ▾ shipped exactly that for one
+  // commit ("jiggles concerningly"). Centre buttons with top/bottom + margin:auto instead.
+  const BTNISH = /\.(?:[a-z-]*-btn|iconbtn|ws-add|share-btn|cmdpill|termtab|ws-info|sess-flair|panel-close)\b/;
+  const jig = [];
+  // Comments must be stripped FIRST: they trail into the next rule's selector chunk, and a comment that merely
+  // mentions `:active` (like the one above the ▾) would silently exempt the very rule it documents.
+  flat.replace(/\/\*[\s\S]*?\*\//g, '').split('}').forEach((chunk) => {
+    const [sel, body] = chunk.split('{');
+    if (!sel || !body || !BTNISH.test(sel) || /:active/.test(sel)) return;
+    if (/transform\s*:\s*[^;]*translate[^;]*-50%/.test(body)) jig.push(sel.trim().slice(0, 60) + ' centres with transform');
+  });
+  none('a button uses transform for centring (button:active will clobber it → the press jiggles)', jig);
+  none('…and the ▾ itself must stay on the transform-free centring',
+    /\.sess-menu-btn\{[^}]*top:0;bottom:0;margin:auto 0/.test(flat) ? [] : ['.sess-menu-btn is no longer centred by top/bottom + margin:auto']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
