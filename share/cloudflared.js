@@ -30,6 +30,18 @@ function candidates(opts) {
     const wp = path.join(process.env.LOCALAPPDATA, WINGET_REL);
     if (fs.existsSync(wp)) list.push(wp);   // deterministic, beats PATH-propagation lag
   }
+  // The official Windows .msi installs here, NOT under %LOCALAPPDATA%, so the winget shortcut above never
+  // covered it and we fell through to a bare PATH lookup. That lookup uses the PATH Electron INHERITED at
+  // launch: install cloudflared while the app is open (or in any session that started before the installer
+  // touched PATH) and the spawn fails with ENOENT even though `where cloudflared` finds it in a fresh shell.
+  // The failure is silent — share:start still returns ok with a 127.0.0.1 URL — so the user hands a
+  // collaborator a link pointing at the collaborator's own machine. Same reasoning as the winget entry:
+  // check the deterministic location before trusting PATH.
+  for (const root of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], 'C:\\Program Files', 'C:\\Program Files (x86)']) {
+    if (!root) continue;
+    const mp = path.join(root, 'cloudflared', 'cloudflared.exe');
+    if (!list.includes(mp) && fs.existsSync(mp)) list.push(mp);
+  }
   list.push('cloudflared.exe', 'cloudflared');
   return list;
 }

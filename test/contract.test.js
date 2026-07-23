@@ -1336,5 +1336,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     runners.filter((f) => !/child\.once\('spawn', \(\) => \{ try \{ opts\.onSpawn\(\)/.test(read(f))));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 41. A TUNNEL-LESS SHARE MUST NOT LOOK LIKE A WORKING ONE.
+//   share:start deliberately returns ok:true with a 127.0.0.1 URL when cloudflared fails — a local link is
+//   genuinely useful on your own machine. But 127.0.0.1 means "this computer" to whoever opens it, so a
+//   collaborator gets only "site can't be reached". The standing chip sits at the bottom of the sidebar,
+//   easy to miss at exactly the moment you are copying a link to send someone.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const CF = read('share/cloudflared.js');
+  none('a degraded (local-only) share is silent again',
+    /r\.remote === false\)\s*\{[\s\S]{0,400}?only works on THIS machine/.test(APP)
+      ? [] : ['nothing tells the user the link is local-only at the moment it happens']);
+  // The .msi installs to Program Files, not %LOCALAPPDATA%, so the winget shortcut never covered it and the
+  // lookup fell through to a bare PATH spawn — which uses the PATH Electron inherited AT LAUNCH. Installing
+  // cloudflared while the app is open then fails with ENOENT even though `where cloudflared` finds it.
+  none('the cloudflared lookup trusts PATH alone for a Program Files install',
+    /ProgramFiles\(x86\)/.test(CF) && /'cloudflared', 'cloudflared\.exe'/.test(CF)
+      ? [] : ['candidates() does not check the .msi install locations explicitly']);
+  none('…and the explicit paths must be tried BEFORE the bare PATH lookup',
+    CF.indexOf("ProgramFiles(x86)") < CF.indexOf("list.push('cloudflared.exe'")
+      ? [] : ['the PATH fallback is ordered ahead of the deterministic paths']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

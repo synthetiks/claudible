@@ -3245,7 +3245,18 @@ async function ensureTunnel() {
       const ro = (!collabLive && webShare) ? !!$('share-ro').checked : false;   // collab is always co-drive
       const nm = collabName() || hostDisplayName || 'Host';   // one Claudible username, used hosting + joining
       const r = await claudible.shareStart({ readOnly: ro, name: nm });
-      if (r && r.ok) { tunnelUp = true; lastShareUrl = r.url; lastShareRemote = r.remote; lastShareNote = r.note; lastShareReadOnly = !!r.readOnly; }
+      if (r && r.ok) {
+        tunnelUp = true; lastShareUrl = r.url; lastShareRemote = r.remote; lastShareNote = r.note; lastShareReadOnly = !!r.readOnly;
+        // A tunnel failure still returns ok:true with a 127.0.0.1 URL, because a local link is genuinely
+        // useful on your own machine. But that link means "this computer" to whoever opens it, so a
+        // collaborator sees only "site can't be reached" — and the standing chip lives at the bottom of the
+        // sidebar, which is easy to miss at exactly the moment you are copying a link to send someone. Say it
+        // once, loudly, at the moment it happens.
+        if (r.remote === false) {
+          toast('This link only works on THIS machine — the public tunnel didn’t start'
+            + (r.note ? ' (' + r.note + ')' : '') + '. Don’t send it yet; Claudible is retrying in the background.');
+        }
+      }
     } else {
       await claudible.shareStop(); tunnelUp = false; lastShareUrl = ''; guestCount = 0; lastRoster = [];   // no tunnel → no viewers
     }
