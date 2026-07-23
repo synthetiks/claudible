@@ -1666,5 +1666,41 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the context meter was removed too']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 51. GUEST CHROME: A READABLE TYPING LINE, A SLEEK CHAT SCROLLBAR, A GROUPED TOP BAR, A TIGHTER FRAME.
+//   The typing hint was a 10px pill in the corner reading "✎ MK" — too small to notice and too cryptic to
+//   parse. It is now a sentence ("<name> is typing…") centred at the TOP of the pane: terminal activity
+//   belongs over the terminal, and never at the bottom where the prompt and cursor live.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const gflat = GUEST_HTML.replace(/\s*\n\s*/g, '');
+  none('the typing hint is still a tiny corner pill',
+    /\.typist-chip\{[^}]*top:0;left:50%/.test(gflat) && !/\.typist-chip\{[^}]*border-radius:999px/.test(gflat)
+      ? [] : ['.typist-chip is not the centred top banner (or is still pill-shaped)']);
+  none('…and it never says what is actually happening',
+    /' is typing…'/.test(GUEST_JS) && !/'✎ '/.test(GUEST_JS)
+      ? [] : ['the chip does not read "<name> is typing…"']);
+  // Names are collaborator-supplied. The old code used textContent (safe); the new markup has a <b>, so it must
+  // be BUILT FROM NODES — an innerHTML shortcut here would be an XSS hole on someone else's machine.
+  none('the typing line interpolates a collaborator-supplied name into HTML',
+    /var b = document\.createElement\('b'\); b\.textContent = String\(name\)/.test(GUEST_JS)
+      && !/chip\.innerHTML/.test(GUEST_JS)     // an assignment, not the word — a comment mentioning innerHTML must not trip this
+      ? [] : ['the typist name is not built from text nodes']);
+  none('the guest chat scrollbar is still the browser default',
+    /\.gchat-log::-webkit-scrollbar\{width:7px\}/.test(gflat) && /\.gchat-log\{scrollbar-width:thin/.test(gflat)
+      ? [] : ['.gchat-log has no thin/custom scrollbar styling']);
+  none('…and it is painted at rest instead of fading in on hover',
+    /\.gchat-log::-webkit-scrollbar-thumb\{background:transparent/.test(gflat) && /\.gchat:hover \.gchat-log::-webkit-scrollbar-thumb\{background:rgba/.test(gflat)
+      ? [] : ['the chat scrollbar thumb is not transparent-at-rest + hover-revealed']);
+  none('the top bar does not group the session with its "shared live session" label',
+    /class="sesslbl">shared live session:<\/span><b id="sess-chip-text">/.test(GUEST_HTML) && /class="barsep"/.test(GUEST_HTML)
+      ? [] : ['the session label/name group or the brand separator is missing']);
+  none('…and the old free-floating "shared" tag came back beside the wordmark',
+    !/<span class="tag">/.test(GUEST_HTML) ? [] : ['the standalone .tag element is back']);
+  none('the vertical frame around the terminal was not tightened',
+    /\.wrap\{[^}]*padding:7px 14px/.test(gflat) && /#terminal\{[^}]*padding:5px 12px/.test(gflat)
+      ? [] : ['the .wrap / #terminal vertical padding is not halved']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

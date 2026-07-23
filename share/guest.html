@@ -27,7 +27,8 @@
       background:linear-gradient(180deg,#0d0f13,#090a0c);font-size:12px;letter-spacing:.04em}
     .bar .logo{height:30px;width:auto;mix-blend-mode:lighten;image-rendering:pixelated}
     .bar .name{font-weight:500;letter-spacing:.3em;text-transform:uppercase;color:var(--silver);font-size:14px}
-    .bar .tag{font-size:10px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase}
+    /* the old free-floating "shared" tag was absorbed into the session group below */
+    .barsep{flex:none;width:1px;height:17px;background:var(--hairline);margin:0 3px}
     .pill{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
       border:1px solid var(--hairline);border-radius:7px;padding:3px 8px}
     .pill.ro{color:var(--amber);border-color:rgba(224,169,59,.4)}
@@ -61,7 +62,7 @@
     /* overflow:HIDDEN on desktop — the terminal is scaled to fit the pane, so a scrollable outer area can only
        ever be a rounding artifact, and a phantom scroll outside the terminal is confusing. Phones/narrow layouts
        re-enable overflow further down: there the grid is deliberately wider than the screen and you pan it. */
-    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:14px;overflow:hidden;-webkit-overflow-scrolling:touch}
+    .wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:0;padding:7px 14px;overflow:hidden;-webkit-overflow-scrolling:touch}
     .gchat{min-width:0}
     /* guest chat — human↔human side channel with the host */
     .gchat{flex:none;width:300px;display:flex;flex-direction:column;min-height:0;margin:14px 14px 14px 0;
@@ -87,6 +88,16 @@
     .gchat .cdot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 8px -1px var(--live);display:none;flex:none}
     .gchat.collapsed.has-unread .cdot{display:inline-block}
     .gchat-log{flex:1;min-height:0;overflow:auto;padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+    /* The chat log was the one scroll region on this page with NO styling, so it fell back to the browser's
+       chunky default bar. Mirror the cockpit's .ws-chips treatment: thin, invisible at rest, fading in only
+       while the panel is hovered. Firefox can't do the hover-fade (no ::-webkit pseudo), so it gets a
+       permanently thin, low-contrast bar via the standard properties. */
+    .gchat-log{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.14) transparent}
+    .gchat-log::-webkit-scrollbar{width:7px}
+    .gchat-log::-webkit-scrollbar-track{background:transparent}
+    .gchat-log::-webkit-scrollbar-thumb{background:transparent;border:2px solid transparent;background-clip:padding-box;border-radius:8px;transition:background .2s ease}
+    .gchat:hover .gchat-log::-webkit-scrollbar-thumb{background:rgba(255,255,255,.13);background-clip:padding-box}
+    .gchat-log::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
     .chat-msg{position:relative;max-width:88%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}
     .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
     .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6;border-bottom-right-radius:4px}
@@ -109,7 +120,7 @@
     .gchat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-family:inherit;font-size:0;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,#101216);border:1px solid var(--hairline);cursor:pointer;display:flex;align-items:center;justify-content:center}
     .gchat-input button::after{content:'→';font-size:15px;line-height:1}
     .gchat-input button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
-    #terminal{background:#0a0b0d;border:1px solid var(--hairline);border-radius:11px;padding:10px 12px;
+    #terminal{background:#0a0b0d;border:1px solid var(--hairline);border-radius:11px;padding:5px 12px;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
     /* hide xterm's native scrollbar (it sits over the text) — mirror the cockpit and render our own gutter */
     #terminal .xterm-viewport{scrollbar-width:none}
@@ -167,6 +178,8 @@
       border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);box-shadow:inset 0 1px 0 var(--sheen)}
     .sesschip .dot{flex:none}   /* the chip's dot is the connection indicator (uses the shared .dot ok/bad/work colors) */
     .sesschip b{font-weight:600;color:var(--silver);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sesschip b::before{content:'\201C'} .sesschip b::after{content:'\201D'}   /* quote the name so it reads as a title, not a label */
+    .sesslbl{flex:none;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
     /* "Disconnect" — a guest's own clean exit. Lives in the voice strip, pushed to the right (margin-left:auto)
        so voice controls stay on the left and "leave" reads as its own thing. Quiet red — leave-the-room, not a
        primary action. (The old projects/browse strip that used to host it was removed as redundant.) */
@@ -202,11 +215,19 @@
     .paused-ov .card h2{color:var(--amber)}
     /* "who's typing" pill — floats on the terminal's corner, names whoever's keystrokes are landing in the
        mirror (host or another guest — never you; the server skips the sender). Blue = identity, as in the cockpit. */
-    .typist-chip{position:absolute;top:8px;right:16px;z-index:4;padding:3px 10px;border-radius:999px;
-      font-size:10px;font-weight:600;letter-spacing:.04em;color:#7fb3e8;background:rgba(106,166,224,.14);
-      opacity:0;transition:opacity .18s ease;pointer-events:none;user-select:none;white-space:nowrap;max-width:45%;
+    /* "someone is typing" — a readable sentence, not a badge. A 10px pill in the corner reading "✎ MK" was too
+       small to notice and didn't say what was happening. Centred at the TOP of the pane: this is TERMINAL
+       activity so it belongs over the terminal, and top specifically because the prompt and cursor live at the
+       BOTTOM — the one place an overlay must never cover. Text on a soft scrim, no pill. */
+    .typist-chip{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:4;
+      max-width:74%;padding:6px 16px 8px;border-radius:0 0 10px 10px;
+      font-size:12px;letter-spacing:.02em;color:var(--ink-dim);
+      background:linear-gradient(180deg,rgba(10,12,16,.94),rgba(10,12,16,.74));
+      backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+      opacity:0;transition:opacity .18s ease;pointer-events:none;user-select:none;white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis}
     .typist-chip.show{opacity:1}
+    .typist-chip b{font-weight:600;color:#9fc6ef}   /* the name carries the emphasis; "is typing…" stays quiet */
     /* overlay shown while waiting for host approval / when denied */
     .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
       background:rgba(5,6,8,.78);backdrop-filter:blur(2px);z-index:5}
@@ -251,9 +272,12 @@
 <body>
   <div class="bar">
     <img class="logo" src="/logo.png" alt="" />
-    <span class="name">claudible</span><span class="tag">shared</span>
+    <span class="name">claudible</span>
+    <span class="barsep" aria-hidden="true"></span><!-- brand and session status are different things; give them a seam -->
+    <!-- "shared" used to float beside the wordmark while the session name sat in a separate chip, so nothing
+         said they were related. One group now reads: SHARED LIVE SESSION: "Name" ● -->
+    <span class="sesschip" id="sess-chip" title="Connection — green when live, red if disconnected" style="display:none"><span class="sesslbl">shared live session:</span><b id="sess-chip-text"></b><span class="dot" id="sess-dot"></span></span>
     <span class="pill ro" id="ro" style="display:none">read-only</span>
-    <span class="sesschip" id="sess-chip" title="Connection — green when live, red if disconnected" style="display:none"><span class="dot" id="sess-dot"></span><b id="sess-chip-text"></b></span>
     <span class="trk" title="host session usage">
       <!-- session cost + token count removed: they are the HOST's billing numbers and mean nothing to a guest
            watching the session. Context is the one figure that tells a viewer how much room is left. -->

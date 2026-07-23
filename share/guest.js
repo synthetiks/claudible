@@ -378,7 +378,10 @@ function applyStatus(s) {
 var typistTimer = null;
 function showTypist(name) {
   var chip = $('typist-chip'); if (!chip || !name) return;
-  chip.textContent = '✎ ' + String(name).slice(0, 40);   // textContent — names are collaborator-supplied
+  // "<name> is typing…" — built from NODES, never innerHTML: names are collaborator-supplied strings.
+  chip.textContent = '';
+  var b = document.createElement('b'); b.textContent = String(name).slice(0, 40);
+  chip.appendChild(b); chip.appendChild(document.createTextNode(' is typing…'));
   chip.classList.add('show');
   if (typistTimer) clearTimeout(typistTimer);
   typistTimer = setTimeout(function () { chip.classList.remove('show'); }, 3000);
