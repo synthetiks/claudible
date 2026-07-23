@@ -4,7 +4,50 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
-## [0.9.0] — 2026-07-21
+<!-- 0.9.0 was prepared but never tagged or released (latest published release is v0.8.2), so its section is
+     RENAMED to 0.9.1 rather than left behind a second dated heading — 0.8.3 and 0.8.4 are already sitting in
+     this file with no matching tag, and a third orphan would make the history actively misleading. Everything
+     below therefore ships together as 0.9.1. -->
+## [0.9.1] — 2026-07-23
+
+- **Plan usage in the top bar.** A gauge next to the context meter shows how much of your Claude 5-hour limit
+  you have burned — a 4-cell battery that fills as you consume, with the same `used_percentage` figure `/usage`
+  prints, coloured green through red as you approach the cap. Click it for both windows and their reset times.
+  It reads the limits Claude Code already reports, so there is nothing to configure; it stays hidden for API-key
+  users, whom the upstream data never covers, and a missing reading leaves the gauge alone rather than painting
+  a reassuring 0%. Your own limits only — a guest never sees the host's, and yours stay visible while you watch
+  someone else's session.
+- **Command palette (Ctrl/Cmd+Shift+P) replaces the command pill bar.** The old bar showed 5 of 15 commands and
+  hid the rest behind a horizontal drag nobody discovers, while costing a full row of terminal height. The
+  palette searches every command at once (subsequence matching — `cmp` finds `/compact`) and can also open
+  Settings, Project History, a new session or the share flow, which a pill never could. Deliberately **not**
+  Ctrl+K: that is readline's kill-to-end-of-line, and this app is a terminal.
+- **Design-system pass.** 19 ad-hoc font sizes collapse to one 8-step scale, six motion durations and three
+  easings to one motion system, and per-element shadows to a single elevation ladder — anchored on the sidebar's
+  own values so the surface tuned most did not move. Selected projects and sessions now read as *selected*
+  rather than *alarmed*: the Claude-orange and red washes are replaced by a neutral blue-silver that does not
+  compete with any theme's accent.
+- **Sidebar and chrome overhaul.** One-line session rows with icon flairs and hover detail, a dark-glass pane,
+  and a single `--chrome` token so the top bar and sidebar match by construction in every theme instead of by
+  coincidence in one. Seamless top edge, tidier share dock, quieter scrollbars.
+- **Live sharing: a failed presence push is no longer silent.** With a dead network, a revoked `gh` token or a
+  rate limit, the host saw "Sharing live" and believed they were joinable while no peer ever saw them — there
+  was no retry and nothing on screen. The heartbeat now retries promptly instead of waiting its full cadence,
+  and a standing chip appears if publishing keeps failing. The failure message also names the real cause: it
+  used to blame cloudflared for what were GitHub authentication problems.
+- **Live sharing: a peer with a skewed clock can no longer lock a session.** Presence timestamps are written by
+  one machine and read by another; a clock running fast made a claim look permanently fresh, which could refuse
+  every later claim on that session with no expiry able to clear it. Such stamps are now distrusted past a
+  generous tolerance, in both the arbiter and the sidebar.
+- **Live sharing: advertise on the shared session's project**, not whichever tab happens to be in front — a host
+  focused on a local project silently failed every presence write. An empty presence read now clears peers
+  instead of resurrecting them, and a "going live…" row can no longer strand.
+- **Fixes.** The session options ▾ no longer jumps when pressed (the global press animation was overriding the
+  centring). Toasts sit over the terminal, hug their text, and no longer stretch to a fixed width. A live row
+  keeps its hover timestamp hidden, since the Live pill already claims that space.
+- **A dead test assertion revived.** One beacon check passed an un-invoked function as its condition, so it had
+  silently rubber-stamped itself since the day it was written — while guarding the very watchdog that stops a
+  "going live…" row stranding. The behaviour it covers was correct; only the guard was dead.
 
 **Known limitations (owner decisions, not defects — carried forward):** packaged installs have no in-app
 auto-updater (the new **Update & restart** button is for git-clone installs only; packaged builds still get

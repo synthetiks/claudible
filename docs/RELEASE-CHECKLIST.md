@@ -1,13 +1,13 @@
-# Release checklist — 0.9.0
+# Release checklist — 0.9.1
 
-The code/doc prep for 0.9.0 is committed (`package.json` bumped, `CHANGELOG.md` dated, docs reconciled).
+The code/doc prep for 0.9.1 is committed (`package.json` bumped, `CHANGELOG.md` dated, docs reconciled).
 The remaining steps are **human-gated** — they need real hardware and an outward-facing tag push that
 triggers a public CI release build, so they are intentionally NOT automated. Do them in order.
 
 ## 1. Confirm the version number
-`package.json` is set to **0.9.0** (minor bump: two new user-facing features — opt-in presence relay and the
+`package.json` is set to **0.9.1** (minor bump: two new user-facing features — opt-in presence relay and the
 clone-install self-update — plus a security-relevant guest-input-safety batch). If you'd rather ship an
-incremental **0.8.5**, change `package.json` and the `## [0.9.0]` heading in `CHANGELOG.md` to match before
+incremental **0.9.2**, change `package.json` and the `## [0.9.1]` heading in `CHANGELOG.md` to match before
 tagging — they must be identical or CI fails.
 
 ## 2. Green gates (re-run locally right before tagging)
@@ -34,17 +34,17 @@ Only after §2 and §3 pass. `.github/workflows/build.yml` builds/publishes inst
 **hard-fails if the tag doesn't equal `package.json`'s version**.
 
 ```bash
-git tag -a v0.9.0 -m "Claudible 0.9.0"
-git push origin v0.9.0
+git tag -a v0.9.1 -m "Claudible 0.9.1"
+git push origin v0.9.1
 ```
 
 ## 5. Verify the release
-- GitHub Releases shows the Windows `.exe` attached and the body contains the real `## [0.9.0]` CHANGELOG
+- GitHub Releases shows the Windows `.exe` attached and the body contains the real `## [0.9.1]` CHANGELOG
   excerpt (not the "See CHANGELOG.md" fallback).
 - Linux/macOS artifacts were **not** manually promoted to the Release (they stay CI-artifact-only by design —
   `build.yml`).
 
-## Known limitations shipping with 0.9.0 (owner decisions — see CHANGELOG [0.9.0])
+## Known limitations shipping with 0.9.1 (owner decisions — see CHANGELOG [0.9.1])
 No packaged in-app auto-updater (self-update is clone-installs only); packaged Windows forces the native
 runner even on WSL2 machines; Linux/macOS packaged installers unpublished; macOS signing/notarization and a
 native-Windows runtime smoke still open; presence relay ships inert. The guest resume token in the WS URL is
