@@ -128,8 +128,8 @@
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
     .body{display:grid;grid-template-columns:1fr;gap:9px;padding:5px 7px 4px 5.25px;min-height:0}   /* left gutter trimmed 7→5.25 (−25%): less dead space to the terminal's left. top5 / right7 / bottom4 / left5.25 */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
-    .body.with-sessions{grid-template-columns:clamp(238px,15.6vw,331px) 1fr}                                   /* + docked sessions (left) — ~2.5% narrower, sleeker */
-    .body.with-sessions.sharing{grid-template-columns:clamp(238px,15.6vw,331px) 1fr clamp(312px,24vw,480px)}   /* both */
+    .body.with-sessions{grid-template-columns:clamp(226px,14.8vw,314px) 1fr}                                   /* + docked sessions (left) — another ~5% narrower, sleeker */
+    .body.with-sessions.sharing{grid-template-columns:clamp(226px,14.8vw,314px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:7.65px;min-height:0;min-width:0}   /* gap −15% more (9→7.65): the command buttons sit a touch closer to the bottom of the terminal */
     .termrow{display:flex;gap:5px;flex:1;min-height:0;min-width:0;position:relative}   /* gap terminal↔scrollbar −50% (11→5) */
@@ -518,16 +518,22 @@
     .iconbtn:active{transform:translateY(1px)}
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;
-      background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.016) 34%,transparent 70%),color-mix(in srgb,var(--panel) 86%,var(--raised));
-      backdrop-filter:blur(8px) saturate(1.05);
-      box-shadow:inset -1px 0 0 var(--sheen),inset 0 1px 0 rgba(255,255,255,.05);overflow:hidden}   /* ④ frosted, a touch lighter than plain panel — top-lit glass feel */   /* ④ a real material: top-lit panel. No hard right border — the panel-vs-bg brightness STEP is the edge; only a faint light-catching bevel (sheen) remains */
+      background:linear-gradient(158deg,rgba(255,255,255,.05),rgba(255,255,255,.012) 18%,transparent 46%),color-mix(in srgb,var(--panel) 72%,var(--bg));
+      backdrop-filter:blur(10px) saturate(1.08);
+      box-shadow:inset -1px 0 0 rgba(255,255,255,.07),inset 0 1px 0 rgba(255,255,255,.07),6px 0 18px -12px #000;overflow:hidden}
+      /* ④ DARK GLASS (not frosted): the pane is DEEPER than --panel (mixed toward --bg) so it sits below the
+         terminal; "glass" comes from light ON the surface — one diagonal specular graze + a crisp top/right
+         edge highlight — never from a milky white fill. The color-mix keeps each theme's own hue in the dark.
+         ⑤ the outer right shadow spills into the gutter so the pane dissolves toward the terminal instead of
+         stopping at a hard bevel (an inner scrim was rejected: it would dim the row's ▾ and live badges). */
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
-    .sess-list{display:flex;flex-direction:column;gap:1px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
-    .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
+    .sess-list{display:flex;flex-direction:column;gap:2px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
+    .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:6px 7px;border:none;border-left:2px solid transparent;border-radius:6px;
       background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
     .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .17s cubic-bezier(.2,.7,.15,1);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
-    .sess.active{background-color:color-mix(in srgb,var(--live) 5%,transparent);box-shadow:inset 0 1px 0 var(--sheen)}    /* selected session → workspace-style wash (tint + ::before gradient + top sheen). No rail-neutraliser needed: rails are extinct */
+    .sess.active{background-color:color-mix(in srgb,var(--live) 7%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}    /* ③ selected session → a touch more presence + a brighter top light. Still no rail: rails are extinct */
+    .sess.active .sess-prev{color:#f4f7fb}                                                                     /* ③ the selected title reads brightest in the column */
     .sess.active::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 13%,transparent),transparent 46%)}    /* the directional gradient now carries the selection (mirrors .ws-chip.active) since the rail is gone */
     .sess.active::after{content:'';position:absolute;left:-9px;top:50%;width:9px;height:1px;background:rgba(217,119,87,.24);transform:translateY(-50%);pointer-events:none}    /* horizontal CONNECTOR elbow (~10% brighter): same Claude-orange as the .ws-children vertical guide, branching off it to touch the active session row (tree-style ├──) */
     .sess.active.sess-live-row,.sess.active.sess-peer-live,.sess.active.sess-joined-live{background-color:color-mix(in srgb,var(--ok) 5%,transparent)}    /* an ACTIVE session that's LIVE (sharing, peer-live, OR a joined tab) → GREEN wash only (its ::before is green below); overrides the active tint so it's never an orange/green MIX. A not-live active session keeps the single-colour tint above. */
@@ -535,7 +541,9 @@
     .sess.sess-live-row::before,.sess.sess-peer-live::before,.sess.sess-joined-live::before{opacity:1;background-image:linear-gradient(90deg,color-mix(in srgb,var(--ok) 10%,transparent),transparent 42%)}
     .sess.dragging{opacity:.55;background:rgba(255,255,255,.08);box-shadow:0 8px 22px -8px #000;cursor:grabbing}
     .sess-prev{font-size:12px;color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:30px}
-    .sess-meta{margin-top:4px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    .sess-meta{margin-top:3px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+    .sess-meta .sess-meta-t{color:color-mix(in srgb,var(--ink-faint) 70%,transparent);transition:color .16s ease}   /* ① detail on demand: the list reads as a clean column of TITLES… */
+    .sess:hover .sess-meta .sess-meta-t,.sess.active .sess-meta .sess-meta-t{color:var(--ink-faint)}                /* …with the timestamp surfacing where you're actually looking */
     /* draft (unsaved) session rows: an amber accent so they read as "not yet saved" — deliberately NOT the
        word/blue of anything "live": LIVE is the collab-share state (green, .sess-live-row family) and this
        indicator masquerading as "live" made brand-new sessions look shared for their first turn */
@@ -642,18 +650,19 @@
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
       padding:8px 5px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */
-    .ws-chips::-webkit-scrollbar{width:6px}                                          /* uber-sleek thin scroll for the workspace tree */
-    .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.09);border:none;border-radius:6px}
-    .ws-chips::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2)}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
+    .ws-chips::-webkit-scrollbar{width:6px}                                          /* width stays CONSTANT — animating it would reflow the rows */
+    .ws-chips::-webkit-scrollbar-thumb{background:transparent;border:none;border-radius:6px;transition:background .18s ease}   /* invisible at rest; the top/bottom vignette already signals "more below" */
+    .sidebar:hover .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}   /* fades in only while the sidebar is hovered */
+    .ws-chips::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22)}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
-    .ws-children{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 12px;padding-left:6px;border-left:1px solid rgba(217,119,87,.14)}   /* nested-session guide: faint Claude-orange tint, ~10% brighter; 6px indent → session rows extend another touch further left */
+    .ws-children{display:flex;flex-direction:column;gap:2px;margin:3px 0 12px 12px;padding-left:6px;border-left:1px solid rgba(217,119,87,.14)}   /* nested-session guide: faint Claude-orange tint, ~10% brighter; 6px indent → session rows extend another touch further left */
     /* "+ New Session" — inline as the last child inside the open workspace */
     .newsess-row{display:flex;align-items:center;gap:6px;width:auto;text-align:left;margin:1px 0 0;padding:7px 6px;
       font-size:11.5px;letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
       border-radius:6px;cursor:pointer;box-shadow:none;transition:background .14s,color .14s}
     .newsess-row:hover{background:rgba(255,255,255,.045);color:var(--ink-dim)}
     /* SESSIONS section header — just the label + "+ New"; the active workspace is already shown above */
-    .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:7px 5px;border:1px solid transparent;
+    .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:8px 5px;border:1px solid transparent;
       border-radius:6px;background:none;cursor:pointer;box-shadow:none;
       transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),color .14s}
     .ws-chip:hover{background-color:rgba(255,255,255,.034);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
@@ -667,7 +676,8 @@
     .ws-chip.expanded .ws-caret svg{transform:rotate(90deg)}
     .ws-chip .ws-ico{width:13px;height:13px;flex:none;color:var(--ink-faint)}
     .ws-chip.active .ws-ico{color:var(--live-soft)}
-    .ws-chip .ws-name{flex:1;min-width:0;font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ws-chip .ws-name{flex:1;min-width:0;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .16s ease}   /* ② a quiet SECTION LABEL — sessions are the heroes, projects are dividers */
+    .ws-chip:hover .ws-name,.ws-chip.active .ws-name{color:var(--ink)}
     /* right edge: passive status dot + the ▾ options trigger (all actions moved into the dropdown) */
     .ws-chip .ws-right{flex:none;display:flex;align-items:center;gap:6px;margin-left:6px}
     .ws-chip .ws-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ink-faint)}
@@ -694,7 +704,7 @@
     .ws-menu .ws-mi.danger:hover{background:rgba(210,104,95,.12);color:#e0796f}
     .ws-menu .ws-menu-sep{height:1px;background:var(--hairline);margin:5px 6px}
     @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
-    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:11.5px;color:var(--ink);background:#0a0b0d;
+    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:10.5px;color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:6px;padding:2px 6px}
     .ws-chip .ws-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
     /* transient toast (button feedback / coming-soon) */
