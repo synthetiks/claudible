@@ -151,7 +151,7 @@ $('terminal').addEventListener('paste', function (e) {
 })();
 
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
-var grantedWs = [], wsPaused = false, lastLiveId = null;   // granted workspace library + private-pause state
+var wsPaused = false;   // host-in-private-project pause state (freezes the mirror)
 // end-state bookkeeping: `left` = the guest clicked Disconnect (a FINAL state — never auto-reconnect back in);
 // `wasAdmitted` = we got past approval at least once (so a later dead socket is "the session ended", not "bad link");
 // `reconnTries` = consecutive failed reconnects since we were last live, the signal that the host is gone for good.
@@ -169,14 +169,10 @@ function showOverlay(show, title, body, bad) {
   $('card').classList.toggle('bad', !!bad);
   var rj = $('ov-rejoin'); if (rj) rj.style.display = 'none';   // only the terminal end-states (showEnded) surface Rejoin
 }
-// show/hide the top session bar (holds the granted-project chips + the Disconnect button). Hidden before we're
-// admitted and after we've left, so Disconnect is offered exactly when there's a live session to disconnect FROM.
-function showBar(on) { var b = $('wsbar'); if (b) b.classList.toggle('hidden', !on); }
 // The final, blurred end card — for the guest's own Disconnect ('left') and for a host share that's ended for
 // good ('ended'). Reuses the approval overlay's blur + .bad styling, plus a Rejoin (reload) button.
 function showEnded(kind) {
   left = true;                                    // both kinds are terminal: stop every reconnect/paint path
-  showBar(false);
   try { document.body.classList.remove('connected'); } catch (e) {}
   showOverlay(true,
     kind === 'left' ? 'You’ve left the session' : 'Session ended',
@@ -345,33 +341,9 @@ function applyStatus(s) {
 
 // ---- granted workspace library: the host shares a SUBSET of their Claudible. You watch the live one,
 // and (when interactive) can click another granted workspace to switch the shared terminal to it. ----
-function renderGuestWs() {
-  var box = $('wschips'); if (!box) return;
-  box.innerHTML = '';
-  // The bar now also carries Disconnect, so it must NOT collapse when there are no granted projects — only the
-  // "projects" label + chips hide; the bar (and its Disconnect) stays. Bar show/hide is owned by showBar (on
-  // admit / on leave), not by the chip count.
-  var has = grantedWs.length > 0, lbl = $('wsbar-lbl');
-  if (lbl) lbl.style.display = has ? '' : 'none';
-  box.style.display = has ? '' : 'none';
-  if (!has) return;
-  var liveId = null;
-  grantedWs.forEach(function (w) {
-    if (w.live) liveId = w.id;
-    var c = document.createElement('div');
-    c.className = 'wschip' + (w.live ? ' live' : '');
-    c.title = w.label + (w.kind && w.kind !== 'legacy' ? ' (' + w.kind + ')' : '');
-    var n = document.createElement('span'); n.textContent = w.label; c.appendChild(n);
-    if (w.kind && w.kind !== 'legacy') { var k = document.createElement('span'); k.className = 'wsk'; k.textContent = w.kind; c.appendChild(k); }
-    if (!readOnly) c.addEventListener('click', function () { switchWorkspaceReq(w.id, w.live); });
-    box.appendChild(c);
-  });
-  if (liveId && liveId !== lastLiveId) { lastLiveId = liveId; try { term.reset(); } catch (e) {} }   // clean swap on switch
-}
-function switchWorkspaceReq(id, live) {
-  if (readOnly || live) return;                                // can't switch when view-only or already there
-  if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'switch', id: id })); } catch (e) {} }
-}
+// (The granted-projects strip + its chip switcher were removed — a live link shows ONE session; the extra
+// "projects" bar under the top bar was redundant. The host's own granted-library updates ('workspaces') are
+// simply ignored now.)
 // "who's typing" pill — names whoever's keystrokes are landing in the mirror (host or another guest; the
 // server never echoes your own). Senders throttle to 1/s, so decay locally ~3s after the last ping.
 var typistTimer = null;
@@ -512,8 +484,11 @@ try {
     var _vb = $('voice-btn'), _vm = $('voice-mute');
     if (_vb) _vb.addEventListener('click', function () { if (voice.isJoined()) voice.leave(); else voice.join().catch(function () {}); });
     if (_vm) _vm.addEventListener('click', function () { voice.toggleMute(); });
-  } else { var _vbar = $('voicebar'); if (_vbar) _vbar.style.display = 'none'; }
-} catch (e) { try { var _vbar2 = $('voicebar'); if (_vbar2) _vbar2.style.display = 'none'; } catch (x) {} }
+  } else { hideVoiceControls(); }
+} catch (e) { try { hideVoiceControls(); } catch (x) {} }
+// Voice unavailable → hide only the voice CONTROLS, never the whole strip: the strip also carries Disconnect,
+// which must stay reachable for every guest whether or not their browser can do audio.
+function hideVoiceControls() { ['voice-btn', 'voice-mute', 'voice-members'].forEach(function (id) { var e2 = $(id); if (e2) e2.style.display = 'none'; }); }
 
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -538,9 +513,8 @@ function connect() {
         $('ro').style.display = readOnly ? '' : 'none';
         document.body.classList.toggle('ro', readOnly);
         applyReadOnlyInput();                                 // read-only: a tap won't raise the soft keyboard
-        grantedWs = Array.isArray(msg.workspaces) ? msg.workspaces : [];
         wsPaused = !!msg.paused;
-        renderGuestWs(); applyPaused(); showBar(true);        // show the granted library + the Disconnect button + freeze if host is private
+        applyPaused();                                        // freeze the mirror if the host is in a private project
         if (msg.resume) { resume = msg.resume; try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ t: token, r: resume })); } catch (e) {} }
         showOverlay(false);
         document.body.classList.add('connected');             // reveal the phone zoom control only once actually viewing
@@ -567,9 +541,6 @@ function connect() {
       } else if (msg.type === 'chat') {
         if (msg.role === 'system') addSystemChat(msg.text);
         else addChat(msg.name || (msg.role === 'host' ? hostName : 'viewer'), msg.text, false);
-      } else if (msg.type === 'workspaces') {
-        grantedWs = Array.isArray(msg.list) ? msg.list : [];
-        renderGuestWs();
       } else if (msg.type === 'typist') {
         showTypist(msg.name);                                 // host or another guest is typing (the server never echoes your own)
       } else if (msg.type === 'paused') {

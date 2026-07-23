@@ -1705,10 +1705,9 @@ let lastShareUrl = '', lastShareRemote = true, lastShareNote = null, lastShareRe
 const shareBtn = $('share-btn'), shareLink = $('share-link'), shareOut = $('share-out');
 // The bottom-left indicator reflects ONLY a manual web link (never collab) — collaboration stays invisible here.
 function webShareUI(on) {
-  shareBtn.textContent = on ? 'Stop sharing' : 'Share a live link';
+  { const lb = $('sb-label'); if (lb) lb.textContent = on ? 'Stop sharing' : 'Share a live link'; }   // set the LABEL span only — the button also holds the share icon, which textContent would wipe
   shareBtn.classList.toggle('live', on);
   setActive('lbl-share', on);
-  setDot('d-share', on ? 'ok' : '');
   const sr = $('share-reset'); if (sr) sr.style.display = on ? '' : 'none';   // "reset access" only while web-sharing
   if (!on) { shareLink.style.display = 'none'; shareLink.value = ''; }
   renderTunnelWarn();
@@ -2150,13 +2149,12 @@ async function doStartSharing() {
   $('namemodal').classList.remove('show');
   shareBtn.disabled = true;
   shareOut.textContent = 'starting tunnel — checking the link actually works…'; shareOut.className = 'out';   // main now proves the public URL serves before calling it up, so this step is a few seconds longer AND honest
-  setDot('d-share', 'work');
   webShare = true;
   await ensureTunnel();                             // starts the tunnel (or reuses the one collab already has up)
   shareBtn.disabled = false;
   if (!tunnelUp) {
     webShare = false; webShareUI(false); await ensureTunnel();
-    setDot('d-share', 'bad'); shareOut.textContent = 'share failed — could not start the tunnel'; shareOut.className = 'out';
+    shareOut.textContent = 'share failed — could not start the tunnel'; shareOut.className = 'out';
     return;
   }
   webShareUI(true);

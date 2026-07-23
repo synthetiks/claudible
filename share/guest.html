@@ -21,7 +21,7 @@
     body{height:100vh;height:100svh;height:100dvh;height:var(--app-h,100dvh)}
     body{background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
       color:var(--ink);font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
-      display:grid;grid-template-rows:52px auto 1fr 22px}   /* bar · workspaces · terminal(1fr) · foot (voice lives in the chat panel) */
+      display:grid;grid-template-rows:52px 1fr 22px}   /* bar · terminal(1fr) · foot (the redundant projects strip was removed; Disconnect lives in the chat panel's voice bar) */
     /* top bar — mirrors the Claudable cockpit */
     .bar{display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--hairline);
       background:linear-gradient(180deg,#0d0f13,#090a0c);font-size:12px;letter-spacing:.04em}
@@ -158,25 +158,11 @@
       border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);box-shadow:inset 0 1px 0 var(--sheen)}
     .sesschip .dot{flex:none}   /* the chip's dot is the connection indicator (uses the shared .dot ok/bad/work colors) */
     .sesschip b{font-weight:600;color:var(--silver);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    /* guest workspace bar — the granted library the host shared. The host drives; an interactive guest
-       can click a chip to switch the shared terminal to that workspace. Collapses to 0 height when empty. */
-    .wsbar{display:flex;align-items:center;gap:9px;padding:7px 16px;border-bottom:1px solid var(--hairline);
-      background:linear-gradient(180deg,#0b0d11,#090a0c);overflow-x:auto;overflow-y:hidden}
-    .wsbar.hidden{height:0;padding:0;border:0;overflow:hidden}
-    .wsbar-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);flex:none}
-    .wschips{display:flex;gap:6px;align-items:center}
-    .wschip{display:flex;align-items:center;gap:6px;flex:none;padding:5px 10px;border:1px solid var(--hairline);
-      border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);
-      cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s}
-    .wschip:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
-    .wschip.live{border-color:var(--ok);color:var(--silver);box-shadow:0 0 12px -7px var(--ok)}
-    .wschip .wsk{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
-    body.ro .wschip{cursor:default}                        /* view-only viewers can't drive switching */
-    /* "Disconnect" — a guest's own clean exit. Sits where the (removed) session browser used to; a live share
-       streams ONE session, never the repo's whole history, so there is nothing to "browse". Quiet red so it
-       reads as leave-the-room, not a primary action. */
-    .disc-btn{margin-left:auto;flex:none;padding:5px 12px;border:1px solid rgba(229,86,75,.34);border-radius:8px;
-      background:rgba(229,86,75,.08);color:#e6a49d;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+    /* "Disconnect" — a guest's own clean exit. Lives in the voice strip, pushed to the right (margin-left:auto)
+       so voice controls stay on the left and "leave" reads as its own thing. Quiet red — leave-the-room, not a
+       primary action. (The old projects/browse strip that used to host it was removed as redundant.) */
+    .disc-btn{margin-left:auto;flex:none;padding:5px 11px;border:1px solid rgba(229,86,75,.34);border-radius:8px;
+      background:rgba(229,86,75,.08);color:#e6a49d;font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
     .disc-btn:hover{color:#fff;border-color:rgba(229,86,75,.6);background:rgba(229,86,75,.18)}
     /* voice room bar */
     /* voice lives at the top of the chat panel — a compact strip; stays visible even when chat is collapsed */
@@ -227,7 +213,7 @@
     @keyframes sp{to{transform:rotate(360deg)}}
     /* ---- mobile / small screens: stack terminal over chat, trim the chrome ---- */
     @media (max-width: 760px){
-      body{grid-template-rows:46px auto 1fr auto}
+      body{grid-template-rows:46px 1fr auto}
       .bar{gap:9px;padding:0 11px}
       .bar .logo{height:24px}
       .bar .name{font-size:12px;letter-spacing:.16em}
@@ -265,11 +251,6 @@
       <span class="trk-item"><b id="trk-tokens">—</b><i>tokens</i></span>
     </span>
   </div>
-  <div class="wsbar hidden" id="wsbar">
-    <span class="wsbar-lbl" id="wsbar-lbl">projects</span>
-    <div class="wschips" id="wschips"></div>
-    <button class="disc-btn" id="disconnect-btn" type="button" title="Leave this live session">Disconnect</button>
-  </div>
   <div class="main">
     <div class="wrap">
       <div id="terminal"></div>
@@ -304,6 +285,7 @@
       <div class="gvoice" id="voicebar">
         <button class="voice-btn" id="voice-btn" type="button" title="Talk with the host & other viewers">🎙 Join voice</button>
         <button class="voice-mute" id="voice-mute" type="button" style="display:none">Mute</button>
+        <button class="disc-btn" id="disconnect-btn" type="button" title="Leave this live session">Disconnect</button>
         <div class="voice-members" id="voice-members"></div>
       </div>
       <div class="gchat-log" id="chat-log"></div>

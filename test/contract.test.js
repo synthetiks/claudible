@@ -1538,5 +1538,33 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.sess-meta-t\{[^}]*max-width:\d/.test(flat) ? [] : ['.sess-meta-t has no max-width bound']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 47. SHARE UI, TIDIED. The guest page dropped the redundant projects strip (a live link streams ONE session)
+//   and moved Disconnect into the voice bar; the main-app share dock dropped the "share live" label + the dead
+//   status dot and folded the icon into the button. Two real traps guarded here: Disconnect must not disappear
+//   when voice is unavailable, and webShareUI must not wipe the button's icon by setting textContent.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // GUEST — the projects strip is gone, Disconnect lives in the voice bar.
+  none('the redundant guest projects bar is still present',
+    !/id="wsbar"/.test(GUEST_HTML) && !/class="wschip"/.test(GUEST_HTML) ? [] : ['the guest wsbar/wschip markup survives']);
+  none('Disconnect is not in the voice bar next to Join voice',
+    /id="voicebar"[\s\S]*?id="voice-btn"[\s\S]*?id="disconnect-btn"[\s\S]*?<\/div>/.test(GUEST_HTML)
+      ? [] : ['#disconnect-btn is not inside #voicebar after #voice-btn']);
+  none('an unavailable voice feature hides Disconnect along with the whole bar',
+    /function hideVoiceControls\(\)[\s\S]*?'voice-btn'/.test(GUEST_JS) && !/voicebar["']\)[\s\S]{0,50}?display\s*=\s*["']none["']/.test(GUEST_JS)
+      ? [] : ['voice-unavailable hides #voicebar (taking Disconnect with it), or hideVoiceControls does not target the voice controls']);
+  none('the guest grid still reserves a row for the removed projects strip',
+    /grid-template-rows:52px 1fr 22px/.test(GUEST_HTML) ? [] : ['guest body grid still has the workspaces row']);
+  // MAIN APP — the share dock is tidied.
+  none('the redundant "share live" label or dead status dot is still in the dock',
+    !/class="sl-text"/.test(HTML) && !/id="d-share"/.test(HTML) ? [] : ['sl-text or #d-share survives in the share dock']);
+  none('the share icon was not folded into the button',
+    /id="share-btn"[^>]*>\s*<svg class="ico"[\s\S]*?id="sb-label"/.test(HTML) ? [] : ['#share-btn has no leading icon + #sb-label span']);
+  none('webShareUI wipes the button icon by setting shareBtn.textContent',
+    /\$\('sb-label'\)[\s\S]{0,60}?textContent = on/.test(APP) && !/shareBtn\.textContent/.test(APP)
+      ? [] : ['webShareUI still sets shareBtn.textContent (nuking the icon) instead of the label span']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

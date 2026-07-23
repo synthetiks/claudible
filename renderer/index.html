@@ -890,17 +890,10 @@
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:10px 12px 12px;display:flex;flex-direction:column;gap:9px}   /* tightened to the sidebar rhythm */
-    .sharelbl{display:flex;align-items:center;gap:5px;font-size:var(--fs-2xs);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}   /* one line: share icon · share-live · ⓘ · view-only — font −1 + tight gaps/tracking so it all fits */
-    /* same header LANGUAGE as the PROJECTS head (wide tracking, same faint grey) but not its exact size: this row
-       also carries an icon, a dot, the ⓘ and the view-only toggle, and 10.5px/.20em overflows it at min width. */
-    .sl-text{white-space:nowrap;font-size:var(--fs-2xs);letter-spacing:.14em;color:#6f7783;transition:color var(--dur-slow)}
-    .sharelbl .ico{width:15.4px;height:15.4px;color:#5a7468;flex:none;transition:color var(--dur-slow),filter var(--dur-slow)}   /* ~10% larger; very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
+    /* The label row now carries ONLY the info "i" (the "share live" text + status dot were redundant and the
+       share icon moved into the button). Right-align the "i" so it reads as a subtle affordance above the button. */
+    .sharelbl{display:flex;align-items:center;justify-content:flex-end;gap:5px;min-height:18px;font-size:var(--fs-2xs);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}
     .sharelbl.active{color:var(--ink)}
-    .sharelbl.active .sl-text{color:var(--ink)}   /* .sl-text sets colour DIRECTLY, so the parent's active colour no longer inherits into it — restate it here or "share live" stays grey while live */
-    .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
-    .sharelbl .toggle{margin-left:auto;gap:6px;font-size:var(--fs-2xs);letter-spacing:.04em;white-space:nowrap}   /* "view-only" — one unbroken word, tightened to sit on the same line as the rest */
-    .sharelbl .toggle .tlabel{white-space:nowrap}
-    #d-share:not(.ok):not(.work):not(.bad){display:none}   /* the web-share status light: hidden AND takes no width until a link is starting/live/failed (frees room so the row fits one line) */
     .share-dock .out{margin-top:1px;font-size:var(--fs-xs);line-height:1.55}
     .share-dock .out:empty{display:none}   /* no fluff line when there's no live-share status to show (the hint moved to the button's tooltip) */
     /* standing "hosting but not remotely reachable" warning — amber family matches .ctxbar.warn, persistent (not a toast) because this state strands every guest silently */
@@ -950,7 +943,9 @@
     .hvm.speaking{color:var(--ink);border-color:var(--ok)}
     .hvm.speaking .d{background:var(--ok);box-shadow:0 0 7px 0 var(--ok)}
     .hvm.c-connected .d{background:var(--ok)}   /* voice-core only emits conn 'self'|'connected'; the other WebRTC-state variants were never produced (dead CSS removed) */
-    .share-btn{width:100%}
+    .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+    .share-btn .ico{width:15px;height:15px;flex:none;color:#5a7468;transition:color var(--dur-slow),filter var(--dur-slow)}   /* the share glyph that used to sit in the label row now leads the button */
+    .share-btn.live .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}   /* icon goes live-green while sharing (mirrors the old .sharelbl.active .ico) */
     .share-reset{width:100%;padding:7px;font-size:var(--fs-xs);letter-spacing:.04em;color:var(--ink-dim);
       background:none;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:color var(--dur-fast),border-color var(--dur-fast)}
     .share-reset:hover{color:var(--live-soft);border-color:rgba(229,86,75,.4)}
@@ -1283,13 +1278,11 @@
       <div class="sess-list" id="sess-list"></div>
       <button class="newsess-row" id="new-session" title="New session in this project">+ New Session</button>
       <div class="share-dock">
-        <div class="sharelbl" id="lbl-share">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
-          <span class="sl-text">share live</span><span class="dot" id="d-share"></span>
+        <div class="sharelbl" id="lbl-share"><!-- label text + status dot removed as redundant (the button says it); the share icon moved into the button. Only the info "i" remains. -->
           <button class="ws-info" id="share-info" type="button" aria-label="About sharing a live link" title="About sharing a live link">i</button>
         </div><!-- the view-only toggle moved into the share dialog (namemodal), colocated with the security warning it governs, so the risk and the control are decided together -->
 
-        <button id="share-btn" class="share-btn" title="A web link for people without Claudible">Share a live link</button>
+        <button id="share-btn" class="share-btn" title="A web link for people without Claudible"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg><span class="sb-label" id="sb-label">Share a live link</span></button>
         <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
         <div class="out share-out" id="share-out"></div><!-- empty by default (hint is now the button tooltip); JS fills this only with live-share status -->
