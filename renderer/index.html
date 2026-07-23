@@ -163,7 +163,7 @@
       background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
       transition:box-shadow var(--dur-slow) ease,color var(--dur-slow) ease}
     .usagebar:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 40%,transparent)}
-    .ub-batt{flex:none;display:inline-flex;align-items:center;margin:0 5px 0 8px}
+    .ub-batt{flex:none;display:inline-flex;align-items:center;margin:0 7px 0 8px}   /* 7, not 5: tight enough to still read as one unit with the number, loose enough not to look crammed */
     .ub-batt svg{width:22px;height:12px;display:block}
     .ub-cells rect{fill:currentColor;opacity:.14;transition:opacity var(--dur-slow) ease}   /* unlit cells stay visible as an empty track — same trick as .ctxsegs i */
     .usagebar[data-cells="1"] .ub-cells rect:nth-child(-n+1),
