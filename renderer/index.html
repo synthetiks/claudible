@@ -30,9 +30,11 @@
       --ok:#42d791;                /* success / green accent — cleaner emerald (was a muted sage) */
       --accent:#5aa8f0;            /* primary blue accent — brighter, reads clearly blue */
       --warn:#edb44a;              /* amber / warning accent */
-      /* the sidebar pane's depth — ONE dial. Built from the themed surface tokens, so every theme gets its
-         own hue in the darkness automatically; the outer 90%/#000 step is the "10% deeper" trim. */
-      --sidebar-glass:color-mix(in srgb,color-mix(in srgb,var(--panel) 72%,var(--bg)) 72%,#000);
+      /* the app CHROME (top bar + sidebar) — ONE dial. Both surfaces derive from this, so they are the same
+         colour by construction, in every theme (--panel/--bg are re-declared per theme on this same element,
+         so the mix re-resolves for free). The terminal stays lighter: chrome vs content. */
+      --chrome:color-mix(in srgb,color-mix(in srgb,var(--panel) 72%,var(--bg)) 65%,#000);
+      --sidebar-glass:var(--chrome);
     }
     /* ── Themes: subtle, low-key dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
        Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
@@ -87,7 +89,7 @@
       background:radial-gradient(120% 120% at 50% 40%, transparent 60%, rgba(0,0,0,.35) 100%);}
     /* top bar */
     .top{display:flex;align-items:center;gap:12px;padding:0 16px;
-      border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,#0d0f13,#090a0c)}
+      border-bottom:1px solid var(--hairline);background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}   /* derived from --chrome: matches the sidebar exactly, keeps a gentle top-light */
     .logo{height:28px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
     .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:14.5px;color:#f6f8fc}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
@@ -131,8 +133,8 @@
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
     .body{display:grid;grid-template-columns:1fr;gap:9px;padding:5px 7px 4px 5.25px;min-height:0}   /* left gutter trimmed 7→5.25 (−25%): less dead space to the terminal's left. top5 / right7 / bottom4 / left5.25 */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
-    .body.with-sessions{grid-template-columns:clamp(226px,14.8vw,314px) 1fr}                                   /* + docked sessions (left) — another ~5% narrower, sleeker */
-    .body.with-sessions.sharing{grid-template-columns:clamp(226px,14.8vw,314px) 1fr clamp(312px,24vw,480px)}   /* both */
+    .body.with-sessions{grid-template-columns:clamp(228px,14.9vw,316px) 1fr}                                   /* + docked sessions (left) — another ~5% narrower, sleeker */
+    .body.with-sessions.sharing{grid-template-columns:clamp(228px,14.9vw,316px) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:7.65px;min-height:0;min-width:0}   /* gap −15% more (9→7.65): the command buttons sit a touch closer to the bottom of the terminal */
     .termrow{display:flex;gap:5px;flex:1;min-height:0;min-width:0;position:relative}   /* gap terminal↔scrollbar −50% (11→5) */
@@ -295,7 +297,8 @@
     .cmdscroll:active{cursor:grabbing}
     /* the command scrollbar: shorter + a thinner thumb than the global 9px — sleek, barely noticeable */
     .cmdscroll::-webkit-scrollbar{height:6px}   /* −35% (9→6) */
-    .cmdscroll::-webkit-scrollbar-thumb{border-width:1px}   /* 4px visible thumb on the 6px track (global is 2px border → too thin here) */
+    .cmdscroll::-webkit-scrollbar-thumb{border-width:1px;background:rgba(255,255,255,.085);background-clip:padding-box}   /* 4px thumb on the 6px track; −30% opacity so it stops competing with the pills */
+    .cmdscroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2);background-clip:padding-box}   /* still findable when you reach for it */
     /* clickable scroll arrows over the edge-fades — shown only when there's more to reveal that direction */
     .cmdarrow{position:absolute;top:0;bottom:10px;width:24px;display:flex;align-items:center;justify-content:center;z-index:3;   /* bottom skips the 4px gap + 6px scrollbar so the arrow centers on the pill row, not the scrollbar */
       border:none;background:none;color:var(--ink-dim);font-size:18px;line-height:1;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .16s,color .16s}
@@ -533,7 +536,7 @@
          stopping at a hard bevel (an inner scrim was rejected: it would dim the row's ▾ and live badges). */
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .sess-list{display:flex;flex-direction:column;gap:2px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
-    .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:4.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
+    .sess{position:relative;isolation:isolate;width:auto;text-align:left;padding:5.2px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
       background:none;cursor:pointer;transition:background-color .17s cubic-bezier(.2,.7,.15,1),box-shadow .17s cubic-bezier(.2,.7,.15,1),border-color .16s ease,opacity .16s}
     .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .17s cubic-bezier(.2,.7,.15,1);background-image:linear-gradient(90deg,color-mix(in srgb,var(--live) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
@@ -597,8 +600,8 @@
        amber-pulse + "working…" they already had. They are also the only overlap that can occur: syncRowFlairs
        toggles .busy on .sess[data-id] and .sess[data-tab] alone, so a peer-live/joined row (which owns a
        .sess-livedot) never receives .busy and cannot double up either. */
-    .sess.busy:not(.sess-draft) .sess-meta::before{content:'';flex:none;width:6px;height:6px;border-radius:50%;
-      background:var(--live);box-shadow:0 0 6px -1px var(--live);animation:ws-sync-pulse 1s ease-in-out infinite}
+    .sess.busy:not(.sess-draft) .sess-prev::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;vertical-align:middle;
+      background:var(--live);box-shadow:0 0 6px -1px var(--live);animation:ws-sync-pulse 1s ease-in-out infinite}   /* LEADS the row now — a status light belongs at the left edge, not buried in the right cluster */
     .sess.sess-done.busy{animation:none}   /* it started working again → busy wins: the done-glow stops, the busy dot appears */
     .sess.sess-done.busy .sess-prev{color:var(--ink)}   /* …and the done-green title reverts to neutral, so a row that resumed work isn't still wearing "finished" */
     @keyframes sess-done-pulse{0%,100%{background-color:transparent}
@@ -647,10 +650,17 @@
     /* two clearly-divided sections: WORKSPACES (top) then SESSIONS, each with its own header */
     .ws-section-head{flex:none;display:flex;align-items:center;justify-content:space-between;
       font-size:10.5px;letter-spacing:.20em;text-transform:uppercase;color:#6f7783}   /* ~5% taller, ~10% wider-tracked, ~2.5% brighter — more noticeable */
-    .ws-section-head{padding:5px 9px 2px 18px}   /* ~20% shorter again — sleeker; left-aligned, title nudged in from the edge */
+    .ws-section-head{padding:3px 9px 2px 18px}   /* ~10% shorter again — sleeker; left-aligned, title nudged in from the edge */
     .sh-actions{display:flex;align-items:center;gap:6px}   /* equal gaps — the three buttons are now one size, so the rhythm reads even */
 
 
+    /* base pill for the little italic "i" explainers wherever they appear (share dock, settings). REGRESSION
+       FIX: the header rewrite replaced this rule with a .sh-actions-scoped one, so every "i" OUTSIDE the header
+       fell through to button{width:100%} and rendered as a full-width block. */
+    .ws-info{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0;
+      border:1px solid var(--hairline);border-radius:50%;background:transparent;color:var(--ink-faint);
+      font:italic 600 11px/1 Georgia,"Times New Roman",serif;cursor:pointer;flex:none}
+    .ws-info:hover{color:var(--ink);border-color:rgba(255,255,255,.24)}
     /* the three header controls (i / + / ‹) share ONE 20x20 borderless box so they read as a set —
        previously a 18px circle, a ~24x19 bordered pill and a bare 22px glyph, all different heights. */
     .sh-actions>button{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0;
@@ -668,7 +678,7 @@
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
     .ws-chips{flex:1;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-x:hidden;overflow-y:auto;   /* never scroll the sidebar sideways — clip, don't show a horizontal bar */
-      padding:8px 5px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */
+      padding:8px 4px 12px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 9px,#000 calc(100% - 9px),transparent)}   /* ④ scroll vignette: rows melt at the top/bottom edges instead of hard-clipping */
     .ws-chips::-webkit-scrollbar{width:6px}                                          /* width stays CONSTANT — animating it would reflow the rows */
     .ws-chips::-webkit-scrollbar-thumb{background:transparent;border:none;border-radius:6px;transition:background .18s ease}   /* invisible at rest; the top/bottom vignette already signals "more below" */
     .sidebar:hover .ws-chips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}   /* fades in only while the sidebar is hovered */
@@ -754,11 +764,14 @@
     .ws-pick-row input{cursor:pointer}
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
-    .share-dock{flex:none;border-top:1px solid var(--hairline);padding:14px 14px 16px;display:flex;flex-direction:column;gap:11px}
+    .share-dock{flex:none;border-top:1px solid var(--hairline);padding:10px 12px 12px;display:flex;flex-direction:column;gap:9px}   /* tightened to the sidebar rhythm */
     .sharelbl{display:flex;align-items:center;gap:5px;font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}   /* one line: share icon · share-live · ⓘ · view-only — font −1 + tight gaps/tracking so it all fits */
-    .sl-text{white-space:nowrap}   /* keep "SHARE LIVE" on one line — never let flex-shrink stack it into SHARE / LIVE */
+    /* same header LANGUAGE as the PROJECTS head (wide tracking, same faint grey) but not its exact size: this row
+       also carries an icon, a dot, the ⓘ and the view-only toggle, and 10.5px/.20em overflows it at min width. */
+    .sl-text{white-space:nowrap;font-size:9.5px;letter-spacing:.14em;color:#6f7783;transition:color .2s}
     .sharelbl .ico{width:15.4px;height:15.4px;color:#5a7468;flex:none;transition:color .2s,filter .2s}   /* ~10% larger; very subtle green tint — muted sage, green the clearly-dominant channel, low chroma */
     .sharelbl.active{color:var(--ink)}
+    .sharelbl.active .sl-text{color:var(--ink)}   /* .sl-text sets colour DIRECTLY, so the parent's active colour no longer inherits into it — restate it here or "share live" stays grey while live */
     .sharelbl.active .ico{color:var(--live);filter:drop-shadow(0 0 5px var(--live))}
     .sharelbl .toggle{margin-left:auto;gap:6px;font-size:8.5px;letter-spacing:.04em;white-space:nowrap}   /* "view-only" — one unbroken word, tightened to sit on the same line as the rest */
     .sharelbl .toggle .tlabel{white-space:nowrap}

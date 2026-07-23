@@ -477,15 +477,17 @@ none('renderer: orphanTab is never rendered',
   // Mid-turn must still SHOW — but as the row's quiet 6px pulsing dot, not by repainting the title. The first
   // post-rail attempt recoloured the whole title red, which shouted (and put a red title beside the green ● LIVE
   // pill on a live row — two contradictory claims on one row). The dot is the vocabulary the row already had.
+  // It now LEADS the row (::before on the title) rather than heading the right-hand meta cluster — a status light
+  // belongs at the left edge. The anchor moved; the invariant did not.
   none('the mid-turn state lost its railless indicator (the pulsing busy dot)',
-    /\.sess\.busy:not\(\.sess-draft\) \.sess-meta::before\{[^}]*background:var\(--live\)/.test(flat) ? [] : ['no .sess.busy .sess-meta::before busy-dot rule']);
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*background:var\(--live\)/.test(flat) ? [] : ['no .sess.busy .sess-prev::before busy-dot rule']);
   none('…and the busy dot must actually pulse (a static dot reads as decoration, not activity)',
-    /\.sess\.busy:not\(\.sess-draft\) \.sess-meta::before\{[^}]*animation:ws-sync-pulse/.test(flat) ? [] : ['the busy dot has no ws-sync-pulse animation']);
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*animation:ws-sync-pulse/.test(flat) ? [] : ['the busy dot has no ws-sync-pulse animation']);
   // A DRAFT row builds its OWN .sess-draftdot span and the rule above already pulses it when .busy is set. If the
   // busy dot stops excluding draft rows, a busy draft wears TWO dots — a red one and an amber one, side by side.
   // That shipped for one commit; it must not ship twice.
   none('the busy dot no longer excludes draft rows (a busy draft would wear two dots)',
-    /\.sess\.busy(?!:not\(\.sess-draft\))[^{,]*\.sess-meta::before/.test(flat) ? ['.sess.busy .sess-meta::before is not :not(.sess-draft)-guarded'] : []);
+    /\.sess\.busy(?!:not\(\.sess-draft\))[^{,]*\.sess-prev::before/.test(flat) ? ['.sess.busy .sess-prev::before is not :not(.sess-draft)-guarded'] : []);
   none('…and draft rows must still pulse their OWN dot while busy (the indicator they already had)',
     /\.sess\.busy \.sess-draftdot\{[^}]*animation:ws-sync-pulse/.test(flat.replace(/\.sess\.busy \.sess-livedot,/, '.sess.busy ')) ? [] : ['.sess.busy .sess-draftdot lost its pulse']);
   // The title is NOT a busy channel. Red-on-title is the regression this replaced; it must not come back.
