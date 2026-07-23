@@ -1420,5 +1420,39 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     deaths.filter(([, re]) => !re.test(MAIN)).map(([w]) => w));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 43. THE PINNED TAB MUST BE VISIBLE, AND KILLING IT MUST NAME WHAT DIES.
+//   share:start pins whatever tab was in the foreground — for a plain "Share a live link" exactly as for a
+//   session share, though nothing in that UI says a tab is involved. main tears the share down when that tab
+//   closes or its project is deleted; the renderer's guards must say so FIRST, in terms of the link already
+//   sitting in someone else's chat window. isSharingSession() only ever covered the sharedSessionId path.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SRV = read('share/server.js');
+  none('a web share leaves no mark on the row that carries the link',
+    /function isWebSharePinnedTo\(id\)/.test(APP) && /isWebSharePinnedTo\(s\.id\)/.test(APP)
+      ? [] : ['nothing marks the session row a web share is pinned to']);
+  // Two independent row renderers (active list + expanded non-active tree). Marking one and not the other is
+  // how the indicator silently vanishes depending on which project you happen to be looking at.
+  none('only one of the two session-row renderers marks the pinned row',
+    (APP.match(/isWebSharePinnedTo\(s\.id\)/g) || []).length >= 2
+      ? [] : ['the expanded-tree row renderer does not mark the pinned session']);
+  none('…and the marker never appears until some unrelated repaint',
+    /onSharePinned\(\(p\) => \{[^}]*refreshSessions\(\)/.test(APP) ? [] : ['pinning does not repaint the sidebar']);
+  none('closing the pinned tab does not mention the link that dies with it',
+    /This tab carries your live link[\s\S]{0,300}?STOPS WORKING/.test(APP)
+      ? [] : ['the close confirm never names the public link']);
+  none('deleting the pinned tab’s project does not mention live sharing at all',
+    /function deleteWsPrompt\(w\)[\s\S]{0,700}?liveShareLivesInWs\(w\.id\)/.test(APP)
+      ? [] : ['deleteWsPrompt has no live-share warning']);
+  // The only auth path that never reaches guest.js, so no error card of its own can explain it.
+  none('a revoked link still renders as an unstyled one-word page',
+    /res\.writeHead\(403, \{ 'Content-Type': 'text\/html/.test(SRV) && /DENIED_HTML/.test(SRV)
+      ? [] : ['the 403 has no Content-Type or no body worth reading']);
+  none('…and that page pulls assets it is not authorized to fetch',
+    /const DENIED_HTML = `<!doctype html>/.test(SRV) && !/DENIED_HTML[\s\S]{0,1400}?<(script|link)\b/.test(SRV)
+      ? [] : ['the denied page references an external asset']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

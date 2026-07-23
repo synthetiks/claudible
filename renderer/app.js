@@ -406,7 +406,10 @@ function closeTab(tabId) {
   // "✕ End this session" and the draft row's "Close session" both reach here with no idea a share is running.
   // Confirm, then let main's tab:close send share:force-end so the tunnel actually closes (it used to just pause,
   // leaving guests frozen on a dead pty while the host's UI still said "live").
-  if (tabId === sharedTabIdR && !confirm('This tab is live-shared.\nClosing it ends the live session — everyone watching will be disconnected.')) return;
+  // Name the consequence the host actually cares about. The old wording said "the live session ends", which reads
+  // like a local thing; what it really does is kill the PUBLIC LINK already sitting in someone's chat window. And
+  // trycloudflare hands out a new random hostname every time, so there is no getting that link back.
+  if (tabId === sharedTabIdR && !confirm('This tab carries your live link.\n\nClosing it ends the share and the link STOPS WORKING for everyone you sent it to — they’ll get "site can’t be reached".\n\nSharing again creates a different link you would have to send them.\n\nClose anyway?')) return;
   // The last unguarded kill path (register R1): every OTHER mutating route (switch/delete/sync/project ops) is
   // busy-guarded by main's authoritative flag, but closeTab — reachable from the Command Center's always-visible
   // "End this session" ✕ — killed a mid-turn Claude silently. Closing a busy session is a legitimate choice,
@@ -510,7 +513,7 @@ function parseTokCount(str) {
 // So the payload is built from the tab RECORD, never the DOM (the DOM shows whatever the host is browsing),
 // and main drops any push whose tabId isn't the mirrored tab — a stray push can never leak another session.
 let sharedTabIdR = null;   // the tab main has pinned the live mirror to (null = not hosting)
-if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); });
+if (claudible.onSharePinned) claudible.onSharePinned((p) => { sharedTabIdR = (p && p.tabId != null) ? p.tabId : null; pushTracker(); try { refreshSessions(); } catch {} });   // repaint: the pinned row must grow its "Link" marker the moment main pins it, not at the next incidental rebuild
 // (share:session-moved is gone: main no longer moves the pinned tab off its session for ANY navigation, so the
 // "your guests are frozen, re-share from its session" toast had nothing left to report. Deleting the live
 // session's workspace is the one remaining teardown, and it sends share:force-end instead — a real ending.)
@@ -1709,6 +1712,7 @@ function webShareUI(on) {
   const sr = $('share-reset'); if (sr) sr.style.display = on ? '' : 'none';   // "reset access" only while web-sharing
   if (!on) { shareLink.style.display = 'none'; shareLink.value = ''; }
   renderTunnelWarn();
+  try { refreshSessions(); } catch {}   // the pinned row's "Link" marker is keyed on webShare — it has to appear/clear with the toggle, not one rebuild later
 }
 // "Reset access": disconnect every current guest + revoke the old link (server regenerateLink), then surface the fresh one.
 { const sr = $('share-reset'); if (sr) sr.addEventListener('click', async () => {
@@ -3146,6 +3150,20 @@ let sharedSessionId = null;
 // (or work in) a different workspace afterwards — the share stays welded to THIS one, matching main's mirrorWs().
 let sharedWsId = null;
 function isSharingSession(id) { return !!id && sharedSessionId === id; }
+// A plain "Share a live link" pins whatever tab happened to be in front (main.js share:start) — and NOTHING said
+// so. The row carrying the public link looked exactly like every other row, so closing it, or deleting its
+// project, killed the link for everyone holding it with no hint beforehand. isSharingSession only ever covered
+// the SESSION-share path (sharedSessionId), which a web share never sets. These two cover the other half.
+function isWebSharePinnedTo(id) {
+  if (!webShare || sharedTabIdR == null || !id) return false;
+  const r = tabs.get(sharedTabIdR);
+  return !!(r && r.session === id);
+}
+function liveShareLivesInWs(wsId) {
+  if (!wsId || sharedTabIdR == null || !(webShare || sharedSessionId)) return false;
+  const r = tabs.get(sharedTabIdR);
+  return !!(r && r.wsId === wsId);
+}
 // The name of the session I'm hosting — for the "your live session is still running over there" bar. Prefer the
 // pinned TAB's own label (truthful even when the host is browsing a workspace whose sessIndex doesn't hold it).
 function sharedSessionLabel() {
@@ -3866,6 +3884,12 @@ function renderSessionRow(s) {
     row.classList.add('sess-live-row');                              // green left accent bar — you're sharing this live
     const lv = document.createElement('span'); lv.className = 'sess-live-ind';
     lv.innerHTML = '<span class="live-dot"></span><span class="liw">Live</span>'; lv.title = 'You are sharing this session live';
+    m.appendChild(lv);
+  } else if (isWebSharePinnedTo(s.id)) {
+    row.classList.add('sess-live-row');                              // same accent as a session share — this row IS the one the public link streams
+    const lv = document.createElement('span'); lv.className = 'sess-live-ind';
+    lv.innerHTML = '<span class="live-dot"></span><span class="liw">Link</span>';
+    lv.title = 'Your public live link streams THIS session — closing it stops the link working';
     m.appendChild(lv);
   } else {
     const _lp = !joinedTabSessionIds().has(s.id) && peersForWs(activeWsId).find((x) => x.session === s.id);
@@ -4732,6 +4756,12 @@ function renderWsSessionRow(w, s) {
     const lv = document.createElement('span'); lv.className = 'sess-live-ind';
     lv.innerHTML = '<span class="live-dot"></span><span class="liw">Live</span>'; lv.title = 'You are sharing this session live';
     m.appendChild(lv);
+  } else if (isWebSharePinnedTo(s.id)) {
+    row.classList.add('sess-live-row');                              // same accent as a session share — this row IS the one the public link streams
+    const lv = document.createElement('span'); lv.className = 'sess-live-ind';
+    lv.innerHTML = '<span class="live-dot"></span><span class="liw">Link</span>';
+    lv.title = 'Your public live link streams THIS session — closing it stops the link working';
+    m.appendChild(lv);
   } else {
     const _lp = peersForWs(w.id).find((x) => x.session === s.id);
     if (_lp) { row.classList.add('sess-live-row'); m.appendChild(makeLiveBadge(_lp, sessTitle(s, w.id))); }
@@ -5337,9 +5367,14 @@ function isLastLocal(w) {
 // One sentence for both delete affordances (the ▾ menu and the chip's right-click), so they can never disagree
 // about whether the folder survives.
 function deleteWsPrompt(w) {
-  return w.adopted
+  const base = w.adopted
     ? 'Remove "' + w.label + '" from Claudible?\nThis only stops tracking the folder as a project — nothing on disk is moved or deleted.'
     : 'Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash and is kept for 30 days. A repo project keeps its GitHub repo — only the local copy is removed.';
+  // main.js tears the share down when the pinned tab's project goes (share:force-end, reason workspace-deleted),
+  // but this prompt — the last thing standing between the user and that — never mentioned live sharing at all.
+  return base + (liveShareLivesInWs(w.id)
+    ? '\n\n⚠ Your live link streams a session in THIS project. Deleting it ends the share, and the link stops working for everyone you sent it to.'
+    : '');
 }
 // First launch (no local workspace existed → main materialized a default): once, welcome the user and open the
 // workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.

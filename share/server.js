@@ -44,6 +44,28 @@ const NAME_MAX = 40;
 const ROSTER_MAX = 32;           // MAX_GUESTS(8) live + up to 24 'left' tombstones. Beyond that, the oldest tombstone is evicted (see trimRoster) — the Map had no delete at all and grew one entry per distinct name, forever.
 const newToken = () => crypto.randomBytes(16).toString('hex');
 
+// Shown for a link that is missing, wrong, or (the common case) revoked because the host clicked "Reset access".
+// Self-contained by necessity: it is served BEFORE authorization, so it must not pull /xterm.css or any other
+// asset. Says who the page belongs to and what to do about it — the one instruction that actually resolves it is
+// "ask for a fresh link", since trycloudflare hands out a new hostname and token every time.
+const DENIED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Link expired · Claudible</title>
+<style>
+ :root{color-scheme:dark}
+ body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+   background:#0e1013;color:#e6e8ea;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+ .card{max-width:30rem;padding:2rem 2.25rem;margin:1.5rem;border:1px solid #23272d;border-radius:14px;background:#15181c}
+ h1{margin:0 0 .6rem;font-size:1.2rem;font-weight:600;letter-spacing:-.01em}
+ p{margin:.55rem 0;color:#a6adb6}
+ .hint{margin-top:1.1rem;padding-top:1rem;border-top:1px solid #23272d;font-size:13.5px;color:#8b939d}
+ b{color:#e6e8ea;font-weight:600}
+</style></head><body><div class="card">
+ <h1>This live link isn’t valid any more</h1>
+ <p>It may have expired, already been reset by the host, or been copied incompletely.</p>
+ <p class="hint">Ask the host to send you a <b>fresh link</b> — Claudible creates a new one each time sharing
+ starts, and resetting access revokes the old one immediately.</p>
+</div></body></html>`;
+
 function serveFile(res, file, type) {
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('not found'); }
@@ -499,7 +521,11 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
       res.setHeader('X-Claudible-Share', '1');
       const u = (req.url || '').split('?')[0];
       if (u === '/' || u === '/index.html') {
-        if (!pageAuthorized(req.url)) { res.writeHead(403); return res.end('forbidden'); }
+        // The ONE auth path that never reaches guest.js, so none of its error cards can explain it. It answered a
+        // bare `forbidden` with no Content-Type — an unstyled white page with a single lowercase word, which is
+        // indistinguishable from "this app is broken". It fires for a missing token, a wrong token, and a STALE
+        // one, so the ordinary case is a colleague opening a link after the host clicked "Reset access".
+        if (!pageAuthorized(req.url)) { res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(DENIED_HTML); }
         return serveFile(res, GUEST_HTML, 'text/html; charset=utf-8');
       }
       if (Object.prototype.hasOwnProperty.call(ASSETS, u)) return serveFile(res, ASSETS[u].file, ASSETS[u].type);
