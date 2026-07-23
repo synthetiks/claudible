@@ -1478,5 +1478,40 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the warning is not wired to open + change']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 45. A LIVE LINK SHARES ONE SESSION — NOT THE WHOLE HISTORY — AND A GUEST CAN LEAVE CLEANLY.
+//   The guest browser had a "Browse sessions" panel that walked every granted project's saved conversations
+//   and transcripts. That's the repo's history, not the one live session. Removing the BUTTON is not enough:
+//   the server must stop answering the frames, or a link holder crafts them by hand. And a guest had no clean
+//   exit — closing the tab just dropped the socket. Now: Disconnect in the bar → a final blurred end card.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SRV = read('share/server.js');
+  none('the guest can still open a read-only session/history browser',
+    !/id="browse-open"/.test(GUEST_HTML) && !/class="browse"/.test(GUEST_HTML)
+      ? [] : ['the Browse-sessions button or panel is still in guest.html']);
+  none('the server still answers the history-browsing frames (button removal is not the gate)',
+    !/msg\.type === 'ws-sessions'/.test(SRV) && !/msg\.type === 'ws-transcript'/.test(SRV)
+      ? [] : ['share/server.js still handles ws-sessions/ws-transcript']);
+  none('…and main still wires the browse callbacks that feed them',
+    !/onBrowseSessions:/.test(MAIN) && !/onBrowseTranscript:/.test(MAIN)
+      ? [] : ['main.js still implements onBrowseSessions/onBrowseTranscript']);
+  none('the guest has no Disconnect control',
+    /id="disconnect-btn"/.test(GUEST_HTML) && /addEventListener\('click', doDisconnect\)/.test(GUEST_JS)
+      ? [] : ['no Disconnect button, or it is not wired to doDisconnect']);
+  none('Disconnect does not reach a final, no-reconnect state',
+    /function doDisconnect\(\)[\s\S]{0,320}?showEnded\('left'\)/.test(GUEST_JS) && /function showEnded\(kind\)/.test(GUEST_JS)
+      ? [] : ['doDisconnect does not enter the terminal end state']);
+  none('…and a left guest can still be dragged back by the reconnect loop',
+    /ws\.onclose = function \(ev\) \{\s*\n\s*if \(left\) return;/.test(GUEST_JS) && /function reconnect\(label\) \{\s*\n\s*if \(left\) return;/.test(GUEST_JS)
+      ? [] : ['onclose/reconnect do not honor the left flag']);
+  none('a host that stops sharing loops "retrying…" forever instead of ending',
+    /if \(wasAdmitted && \+\+reconnTries >= 6\) \{ showEnded\('ended'\)/.test(GUEST_JS)
+      ? [] : ['no terminal end state when the host is gone for good']);
+  none('the end card offers no way back',
+    /id="ov-rejoin"/.test(GUEST_HTML) && /getElementById|\$\('ov-rejoin'\)/.test(GUEST_JS) && /location\.reload\(\)/.test(GUEST_JS)
+      ? [] : ['no Rejoin affordance on the end card']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

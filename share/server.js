@@ -128,7 +128,7 @@ const MAX_PASTE_CHARS = 200 * 1000;   // a paste, not an upload — and MAX_WS_P
 
 // onInput(data) · onPaste(text,{pid,name}) · onGuests(n) · onApprovalRequest({id,name,addr},fn) · onApprovalCancel(id)
 // onChat({role,name,text})  — a guest chat OR a system join/left line, surfaced to the host UI
-function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onBrowseSessions, onBrowseTranscript, onVoiceMembers, onAudio } = {}) {
+function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalRequest, onApprovalCancel, onChat, onSwitchWorkspace, onVoiceMembers, onAudio } = {}) {
   let server = null, wss = null, port = null, readOnly = false, requireApproval = true;
   let heartbeatTimer = null;   // ~30s WS ping/pong — catches SILENT disconnects (a network drop with no clean 'close')
   let linkToken = null, hostName = 'Host';
@@ -376,20 +376,10 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
         try { onSwitchWorkspace && onSwitchWorkspace(msg.id); } catch {}
         return;
       }
-      // Read-only browsing of a GRANTED workspace's saved sessions/transcripts. Allowed even for view-only
-      // guests AND while paused — it reads saved text from SHARED workspaces only, and NEVER touches the live
-      // terminal or a private workspace. Replies go only to THIS requesting guest.
-      const sendBack = (p) => { if (ws.readyState === ws.OPEN) { try { ws.send(JSON.stringify(p)); } catch {} } };
-      if (msg.type === 'ws-sessions' && typeof msg.id === 'string') {
-        if (!workspaces.some((w) => w.id === msg.id)) return;          // only granted (shared) workspaces are browsable
-        try { onBrowseSessions && onBrowseSessions(msg.id, sendBack); } catch {}
-        return;
-      }
-      if (msg.type === 'ws-transcript' && typeof msg.id === 'string' && typeof msg.sid === 'string') {
-        if (!workspaces.some((w) => w.id === msg.id)) return;          // gate to granted workspaces (transcripts can be sensitive)
-        try { onBrowseTranscript && onBrowseTranscript(msg.id, msg.sid, sendBack); } catch {}
-        return;
-      }
+      // ws-sessions / ws-transcript (the read-only history browser) were REMOVED. A live link shares one running
+      // session; it must not become a window into every saved conversation in the granted projects. This is the
+      // authoritative gate — dropping the guest-side button is not enough, since a link holder can craft the
+      // frame by hand. Unknown message types now simply fall through and are ignored.
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (readOnly || paused) return;   // paused = host on a private/non-granted workspace; never inject into it
         const data = stripCtrlV(msg.data);   // a raw ^V would paste the HOST's clipboard at the CLI — see stripCtrlV

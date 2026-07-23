@@ -169,31 +169,8 @@ const share = createShareServer({
     if (hostIsHere) { activeWorkspace = ws; registry.activeId = id; saveRegistry(); }
     try { win && win.webContents.send('workspace:active-changed', { id, tabId: target, global: hostIsHere }); } catch {}   // tabId = the tab whose pty was ACTUALLY re-pointed (the pinned shared tab); global:false = reset that tab's record but leave the host's sidebar scope alone
   },
-  // A guest browses a SHARED workspace's saved sessions, read-only — independent of the live terminal. Lists
-  // that workspace's conversations and (separately) reads one transcript for display. Only SHARED workspaces
-  // are reachable (the server already gates wsId to the granted list; we re-check w.shared as defense in depth).
-  onBrowseSessions: (wsId, reply) => {
-    const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
-    if (!ws || !APPDIR_WSL) return reply({ type: 'ws-sessions', wsId, list: [] });
-    runner.runScript('sessions.sh', '', { ws, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }).then(({ err, stdout }) => {
-        // `err` used to be dropped: a crashed/timed-out sessions.sh rendered to the connected GUEST as
-        // "this workspace has zero sessions" — a lie about someone else's machine. Log it; still reply (with an
-        // honest empty list) so the guest's browse pane doesn't hang waiting.
-        if (err) console.error('[claudible] browse sessions:', err.message);
-        let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
-        reply({ type: 'ws-sessions', wsId, label: ws.label, list: Array.isArray(list) ? list : [] });
-      });
-  },
-  onBrowseTranscript: (wsId, sessionId, reply) => {
-    const ws = registry.workspaces.find((w) => w.id === wsId && w.shared);
-    const sid = String(sessionId || '').replace(/[^A-Za-z0-9-]/g, '');   // strict id (also the bash-interp invariant)
-    if (!ws || !sid || !APPDIR_WSL) return reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: [] });
-    runner.runScript('transcript.sh', `'${sid}'`, { ws, timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(({ err, stdout }) => {
-        if (err) console.error('[claudible] browse transcript:', err.message);   // else a failed read reads as "empty transcript" to the guest
-        let msgs = []; try { msgs = JSON.parse(String(stdout).trim() || '[]'); } catch {}
-        reply({ type: 'ws-transcript', wsId, sessionId: sid, msgs: Array.isArray(msgs) ? msgs : [] });
-      });
-  },
+  // (The read-only session/transcript browser was removed — a live link shares one running session, not the
+  // saved history of the granted projects. The server no longer accepts ws-sessions/ws-transcript at all.)
   // Voice room — audio is RELAYED through the share server as base64 PCM (the original peer-to-peer WebRTC path
   // was replaced by c4b9c4f). The server tracks membership and forwards every voice frame. Bridge the host
   // cockpit's voice membership + audio frames back to the cockpit renderer (over IPC).
