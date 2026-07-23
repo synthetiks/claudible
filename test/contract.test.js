@@ -1190,8 +1190,16 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // only when a session is clicked (it did not, so the pref never existed and the whole chain was inert).
   none('main lets the script guess again instead of using the recorded session',
     /rememberedSessionFor\(ws\) \|\| ''/.test(MAIN) && /function rememberedSessionFor/.test(MAIN) ? [] : ['pty:start does not fall back to the recorded session']);
-  none('the recorded session is only written on a click, so it never exists at boot',
-    /rememberLastSession\(t\.wsId \|\| activeWsId, s\.sessionId\)/.test(APP) ? [] : ['onStatus does not record the pty-confirmed session']);
+  // MUST be turn-start, not presence. Recording "the session the foreground tab is showing" cannot distinguish
+  // a session you CHOSE from one that auto-opened into that tab — and for the auto-opened case those are
+  // precisely the states that differ. Shipped that way once: the wrong session opened, recorded itself as
+  // current, and reopened at every boot. A turn requires a prompt the user submitted, so a session nobody
+  // writes in can never nominate itself.
+  none('the recorded session is written from mere presence again (an auto-opened session re-nominates itself)',
+    /if \(busy && t\.tabId === activeTabId\) rememberLastSession\(t\.wsId \|\| activeWsId, t\.session\)/.test(APP)
+      ? [] : ['the record is not driven by turn start']);
+  none('…and it must NOT also be written from onStatus, which reintroduces the loop',
+    /rememberLastSession\([^)]*s\.sessionId\)/.test(APP) ? ['onStatus still records on presence'] : []);
   none('a deleted session stays recorded and keeps losing the boot race',
     /if \(remembered && !still\) forgetLastSession\(activeWsId\)/.test(APP) && /function forgetLastSession/.test(APP) ? [] : ['a stale recorded id is never cleared']);
   // main interpolates this id into a shell command via spawnPty -> session.sh, so it must be charset-gated.

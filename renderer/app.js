@@ -606,7 +606,6 @@ claudible.onStatus((s) => {
     t.session = s.sessionId;
     t.bornNew = wasNew;
     if (t.tabId === activeTabId) activeSession = s.sessionId;
-    if (t.tabId === activeTabId) rememberLastSession(t.wsId || activeWsId, s.sessionId);   // confirmed by the pty = the session you are genuinely in
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
       const _pp = loadPrefs();
@@ -1232,6 +1231,12 @@ claudible.onTabBusy((tabId, busy) => {
   const t = tabs.get(tabId); if (!t) return;
   if (t.busy === busy) return;                          // idempotent: main re-sends on every hook; don't repaint for a no-op
   t.busy = busy;
+  // A turn STARTING is the only unambiguous evidence that you chose this conversation — it requires a prompt
+  // you submitted. Everything cheaper conflates "chosen" with "merely on screen", and for an auto-opened
+  // session those are exactly the cases that differ, which is the whole bug: the wrong session opened into
+  // the foreground tab, recorded itself as current, and reopened forever. A session you never write in is
+  // never recorded, so it can no longer nominate itself.
+  if (busy && t.tabId === activeTabId) rememberLastSession(t.wsId || activeWsId, t.session);
   // markTabBusy → syncRowFlairs(), which recomputes EVERY .sess row in the sidebar from truth — including the rows
   // inside an expanded non-active workspace's subtree. Deliberately NOT refreshExpandedTrees(): that re-RENDERS the
   // subtrees, and doing that on every turn start/stop is exactly the repaint-churn the anti-flicker work removed.
