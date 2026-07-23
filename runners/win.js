@@ -45,7 +45,7 @@ function appDirGuest() {
   if (_appdirMsys !== undefined) return _appdirMsys;
   const bash = gitBash();
   if (!bash) { _appdirMsys = null; return _appdirMsys; }
-  try { _appdirMsys = cp.execFileSync(bash, ['-lc', `cygpath -u '${APP_ROOT.replace(/'/g, "'\\''")}'`], { encoding: 'utf8' }).trim() || null; }
+  try { _appdirMsys = cp.execFileSync(bash, ['-lc', `cygpath -u '${shared.shq(APP_ROOT)}'`], { encoding: 'utf8' }).trim() || null; }
   catch (e) { console.error('[claudible] cygpath failed:', e.message); _appdirMsys = null; }
   return _appdirMsys;
 }
@@ -56,11 +56,11 @@ function appDirGuest() {
 // (forward slashes), so it's correct in every consumer. (toHostPath stays -w for the few Windows-native call sites.)
 function toGuestPath(p) {
   const bash = gitBash(); if (!bash) return '';
-  try { return cp.execFileSync(bash, ['-lc', `cygpath -m '${String(p).replace(/'/g, "'\\''")}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
+  try { return cp.execFileSync(bash, ['-lc', `cygpath -m '${shared.shq(String(p))}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
 function toHostPath(p) {
   const bash = gitBash(); if (!bash) return '';
-  try { return cp.execFileSync(bash, ['-lc', `cygpath -w '${String(p).replace(/'/g, "'\\''")}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
+  try { return cp.execFileSync(bash, ['-lc', `cygpath -w '${shared.shq(String(p))}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
 function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
 
