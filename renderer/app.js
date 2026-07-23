@@ -134,6 +134,7 @@ let activeSession = null;                       // the ACTIVE tab's session id (
 // 12 enforces both. The per-peer wsId stamp is kept as belt-and-suspenders so a mis-bucketed entry is still inert.
 let livePeersByWs = new Map(), livePeersSig = '', advertisedSession = null;
 const LIVE_TTL_S = 120;   // a stamp older than this is aged out (host re-stamps every ~45s); MUST match wsl/sessions-sync-tool.js LIVE_TTL
+const SKEW_TOL_S = 120;   // how far ahead of OUR clock a peer's ts may sit before we stop trusting it. MUST match wsl/sessions-sync-tool.js SKEW_TOL. Generous on purpose: WSL2 clocks genuinely drift after host sleep, and a briefly-invisible honest host beats rejecting one who is merely a few seconds fast.
 const STARTING_TTL_S = 60;   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
 let MY_SHA = '';               // the running build's git sha (fetched at boot) — build-skew hints on live badges
 // Sessions a JOINED tab's OWN socket already proved offline (the host ended). Suppressed from the badge instantly,
@@ -1782,6 +1783,25 @@ function renderTunnelWarn() {
   const t = $('tunnel-warn-txt');
   if (t) t.textContent = 'Your live link only works on this machine — remote guests can’t reach it' + (lastShareNote ? ' (' + lastShareNote + ')' : '') + '.';
 }
+// PRESENCE HEALTH chip. main raises this after 2 consecutive failed presence pushes while hosting, and clears it
+// on the first success or on teardown. Before this, a failing push was completely invisible: the host's UI said
+// "Sharing live", the heartbeat kept firing into a void, and no peer ever saw the session — with nothing on
+// screen to suggest anything was wrong. The wording names the two causes a user can actually act on.
+let _presenceUnhealthy = false;
+function renderPresenceWarn(err) {
+  const chip = $('presence-warn'); if (!chip) return;
+  chip.style.display = _presenceUnhealthy ? '' : 'none';
+  if (!_presenceUnhealthy) return;
+  const t = $('presence-warn-txt');
+  if (t) t.textContent = 'Collaborators can’t see this session — publishing your live status keeps failing'
+    + (err ? ' (' + humanError(err) + ')' : '') + '. Check your connection and that GitHub access still works (gh auth status).';
+}
+if (claudible.onPresenceHealth) claudible.onPresenceHealth((p) => {
+  const bad = !!(p && p.ok === false);
+  if (bad === _presenceUnhealthy && !bad) return;                 // already clear → nothing to repaint
+  _presenceUnhealthy = bad;
+  renderPresenceWarn(p && p.error);
+});
 { const b = $('tunnel-warn-install'); if (b) b.addEventListener('click', async () => {
     b.disabled = true; b.textContent = 'Installing…';
     let r = null; try { r = await claudible.preflightInstall('cloudflared'); } catch (e) { r = { ok: false, error: (e && e.message) || 'install failed' }; }
@@ -3047,7 +3067,14 @@ function updateAdvertise() {
         // starting:true = the phase-1 "going live…" stamp landed, peers already see the row and the tunnel is
         // merely finishing its spawn — the scary toast would be noise on every single share. Only warn when the
         // stamp ALSO failed (offline / branch unreachable): then nobody can see or join anything.
-        if (r && r.error === 'tunnel-down' && !r.starting) toast('Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.');
+        // Two very different failures used to share one message. stampError set = the presence PUSH failed
+        // (GitHub auth / rate limit / no network), so pointing at cloudflared sent the user to fix the wrong
+        // thing. Only the genuine tunnel case mentions cloudflared.
+        if (r && r.error === 'tunnel-down' && !r.starting) {
+          toast(r.stampError
+            ? 'Sharing started — but your live status couldn’t be published, so collaborators won’t see this session (' + humanError(r.stampError) + '). Check your connection and that GitHub access still works.'
+            : 'Sharing started — but the live tunnel isn’t up yet, so collaborators can’t join until it connects. Check your internet / that cloudflared isn’t blocked.');
+        }
       })
       .catch(() => { if (advertisedSession === want) advertisedSession = null; });   // IPC failure must not leave the latch stuck on a session that was never advertised
   } catch (e) {}
@@ -3217,7 +3244,12 @@ async function pollLivePeers() {
 // hand-rolled copies of the accept/TTL rule would drift): full stamps need url+token, phase-1 stamps need
 // starting:true, each with its own TTL.
 function filterLivePeers(list, wsId, now) {
-  const peers = (list || []).filter((p) => p && p.session && ((p.url && p.token) || p.starting) && (now - (p.ts || 0) < (p.url ? LIVE_TTL_S : STARTING_TTL_S)));
+  // A ts in the FUTURE is a broken clock, not a fresh claim — and it cannot be repaired by clamping: the stamp
+  // is fixed on the branch, so `min(ts, now)` would re-evaluate to "age 0" on every single read and the row
+  // would never age out. The only bounded answer is to distrust the stamp outright past a tolerance.
+  const peers = (list || []).filter((p) => p && p.session && ((p.url && p.token) || p.starting)
+    && (p.ts || 0) <= now + SKEW_TOL_S
+    && (now - (p.ts || 0) < (p.url ? LIVE_TTL_S : STARTING_TTL_S)));
   peers.forEach((p) => { p.wsId = wsId; });
   return peers;
 }

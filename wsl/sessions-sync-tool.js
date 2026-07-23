@@ -460,6 +460,13 @@ function presenceFilter() {
 //     I WIN the deterministic tie-break: earlier ts first (first click wins), login ascending on a tie.
 //     Exactly one side wins on identical inputs, so one host yields instead of both (or neither).
 // Corrupt/unparseable peer files are ignored (like presence-filter) — junk must never lock a session.
+// A claim dated further ahead than this is from a machine whose clock we cannot trust. It must be IGNORED, not
+// clamped: `now - ts` going negative reads as "always fresh", so a forward-skewed (or hand-crafted — any peer
+// with push access can write any author path, see the trust note above) stamp could refuse every future claim on
+// that session FOREVER, with no TTL escape. Ignoring it fails in the safe direction: worst case an honest host
+// with a badly-drifted clock is briefly not seen, instead of every host being permanently locked out.
+// MUST match the renderer's SKEW_TOL_S.
+const SKEW_TOL = 120;
 const LIVE_TTL = 120;   // a live host re-stamps every ~45s (main.js heartbeat); 120s = ~2.6 missed beats of slack before a genuinely-crashed host's claim ages out. MUST match the renderer's LIVE_TTL_S.
 function liveHolder() {
   const dir = process.env.CL_DIR || '';
@@ -482,6 +489,7 @@ function liveHolder() {
     // full 120s here, an orphaned starting stamp kept refusing new claims for a minute AFTER every UI had
     // already stopped showing anyone live ("already-live" with nobody visibly live).
     const claimTtl = o.starting === true ? 60 : LIVE_TTL;
+    if (ts > now + SKEW_TOL) continue;                                // future-dated → untrusted clock; must never lock the session
     if (now - ts >= claimTtl) continue;                               // stale claim (crashed/sleeping host) never blocks
     claims.push({ login, ts, name: String(o.name || '') });
   }

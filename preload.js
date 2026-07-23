@@ -131,6 +131,7 @@ contextBridge.exposeInMainWorld('claudible', {
   liveAdvertise: (sessionId, name, wsId) => ipcRenderer.invoke('live:advertise', { sessionId, name, wsId }),   // wsId = the SHARED session's project. Never let main guess from its ambient foreground tab: the host can be focused on a different (even non-repo) project, and presence would then be written to the wrong branch — or refused outright ("sync is only available for repo workspaces"), advertising nothing at all.
   liveUnadvertise: () => ipcRenderer.invoke('live:unadvertise'),
   livePeers: (wsId) => ipcRenderer.invoke('live:peers', wsId),   // peers on THIS workspace's presence branch, never main's ambient one
+  onPresenceHealth: (cb) => ipcRenderer.on('live:presence-health', (_e, p) => cb(p)),   // presence pushes are failing (or recovered) while hosting — drives the standing chip; silence here is what made a dead push look identical to a healthy share
   onAdvertiseLost: (cb) => ipcRenderer.on('live:advertise-lost', (_e, p) => cb(p)),   // the presence heartbeat lost the one-host-per-session claim (a collaborator went live while ours was stale) — UI must stop saying "sharing"
   onLivePeersPush: (cb) => ipcRenderer.on('live:peers-push', (_e, p) => cb(p)),       // { id, peers } main's beacon saw this workspace's shared branch move and already read the fresh presence — paint it now, no extra round-trip
   onBuildDrift: (cb) => ipcRenderer.on('build:drift', (_e, p) => cb(p)),             // { running, disk } a git pull moved the files under this running process — show the restart chip

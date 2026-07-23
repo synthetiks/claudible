@@ -1085,5 +1085,49 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /pct === 0 \? 0 : Math\.min\(4, Math\.ceil\(pct \/ 25\)\)/.test(APP) ? [] : ['the cell count is not ceil(pct/25) with an explicit 0 case']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 36. LIVE-SHARE TRUTHFULNESS. Two silent-lie classes, both of which let the UI claim something false:
+//
+//   (a) A presence push that FAILS while the UI says "Sharing live". The beat used to branch only on
+//       'already-live', so a dead network / revoked gh token / rate limit produced no retry and no signal —
+//       the host believed they were joinable while no peer ever saw them.
+//   (b) A future-dated peer stamp. `now - ts` goes negative for a forward-skewed writer, which reads as
+//       "always fresh". It CANNOT be fixed by clamping (the stamp is fixed on the branch, so min(ts,now)
+//       re-evaluates to age 0 forever) — the claim has to be distrusted past a tolerance, or it can refuse
+//       every future claim on that session with no TTL escape.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const TOOL = read('wsl/sessions-sync-tool.js');
+  // (a) the failure has to reach the user
+  none('a failed presence beat is silent again (no health signal)',
+    /_notePresenceHealth\(false/.test(MAIN) && /live:presence-health/.test(MAIN) ? [] : ['presenceBeatOnce no longer reports a failed push']);
+  none('a failed presence beat waits a full 45s cadence again (no short retry)',
+    /if \(!isRetry && advertisedSid === sid\)[\s\S]{0,200}?presenceBeatOnce\(true\)/.test(MAIN) ? [] : ['the beat has no one-shot short retry']);
+  none('preload: the presence-health channel is not bridged',
+    /onPresenceHealth:\s*\(cb\)\s*=>\s*ipcRenderer\.on\('live:presence-health'/.test(PRELOAD) ? [] : ['no onPresenceHealth bridge']);
+  none('renderer: nothing consumes presence-health (the chip can never appear)',
+    /onPresenceHealth\(/.test(APP) && /function renderPresenceWarn/.test(APP) ? [] : ['renderer does not subscribe to presence-health']);
+  none('a stale "presence failing" chip outlives the share (teardown must clear it)',
+    /function stopAdvertiseHeartbeat\(\)[\s\S]{0,400}?live:presence-health/.test(MAIN) ? [] : ['stopAdvertiseHeartbeat does not clear the health warning']);
+  // …and it must name the RIGHT cause: blaming cloudflared for a GitHub push failure sends the user to fix
+  // the wrong thing. main threads stampError; the renderer must branch on it.
+  // Must assert the BRANCH, not the mere presence of the identifier: the message body also interpolates
+  // stampError, so a substring check still passed with the branch itself removed (it did, on first write).
+  none('the phase-1 failure toast blames cloudflared for a presence-push failure again',
+    /stampError:/.test(MAIN) && /toast\(r\.stampError\s*\n?\s*\?/.test(APP) ? [] : ['the toast does not branch on r.stampError']);
+
+  // (b) skew — REJECT past tolerance, in both the arbiter and the renderer's filter, with matching constants.
+  none('the arbiter trusts a future-dated claim again (a phantom lock with no TTL escape)',
+    /if \(ts > now \+ SKEW_TOL\) continue;/.test(TOOL) ? [] : ['liveHolder has no future-ts guard']);
+  none('the renderer paints a future-dated peer row again',
+    /\(p\.ts \|\| 0\) <= now \+ SKEW_TOL_S/.test(APP) ? [] : ['filterLivePeers has no future-ts guard']);
+  // The two constants govern the same decision on two sides of the wire; drift makes the arbiter and the UI
+  // disagree about who is live — exactly the class of bug the LIVE_TTL/LIVE_TTL_S pairing already guards.
+  const tolTool = (TOOL.match(/const SKEW_TOL = (\d+)/) || [])[1];
+  const tolApp = (APP.match(/const SKEW_TOL_S = (\d+)/) || [])[1];
+  none('the skew tolerances drifted apart (arbiter vs renderer)',
+    tolTool && tolApp && tolTool === tolApp ? [] : [`SKEW_TOL=${tolTool} vs SKEW_TOL_S=${tolApp}`]);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

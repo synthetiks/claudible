@@ -19,6 +19,7 @@ function eq(label, a, b) { (a === b) ? pass++ : (fail++, console.error(`  FAIL $
 
 const NOW = Math.floor(Date.now() / 1000);
 const FRESH = NOW - 10, STALE = NOW - 400;   // TTL is 300s (matches the renderer's Join-badge filter)
+const SKEWED = NOW + 4000;   // a machine whose clock is ~an hour fast (WSL2 after host sleep, a restored VM snapshot, or a hand-written blob — any peer with push access can write any author path)
 
 // build a temp live/ dir from {author: claimObjOrRawString}, run the tool as `me` claiming `sid`.
 function run(files, sid, me) {
@@ -91,6 +92,30 @@ eq('rival file with no ts → treated stale (free)', run({ daisy: { session: 's1
 {
   const out = run({ daisy: { session: 's1', ts: FRESH, name: 'CrazyDev', starting: true } }, 's1', 'niburu');
   eq('fresh STARTING rival claim → refusal', (refusal(out) || {}).error, 'already-live');
+}
+
+// ---- CLOCK SKEW: a future-dated claim must be IGNORED, never treated as fresh ----------------------------
+// `now - ts` goes NEGATIVE for a forward-skewed writer, which reads as "always fresh" — so before the SKEW_TOL
+// guard, such a claim refused every future claimant on that session FOREVER, with no TTL that could ever expire
+// it. That is unrecoverable without hand-editing the branch, which is why it is worth a guard and a test.
+// Clamping cannot fix it: the stamp is fixed on the branch, so min(ts, now) re-evaluates to age 0 on every read.
+{
+  const out = run({ daisy: { session: 's1', ts: SKEWED, name: 'CrazyDev' } }, 's1', 'niburu');
+  ok('a far-future rival claim does NOT lock the session (no refusal)', out === '');
+}
+{
+  // inside tolerance (a few seconds fast) must still be honoured — rejecting honest small drift would let TWO
+  // hosts go live, which is worse than the thing we are guarding against.
+  const out = run({ daisy: { session: 's1', ts: NOW + 5, name: 'CrazyDev' } }, 's1', 'niburu');
+  ok('a slightly-fast rival clock is still a valid claim (refuses)', !!refusal(out));
+}
+{
+  // Boundary, both sides. (Deliberately not testing the exact edge: the tool reads its own clock a moment after
+  // the test computes NOW, so an exactly-at-tolerance stamp is inherently flaky. These sit well inside/outside.)
+  const kept = run({ daisy: { session: 's1', ts: NOW + 118 } }, 's1', 'niburu');
+  ok('a claim just inside the skew tolerance is still honoured', !!refusal(kept));
+  const dropped = run({ daisy: { session: 's1', ts: NOW + 240 } }, 's1', 'niburu');
+  ok('a claim beyond the skew tolerance is ignored', dropped === '');
 }
 
 console.log(`live-holder: ${pass} passed, ${fail} failed`);

@@ -1124,7 +1124,11 @@ function runPresence(args, cb, ws, opts) {
 // here so a later presence-set/clear targets it even after the user switches the cockpit to another workspace — else
 // the clear runs against the new active ws (nothing there) and the OLD ws stays "live" until its ~2-min TTL expires.
 let advertiseTimer = null, advertisedSid = null, advertisedNameB64 = '', advertisedWs = null;
-function stopAdvertiseHeartbeat() { if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; } advertisedSid = null; advertisedWs = null; }
+function stopAdvertiseHeartbeat() {
+  if (advertiseTimer) { clearInterval(advertiseTimer); advertiseTimer = null; }
+  advertisedSid = null; advertisedWs = null;
+  if (_presFailStreak) { _presFailStreak = 0; try { winSend('live:presence-health', { ok: true }); } catch {} }   // no longer hosting → any standing "presence failing" chip is stale
+}
 // Pull our live/<login>.json off the branch, RETRYING until it lands. presence-clear's own script already retries
 // its git push 3x internally, but if a transient outage spans all three (a network blip exactly at End-live), it
 // returns {ok:false} and — before this — nothing re-attempted, because the heartbeat that might have is already
@@ -1174,18 +1178,43 @@ function stopLiveSharing(opts) {
 }
 // One presence beat, callable outside the interval too: adoptTunnel() fires it the instant a recovered tunnel
 // is adopted, so peers see the fresh handle in tunnel-time — not tunnel-time + up to a full 45s cadence.
-function presenceBeatOnce() {
+// PRESENCE HEALTH. A presence push that fails while the UI says "Sharing live" used to be completely silent:
+// the beat only ever branched on 'already-live', so a dead network / revoked gh token / rate limit left the host
+// believing they were joinable while no peer ever saw them — the same user-visible shape as the long-running
+// "MK can't see my live session" saga. One failure is a blip (the beat retries it once, below); a SECOND
+// consecutive failure is a condition the host needs to know about, so it raises a standing chip in the share
+// dock. Recovery lowers it. Threshold 2 keeps a single transient push from flapping a warning on screen.
+let _presFailStreak = 0;
+function _notePresenceHealth(ok, err) {
+  if (ok) {
+    if (_presFailStreak) { _presFailStreak = 0; try { winSend('live:presence-health', { ok: true }); } catch {} }
+    return;
+  }
+  _presFailStreak++;
+  if (_presFailStreak >= 2) { try { winSend('live:presence-health', { ok: false, error: String(err || 'push failed'), streak: _presFailStreak }); } catch {} }
+}
+function presenceBeatOnce(isRetry) {
   const st = share.status();
   if (!advertisedSid || !st.running || !st.token || !isTunnelUrl(shareBaseUrl)) return;   // not hosting OR no real tunnel yet → skip the beat (never publish a loopback/dead handle); the next beat self-heals once the tunnel URL is up
+  const sid = advertisedSid, ws = advertisedWs;   // pin: a session switch mid-flight must not retry against the NEW sid
   _relayPub(advertisedWs, { type: 'live', session: advertisedSid, url: shareBaseUrl, token: st.token, name: _advNamePlain(), sha: BUILD.short });   // keeps late relay joiners current
   runPresence(`presence-set '${shq(advertisedSid)}' '${shq(shareBaseUrl)}' '${shq(st.token)}' '${shq(advertisedNameB64)}' '${shq(BUILD.short)}'`, (r) => {
-    _liveTiming(`heartbeat: stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'}`);
+    _liveTiming(`heartbeat: stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'}${isRetry ? ' [retry]' : ''}`);
     // The beat lost the claim: someone else went live on this session while our presence was stale (laptop
     // sleep past the 2-min TTL, network outage). ONE host per session — stand down instead of stamping a
     // duplicate, and tell the renderer so the UI stops saying "sharing" (it clears sharedSessionId + toasts).
     if (r && r.error === 'already-live') {
       stopAdvertiseHeartbeat();
       try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
+      return;                                    // a verdict, not a failure — never retried, never a health warning
+    }
+    if (r && r.ok) { _notePresenceHealth(true); return; }
+    _notePresenceHealth(false, r && r.error);
+    // ONE short retry, mirroring the phase-1 presence-starting path. Without it the next attempt was a full
+    // 45s away, so a blip meant peers were blind for the better part of a minute with nothing on screen.
+    if (!isRetry && advertisedSid === sid) {
+      const t = setTimeout(() => { if (advertisedSid === sid && advertisedWs === ws) presenceBeatOnce(true); }, 5000);
+      if (t.unref) t.unref();
     }
   }, advertisedWs);
 }
@@ -1231,7 +1260,10 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
         try { winSend('live:advertise-lost', { by: String(r.by || '') }); } catch {}
         return resolve(r);
       }
-      resolve({ ok: false, error: 'tunnel-down', starting: !!(r && r.ok) });   // starting:true → the renderer skips the "can't join yet" toast (peers already see the row)
+      // stampError distinguishes "the tunnel is merely still spawning" from "the presence push itself failed".
+      // Without it the renderer showed a cloudflared/internet message for a GitHub auth or rate-limit failure,
+      // sending the user to fix the wrong thing entirely.
+      resolve({ ok: false, error: 'tunnel-down', starting: !!(r && r.ok), stampError: (r && r.ok) ? null : String((r && r.error) || 'push failed') });   // starting:true → the renderer skips the "can't join yet" toast (peers already see the row)
     }, ws);
     return;
   }
@@ -1239,6 +1271,9 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   runPresence(`presence-set '${shq(sid)}' '${shq(shareBaseUrl)}' '${shq(st.token)}' '${shq(advertisedNameB64)}' '${shq(BUILD.short)}'`, (r) => {
     _liveTiming(`advertise: full stamp ${r && r.ok ? 'landed' : 'FAILED(' + ((r && r.error) || 'no result') + ')'} +${Date.now() - tAdv}ms`);
     if (r && r.error === 'already-live') return resolve(r);   // a collaborator already hosts this session — do NOT arm the heartbeat (it would keep re-contesting the claim every 2 min); the renderer un-shares + points the user at Join
+    // A failed FIRST full stamp is the same silent hole as a failed beat: the heartbeat still arms and the UI
+    // still says "Sharing live". Seed the health tracker so the standing chip can appear if it keeps failing.
+    _notePresenceHealth(!!(r && r.ok), r && r.error);
     startAdvertiseHeartbeat(sid, ws);
     resolve(r || { ok: false });
   }, ws);
