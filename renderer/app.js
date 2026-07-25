@@ -5547,7 +5547,17 @@ async function switchWorkspace(id, targetSession) {
     }
     return;
   }
-  const sess = targetSession || '';                 // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
+  // Resolve the session to open HERE (renderer-side) rather than leaving it '' for main to guess: '' picks the
+  // newest-mtime session (the bug-1 wrong-session), and — resolved here — we can DEDUPE against it before
+  // respawning. Mirrors main's rememberedSessionFor fallback, using the same lastSession record.
+  const sess = targetSession || lastSessionFor(id) || '';   // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
+  // DEDUPE — the "already running or being resumed" modal that swallows the spacebar (bug 2): resuming a session
+  // that is ALREADY live in another tab spawns a SECOND claude on it, and Claude Code blocks with a selection
+  // prompt that eats every space. Focus the existing tab instead of duplicating — the same guard the busy/shared
+  // branch above already applies, extended to the normal switch path (which never had it).
+  if (sess && sess !== 'new') {
+    for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === sess) { setActiveTab(rec.tabId); return; }
+  }
   // The sidebar is repainted OPTIMISTICALLY (that's what keeps the switch flicker-free), so remember what this tab
   // actually held: main's rec.busy is authoritative and can refuse the re-point in a race the guards above can't see.
   const prev = { wsId: t.wsId, session: t.session, label: t.label, curSessionLabel: t.curSessionLabel, pendingTitle: t.pendingTitle };

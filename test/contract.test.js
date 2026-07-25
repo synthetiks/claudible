@@ -1902,6 +1902,12 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and the new-tab path lost the same fallback (they must stay in lockstep)',
     /spawnPty\(tabId, cols, rows, ws, \(rec && rec\.session\) \|\| \(intent && intent\.session\) \|\| rememberedSessionFor\(ws\) \|\| ''\)/.test(MAIN)
       ? [] : ['pty:start no longer resolves through rememberedSessionFor']);
+  // Resuming a session that's already live in another tab spawns a duplicate claude → Claude Code's "already
+  // running or being resumed" modal, which swallows the spacebar. The normal switch path must focus the
+  // existing tab instead (the busy/shared branch already did; this extends it).
+  none('switching to a project can spawn a SECOND claude on a session another tab already runs (spacebar-eating modal)',
+    /const sess = targetSession \|\| lastSessionFor\(id\) \|\| '';[\s\S]{0,700}?if \(sess && sess !== 'new'\) \{\s*\n\s*for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+      ? [] : ['switchWorkspace normal path does not dedupe an already-open session']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
