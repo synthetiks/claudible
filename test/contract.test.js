@@ -1887,5 +1887,22 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['claudeLatest / claudeRefreshSession are not in preload.js']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 57. SWITCHING TO A PROJECT OPENS THE SESSION YOU LAST WORKED IN — not the newest-mtime guess.
+//   The remembered-session fallback (rememberedSessionFor) is what stops session.sh's filesystem-timestamp
+//   guess from opening the wrong conversation (a sessions-sync/git-pull rewrite bumps an untouched session's
+//   mtime → e.g. GIT PULL wins). It guarded the new-tab path (pty:start) but the workspace-SWITCH respawn
+//   (workspace:open) resumed '' directly — so switching back to a project opened the wrong session. Both
+//   respawn paths must carry the same fallback.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('workspace:open resumes the newest-mtime guess instead of the remembered session',
+    /respawnPty\(targetTab, session \|\| rememberedSessionFor\(ws\) \|\| '', \{ guardBusy: true \}\)/.test(MAIN)
+      ? [] : ['workspace:open does not fall back to rememberedSessionFor before session.sh guesses']);
+  none('…and the new-tab path lost the same fallback (they must stay in lockstep)',
+    /spawnPty\(tabId, cols, rows, ws, \(rec && rec\.session\) \|\| \(intent && intent\.session\) \|\| rememberedSessionFor\(ws\) \|\| ''\)/.test(MAIN)
+      ? [] : ['pty:start no longer resolves through rememberedSessionFor']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

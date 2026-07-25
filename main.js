@@ -2066,7 +2066,13 @@ ipcMain.handle('workspace:open', async (e, id, session) => {
   if (fr) fr.ws = ws;                                              // re-point the target tab at the new workspace (other tabs keep running)
   // guardBusy: the user may have submitted a prompt on this tab DURING the clone — never kill a mid-turn
   // Claude. On refusal the workspace still switches (sidebar follows); the running session keeps its ws truthful.
-  const respawned = respawnPty(targetTab, session || '', { guardBusy: true });   // a session id → open it DIRECTLY (one respawn); '' = resume most-recent in that cwd
+  // A session id → open it DIRECTLY. A switch with no explicit session ('') used to fall straight to
+  // session.sh's "resume most-recent in this cwd", which picks by filesystem timestamp — and a git pull /
+  // sessions-sync rewrite bumps an untouched session's mtime, so the WRONG conversation (the freshest stamp,
+  // e.g. GIT PULL) opened when you switched back to a project. The remembered-session fallback already guards
+  // the new-tab/boot path (pty:start); this is the sibling respawn that was missed. Same fallback, same source
+  // (settings.lastSession[ws]) — and it still degrades to '' when there's no record, so a first visit is unchanged.
+  const respawned = respawnPty(targetTab, session || rememberedSessionFor(ws) || '', { guardBusy: true });
   if (!respawned && fr) fr.ws = prevWs;
   pollDelay = SYNC_MIN;                                            // a freshly-opened workspace: poll promptly
   if (ws.kind === 'repo' && ws.syncSessions) doSync(ws, 'sync', {});   // pull collaborators' sessions in the background
