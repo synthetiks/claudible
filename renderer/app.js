@@ -6103,16 +6103,34 @@ window.addEventListener('keydown', (e) => {
   const msg = $('cc-msg'), act = $('cc-action'), busy = $('cc-busy'), doneBtn = $('cc-done'), dot = $('claude-dot');
   let poll = null, pollSince = 0, lastState = '', userDismissed = false;
   const head = pop.querySelector('.cc-head h3'), center = $('cc-center');
-  let ccVer = '';
+  let ccVer = '', ccLatest = '', ccStale = false;
   async function loadVer() { if (ccVer) return ccVer; try { ccVer = (await claudible.claudeVersion()) || ''; } catch {} return ccVer; }
+  async function loadVerForce() { try { ccVer = (await claudible.claudeVersion(true)) || ''; } catch {} return ccVer; }   // after an in-app update, re-read past main's app-lifetime cache
+  function verLt(a, b) {   // a < b, numeric-dotted (missing parts = 0)
+    const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0), pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0); }
+    return false;
+  }
+  // "Out of date?" — installed vs latest-published. FAIL-SILENT: if latest can't be fetched (offline/registry),
+  // ccStale stays false so the dot never goes falsely amber.
+  async function checkStale() {
+    try {
+      const inst = await loadVer(); if (!inst) { ccStale = false; return; }
+      ccLatest = (await claudible.claudeLatest()) || '';
+      ccStale = !!(ccLatest && verLt(inst, ccLatest));
+    } catch { ccStale = false; }
+  }
   const stop = () => { if (poll) { clearInterval(poll); poll = null; } };
   async function getState() { try { return await claudible.claudeState(); } catch { return null; } }
   function toState(s) { if (!s) return ''; if (!s.installed) return 'missing'; return s.signedIn ? 'ready' : 'unconfirmed'; }
   function setDot(state) {
     lastState = state || '';
-    if (dot) dot.className = 'claude-dot ' + (state === 'ready' ? 'ok' : state === 'missing' ? 'bad' : (state ? 'warn' : ''));
+    // connected + a newer version available → gold 'stale' (the user's "amber when out of date"); otherwise the
+    // existing green/amber/blue. Only 'ready' can be stale — a not-installed / not-signed-in state owns its own colour.
+    const cls = state === 'ready' ? (ccStale ? 'stale' : 'ok') : state === 'missing' ? 'bad' : (state ? 'warn' : '');
+    if (dot) dot.className = 'claude-dot ' + cls;
     btn.classList.toggle('attn', state === 'missing');   // nudge ONLY when truly absent (not the unconfirmed false-negative)
-    btn.title = state === 'ready' ? ('Claude Code — Connected ✓' + (ccVer ? ' · ' + ccVer : '') + ' · click for status')
+    btn.title = state === 'ready' ? ((ccStale ? 'Claude Code update available' + (ccLatest ? ' (' + ccLatest + ')' : '') : 'Claude Code — Connected ✓' + (ccVer ? ' · ' + ccVer : '')) + ' · click for status')
       : state === 'missing' ? 'Claude Code not installed — click to set up'
       : state === 'unconfirmed' ? 'Claude Code installed — click to sign in'
       : 'Claude Code — click to check status';
@@ -6187,6 +6205,44 @@ window.addEventListener('keydown', (e) => {
       row.appendChild(kill); list.appendChild(row);
     });
     center.appendChild(list);
+    // ---- Refresh session (always) + Update Claude Code (only when out of date) ----
+    const actions = document.createElement('div'); actions.className = 'cc-actions';
+    if (ccStale) {
+      const note = document.createElement('div'); note.className = 'cc-update';
+      note.textContent = 'Update available — ' + (ccVer || '?') + ' → ' + (ccLatest || 'latest');
+      const ub = document.createElement('button'); ub.className = 'cc-btn upd'; ub.textContent = 'Update Claude Code';
+      ub.addEventListener('click', () => update(ub));
+      actions.appendChild(note); actions.appendChild(ub);
+    }
+    const rb = document.createElement('button'); rb.className = 'cc-btn'; rb.textContent = 'Refresh session';
+    rb.title = 'Restart this session on the latest Claude Code — your history is kept';
+    rb.addEventListener('click', () => refresh(rb));
+    actions.appendChild(rb);
+    center.appendChild(actions);
+  }
+  // Update the CLI in place (npm -g latest, via the same install path), then re-read the version and re-evaluate
+  // the amber dot — so it clears to green the moment the machine is current.
+  async function update(b) {
+    b.disabled = true; busy.classList.remove('err'); busy.textContent = 'Updating Claude Code… (a minute or two)';
+    let r; try { r = await claudible.preflightInstall('claude'); } catch (e) { r = { ok: false, error: e && e.message }; }
+    b.disabled = false;
+    if (r && r.ok) { ccVer = ''; await loadVerForce(); await checkStale(); busy.textContent = ''; setDot(lastState); renderCenter(); }
+    else { busy.classList.add('err'); busy.textContent = 'Update failed: ' + installErrText(r && r.error) + ' — retry, or update it manually.'; }
+  }
+  // Restart the foreground session on the current binary (resume → history kept). Guards: confirm if mid-turn,
+  // and main refuses if a live share is hosted on it (restarting would drop the guests).
+  async function refresh(b) {
+    if (AT() && AT().busy && !confirm('Claude is mid-turn in this session.\nRefreshing restarts it — the current turn stops.\n\nRefresh anyway?')) return;
+    b.disabled = true; busy.classList.remove('err'); busy.textContent = 'Refreshing session…';
+    let r; try { r = await claudible.claudeRefreshSession(); } catch (e) { r = { ok: false }; }
+    b.disabled = false;
+    if (r && r.ok) { busy.textContent = ''; close(); toast('Session refreshed — now on the latest Claude Code'); }
+    else {
+      busy.classList.add('err');
+      busy.textContent = (r && r.reason === 'hosting') ? 'You’re hosting a live share on this session — stop sharing first (refreshing would drop your guests).'
+        : (r && r.reason === 'live') ? 'This is a joined live session — refresh it from the host’s side.'
+        : 'Couldn’t refresh the session — try again.';
+    }
   }
   btn.addEventListener('click', open);
   doneBtn.addEventListener('click', close);
@@ -6201,4 +6257,5 @@ window.addEventListener('keydown', (e) => {
   });
   getState().then((s) => setDot(toState(s)));   // initialize the dot (cheap, claude-only)
   loadVer().then(() => { if (lastState) setDot(lastState); });   // prefetch version so the tooltip shows it; refresh the title once known
+  checkStale().then(() => { if (lastState === 'ready') setDot(lastState); });   // async, fail-silent → the dot goes gold at rest only if a newer version is actually published
 })();

@@ -2863,8 +2863,8 @@ ipcMain.handle('session:export-text', async (e, arg) => {
 let _claudeVer;   // undefined = not fetched yet
 ipcMain.handle('app:version', () => app.getVersion());   // the real Claudible version (package.json) for the status-bar badge — was hardcoded in the HTML
 ipcMain.handle('app:buildSha', () => BUILD.short || '');   // the running build's git sha — semver doesn't move between releases, this does
-ipcMain.handle('claude:version', () => {
-  if (_claudeVer !== undefined) return _claudeVer;
+ipcMain.handle('claude:version', (_e, force) => {
+  if (!force && _claudeVer !== undefined) return _claudeVer;   // force = re-read after an in-app update (the cache is otherwise app-lifetime)
   return new Promise((resolve) => {
     runner.runScript('claude-version.sh', '', { timeout: 8000 }).then(({ err, stdout }) => {
       if (err) console.error('[claudible] claude-version:', err.message);   // cosmetic (the version chip), but never silent
@@ -2872,6 +2872,34 @@ ipcMain.handle('claude:version', () => {
       resolve(_claudeVer);
     }).catch(() => { _claudeVer = ''; resolve(''); });
   });
+});
+// Latest PUBLISHED Claude Code version (npm registry), for the "update available" amber dot. Cached 24h
+// in-memory and FAIL-SILENT (empty string on any error) — a check that can't reach the registry must never
+// surface a false "out of date". Async; never blocks boot.
+let _claudeLatest, _claudeLatestTs = 0;
+ipcMain.handle('claude:latest', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  if (_claudeLatest !== undefined && (Date.now() - _claudeLatestTs) < DAY) return _claudeLatest;
+  return new Promise((resolve) => {
+    runner.runScript('claude-latest.sh', '', { timeout: 12000 }).then(({ stdout }) => {
+      _claudeLatest = (String(stdout || '').match(/\d+\.\d+(?:\.\d+)?/) || [''])[0];
+      _claudeLatestTs = Date.now(); resolve(_claudeLatest);
+    }).catch(() => { _claudeLatest = ''; _claudeLatestTs = Date.now(); resolve(''); });
+  });
+});
+// "Refresh session" (Connect-Claude popup): restart the FOREGROUND tab's Claude on its SAME conversation, so a
+// long-running session adopts a just-installed CLI / a newly-available model — history is preserved because
+// session.sh resumes by id. REFUSED while hosting a live share on that tab: respawning kills the guests'
+// mirror (respawnPty would refuse anyway, but we return a clear reason). User-initiated + confirmed in the
+// renderer, so no busy-guard here — the user has chosen to end any in-flight turn.
+ipcMain.handle('claude:refresh-session', () => {
+  const tabId = fgTabId;
+  if (tabId == null) return { ok: false, reason: 'no-tab' };
+  if (liveTabs.has(tabId)) return { ok: false, reason: 'live' };        // a joined live tab is a client socket, not a local pty
+  const hosting = (() => { try { return !!share.status().running; } catch { return false; } })();
+  if (hosting && sharedTabId != null && tabId === sharedTabId) return { ok: false, reason: 'hosting' };
+  const rec = ptys.get(tabId);
+  return { ok: !!respawnPty(tabId, (rec && rec.session) || '', {}) };    // same session → resume; not a "move", so the pinned-tab guard never triggers
 });
 
 // ---- first-run onboarding (the Get-Started wizard) -------------------------------------------------

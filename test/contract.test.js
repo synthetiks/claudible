@@ -1841,5 +1841,51 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['host name / view-only / reason are not preserved in the row tooltip on both paths']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 56. THE CLAUDE-CODE BUTTON GAINS "UPDATE AVAILABLE" + "REFRESH SESSION" — additively, in the existing popup.
+//   Amber dot when the installed CLI is behind the latest published (a distinct gold, NOT the not-installed
+//   amber). One-click update (npm -g latest, reusing the install path) and one-click session refresh (resume →
+//   history kept). Two footguns guarded: a false amber when the registry can't be reached, and refreshing a
+//   session that is HOSTING a live share (which would drop the guests).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  const LATEST = read('wsl/claude-latest.sh');
+  none('the "latest version" check can hang or crash instead of failing silent',
+    /command -v npm >\/dev\/null 2>&1 \|\| \{ printf ''; exit 0; \}/.test(LATEST) && /npm view @anthropic-ai\/claude-code version/.test(LATEST)
+      ? [] : ['claude-latest.sh does not fail silent on missing npm']);
+  none('main.js does not fetch/cache the latest version fail-silent',
+    /ipcMain\.handle\('claude:latest'/.test(MAIN) && /_claudeLatest = ''; _claudeLatestTs = Date\.now\(\); resolve\(''\)/.test(MAIN) && /24 \* 60 \* 60 \* 1000/.test(MAIN)
+      ? [] : ['claude:latest is missing its daily cache or its fail-silent catch']);
+  none('the refresh IPC does not restart the foreground session via respawn (resume)',
+    /ipcMain\.handle\('claude:refresh-session'[\s\S]{0,600}?respawnPty\(tabId, \(rec && rec\.session\) \|\| ''/.test(MAIN)
+      ? [] : ['claude:refresh-session does not respawn the fg tab on its own session']);
+  none('…and it can restart a session that is HOSTING a live share (dropping the guests)',
+    /if \(hosting && sharedTabId != null && tabId === sharedTabId\) return \{ ok: false, reason: 'hosting' \}/.test(MAIN)
+      ? [] : ['the refresh IPC has no hosting guard']);
+  none('the out-of-date dot state does not exist / collides with the not-installed amber',
+    /\.claude-dot\.stale\{background:#f5b74a/.test(flat) && !/\.claude-dot\.bad\{background:#f5b74a/.test(flat)
+      ? [] : ['no distinct .claude-dot.stale gold, or it reuses the not-installed colour']);
+  none('the dot does not go amber on "installed + signed in + out of date"',
+    /state === 'ready' \? \(ccStale \? 'stale' : 'ok'\)/.test(APP)
+      ? [] : ['setDot does not map ready+ccStale to the stale dot']);
+  none('a registry that can’t be reached still turns the dot amber (false out-of-date)',
+    /async function checkStale\(\)[\s\S]{0,400}?ccStale = !!\(ccLatest && verLt\(inst, ccLatest\)\)/.test(APP)
+      && /catch \{ ccStale = false; \}/.test(APP)
+      ? [] : ['checkStale can leave ccStale true without a confirmed newer version']);
+  none('Update does not reuse the proven install path',
+    /async function update\(b\)[\s\S]{0,300}?claudible\.preflightInstall\('claude'\)/.test(APP)
+      ? [] : ['the update button does not call preflightInstall(claude)']);
+  none('…and does not re-evaluate staleness after updating (amber would never clear)',
+    /async function update\(b\)[\s\S]{0,400}?loadVerForce\(\); await checkStale\(\)/.test(APP)
+      ? [] : ['update never re-reads the version / re-checks stale']);
+  none('Refresh does not confirm before killing a mid-turn session',
+    /async function refresh\(b\)[\s\S]{0,200}?AT\(\) && AT\(\)\.busy && !confirm\(/.test(APP)
+      ? [] : ['the refresh button has no busy confirm']);
+  none('the new IPCs are not exposed on the preload bridge',
+    /claudeLatest: \(\) => ipcRenderer\.invoke\('claude:latest'\)/.test(PRELOAD) && /claudeRefreshSession: \(\) => ipcRenderer\.invoke\('claude:refresh-session'\)/.test(PRELOAD)
+      ? [] : ['claudeLatest / claudeRefreshSession are not in preload.js']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

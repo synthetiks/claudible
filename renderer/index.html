@@ -602,9 +602,10 @@
     .claude-mascot{width:18px;height:18px;border-radius:5px;display:block}
     .claude-dot{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;
       background:var(--ink-faint);box-shadow:0 0 0 1.5px var(--bg)}
-    .claude-dot.ok{background:#7ee0a8}      /* connected + signed in */
+    .claude-dot.ok{background:#7ee0a8}      /* connected + signed in + up to date */
     .claude-dot.bad{background:#e6b86a}     /* not installed */
     .claude-dot.warn{background:#9bb4ff}    /* installed, not signed in */
+    .claude-dot.stale{background:#f5b74a;box-shadow:0 0 6px -1px #f5b74a}   /* connected, but a newer Claude Code is available — a distinct gold, not the not-installed amber */
     .claude-btn.attn{animation:claudePulse 1.4s var(--ease-pop) infinite}
     @keyframes claudePulse{0%,100%{box-shadow:inset 0 1px 0 var(--sheen),0 0 0 0 rgba(217,119,87,.55)}50%{box-shadow:inset 0 1px 0 var(--sheen),0 0 0 4px rgba(217,119,87,0)}}
     /* Connect-Claude popup: reuses the .approve scrim/card */
@@ -628,6 +629,14 @@
     .cc-kill{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;border-radius:6px;background:none;color:var(--ink-faint);font-size:var(--fs-md);line-height:1;cursor:pointer;transition:all var(--dur-fast)}
     .cc-kill:hover{color:#ff8e8e;border-color:rgba(210,104,95,.4);background:rgba(210,104,95,.1)}
     .cc-kill:disabled{opacity:.3;cursor:not-allowed}
+    /* Refresh-session + Update actions, tucked under the connected view (renderCenter) */
+    .cc-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px}
+    .cc-update{flex-basis:100%;font-size:var(--fs-xs);color:#f5b74a;letter-spacing:.01em}
+    .cc-btn{flex:none;padding:6px 12px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#191c22,#101216);color:var(--ink-dim);font:inherit;font-size:var(--fs-xs);cursor:pointer;transition:all var(--dur-fast)}
+    .cc-btn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+    .cc-btn:disabled{opacity:.5;cursor:default}
+    .cc-btn.upd{color:#f5c96a;border-color:rgba(245,183,74,.4);background:rgba(245,183,74,.10)}
+    .cc-btn.upd:hover{background:rgba(245,183,74,.18)}
     .iconbtn:active{transform:translateY(1px)}
     /* docked session sidebar — a left column of .body (shown when .with-sessions), not an overlay */
     .sidebar{display:none;flex-direction:column;min-height:0;
