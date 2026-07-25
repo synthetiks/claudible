@@ -1910,5 +1910,25 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['switchWorkspace normal path does not dedupe an already-open session']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 58. THE NAMING DIALOG'S OK BUTTON WORKS, AND THE INLINE RENAME ✓/✗ FIT THE FLEX ROW.
+//   modalPrompt (the "+ New Session" naming dialog) wired Cancel but NOT OK — clicking "Create session" did
+//   nothing, only Enter committed. And the inline-rename ✓/✗ (.sess-rename-actions) were position:absolute at a
+//   fixed top, tuned for the pre-flex row; once .sess became a flexbox they stopped centring and overlapped the
+//   input, so clicks missed them.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('the naming dialog OK button has no click handler (only Enter commits)',
+    /okb\.addEventListener\('click', \(\) => close\(inp\.value\.trim\(\)\)\)/.test(APP)
+      ? [] : ['modalPrompt okb is not wired to close/commit']);
+  none('…and Cancel is still wired (guard against removing the wrong one)',
+    /cancel\.addEventListener\('click', \(\) => close\(null\)\)/.test(APP)
+      ? [] : ['modalPrompt cancel lost its handler']);
+  none('the inline-rename ✓/✗ are still absolutely positioned over the flex-row input',
+    /\.sess-rename-actions\{flex:none;display:flex;align-items:center/.test(flat) && !/\.sess-rename-actions\{position:absolute/.test(flat)
+      ? [] : ['.sess-rename-actions is not an in-flow flex child']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

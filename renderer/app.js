@@ -4311,6 +4311,7 @@ function modalPrompt({ title, body, placeholder, value, ok }) {
     // reclaims from the terminal, so clicking the prompt's own buttons (or anything else) is never fought.
     inp.addEventListener('blur', () => setTimeout(() => { try { const ae = document.activeElement; if (document.body.contains(inp) && ae && ae.closest && ae.closest('.xterm')) inp.focus(); } catch {} }, 0));
     cancel.addEventListener('click', () => close(null));
+    okb.addEventListener('click', () => close(inp.value.trim()));       // the OK button had NO handler — clicking "Create session" did nothing, only Enter committed. Mirror the Enter path.
     back.addEventListener('mousedown', (e) => { if (e.target === back) close(null); });
     document.addEventListener('keydown', onDocKey, true);
     document.body.appendChild(back); back.appendChild(box);
