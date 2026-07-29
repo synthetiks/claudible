@@ -2053,5 +2053,40 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['share-names.test.js no longer announces a skipped integration']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 63. NO SHIPPED .js FILE MAY BE UNLINTED. eslint.config.js matches files by glob, so a file in a directory no
+//   glob covers gets ZERO rules and `npm run lint` still exits 0 — "lint passes" becomes true-by-omission.
+//   It had already happened once (share/cloudflared.js + share/server.js, per the config's own comment) and had
+//   happened again to share/replay.js, relay/worker.js and scripts/preinstall-check.js. Rather than name those
+//   three, walk the tree and assert EVERY shipped .js matches some glob — the drift class, not its instances.
+//   Pure text/fs so it runs with no devDeps (the CI test job installs --omit=dev, so eslint isn't there).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const cfg = read('eslint.config.js');
+  const globs = [];
+  for (const m of cfg.matchAll(/files:\s*\[([^\]]+)\]/g)) {
+    for (const g of m[1].matchAll(/'([^']+)'/g)) globs.push(g[1]);
+  }
+  // Mirrors eslint.config.js's own `ignores`, plus the two dirs that are RUNTIME STATE rather than shipped
+  // code: .claude/ is the hook bundle Claudible injects into a workspace (gitignored, regenerated per run)
+  // and .git/. Verified untracked+ignored before excluding them — not assumed.
+  const ignores = ['node_modules', 'dist', 'runtime', 'patches', 'assets', path.join('test', 'fixtures'), '.git', '.claude'];
+  const toRe = (g) => new RegExp('^' + g.split('/').map((p) => p === '**' ? '@@' : p)
+    .join('/').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/@@\//g, '(?:.*/)?').replace(/@@/g, '.*')
+    .replace(/\*/g, '[^/]*') + '$');
+  const res = globs.map(toRe);
+  const walk = (dir, acc) => {
+    for (const e of fs.readdirSync(path.join(ROOT, dir || '.'), { withFileTypes: true })) {
+      const rel = dir ? dir + '/' + e.name : e.name;
+      if (ignores.some((i) => rel === i || rel.startsWith(i + '/'))) continue;
+      if (e.isDirectory()) walk(rel, acc);
+      else if (e.name.endsWith('.js')) acc.push(rel);
+    }
+    return acc;
+  };
+  const unmatched = walk('', []).filter((f) => !res.some((re) => re.test(f)));
+  none('a shipped .js file matches no ESLint glob (0 rules — lint would pass by omission)', unmatched);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

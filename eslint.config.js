@@ -32,6 +32,16 @@ const BROWSER_GLOBALS = {
   confirm: 'readonly', prompt: 'readonly', structuredClone: 'readonly', crypto: 'readonly',
 };
 
+// Cloudflare Workers runtime (relay/worker.js): not Node and not a browser tab — it has fetch/Response and the
+// Workers-only WebSocketPair, but no require/process/window. ES modules, not CommonJS.
+const WORKER_GLOBALS = {
+  Response: 'readonly', Request: 'readonly', Headers: 'readonly', fetch: 'readonly',
+  WebSocketPair: 'readonly', WebSocket: 'readonly', crypto: 'readonly', caches: 'readonly',
+  URL: 'readonly', URLSearchParams: 'readonly', TextEncoder: 'readonly', TextDecoder: 'readonly',
+  console: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly',
+  clearInterval: 'readonly', atob: 'readonly', btoa: 'readonly', addEventListener: 'readonly',
+};
+
 // The rules. Deliberately small — every one has caught (or would have caught) a real defect class here.
 const RULES = {
   'no-unused-vars': ['error', { args: 'none', varsIgnorePattern: '^_', caughtErrors: 'none' }],
@@ -64,8 +74,17 @@ module.exports = [
   // share/server.js are node too (required by main.js) — before they were listed here they matched NO block
   // and were silently unlinted, which is how a whole file can drift with zero gate.
   {
-    files: ['main.js', 'preload.js', 'lib/**/*.js', 'runners/**/*.js', 'hooks/**/*.js', 'wsl/**/*.js', 'test/**/*.js', 'eslint.config.js', 'share/cloudflared.js', 'share/server.js'],
+    files: ['main.js', 'preload.js', 'lib/**/*.js', 'runners/**/*.js', 'hooks/**/*.js', 'wsl/**/*.js', 'test/**/*.js', 'eslint.config.js', 'share/cloudflared.js', 'share/server.js', 'share/replay.js', 'scripts/**/*.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: NODE_GLOBALS },
+    rules: RULES,
+  },
+
+  // Cloudflare Worker (ES module, Workers runtime). It matched NO block before — `eslint --print-config` returned
+  // zero rules for it — which is the exact drift this config's Node comment warns about, repeated on an
+  // internet-facing file. It ships inert and is excluded from build.files, but it is still code we publish.
+  {
+    files: ['relay/worker.js'],
+    languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: WORKER_GLOBALS },
     rules: RULES,
   },
 
