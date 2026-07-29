@@ -2088,5 +2088,22 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('a shipped .js file matches no ESLint glob (0 rules — lint would pass by omission)', unmatched);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 64. THE INLINE RENAME FIELD MUST ACTUALLY BE USABLE. Two leftovers from the flex conversion, both measured:
+//   .sess-rename kept a 44px right padding reserved for the ✓/✗ back when they were positioned OVER the input
+//   (they became an in-flow sibling in 2799ffd), and .sess-meta — absolute and zero-width pre-flex — became a
+//   real flex sibling that takes width while editing. Together: a saved row had 81.8px of usable text area and
+//   a DRAFT row had 9.8px. After: 157px for both.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('the rename input keeps a padding reserve for buttons that no longer overlap it',
+    /\.sess-rename\{[^}]*padding:4px 7px/.test(flat) && !/\.sess-rename\{[^}]*padding:4px 44px/.test(flat)
+      ? [] : ['.sess-rename still reserves right padding for the old absolute ✓/✗']);
+  none('the meta cluster still steals width from the rename field (a draft row had 9.8px to type in)',
+    /\.sess\.renaming \.sess-meta\{display:none\}/.test(flat)
+      ? [] : ['no .sess.renaming .sess-meta guard — unlike its menu-btn / flair / live-ind siblings']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

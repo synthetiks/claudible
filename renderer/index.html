@@ -793,7 +793,17 @@
     .sess.renaming .sess-live-ind{display:none}
     /* inline rename input (replaces the title while editing) */
     .sess-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);background:#0a0b0d;
-      border:1px solid var(--hairline);border-radius:6px;padding:4px 44px 4px 7px;margin-bottom:3px}
+      border:1px solid var(--hairline);border-radius:6px;padding:4px 7px;margin-bottom:3px}
+    /* The 44px right padding this replaces was a reserve for the ✓/✗ back when .sess-rename-actions was
+       position:absolute OVER the input. They became an in-flow sibling (margin-left:4px) in 2799ffd, so the
+       reserve became dead space the input could never use — 44px of a 165px field. */
+    /* …and the meta cluster must step aside while editing. Pre-flex it was position:absolute (zero layout
+       width), so whatever it showed during a rename was cosmetic. Now it's a real flex sibling that TAKES
+       width: on a saved row :focus-within reveals the timestamp (the input auto-focuses, so this is always
+       true while renaming) and on a draft row "draft · unsaved" is an ungated text node. Measured before this
+       rule: a draft row's rename field had 9.8px of usable text area. .sess-menu-btn/.sess-flair/.sess-live-ind
+       already had exactly this guard — .sess-meta was the one that was missed. */
+    .sess.renaming .sess-meta{display:none}
     .sess-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
     /* ✓/✗ confirm/cancel for the inline rename — sits in the top-right slot the ▾ vacates while editing */
     /* the ✓/✗ ride the flex row inline, next to the input — NOT absolute. The old position:absolute;top:7px was
