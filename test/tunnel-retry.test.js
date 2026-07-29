@@ -27,7 +27,12 @@ ok('main.js: the retry timer is registered in appTimers (quit sweep disarms it f
 }
 
 // ---- a failed tunnel at share-start arms the self-heal instead of staying silently degraded forever ----
-ok('share:start fallback arms the retry', /note = String\(tunErr\.message \|\| tunErr\); armTunnelRetry\(\);/.test(MAIN));
+// Scoped to the catch BLOCK, not to two statements being adjacent: a _liveTiming line and the
+// cloudflared-not-installed early return now sit between them, and the call carries a delay
+// (armTunnelRetry(10000)). What matters is that a failed tunnel records the note AND arms the self-heal —
+// pinning the exact call shape is what made this rot.
+ok('share:start fallback arms the retry',
+  /\} catch \(tunErr\) \{[\s\S]{0,900}?note = String\(tunErr\.message \|\| tunErr\);[\s\S]{0,900}?armTunnelRetry\(/.test(MAIN));
 
 // ---- an unexpected tunnel death re-arms from inside the (single) exit handler, and beats presence on recovery ----
 {

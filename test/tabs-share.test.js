@@ -19,6 +19,11 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const APP = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
 const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+// Comment-free views. The ORDERING assertions below cap the distance between two statements, and every one of
+// them has broken at least once because an explanatory COMMENT grew between them — the code was always correct.
+// Stripping comments first measures the thing the check is actually about. ([^:] keeps https:// intact.)
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+const MAIN_NC = stripComments(MAIN), APP_NC = stripComments(APP);
 
 let pass = 0, fail = 0;
 const ok = (label, c) => c ? pass++ : (fail++, console.error('  FAIL ' + label));
@@ -140,7 +145,7 @@ ok('main.js: syncShare cannot un-freeze the mirror',
 ok('main.js: the workspace-granular pause never overrides the freeze',
   /share\.status\(\)\.running && !freezeMirror/.test(MAIN));
 ok('main.js: workspace:delete freezes AND stops advertising before the respawn (covers a web-share pinned to a session-less tab)',
-  /if \(sharedHere\) \{[\s\S]{0,700}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,300}?stopAdvertising\(\);[\s\S]{0,300}?winSend\('share:force-end'/.test(MAIN));
+  /if \(sharedHere\) \{[\s\S]{0,700}?share\.setPaused\(true\); share\.resetRing\(\); share\.resetStatus\(\);[\s\S]{0,300}?stopAdvertising\(\);[\s\S]{0,300}?winSend\('share:force-end'/.test(MAIN_NC));
 // …and syncShare() must NOT run in that branch: every tab already points at `fallback`, so it would re-derive the
 // pause from a workspace the guests were never granted and un-freeze the mirror it just froze.
 ok('main.js: workspace:delete skips syncShare when the shared tab is one of the moved ones',
@@ -383,7 +388,7 @@ ok('app.js: sessionIsLive covers hosted, joined, and peer-hosted sessions — sc
 // closeTab is reachable from the Command Center's always-visible "End this session" ✕ with zero other guard —
 // killing a mid-turn Claude must never be silent. The confirm must sit BEFORE the actual tabClose IPC.
 ok('app.js: closeTab confirms before killing a BUSY session (R1 — the last unguarded kill path)',
-  /function closeTab\(tabId\) \{[\s\S]{0,1400}?rec\.busy && !confirm\([\s\S]{0,1600}?claudible\.tabClose\(tabId\)/.test(APP));
+  /function closeTab\(tabId\) \{[\s\S]{0,1400}?rec\.busy && !confirm\([\s\S]{0,1600}?claudible\.tabClose\(tabId\)/.test(APP_NC));
 // A JOINED session renders exactly once, sidebar-wide. The active list pins the joined row (its `shown` set);
 // the expanded-tree renderer must consult the SAME authority (joinedTabSessionIds) and stand its saved copy
 // down — this is the "I see the same live session twice" screenshot (joined row under the active project +

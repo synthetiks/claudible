@@ -2009,5 +2009,30 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 61. `npm test` MUST RUN EVERY FILE. It was a 43-step `&&` chain, so one stale assertion at step 20 meant 23
+//   files — including ALL NINE shell tests — silently never executed, locally or in CI, and the output looked
+//   identical to an ordinary single failure. The runner never short-circuits and reports an aggregate.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const PKG = JSON.parse(read('package.json'));
+  const RUN = read('test/run-all.js');
+  none('npm test is back to an && chain (one failure hides the rest of the suite)',
+    PKG.scripts && PKG.scripts.test === 'node test/run-all.js' ? [] : ['scripts.test is not the aggregate runner']);
+  none('…and the e2e boot test lost its separate, opt-in script',
+    PKG.scripts && PKG.scripts['test:e2e'] === 'node test/e2e-boot.test.js' ? [] : ['test:e2e is missing']);
+  none('the runner short-circuits instead of running every file',
+    /for \(const \{ f, cmd \} of steps\)/.test(RUN) && !/break;/.test(RUN) && /failures\.push/.test(RUN)
+      ? [] : ['run-all.js does not run all steps and collect failures']);
+  none('…and a test killed by a signal counts as a pass',
+    /r\.status == null \? 1 : r\.status/.test(RUN) ? [] : ['a null exit status is not treated as failure']);
+  none('…and it still exits non-zero on failure (so CI keeps gating)',
+    /process\.exit\(failures\.length \? 1 : 0\)/.test(RUN) ? [] : ['run-all.js does not propagate failure']);
+  // Discovery, not a hardcoded list — a new test file can never be silently left out of the suite.
+  none('the runner uses a hardcoded list a new test can be forgotten from',
+    /readdirSync\(DIR\)/.test(RUN) && /endsWith\('\.test\.js'\)/.test(RUN) && /endsWith\('\.sh'\)/.test(RUN)
+      ? [] : ['run-all.js does not discover test files']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
