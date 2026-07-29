@@ -36,6 +36,13 @@ self-hosts one). It does have real network surface when you use certain features
     IP-bound, single-use, revoked on kick, and expires after a short grace window — and is bounded to a
     session the host already approved. Moving it into an `HttpOnly` cookie is deliberately deferred (it
     would risk the reconnect flow over the `SameSite=None` tunnel) and is tracked as a hardening item.
+  - *Known, accepted exposure:* the share page's static assets (`/guest.js`, the bundled xterm files) are
+    served without the page's token check. The content is public library/UI code — nothing session- or
+    host-specific — so the only thing an unauthenticated request learns is "a Claudible share is running
+    here", and every response already discloses that via the `X-Claudible-Share` header (which the tunnel
+    verifier needs on all responses, 404s included). Gating the assets would therefore add a token
+    round-trip for zero information hidden; the real upgrade is the same `HttpOnly`-cookie migration
+    deferred above, and the two are tracked as one item.
 - **Live-session presence relay (opt-in, self-hosted, OFF by default).** A team may deploy the tiny
   Cloudflare Worker in [`relay/`](relay/) to make "went live"/"ended" reach collaborators in under a second
   instead of the default ~3–5s git path. When enabled (`CLAUDIBLE_RELAY_URL`, or a maintainer bakes a URL

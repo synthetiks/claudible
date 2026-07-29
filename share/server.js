@@ -444,7 +444,10 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
       if (msg.type === 'voice-join') { voiceGuests.add(ws._pid); broadcastVoice(); return; }
       if (msg.type === 'voice-leave') { if (voiceGuests.delete(ws._pid)) broadcastVoice(); return; }
       // Server-relayed voice: fan a guest's audio frame out to the OTHER voice members + the host. Only voice
-      // members may send/receive; nothing reaches a non-participant or a paused/non-shared workspace.
+      // members may send/receive; nothing reaches a non-participant. Voice is DELIBERATELY not gated on
+      // `paused` (this comment used to claim it was, which was false): paused protects the TERMINAL of a
+      // private workspace, and audio frames carry no terminal content — gating them would drop an ongoing
+      // call the moment the host glances at a private project, and the call would not recover on its own.
       if (msg.type === 'audio' && typeof msg.data === 'string') {
         if (!voiceGuests.has(ws._pid)) return;
         if (msg.data.length > MAX_AUDIO_B64) return;   // drop an oversized frame — amplification guard at the relay fan-out (a legit ~40ms block is far smaller)
