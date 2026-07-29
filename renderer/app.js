@@ -3097,7 +3097,6 @@ function forgetWorkspaceCaches(wsId) {
 
 // ---------- sessions sidebar (switch between Claude conversations, like Claude Code) ----------
 const sessListEl = $('sess-list');
-const newSessEl = $('new-session');   // capture ONCE (like sessListEl). getElementById returns null for a DETACHED node, so re-querying after the active workspace is collapsed/detached would lose the "+ New Session" row forever.
 const bodyEl = document.querySelector('.body');
 // activeSession / workspaces / activeWsId are declared up top (near the tabs Map) so the tab-strip boot can
 // reference them. The conversation order is stored PER workspace so switching libraries never reshuffles another's.
@@ -4869,7 +4868,7 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     // subtree destroyed the input mid-keystroke. User-initiated repaints are unaffected: a click elsewhere
     // blurs → commits the rename BEFORE the click handler repaints. The periodic caller re-fills soon after.
     if (kids.querySelector('.sess-rename')) return;
-    Array.from(kids.querySelectorAll('.sess,.sess-empty,.newsess-row')).forEach((n) => n.remove());
+    Array.from(kids.querySelectorAll('.sess,.sess-empty')).forEach((n) => n.remove());
     // Same stub rule as the active list (promptless fork artifacts hidden, NAMED sessions always shown), and —
     // critically — the SAME ordering. This was the one site still sorting by used/mtime after a0c3c59 moved the
     // other two onto the saved order, so the rows you saw in the tree visibly REORDERED the instant you clicked
@@ -4896,8 +4895,8 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     // suppressions as there: a joined tab wins; saved rows already wear their badge on the ordered rows above.
     { const seenIds = new Set(ordered.map((s) => s.id));
       peersForWs(w.id).forEach((p2) => { if (seenIds.has(p2.session) || joined.has(p2.session)) return; kids.appendChild(renderLivePeerRow(p2)); }); }
-    // NB: no "+ New Session" here. That action belongs only to the SELECTED workspace (its shared #new-session row).
-    // A non-active workspace lists its sessions for browsing/opening; to start a new one you select it first.
+    // No create action inside a subtree: "New session" is a manage-menu item now, reachable for ANY project
+    // (active or not) and targeting that project by id — so a non-active tree needs nothing of its own here.
   };
   const c = _wsSessCache.get(w.id);
   if (c) fill(c.list); else if (!kids.querySelector('.sess')) { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }   // no "loading…" flash over rows we're merely refreshing (busted cache but the list is still on screen)
@@ -4937,8 +4936,7 @@ function wsChipsSig() {
 // In-place update: toggle active/expanded/shared, re-nest the live #sess-list under whoever is active now, and
 // add/remove the non-active children — WITHOUT recreating any chip (so the busy/syncing dot animations don't restart).
 function reconcileWsChips(el) {
-  if (sessListEl && sessListEl.parentNode) sessListEl.remove();      // detach the live list so we can re-nest it under the new active chip (newSessEl is the persistent module ref)
-  if (newSessEl && newSessEl.parentNode) newSessEl.remove();
+  if (sessListEl && sessListEl.parentNode) sessListEl.remove();      // detach the live list so we can re-nest it under the new active chip
   const chipById = {};
   el.querySelectorAll('.ws-chip').forEach((c) => { chipById[c.dataset.id] = c; });
   workspaces.forEach((w) => {
@@ -4951,7 +4949,7 @@ function reconcileWsChips(el) {
     if (kids && !kids.classList.contains('ws-children')) kids = null;
     if (!wantExpanded) { if (kids) kids.remove(); return; }
     if (!kids) { kids = document.createElement('div'); kids.className = 'ws-children'; chip.after(kids); }
-    if (wantActive) { kids.innerHTML = ''; kids.appendChild(sessListEl); if (newSessEl) kids.appendChild(newSessEl); }   // active → the live list
+    if (wantActive) { kids.innerHTML = ''; kids.appendChild(sessListEl); }   // active → the live list
     else if (!kids.childElementCount) { renderWsNonActiveSessions(w, kids); }                                            // newly non-active/expanded → its saved list (warm cache → instant). a stable non-active list is left untouched (no restart)
   });
 }
@@ -4977,11 +4975,10 @@ function renderWsChips() {
   // caller retries); the in-place fast path above stays live, and user clicks blur/commit first anyway.
   if (el.querySelector('.sess-rename, .ws-rename')) return;
   _wsChipsSig = sig;
-  // Preserve the live sessions list + its inline "+ New Session" across the wipe — they get moved INTO the active
-  // workspace node below. .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare
-  // renderWsChips() never drops the sessions. Without this, el.innerHTML='' would destroy the relocated nodes.
+  // Preserve the live sessions list across the wipe — it gets moved INTO the active workspace node below.
+  // .remove() keeps the JS ref (sessListEl) and the already-rendered rows alive, so a bare renderWsChips()
+  // never drops the sessions. Without this, el.innerHTML='' would destroy the relocated node.
   if (el.contains(sessListEl)) sessListEl.remove();
-  if (newSessEl && el.contains(newSessEl)) newSessEl.remove();      // newSessEl: persistent module ref (survives detachment when the active ws is collapsed)
   el.innerHTML = '';
   workspaces.forEach((w) => {
     const chip = document.createElement('div');
@@ -5043,16 +5040,15 @@ function renderWsChips() {
       const kids = document.createElement('div'); kids.className = 'ws-children';
       if (w.id === activeWsId) {                            // the ACTIVE workspace gets the full live list (live/joined rows + the moved #sess-list)
         kids.appendChild(sessListEl);
-        if (newSessEl) kids.appendChild(newSessEl);
       } else {                                              // a NON-active expanded workspace → its saved sessions, fetched without activating it
         renderWsNonActiveSessions(w, kids);
       }
       el.appendChild(kids);
     }
   });
-  // The active workspace's live #sess-list / #new-session are nested above only while the active ws is EXPANDED.
-  // If it's collapsed (or there's no active match), they stay detached (preserved via .remove()) — refreshSessions
-  // still fills the ref harmlessly, and they re-nest the moment the active workspace is expanded again.
+  // The active workspace's live #sess-list is nested above only while the active ws is EXPANDED. If it's
+  // collapsed (or there's no active match), it stays detached (preserved via .remove()) — refreshSessions
+  // still fills the ref harmlessly, and it re-nests the moment the active workspace is expanded again.
   el.scrollTop = _scroll;        // restore the scroll position the rebuild reset (synchronous content is in place)
 }
 // "What's a workspace?" — one click on the ⓘ explains the concept, so the sidebar stays clean (no inline paragraphs).
@@ -5230,9 +5226,35 @@ async function deleteWorkspace(w) {
   else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
 }
 // ---- workspace options (▾) menu: every per-workspace action lives here so the chip stays a clean name ----
+// The green + on a project's manage menu. A CREATE action among toggles and destructive ops, so it is the one
+// item that gets colour (see .ws-mi.accent) — the eye/cloud/pencil/trash icons all stay monochrome.
+const PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+// Start a named session in a SPECIFIC project. Was an inline sidebar row bound to the ambient activeWsId; it is
+// a manage-menu item now, and a menu can be opened on a project that is NOT active — so the target rides in as
+// an argument. newBlankTab honours a non-active wsId (makeTab takes it, and setActiveTab then switches the
+// sidebar onto that project), which is exactly the behaviour the old row could never offer.
+let newSessionPrompting = false;   // modalPrompt has no singleton — without this guard a double-click stacks two "Name this session" dialogs (and can create two tabs). Siblings ws-create/wiz-ws-create guard the same way.
+async function promptNewSession(wsId) {
+  if (newSessionPrompting) return;                                                  // already asking — swallow the double-click
+  newSessionPrompting = true;
+  try {
+    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
+    if (name === null) return;                                                       // Cancel / Esc → don't create
+    if (!newBlankTab(wsId || activeWsId, 'new', name || '')) toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');   // empty (just hit Create) → unnamed, like before
+  } finally { newSessionPrompting = false; }
+}
 function wsMenuItems(chip, nm, w) {
   const st = wsSyncState[w.id] || {};
   const items = [];
+  // CREATE first: the one thing you come to this menu to make, above the toggles that change how the project
+  // behaves and the operations that destroy it. Its own separator keeps it from reading as part of the
+  // share/sync block. (This replaced the sidebar's inline "+ New Session" row — see index.html's note.)
+  items.push({
+    icon: PLUS_SVG, accent: true, label: 'New session',
+    hint: 'Start a new named session in this project.',
+    act: () => promptNewSession(w.id),
+  });
+  items.push({ sep: true });
   // live screen-share (guests watch the terminal) — available on every workspace
   items.push({
     icon: w.shared ? EYE_ON_SVG : EYE_OFF_SVG,
@@ -5287,7 +5309,7 @@ function openWsMenu(btn, chip, nm, w) {
   wsMenuItems(chip, nm, w).forEach((it) => {
     if (it.sep) { const s = document.createElement('div'); s.className = 'ws-menu-sep'; m.appendChild(s); return; }
     const b = document.createElement('button');
-    b.className = 'ctxitem ws-mi' + (it.danger ? ' danger' : '') + (it.on ? ' on' : '');
+    b.className = 'ctxitem ws-mi' + (it.danger ? ' danger' : '') + (it.on ? ' on' : '') + (it.accent ? ' accent' : '');
     if (it.hint) b.title = it.hint;                          // short hover description of what this action does
     b.innerHTML = '<span class="ws-mi-ic">' + it.icon + '</span><span class="ws-mi-lb"></span>';
     b.querySelector('.ws-mi-lb').textContent = it.label;     // textContent → labels can't inject markup
@@ -5819,16 +5841,6 @@ claudible.onWorkspaceActiveChanged((p) => {
 
 $('sessions-btn').addEventListener('click', () => openSidebar(!bodyEl.classList.contains('with-sessions')));
 $('sidebar-close').addEventListener('click', () => openSidebar(false));
-let newSessionPrompting = false;   // modalPrompt has no singleton — without this guard a double-click stacks two "Name this session" dialogs (and can create two tabs). Siblings ws-create/wiz-ws-create guard the same way.
-$('new-session').addEventListener('click', async () => {                            // a NEW tab — never clears the current session
-  if (newSessionPrompting) return;                                                  // already asking — swallow the double-click
-  newSessionPrompting = true;
-  try {
-    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
-    if (name === null) return;                                                       // Cancel / Esc → don't create
-    if (!newBlankTab(activeWsId, 'new', name || '')) toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');   // empty (just hit Create) → unnamed, like before
-  } finally { newSessionPrompting = false; }
-});
 // One-time migration: conversation order moved from the flat `sessionOrder` key to per-workspace
 // `wsOrder_<id>`; carry the legacy arrangement over so it isn't lost on first launch after upgrade.
 { const _p = loadPrefs(); if (_p.sessionOrder && !_p.wsOrder_legacy) savePrefs({ wsOrder_legacy: _p.sessionOrder }); }

@@ -873,11 +873,12 @@
     .ws-chips::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22)}   /* THE single scroll region: the workspace tree + the active workspace's nested sessions (one calm division, no inner divider) */
     /* nested sessions under the expanded (active) workspace — indentation + a faint guide carry the hierarchy (no card borders) */
     .ws-children{display:flex;flex-direction:column;gap:2px;margin:3px 0 12px 8px;padding-left:4px}   /* ⑤ no guide LINE — indentation alone carries the hierarchy, and the reclaimed 6px goes back to the row titles */
-    /* "+ New Session" — inline as the last child inside the open workspace */
-    .newsess-row{display:flex;align-items:center;gap:6px;width:auto;text-align:left;margin:1px 0 0;padding:7px 6px;
-      font-size:var(--fs-sm);letter-spacing:0;text-transform:none;color:var(--ink-faint);background:none;border:none;border-left:2px solid transparent;
-      border-radius:6px;cursor:pointer;box-shadow:none;transition:background var(--dur-fast),color var(--dur-fast)}
-    .newsess-row:hover{background:rgba(255,255,255,.045);color:var(--ink-dim)}
+    /* The inline "+ New Session" row is GONE — it now lives as the first item of a project's manage menu.
+       It used to sit inside .ws-children, i.e. INSIDE the one scroll container, between project chips: so its
+       31px joined the block that moves whenever the session list resizes (skeleton -> real rows), it was
+       .remove()d and re-appended on every one of renderWsChips()'s 14 call sites, and the scrollTop save/restore
+       around that render clamped differently once its height appeared — three separate ways for the whole
+       sidebar to shift under the pointer. In a menu it costs the tree zero height and cannot move anything. */
     /* SESSIONS section header — just the label + "+ New"; the active workspace is already shown above */
     .ws-chip{display:flex;align-items:center;gap:7px;width:auto;text-align:left;padding:6px 5px;border:1px solid transparent;
       border-radius:6px;background:none;cursor:pointer;box-shadow:none;
@@ -917,6 +918,7 @@
     .ws-menu .ws-mi-ic{display:flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none;opacity:.9}
     .ws-menu .ws-mi-ic svg{width:14px;height:14px;display:block}
     .ws-menu .ws-mi.on .ws-mi-ic{color:#6aa6e0}
+    .ws-menu .ws-mi.accent .ws-mi-ic{color:var(--ok)}   /* the green + on "New session" — the one CREATE action in a menu of toggles and destructive ops */
     .ws-menu .ws-mi.danger{color:#d2685f}
     .ws-menu .ws-mi.danger:hover{background:rgba(210,104,95,.12);color:#e0796f}
     .ws-menu .ws-menu-sep{height:1px;background:var(--hairline);margin:5px 6px}
@@ -1367,11 +1369,10 @@
         </span>
       </div>
       <div class="ws-chips" id="ws-chips"></div>
-      <!-- Sessions nest UNDER the active workspace, inside #ws-chips. These two elements live here at load so
-           their JS ref (#sess-list) and click handler (#new-session) resolve; renderWsChips() relocates them
-           into the active workspace's .ws-children on every render. -->
+      <!-- Sessions nest UNDER the active workspace, inside #ws-chips. This lives here at load so its JS ref
+           (#sess-list) resolves; renderWsChips() relocates it into the active workspace's .ws-children on every
+           render. "New session" is NOT here any more — it is the first item of the project's manage menu. -->
       <div class="sess-list" id="sess-list"></div>
-      <button class="newsess-row" id="new-session" title="New session in this project">+ New Session</button>
       <div class="share-dock">
         <!-- The info "i" is a SIBLING overlaying the button's right edge, not a child: a <button> may not contain
              another <button>. Its own row cost ~27px of height for one glyph; here it costs nothing. -->

@@ -2218,5 +2218,34 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /LongPathsEnabled/.test(WIN) ? [] : ['no LongPathsEnabled instruction in the classified error']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 69. "NEW SESSION" LIVES IN THE MANAGE MENU, NOT IN THE SCROLLING TREE. The inline row sat inside
+//   .ws-children — i.e. inside #ws-chips, the ONE scroll container, between project chips — so its 31px moved
+//   with every list resize, it was .remove()d/re-appended on all 14 renderWsChips() call sites, and the
+//   scrollTop save/restore around that render clamped differently once its height appeared. Three ways for the
+//   whole sidebar to shift. Pins: the row is gone everywhere, the menu offers it FIRST, and the action targets
+//   the project whose menu was opened (w.id) — never the ambient activeWsId, since a menu opens on any project.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the inline "+ New Session" row is back in the sidebar (it re-enters the scroll flow it was removed from)',
+    [/id="new-session"/.test(HTML) ? 'index.html still has #new-session' : '',
+     /\.newsess-row\{/.test(HTML) ? 'index.html still styles .newsess-row' : '',
+     /new-session|newsess-row|newSessEl/.test(APP) ? 'app.js still references the removed row' : ''].filter(Boolean));
+  none('the create action is not the FIRST item of a project’s manage menu',
+    /const items = \[\];[\s\S]{0,600}?items\.push\(\{\s*\n\s*icon: PLUS_SVG, accent: true, label: 'New session'/.test(APP)
+      ? [] : ['wsMenuItems does not push the New session item first']);
+  none('…or it targets the ambient activeWsId instead of the project whose menu is open',
+    /act: \(\) => promptNewSession\(w\.id\)/.test(APP) && /async function promptNewSession\(wsId\)/.test(APP)
+      && /newBlankTab\(wsId \|\| activeWsId, 'new', name \|\| ''\)/.test(APP)
+      ? [] : ['promptNewSession is not project-parameterised end to end']);
+  none('the double-click guard was lost when the handler moved out of the sidebar',
+    /let newSessionPrompting = false;[\s\S]{0,900}?if \(newSessionPrompting\) return;/.test(APP)
+      ? [] : ['promptNewSession has no in-flight guard (two dialogs / two tabs)']);
+  none('the green + cannot render — the accent flag or its CSS is missing',
+    /\(it\.accent \? ' accent' : ''\)/.test(APP) && /const PLUS_SVG =/.test(APP)
+      && /\.ws-menu \.ws-mi\.accent \.ws-mi-ic\{color:var\(--ok\)\}/.test(HTML)
+      ? [] : ['accent class, PLUS_SVG or the .ws-mi.accent rule is absent']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
