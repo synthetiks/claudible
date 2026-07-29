@@ -2898,14 +2898,23 @@ ipcMain.handle('claude:latest', () => {
 // session.sh resumes by id. REFUSED while hosting a live share on that tab: respawning kills the guests'
 // mirror (respawnPty would refuse anyway, but we return a clear reason). User-initiated + confirmed in the
 // renderer, so no busy-guard here — the user has chosen to end any in-flight turn.
-ipcMain.handle('claude:refresh-session', () => {
+ipcMain.handle('claude:refresh-session', (_e, opts) => {
   const tabId = fgTabId;
   if (tabId == null) return { ok: false, reason: 'no-tab' };
-  if (liveTabs.has(tabId)) return { ok: false, reason: 'live' };        // a joined live tab is a client socket, not a local pty
+  // Defensive only: fgTabId can never BE a live tab (setForegroundTab refuses one, and setActiveTab never sends
+  // tabForeground for one). Kept so a future change to either can't quietly spawn a pty on a client socket.
+  if (liveTabs.has(tabId)) return { ok: false, reason: 'live' };
   const hosting = (() => { try { return !!share.status().running; } catch { return false; } })();
-  if (hosting && sharedTabId != null && tabId === sharedTabId) return { ok: false, reason: 'hosting' };
+  if (hosting && sharedTabId != null && tabId === sharedTabId) return { ok: false, reason: 'hosting', tabId };
   const rec = ptys.get(tabId);
-  return { ok: !!respawnPty(tabId, (rec && rec.session) || '', {}) };    // same session → resume; not a "move", so the pinned-tab guard never triggers
+  // THE BUSY GUARD BELONGS HERE, NOT IN THE RENDERER. The renderer used to confirm against AT() — the tab ON
+  // SCREEN — while this restarts fgTabId. Those two diverge BY DESIGN the whole time a joined live session is
+  // being viewed (setActiveTab skips tabForeground for live tabs; setForegroundTab refuses to point fgTabId at
+  // one), and a live-tab record carries no `busy` field at all, so AT().busy read undefined, the confirm never
+  // fired, and a DIFFERENT, mid-turn session was killed silently. Main knows which tab it is about to respawn,
+  // so main decides; the renderer re-calls with force once the user has confirmed against the RIGHT session.
+  if (rec && rec.busy && !(opts && opts.force)) return { ok: false, reason: 'busy', tabId, session: rec.session || '' };
+  return { ok: !!respawnPty(tabId, (rec && rec.session) || '', {}), tabId };    // same session → resume; not a "move", so the pinned-tab guard never triggers
 });
 
 // ---- first-run onboarding (the Get-Started wizard) -------------------------------------------------

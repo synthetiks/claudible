@@ -6269,12 +6269,33 @@ window.addEventListener('keydown', (e) => {
   }
   // Restart the foreground session on the current binary (resume → history kept). Guards: confirm if mid-turn,
   // and main refuses if a live share is hosted on it (restarting would drop the guests).
+  // Names the session being refreshed. main returns the tabId it will act on, which is NOT necessarily the tab
+  // on screen (see claude:refresh-session), so never describe it as "this session" — say which one.
+  function refreshTargetName(tabId) {
+    const rec = (tabId != null) ? tabs.get(tabId) : null;
+    if (!rec) return '';
+    return rec.curSessionLabel || rec.label || (rec.session && sessIndex[rec.session] ? sessTitle(sessIndex[rec.session]) : '') || '';
+  }
   async function refresh(b) {
-    if (AT() && AT().busy && !confirm('Claude is mid-turn in this session.\nRefreshing restarts it — the current turn stops.\n\nRefresh anyway?')) return;
     b.disabled = true; busy.classList.remove('err'); busy.textContent = 'Refreshing session…';
     let r; try { r = await claudible.claudeRefreshSession(); } catch (e) { r = { ok: false }; }
+    // The mid-turn confirm is driven by MAIN's answer, because only main knows which tab it will restart. The
+    // old code asked AT().busy — the tab on screen — which silently skipped the warning whenever a joined live
+    // session was being viewed, and killed a different, busy session with no dialog at all.
+    if (r && r.reason === 'busy') {
+      const nm = refreshTargetName(r.tabId);
+      b.disabled = false;
+      if (!confirm('Claude is mid-turn in ' + (nm ? '“' + nm + '”' : 'the session this would restart') + '.\nRefreshing restarts that session — the current turn stops.\n\nRefresh anyway?')) { busy.textContent = ''; return; }
+      b.disabled = true; busy.textContent = 'Refreshing session…';
+      try { r = await claudible.claudeRefreshSession({ force: true }); } catch (e) { r = { ok: false }; }
+    }
     b.disabled = false;
-    if (r && r.ok) { busy.textContent = ''; close(); toast('Session refreshed — now on the latest Claude Code'); }
+    if (r && r.ok) {
+      const nm = refreshTargetName(r.tabId);
+      const elsewhere = r.tabId != null && r.tabId !== activeTabId;   // you were looking at another tab — say which one moved
+      busy.textContent = ''; close();
+      toast((elsewhere && nm ? '“' + nm + '” refreshed' : 'Session refreshed') + ' — now on the latest Claude Code');
+    }
     else {
       busy.classList.add('err');
       busy.textContent = (r && r.reason === 'hosting') ? 'You’re hosting a live share on this session — stop sharing first (refreshing would drop your guests).'

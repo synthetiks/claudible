@@ -30,7 +30,7 @@ contextBridge.exposeInMainWorld('claudible', {
   exportSessionText: (id, wsId) => ipcRenderer.invoke('session:export-text', { id, wsId }),   // → plain Markdown (.md/.txt) transcript
   claudeVersion: (force) => ipcRenderer.invoke('claude:version', force),   // the installed Claude Code CLI version (force=true re-reads after an in-app update)
   claudeLatest: () => ipcRenderer.invoke('claude:latest'),                  // latest published version, or '' if it can't be checked (→ no false "out of date")
-  claudeRefreshSession: () => ipcRenderer.invoke('claude:refresh-session'), // restart the foreground session on the latest CLI, keeping history (resume)
+  claudeRefreshSession: (opts) => ipcRenderer.invoke('claude:refresh-session', opts), // restart the foreground session on the latest CLI, keeping history (resume). {force:true} = the user confirmed main's mid-turn warning
   appVersion: () => ipcRenderer.invoke('app:version'),   // Claudible's own version (package.json) for the status-bar badge
   buildSha: () => ipcRenderer.invoke('app:buildSha'),    // the running build's git sha — identifies unreleased builds semver can't
   latestReply: (id) => ipcRenderer.invoke('session:latest-reply', id),   // a session's last assistant reply (for manual Speak / re-listen)
