@@ -6086,7 +6086,10 @@ window.addEventListener('keydown', (e) => {
       if (detail) { const v = document.createElement('span'); v.className = 'wiz-dim'; v.style.marginLeft = '6px'; v.textContent = detail; name.appendChild(v); }
       const hint = document.createElement('div'); hint.className = 'dep-hint'; hint.textContent = d.hint || '';
       main.appendChild(name); main.appendChild(hint);
-      const dm = depMsgs[d.id];
+      // A detect-time note (e.g. "a git is on PATH but not Git for Windows") seeds the same per-row message
+      // channel the install flow uses — an install's own live message wins over it, and the state === 'ready'
+      // cleanup above retires it the moment the dep is actually fixed.
+      const dm = depMsgs[d.id] || (d.note ? { text: d.note, err: false } : null);
       if (dm) { const mEl = document.createElement('div'); mEl.className = 'dep-msg' + (dm.err ? ' err' : ''); mEl.textContent = dm.text; main.appendChild(mEl); }
       const pill = document.createElement('span'); pill.className = 'dep-pill ' + d.state; pill.textContent = SYS_PILL[d.state] || d.state;
       row.appendChild(main); row.appendChild(pill);

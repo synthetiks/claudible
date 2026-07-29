@@ -75,6 +75,13 @@ function rowState(m, raw, extra, runnerId) {
   }
   const r = raw[m.id] || {};
   if (!r.installed) return 'missing';
+  // A PATH git WITHOUT git-bash (Scoop/Chocolatey shim, custom install) used to read 'ready' here while every
+  // script the row exists for was dead: `where git` succeeds, but runScript needs Git for Windows' bash.exe,
+  // and the user's first failure was a generic "shell backend not available" at CREATE PROJECT — with the
+  // System-check standing green behind it. The row is labelled "Git for Windows" on this runner and that is
+  // what's genuinely missing, so 'missing' is the truthful state — and its Install button (winget Git.Git)
+  // is the actual fix. detect() below attaches the note that explains the seeming contradiction.
+  if (m.id === 'git' && runnerId === 'win' && raw.gitBash === false) return 'missing';
   if (m.id === 'node' && r.ok === false) return 'outdated';
   if (m.auth) {
     if (r.signedIn) return 'ready';
@@ -90,8 +97,14 @@ async function detect(runner, extra) {
   try { raw = (await runner.detectDeps()) || {}; } catch { raw = {}; }
   const deps = MANIFEST.map((m) => {
     const r = raw[m.id] || {};
+    // The one state a bare pill can't explain: git IS on PATH (the user "has git"!) yet the row says missing.
+    // Without this line the contradiction reads as a Claudible bug and the Install button as redundant.
+    const note = (m.id === 'git' && runner.id === 'win' && r.installed && raw.gitBash === false)
+      ? 'A git was found on PATH, but not Git for Windows — Claudible’s project scripts run on its bash. Install adds the full Git for Windows alongside it.'
+      : '';
     return {
       id: m.id,
+      note,
       // The win runner's git really is "Git for Windows" (git-bash runs the scripts); everywhere else —
       // including WSL-on-Windows, whose probed git is Linux git — it's plain Git.
       label: (runner.id === 'win' && m.winLabel) || m.label,
