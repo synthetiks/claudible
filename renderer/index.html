@@ -655,7 +655,13 @@
          stopping at a hard bevel (an inner scrim was rejected: it would dim the row's ▾ and live badges). */
     .body.with-sessions .sidebar{display:flex;margin:-5px 0 -4px -5.25px}   /* flush to the left wing — margins cancel the body padding (now top 5 / left 5.25 / bottom 4) so it hugs the topbar, window edge & bottombar; right keeps the gap to the terminal */
     .sess-list{display:flex;flex-direction:column;gap:2px;padding:1px 0 0}   /* flows inside the workspace tree now — the tree (#ws-chips) owns the scroll */
-    .sess{position:relative;isolation:isolate;display:flex;align-items:center;gap:6px;width:auto;text-align:left;padding:5.2px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
+    /* ONE ROW HEIGHT: 29px, selected or not. A row used to be sized by whichever child was tallest, and the two
+       renderers build DIFFERENT children — the active project's list appends a 22px .sess-menu-btn, the
+       non-active tree's rows don't — so the same session measured 32.38px selected vs 26.56px unselected and
+       every row grew 5.82px the instant you clicked into its project (~35px over six rows). Selection is carried
+       by the tint + wash; it must never be carried by SIZE. The floor pins the short variant up, and 3.5px
+       vertical padding lets the 22px ▾ sit inside the same 29px box (22 + 3.5×2), so both paths land on 29px. */
+    .sess{position:relative;isolation:isolate;display:flex;align-items:center;gap:6px;width:auto;min-height:29px;text-align:left;padding:3.5px 6px;border:none;border-left:2px solid transparent;border-radius:6px;
       background:none;cursor:pointer;transition:background-color var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out),border-color var(--dur-base) ease,opacity var(--dur-base)}
     .sess::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity var(--dur-base) var(--ease-out);background-image:linear-gradient(90deg,color-mix(in srgb,var(--sel) 10%,transparent),transparent 44%)}   /* selection/live WASH on its own layer → FADES smoothly. A gradient can't be transitioned directly, so the old background-image snapped in while bg-color/shadow faded = the "janky" selection. */
     .sess:hover{background-color:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 var(--sheen)}   /* ① lit-from-above on hover */
@@ -742,8 +748,8 @@
        --fs-sm) so the swap is height-neutral; .sess-list's gap:2px applies to them unchanged.
        Deliberately NOT class .sess: app.js's drag/order queries map .sess rows to dataset.id, and a skeleton in
        that set would write `undefined` into the persisted session order. */
-    .sess-skel{display:flex;align-items:center;padding:5.2px 6px;border-left:2px solid transparent;border-radius:6px;
-      font-size:var(--fs-sm);pointer-events:none;user-select:none}
+    .sess-skel{display:flex;align-items:center;min-height:29px;padding:3.5px 6px;border-left:2px solid transparent;border-radius:6px;
+      font-size:var(--fs-sm);pointer-events:none;user-select:none}   /* same 29px box as .sess — the two must stay identical or the switch-in swap drifts again */
     /* STRUT — mirrors .sess-menu-btn's 22px box. A real row's height is set by the ▾ (22px), NOT by its text line
        box (16.2px), because the ▾ stays in flow at opacity:0. Measured: real row 32.38px. Without this the
        skeleton computes 26.56px and the swap still drifts ~6px per row. */

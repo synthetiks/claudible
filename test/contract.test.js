@@ -1954,6 +1954,13 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and refreshSessions clobbers the skeletons straight back to the tall placeholder',
     /!sessListEl\.querySelector\('\.sess,\.sess-skel'\)/.test(APP)
       ? [] : ['the cold-list guard does not treat skeletons as already-painted']);
+  // A row's height was set by its tallest child, and the two renderers build different children: the ACTIVE
+  // project's list appends a 22px .sess-menu-btn, the non-active tree's rows don't. Measured 32.38 vs 26.56 —
+  // every row in a project grew 5.82px the instant you selected it. The floor makes all paths land on one height.
+  none('a session row’s height still depends on whether its renderer added the ▾ (selected vs unselected drift)',
+    /\.sess\{[^}]*min-height:29px[^}]*padding:3\.5px 6px/.test(flat) ? [] : ['.sess lost its uniform 29px row box — selected/unselected rows will drift apart again']);
+  none('…and the skeleton drifted off that floor',
+    /\.sess-skel\{[^}]*min-height:29px/.test(flat) ? [] : ['.sess-skel no longer shares .sess’s 29px box']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
