@@ -239,6 +239,57 @@ function joinAndHello(port, cred) {
     fail++; console.error('  FAIL peer-id threw: ' + (e && e.message));
   } finally {
     try { srv3.stop(); } catch {}
+  }
+
+  // ---- Part E: flood control — an admitted guest's frames are BUDGETED ---------------------------------------
+  // Every frame used to be free: each one costs a JSON.parse in the process that owns the pty, a presence frame
+  // bought a full-roster broadcast, and a chat frame a fan-out to every client — view-only guests included.
+  // Pins: an identical-presence flood buys exactly ONE broadcast (dedupe), a chat burst caps near CHAT_BURST
+  // while refilling at CHAT_RATE, the chat cap does NOT starve the same guest's terminal input (separate
+  // budgets), and one guest's flood costs another guest nothing (per-socket buckets).
+  const rosterEvents = [];
+  const inputs = [];
+  const srv4 = createShareServer({ onRoster: (l) => rosterEvents.push(l), onInput: (d) => inputs.push(String(d)) });
+  try {
+    const st4 = await srv4.start({ requireApproval: false, name: 'Host' });
+    const settle = (ms) => new Promise((res) => setTimeout(res, ms));
+    const F = await joinAndHello(st4.port, `t=${st4.token}&n=Flo`);
+    const G = await joinAndHello(st4.port, `t=${st4.token}&n=Gia`);
+    await settle(150);
+
+    // presence: 50 identical frames = ONE broadcast (the active→idle transition); the 49 repeats are silent.
+    const base = rosterEvents.length;
+    for (let i = 0; i < 50; i++) F.ws.send(JSON.stringify({ type: 'presence', state: 'idle' }));
+    await settle(250);
+    eq('50 identical presence frames buy exactly one roster broadcast', rosterEvents.length, base + 1);
+    F.ws.send(JSON.stringify({ type: 'presence', state: 'active' }));
+    await settle(150);
+    eq('…and a REAL transition still broadcasts', rosterEvents.length, base + 2);
+
+    // chat: 100-frame burst → ~CHAT_BURST(20) relayed + a handful of refills; the rest dropped silently.
+    let chatsSeen = 0;
+    G.ws.on('message', (d) => { try { const m = JSON.parse(d.toString()); if (m.type === 'chat' && m.role === 'guest') chatsSeen++; } catch {} });
+    for (let i = 0; i < 100; i++) F.ws.send(JSON.stringify({ type: 'chat', text: 'x' + i }));
+    await settle(400);
+    ok(`a 100-frame chat burst is capped near the budget (relayed ${chatsSeen}, want 15-40)`, chatsSeen >= 15 && chatsSeen <= 40);
+
+    // the chat cap must not starve the SAME guest's terminal input (chat and input are separate budgets)…
+    F.ws.send(JSON.stringify({ type: 'input', data: 'still-typing' }));
+    await settle(150);
+    ok('the flooding guest can still TYPE (chat budget ≠ input budget)', inputs.some((s) => s.includes('still-typing')));
+    // …and must cost OTHER guests nothing (buckets are per-socket).
+    G.ws.send(JSON.stringify({ type: 'chat', text: 'unaffected' }));
+    const gRelayed = new Promise((res) => {
+      const t = setTimeout(() => res(false), 1500);
+      F.ws.on('message', (d) => { try { const m = JSON.parse(d.toString()); if (m.type === 'chat' && m.text === 'unaffected') { clearTimeout(t); res(true); } } catch {} });
+    });
+    ok("another guest's chat is untouched by the flooder's spent budget", await gRelayed);
+
+    try { F.ws.close(); G.ws.close(); } catch {}
+  } catch (e) {
+    fail++; console.error('  FAIL flood-control threw: ' + (e && e.message));
+  } finally {
+    try { srv4.stop(); } catch {}
     done();
   }
 })();

@@ -40,6 +40,15 @@ const MAX_GUESTS = 8;            // cap concurrent viewers (the host typically i
 const MAX_PENDING = 16;          // cap UNAPPROVED sockets in the lobby: MAX_GUESTS only bounds ADMITTED clients, so without this a link holder could open unlimited pending sockets (connection amplification) — each held for the full APPROVAL_TIMEOUT
 const MAX_WS_PAYLOAD = 512 * 1024;   // hard per-frame cap on the guest-facing server AND the live-join client. ws defaults to 100 MiB, reassembled BEFORE app code runs — an unapproved link holder (or a hostile advertised session) could flood ~100MB frames and block/OOM the whole Electron main loop. 512KB clears the largest legit frame (audio ≤128KB, chat 2000 chars, keystrokes tiny) with headroom.
 const MAX_AUDIO_B64 = 128 * 1024;   // reject an oversized relayed voice frame. Real frames are ~40ms blocks (a few KB base64; ~44KB at the 16384-sample ceiling), so 128KB is generous headroom while bounding a hostile/oversized frame on the internet-facing relay
+// Per-socket frame-RATE budgets (size is already bounded by MAX_WS_PAYLOAD; these bound FREQUENCY). An
+// admitted guest — view-only included — could previously send unlimited frames/s into the single-threaded
+// process that owns the pty: each one costs a JSON.parse, and chat additionally fans out to every client.
+// Budgets are sized ~2x the busiest LEGIT second so a real user can never feel them: voice audio is ~25
+// frames/s, key autorepeat ~30/s, so 100/s sustained (burst 200) clears voice + typing + chat happening at
+// once; nobody types 10 chat lines/s, so chat gets 10/s (burst 20) to bound its fan-out amplification.
+// Excess frames are DROPPED, not answered — an error reply would hand the flooder its own amplifier.
+const MSG_RATE = 100, MSG_BURST = 200;   // all JSON frames, charged BEFORE the parse
+const CHAT_RATE = 10, CHAT_BURST = 20;   // chat only, charged after type dispatch (fan-out amplification)
 const NAME_MAX = 40;
 const ROSTER_MAX = 32;           // MAX_GUESTS(8) live + up to 24 'left' tombstones. Beyond that, the oldest tombstone is evicted (see trimRoster) — the Map had no delete at all and grew one entry per distinct name, forever.
 const newToken = () => crypto.randomBytes(16).toString('hex');
@@ -115,6 +124,19 @@ function uniqueName(base, isTaken, max) {
 function stripCtrlV(data) {
   const s = String(data == null ? '' : data);
   return s.indexOf('\x16') === -1 ? s : s.split('\x16').join('');
+}
+// Token bucket, stored ON the socket under `key` so each guest is budgeted independently and the state
+// dies with the socket (no map to leak). Continuous refill: rate tokens/s up to burst; one frame = one
+// token. Returns false when the budget is spent — callers drop the frame silently.
+function takeToken(ws, key, rate, burst) {
+  const now = Date.now();
+  let b = ws[key];
+  if (!b) { b = ws[key] = { tokens: burst, last: now }; }
+  b.tokens = Math.min(burst, b.tokens + ((now - b.last) * rate) / 1000);
+  b.last = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
 }
 // Not everything on the input channel is TYPING. Every full-screen TUI turns on mouse tracking, so xterm
 // forwards wheel/click REPORTS down the same path as keystrokes; and the guest's scroll gutter sends Page keys
@@ -371,14 +393,20 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
     if (mode === 'link') systemChat(name + ' joined');   // only on a fresh join, not on reconnect
     ws.on('message', (data, isBinary) => {
       if (isBinary) return;
+      // Frame-rate budget, charged BEFORE the parse: this is the single-threaded process that owns the pty,
+      // and every frame past here costs a JSON.parse. See MSG_RATE — sized so no legit guest ever hits it.
+      if (!takeToken(ws, '_rlMsg', MSG_RATE, MSG_BURST)) return;
       let msg = null; try { msg = JSON.parse(data.toString()); } catch { return; }
       if (!msg) return;
       if (msg.type === 'chat' && typeof msg.text === 'string') {     // allowed even read-only
+        if (!takeToken(ws, '_rlChat', CHAT_RATE, CHAT_BURST)) return;   // chat fans out to every client — its own, tighter budget
         relayChat({ type: 'chat', role: 'guest', name: ws._name, text: msg.text.slice(0, 2000) }, ws);
         return;
       }
       if (msg.type === 'presence') {                                  // active (green) / idle = AFK (amber)
-        ws._presence = (msg.state === 'idle') ? 'idle' : 'active';
+        const next = (msg.state === 'idle') ? 'idle' : 'active';
+        if (next === ws._presence) return;   // unchanged state — a repeat must not buy a full-roster broadcast (admit() seeds 'active', so the first frame dedupes correctly too)
+        ws._presence = next;
         roster.set(ws._name, ws._presence); notifyRoster();
         return;
       }
