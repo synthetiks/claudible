@@ -29,7 +29,18 @@ desktop.ini
 # temp debug log (live-join diagnostics)
 .claudible-debug.log
 
-# local audit / planning notes — kept on disk, never committed to the shared repo
+# local audit / planning notes — kept on disk, never committed to the shared repo. These name internal
+# findings (unfixed issues, owner decisions, CI/billing state) and are written for us, not for users.
+#
+# The globs below close the class rather than chasing each file: eleven explicit entries had accumulated and
+# BETA-RELEASE-AUDIT.md STILL slipped through as untracked-but-not-ignored, one `git add -A` away from being
+# published on a repo that is about to go public. All four are ROOT-ANCHORED (`/…`), so nothing under docs/
+# is touched — docs/RELEASE-CHECKLIST.md, docs/OS-CONVERSION-PLAN.md and their siblings stay tracked — and
+# .gitignore never affects an already-tracked file, so no existing file can disappear from the repo.
+/*AUDIT*.md
+/*-REPORT.md
+/*FIX-*.md
+/*-PLAN.md
 /Finishline Audit for Security and Optimizations.md
 /MASTER-FIX-LIST.md
 /SECOND-AUDIT.md
