@@ -185,7 +185,7 @@ still open. The presence relay ships **inert** (no default URL) — it is opt-in
 - **The host's cost and token counters are gone from the viewer.** They are the host's billing, not the
   guest's business, and they read as the guest's own numbers.
 - **The projects strip is gone** — one shared session does not need a project switcher.
-- **"<name> is typing…" means someone is typing.** It fired on scroll, on mouse movement, on any byte the
+- **"⟨name⟩ is typing…" means someone is typing.** It fired on scroll, on mouse movement, on any byte the
   browser sent. It is now gated on actual keystrokes into the terminal, and the same wording and placement
   now appear on the host side, so both ends describe the same event the same way.
 - **A readable typing line, a thin near-invisible chat scrollbar, a grouped top bar, and a tighter terminal
