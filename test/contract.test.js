@@ -2105,5 +2105,64 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['no .sess.renaming .sess-meta guard — unlike its menu-btn / flair / live-ind siblings']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 65. THE RELEASE NOTES MUST NOT SILENTLY DEGRADE. build.yml's release step awks the `## [<tag version>]`
+//   block out of CHANGELOG.md and uses it as the GitHub Release body — but that step ends in `|| true` (on
+//   purpose: a notes problem must never abort a publish whose installers already built). So if no heading
+//   matches, or the section is empty, the release publishes with a bare "See CHANGELOG.md" link and NOTHING
+//   turns red. The tag must equal package.json's version (build.yml hard-fails otherwise), so package.json is
+//   the version to check here. This is the one gate on that path; docs/RELEASE-CHECKLIST.md §1 says so too.
+//   The drift is real: this file sat 40 commits behind its own heading, including the view-only-by-default
+//   change and every session/sidebar fix — all of which would have been absent from the release page.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const VERSION = JSON.parse(read('package.json')).version;
+  const CHANGELOG = read('CHANGELOG.md');
+  // Mirror build.yml's awk exactly: from `## [<v>]` to the next `## [`.
+  const lines = CHANGELOG.split('\n');
+  const start = lines.findIndex((l) => l.startsWith(`## [${VERSION}]`));
+  none(`CHANGELOG.md has no "## [${VERSION}]" heading (release notes would degrade to a bare link, silently)`,
+    start < 0 ? [`package.json is ${VERSION}`] : []);
+  if (start >= 0) {
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) if (lines[i].startsWith('## [')) { end = i; break; }
+    const body = lines.slice(start + 1, end).join('\n').trim();
+    none(`the "## [${VERSION}]" section is empty — the extracted release body would be the heading alone`,
+      body.length > 40 ? [] : [`${body.length} chars`]);
+  }
+  // `## [Unreleased]` is fine as a placeholder, but content parked under it is NOT extracted by the awk above,
+  // so it never reaches the release page. Catch a populated Unreleased sitting above the shipping version.
+  const u = lines.findIndex((l) => l.startsWith('## [Unreleased]'));
+  if (u >= 0) {
+    let ue = lines.length;
+    for (let i = u + 1; i < lines.length; i++) if (lines[i].startsWith('## [')) { ue = i; break; }
+    const ubody = lines.slice(u + 1, ue).join('\n').replace(/<!--[\s\S]*?-->/g, '').trim();
+    none('[Unreleased] has content — build.yml extracts only the version block, so this would not ship in the notes',
+      ubody ? [`${ubody.split('\n')[0].slice(0, 60)}…`] : []);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 66. DOCS MUST NOT DESCRIBE THE PRE-MULTI-TAB BRIDGE PATHS. status.json/hooks.ndjson have not been global
+//   since tabs landed — they are per SPAWN, at runtime/tabs/<runtimeId>/ (nextRuntimeId(), read at the two
+//   pollers). ARCHITECTURE.md and main.js's own header still named the old flat paths, which is the exact
+//   "the doc reads true and is false" class: a reader debugging a stuck meter would look in a directory that
+//   no longer exists. Any reference must carry the tabs/ segment.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const stale = [];
+  for (const f of ['docs/ARCHITECTURE.md', 'README.md', 'main.js', 'CONTRIBUTING.md']) {
+    let txt = ''; try { txt = read(f); } catch { continue; }
+    for (const line of txt.split('\n')) {
+      if (/runtime\/(status\.json|hooks\.ndjson)/.test(line)) stale.push(`${f}: ${line.trim().slice(0, 60)}`);
+    }
+  }
+  none('a doc/comment still names the pre-tabs flat bridge path (runtime/status.json | runtime/hooks.ndjson)', stale);
+  // and the real layout must still be what they were corrected TO
+  none('main.js no longer writes/reads the per-tab bridge dir the docs describe',
+    /path\.join\(RT, 'tabs', rec\.runtimeId, 'status\.json'\)/.test(MAIN)
+    && /path\.join\(RT, 'tabs', rec\.runtimeId, 'hooks\.ndjson'\)/.test(MAIN) ? [] : ['runtime/tabs/<runtimeId>/ poller paths not found in main.js']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -2,8 +2,8 @@
 //  • embeds the live Claude session (node-pty -> wsl session.sh -> claude, run directly, no tmux),
 //    spawned at the renderer's fitted size so the TUI never reflows/garbles
 //  • auto-confirms the WSL "trust this folder" prompt
-//  • reads runtime/status.json (session tracker) + runtime/hooks.ndjson (Claude hook events)
-//    from the WINDOWS FS natively (no flaky 9P watch)
+//  • reads each live tab's runtime/tabs/<runtimeId>/status.json (session tracker) + hooks.ndjson (Claude hook
+//    events) from the WINDOWS FS natively (no flaky 9P watch) — per SPAWN, not global; see nextRuntimeId()
 //  • STT/TTS fetches run here (no renderer CORS)
 const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu, shell } = require('electron');
 const path = require('path');

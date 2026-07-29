@@ -7,8 +7,12 @@ All notable changes to Claudible are documented here.
 <!-- 0.9.0 was prepared but never tagged or released (latest published release is v0.8.2), so its section is
      RENAMED to 0.9.1 rather than left behind a second dated heading — 0.8.3 and 0.8.4 are already sitting in
      this file with no matching tag, and a third orphan would make the history actively misleading. Everything
-     below therefore ships together as 0.9.1. -->
-## [0.9.1] — 2026-07-23
+     below therefore ships together as 0.9.1.
+     DATE = last change in the section, not the day prep started: 0.9.1 was prepared on 07-23 but still is not
+     tagged, and six more days of work landed on top of it. Those commits go HERE, not under [Unreleased] —
+     build.yml's release-notes step extracts ONLY the `## [<tag version>]` block, so anything parked under
+     [Unreleased] when `v0.9.1` is pushed is silently absent from the release page. -->
+## [0.9.1] — 2026-07-29
 
 - **Plan usage in the top bar.** A gauge next to the context meter shows how much of your Claude 5-hour limit
   you have burned — a 4-cell battery that fills as you consume, with the same `used_percentage` figure `/usage`
@@ -141,6 +145,102 @@ still open. The presence relay ships **inert** (no default URL) — it is opt-in
   probes the exact binary the host will launch, the Install button lands it on Windows, a dropped or
   never-present tunnel self-heals in the background (immediately after an in-place install), and hosting
   without a public link shows a standing warning with a one-click fix instead of nothing.
+
+### A live link works the first time you send it (July 24–26)
+
+- **The link was revealed ~2.4s before its DNS existed — and the first click cached that for 30 minutes.**
+  Share printed the `trycloudflare.com` URL as soon as cloudflared emitted it, but the hostname is not
+  resolvable yet at that moment. Anyone who clicked in that window got NXDOMAIN, and `trycloudflare.com`
+  publishes a **1800-second** negative-cache TTL — so one early click poisoned that guest's resolver for half
+  an hour and the link stayed dead long after the tunnel was healthy. The URL is now withheld until the
+  record actually resolves, and the tunnel is verified before the host is told they are live.
+- **That verification was inert inside Electron, and it blamed cloudflared for its own failure.** The check
+  used a fresh `dns.Resolver()`, which in Electron starts with no configured servers and throws
+  `ECONNREFUSED` on every query — so it "failed" every tunnel, told the user to install cloudflared (which
+  was already installed and working), and, worse, still issued the lookups that seeded the 30-minute negative
+  cache it existed to prevent. It now sets explicit bootstrap resolvers, falls back to DNS-over-HTTPS, and
+  treats a reachable tunnel as proof even when DNS is slow.
+- **cloudflared is found where the Windows `.msi` actually puts it**, and a tunnel that fails to come up says
+  what went wrong instead of leaving Share spinning.
+- **A self-update no longer kills a live share silently.** The restart tore down the tunnel and left the
+  presence record standing, so peers saw a joinable badge pointing at nothing.
+
+### Sharing a link is view-only by default (July 24)
+
+- **View-only is now the default, and turning it off says what that means.** A shared link previously granted
+  keystroke access unless you noticed a toggle. It now ships read-only; granting control is a deliberate act,
+  and the dialog spells out — in a warning that scales with what you are handing over — that a guest with
+  control drives the real Claude Code session on your machine. The invite-a-collaborator flow (gated by
+  GitHub repo access) is pointed to as the safer path for anyone you want to work with repeatedly.
+- **A live link shares one session, not your history.** The guest page carried a session browser that let a
+  visitor page through the host's other transcripts. It is gone. Guests also get a **Disconnect** button, so
+  leaving is an action rather than closing a tab and hoping.
+- **A revoked link renders as a real page.** It used to print the bare word "forbidden".
+- **The tab holding the live link is visibly the one that is live**, instead of looking like every other tab.
+
+### The guest page (July 25–27)
+
+- **The terminal is pinned.** There was a second scrollbar outside it — a page-level scroll that moved the
+  whole layout and confused every guest who found it. The frame no longer scrolls; only the terminal does.
+- **The host's cost and token counters are gone from the viewer.** They are the host's billing, not the
+  guest's business, and they read as the guest's own numbers.
+- **The projects strip is gone** — one shared session does not need a project switcher.
+- **"<name> is typing…" means someone is typing.** It fired on scroll, on mouse movement, on any byte the
+  browser sent. It is now gated on actual keystrokes into the terminal, and the same wording and placement
+  now appear on the host side, so both ends describe the same event the same way.
+- **A readable typing line, a thin near-invisible chat scrollbar, a grouped top bar, and a tighter terminal
+  frame** — the typing state was a chip too small to read, the chat's scrollbar was a full-width slab, and
+  the terminal sat inside noticeably uneven dead space.
+
+### The share dock (July 25)
+
+- **One button, not a button plus a redundant label plus a dead status dot.** The share icon moved into the
+  button, the label above it was cut, and the "i" gave up its own row instead of crowding the label — which
+  it had been overlapping by ~3px at a narrow sidebar width. The popover behind the "i" is larger, ranks its
+  information (what a link exposes first, mechanics second), and the button now reads as the primary action
+  it is.
+
+### Sessions and the sidebar (July 24–29)
+
+- **Switching to a project opens the session you last worked in.** It used to guess from transcript mtime,
+  which picks whichever file Claude Code happened to flush last — routinely not the session you were in.
+  The session you actually type in is recorded, and boot and project-switch both restore from that record.
+- **Switching projects can no longer start a SECOND `claude` on a session already live in another tab.** Two
+  processes on one session produced a modal that swallowed every keystroke — including spacebar — which read
+  as "the terminal is frozen".
+- **A project that already has sessions no longer opens as a blank "New session" draft** (and rapid clicking
+  between sessions could leave two of those drafts behind).
+- **Refresh session can no longer kill a different, mid-turn session.** The busy check ran in the renderer
+  against the tab on screen, not the tab being refreshed.
+- **The session list stops lurching when you switch projects.** Rows are now one height — **29px** — whether
+  the project is selected or not (the tint already tells you which one is selected), and skeleton rows hold
+  the list's shape while the real ones load.
+- **Long session names truncate instead of squeezing the timestamp out of the row**, a joined session shows
+  its name again rather than a bare dot, the new-session dialog's **OK** button works, and the inline rename
+  field gets its width back — a draft row previously left **9.8px** to type in, with ✓/✗ buttons taller than
+  the row.
+
+### Claude Code, the palette and the meter (July 23–26)
+
+- **The Claude Code button surfaces "update available" and can refresh a session in place**, so a new CLI
+  version does not require quitting the app to pick up.
+- **The command palette lists Claude Code's own commands — all 54 of them** — anchored to its trigger, with
+  the dead space below the list (the panel stretching, not padding) removed.
+- **The usage gauge is populated at launch.** The restore-on-boot path never ran: a temporal-dead-zone error
+  swallowed by an empty `catch` left the gauge blank until the first live reading.
+
+### Under the hood
+
+- **The test suite runs end to end again.** The `&&` chain meant one stale assertion stopped every later file
+  from running — 20 of 43 steps were never executing while the run still reported success. A discovery-based
+  runner now runs all of them and reports an aggregate; the three stale assertions are repaired. **43/43.**
+- **CI installs the dependencies the suite needs.** Without `ws`, `test/share-names.test.js` caught the module
+  error and skipped its four deepest live-share parts while still printing "0 failed" — the green check was
+  covering **16** assertions where it should have covered **43**.
+- **Three shipped files had zero ESLint rules.** `share/replay.js`, `scripts/**` and `relay/worker.js` matched
+  no config block, so `eslint .` reported clean on files it was not reading. They are linted now, and a guard
+  fails if a tracked JS file ever again resolves to an empty rule set.
+- Relay inertness is pinned by a test, and CONTRIBUTING covers all four install paths.
 
 ## [0.8.4] — 2026-07-19
 
