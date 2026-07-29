@@ -337,7 +337,11 @@ rm -rf "$D"
 D="$(newrepo)"
 br="$(git -C "$D" symbolic-ref --short HEAD)"
 MARK="$D/PWNED_SSH"
-git -C "$D" remote add origin "git@github.com:definitely-does-not-exist-xyz/nope.git"
+# 127.0.0.1, not github.com: the assertion is that the CONFIGURED command never runs — the neutralized
+# fallback (real ssh) failing on connection-refused proves it just as well as failing on auth, without a
+# real network attempt that can stall an offline/captive-portal machine for the full timeout. (10c above
+# keeps its live URL on purpose: fail-fast against a real remote IS that test's subject.)
+git -C "$D" remote add origin "git@127.0.0.1:definitely-does-not-exist-xyz/nope.git"
 git -C "$D" config "branch.$br.remote" origin
 git -C "$D" config "branch.$br.merge" "refs/heads/$br"
 git -C "$D" config core.sshCommand "sh -c 'touch $MARK' #"

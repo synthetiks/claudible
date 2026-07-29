@@ -3,6 +3,12 @@
 // and deletes files added since. Fast (a handful of plumbing calls on a tiny repo). No network.
 // Run: node test/checkpoint.test.js
 'use strict';
+// Hermetic git: a developer's global config must not reach these repos or the lib code under test.
+// commit.gpgsign=true with no agent fails every commit below; a global hooks template or credential helper
+// is the same class. /dev/null for both scopes covers clones too — which per-repo `git config` never does.
+// (Every repo here sets its own user.name/email, and branch names are pinned where they matter.)
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');

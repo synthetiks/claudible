@@ -5,6 +5,12 @@
 // can try to overwrite the running binary, and the restart runs the SAME teardown as a normal quit.
 // Run: node test/self-update.test.js
 'use strict';
+// Hermetic git: a developer's global config must not reach these repos or the lib code under test.
+// commit.gpgsign=true with no agent fails every commit below; a global hooks template or credential helper
+// is the same class. /dev/null for both scopes covers clones too — which per-repo `git config` never does.
+// (Every repo here sets its own user.name/email, and branch names are pinned where they matter.)
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

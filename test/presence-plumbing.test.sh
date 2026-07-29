@@ -11,6 +11,9 @@
 #   · clear removes exactly my blob; clearing when already clear is an honest ok
 # Run: bash test/presence-plumbing.test.sh
 set -u
+# Hermetic git — a dev machine's commit.gpgsign/hooks-template/credential-helper must not reach the
+# fixture repos OR sessions-sync.sh's commit-tree calls (which inherit this env and honor commit.gpgsign).
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$ROOT/wsl/sessions-sync.sh"
 unset CLAUDIBLE_WS_DIR CLAUDIBLE_PROJ 2>/dev/null || true

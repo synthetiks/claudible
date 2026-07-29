@@ -3,6 +3,12 @@
 // stdin like Claude Code does. Must ALWAYS exit 0 (a non-zero UserPromptSubmit hook rejects the prompt) and
 // ALWAYS emit valid {hookSpecificOutput:{hookEventName,additionalContext}} JSON. Run: node test/context-hook.test.js
 'use strict';
+// Hermetic git: a developer's global config must not reach these repos or the lib code under test.
+// commit.gpgsign=true with no agent fails every commit below; a global hooks template or credential helper
+// is the same class. /dev/null for both scopes covers clones too — which per-repo `git config` never does.
+// (Every repo here sets its own user.name/email, and branch names are pinned where they matter.)
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 const fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
 const HOOK = path.join(__dirname, '..', 'hooks', 'context-hook.js');
 
