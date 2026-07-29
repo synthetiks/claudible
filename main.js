@@ -17,6 +17,7 @@ const { shq } = require('./runners/_shared');   // single-quote-safe interpolati
 const { readGitSha } = require('./lib/buildIdentity');
 const { makePresenceRelay, mergePeerFrame, reconcilePeerLists } = require('./lib/presenceRelay');
 const selfUpdate = require('./lib/selfUpdate');
+const { lastJsonLine } = require('./lib/lastJsonLine');   // banner-proof extraction of a script's one JSON result line (bash -lc is a LOGIN shell — profiles print above it)
 // The running build's git identity, captured AT BOOT — the process keeps executing this even after a
 // `git pull` moves the files under it, which is precisely the drift checkBuildDrift() surfaces.
 const BUILD = readGitSha(__dirname) || { sha: '', short: '', at: 0 };
@@ -2929,9 +2930,19 @@ ipcMain.handle('onboard:status', async () => {
   return Object.assign(s, voiceState());
 });
 // Install Claude Code (npm -g) — called when claudeInstalled is false. Blocks until done (a few min).
+// Two repaired holes: (1) the old bare JSON.parse broke on any bash-profile banner (runScript is `bash -lc`,
+// a LOGIN shell — nvm/conda/MOTD text lands ABOVE the script's one JSON line) and the SyntaxError's own text
+// became the "install error" the wizard showed; lastJsonLine scans from the end instead. (2) runScript NEVER
+// rejects — it resolves { err, stdout } — so the old destructure silently DISCARDED err: a timeout/spawn
+// failure parsed '' and reported a generic "no output" with the real reason in hand. err is the report now.
 ipcMain.handle('onboard:install-claude', async () => {
-  try { const { stdout } = await runner.runScript('install-claude.sh', '', { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }); return JSON.parse(String(stdout).trim() || '{"ok":false,"error":"no output"}'); }
-  catch (e) { return { ok: false, error: (e && e.message) || 'install failed' }; }
+  try {
+    const { err, stdout } = await runner.runScript('install-claude.sh', '', { timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
+    const r = lastJsonLine(stdout, null);
+    if (r) return r;                       // the script's own verdict (ok:true, or its curated error) — banner-proof
+    if (err) return { ok: false, error: err.message || 'install failed' };   // no JSON because the run itself died (timeout / WSL missing) — say why, filtered renderer-side
+    return { ok: false, error: 'no output' };
+  } catch (e) { return { ok: false, error: (e && e.message) || 'install failed' }; }
 });
 // Sign-in is browser-OAuth (no headless path): ensure the foreground tab is running Claude so its login surfaces.
 // The renderer hides the wizard to reveal the terminal, then polls onboard:status until signedIn flips true.

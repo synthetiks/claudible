@@ -65,6 +65,15 @@ function humanError(code) {
 function installErrText(raw) {
   const s = String(raw == null ? '' : raw);
   if (/^Command failed:/.test(s)) return 'Could not reach the installer — check your network connection and try again.';
+  // A JSON SyntaxError's own text ("Unexpected token 'W', \"Welcome…\" is not valid JSON") — the wrapper
+  // could not READ the installer's result, which is not the same as the install failing. Belt-and-braces:
+  // main.js now extracts the result banner-proof (lib/lastJsonLine), so this shape should no longer occur,
+  // but this is the last line of defense for every OTHER script whose output a future caller parses raw.
+  if (/^Unexpected (token|end of JSON|non-whitespace)|is not valid JSON|^SyntaxError\b/.test(s)) return 'The installer finished but its result could not be read — press Install again to re-check.';
+  // Raw .NET/PowerShell internals from the Windows provisioner ("Exception calling \"DownloadFile\"…",
+  // "At line:12 char:3", "System.Net.WebException"). Actionable English instead; the full text still goes
+  // to the console for diagnosis.
+  if (/^Exception calling |^At line:\d|System\.[A-Za-z.]*Exception|is not recognized as the name of a cmdlet/.test(s)) return 'A Windows installer step failed — check your network connection and retry. If it keeps failing, run the installer from a normal PowerShell window to see the full error.';
   return s || 'Install failed — retry, or Skip for now.';
 }
 // Log uncaught renderer errors to the console (mirrored to .claudible-debug.log in DEBUG builds). No user-facing
@@ -5981,10 +5990,14 @@ window.addEventListener('keydown', (e) => {
     if (r && r.ok) { b.textContent = ''; refreshClaude(); }
     else { b.classList.add('err'); b.textContent = 'Install failed: ' + installErrText((r && r.error) || 'unknown') + ' — retry, or Skip for now.'; }   // shared filter (R18): this was the 4th, missed install-error surface — a raw Node exec-crash string ("Command failed: …") reached the DOM here unfiltered
   }
+  let signInFlight = false;   // in-flight guard, like installClaude's disabled button: onboardClaudeLogin RESPAWNS the fg tab, so a double-click would kill and restart claude twice (the duplicate-spawn class)
   async function signIn() {
+    if (signInFlight) return;
+    signInFlight = true;
     const b = $('wiz-claude-busy'); b.classList.remove('err'); b.textContent = 'Opening Claude — complete sign-in in the terminal/browser…';
     signingIn = true; pollStart(); pollSince = Date.now();   // anchor the 6-min abandon budget at THIS OAuth hand-off, not at first detection (slow installs mustn't burn it)
     try { await claudible.onboardClaudeLogin(); } catch {}
+    signInFlight = false;   // the hand-off completed (or failed) — the wizard hides below either way, and a later retry must not be blocked
     wiz.classList.remove('show');   // reveal the terminal; the poll re-shows the wizard once signed in (or after the 6-min cap)
   }
 
@@ -6200,9 +6213,13 @@ window.addEventListener('keydown', (e) => {
     if (r && r.ok) { busy.textContent = ''; render(); }
     else { busy.classList.add('err'); busy.textContent = 'Install failed: ' + installErrText(r && r.error) + ' — retry, or install it manually.'; }   // shared filter (R18): the third surface that used to show the raw exec-crash string
   }
+  let signInFlight = false;   // same guard as the wizard's signIn: the login IPC respawns the fg tab, and a double-click respawns it twice
   async function signIn() {
+    if (signInFlight) return;
+    signInFlight = true;
     busy.classList.remove('err'); busy.textContent = 'Opening Claude — finish sign-in in the terminal/browser…';
     try { await claudible.onboardClaudeLogin(); } catch {}    // (re)spawns the foreground tab running claude → login surfaces
+    signInFlight = false;
     fitSoon();
     pop.classList.remove('show');                             // reveal the terminal; a BOUNDED poll re-confirms + updates the dot
     stop(); pollSince = Date.now();

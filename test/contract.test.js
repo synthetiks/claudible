@@ -2164,5 +2164,34 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     && /path\.join\(RT, 'tabs', rec\.runtimeId, 'hooks\.ndjson'\)/.test(MAIN) ? [] : ['runtime/tabs/<runtimeId>/ poller paths not found in main.js']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 67. THE INSTALLER RESULT MUST STAY BANNER-PROOF, AND ITS ERRORS HUMAN. runScript wraps scripts in
+//   `bash -lc` — a LOGIN shell — so profile banners (nvm/conda/MOTD) print above the script's one JSON line.
+//   onboard:install-claude used to bare-JSON.parse that stdout AND discard runScript's `err` (it never
+//   rejects — it RESOLVES {err, stdout}), so a timeout read as a generic "no output" and a banner read as a
+//   SyntaxError shown to the user. Pins: the handler extracts via lastJsonLine and consults err; the wizard's
+//   error filter knows the SyntaxError and raw .NET shapes; both signIn()s carry the in-flight guard
+//   (onboardClaudeLogin RESPAWNS the fg tab — a double-click is the duplicate-spawn class, again).
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('onboard:install-claude parses stdout raw again (one profile banner breaks the wizard)',
+    /ipcMain\.handle\('onboard:install-claude'[\s\S]{0,900}?lastJsonLine\(stdout/.test(MAIN)
+      ? [] : ['the handler does not extract its result with lastJsonLine']);
+  none('onboard:install-claude still throws away runScript’s err (a timeout would read "no output")',
+    /ipcMain\.handle\('onboard:install-claude'[\s\S]{0,900}?if \(err\) return \{ ok: false, error: err\.message/.test(MAIN)
+      ? [] : ['the handler does not surface err when no JSON came back']);
+  none('main.js does not import the extractor it depends on',
+    /require\('\.\/lib\/lastJsonLine'\)/.test(MAIN) ? [] : ['lastJsonLine require missing']);
+  // the renderer filter learned the two unreadable-internals shapes
+  none('installErrText no longer catches a JSON SyntaxError reaching the DOM',
+    /is not valid JSON\|\^SyntaxError\\b/.test(APP) ? [] : ['no SyntaxError branch in installErrText']);
+  none('installErrText no longer catches raw .NET/PowerShell error text',
+    /System\\\.\[A-Za-z\.\]\*Exception/.test(APP) ? [] : ['no .NET branch in installErrText']);
+  // both sign-in buttons: exactly two signIn functions, each guarded
+  const signIns = [...APP.matchAll(/async function signIn\(\) \{\n\s*if \(signInFlight\) return;/g)];
+  none('a signIn() lost its in-flight guard (double-click respawns the fg tab twice)',
+    signIns.length === 2 ? [] : [`found ${signIns.length} guarded signIn()s, expected 2`]);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
