@@ -2193,5 +2193,30 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     signIns.length === 2 ? [] : [`found ${signIns.length} guarded signIn()s, expected 2`]);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 68. A SPAWN-PATH THROW MUST REACH THE TERMINAL, AND A LONG PATH MUST EXPLAIN ITSELF. installHooks throwing
+//   (ENAMETOOLONG from a deep adopted folder) used to bubble uncaught out of the tab-spawn handler — the
+//   terminal showed NOTHING. main.js now catches around runner.spawnClaude and prints e.message on the same
+//   pty:data surface the null case uses; win.js classifies ENAMETOOLONG into the complete instruction
+//   (shorter folder, or LongPathsEnabled + restart). Both halves pinned — either alone is inert: an
+//   unclassified throw prints raw internals, an uncaught classified throw prints nothing.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const WIN = read('runners/win.js');
+  none('main.js lets a spawnClaude throw escape the tab-spawn handler again (a thrown error shows NOTHING)',
+    /let proc = null, spawnErr = '';\s*\n\s*try \{ proc = runner\.spawnClaude\(/.test(MAIN)
+      && /catch \(e\) \{ spawnErr = \(e && e\.message\) \|\| String\(e\);/.test(MAIN)
+      ? [] : ['no try/catch around runner.spawnClaude with spawnErr surfacing']);
+  none('…or swallows spawnErr instead of printing it to the terminal',
+    /\$\{spawnErr \|\| `terminal backend \(node-pty\) unavailable: \$\{pty\.err\}`\}/.test(MAIN)
+      ? [] : ['the !proc branch no longer prefers the thrown message']);
+  none('win.js installHooks lost its ENAMETOOLONG classification (a long path throws raw internals again)',
+    /const guardLongPath = \(fn, p\) => \{[\s\S]{0,300}?e\.code === 'ENAMETOOLONG'/.test(WIN)
+      && /guardLongPath\(\(\) => \{ fs\.mkdirSync\(cdir, \{ recursive: true \}\); fs\.mkdirSync\(rt, \{ recursive: true \}\); \}, cdir\)/.test(WIN)
+      ? [] : ['guardLongPath missing or not wrapping the mkdir pair']);
+  none('the long-path message stopped carrying its fix',
+    /LongPathsEnabled/.test(WIN) ? [] : ['no LongPathsEnabled instruction in the classified error']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

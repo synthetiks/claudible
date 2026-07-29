@@ -30,6 +30,22 @@ function Try-Winget($id) {
 }
 $BIN = Join-Path $env:USERPROFILE '.claudible\bin'   # portable-fallback drop dir (no admin)
 function Ensure-Bin { New-Item -ItemType Directory -Force -Path $BIN | Out-Null }
+# Classify a download failure AT THE SOURCE (parity with wsl/install-claude.sh's network case): the raw
+# Invoke-WebRequest throw is .NET internals ("Exception calling \"GetResponse\"", "The remote name could not
+# be resolved: 'nodejs.org'") — the WSL side turned those into actionable English and this side did not.
+# Exit here, not throw: the global catch would re-wrap the message we just curated.
+function Is-NetworkError($msg) {
+  return ($msg -match 'could not be resolved|Unable to connect|connection.*(closed|refused)|timed out|timeout|TLS|SSL|secure channel|proxy|407|network path')
+}
+function Fetch($url, $out, $what) {
+  try { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $out }
+  catch {
+    $m = $_.Exception.Message
+    if (Is-NetworkError $m) { Emit 'error' "Network problem downloading $what — check your connection (or proxy) and press Install again." }
+    else { Emit 'error' "Could not download $what — $m" }
+    exit 1
+  }
+}
 
 try {
   switch ($Dep) {
@@ -49,7 +65,7 @@ try {
         } catch {}
         if (-not $url) { $url = "https://nodejs.org/dist/v22.12.0/node-v22.12.0-win-$a.zip" }   # pinned LTS fallback
         $zip = Join-Path $env:TEMP 'node-claudible.zip'
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
+        Fetch $url $zip 'Node.js'
         $dest = Join-Path $BIN 'node'
         Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
         Expand-Archive -Path $zip -DestinationPath $dest -Force
@@ -76,7 +92,7 @@ try {
         } catch {}
         if (-not $sfxUrl) { Emit 'error' 'Could not resolve PortableGit (network/proxy?). Install Git from https://git-scm.com/download/win and reopen.'; exit 1 }
         $sfx = Join-Path $env:TEMP 'PortableGit.7z.exe'
-        Invoke-WebRequest -UseBasicParsing -Uri $sfxUrl -OutFile $sfx
+        Fetch $sfxUrl $sfx 'PortableGit'
         $dest = Join-Path $BIN 'git'
         Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -121,7 +137,7 @@ try {
         Emit 'progress' 'Downloading the cloudflared binary…'
         Ensure-Bin
         $exe = Join-Path $BIN 'cloudflared.exe'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile $exe
+        Fetch 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' $exe 'cloudflared'
         if (-not (Test-Path $exe)) { Emit 'error' 'cloudflared download failed.'; exit 1 }
         EmitEnv 'CLAUDIBLE_CLOUDFLARED' $exe
       }
@@ -138,6 +154,11 @@ try {
   exit 0
 }
 catch {
-  Emit 'error' ($_.Exception.Message)
+  # Last-resort classification — anything the per-download Fetch didn't already curate. Network shapes get
+  # the actionable line; everything else keeps the real message (renderer-side installErrText de-fangs the
+  # known .NET internals as the final layer).
+  $m = $_.Exception.Message
+  if (Is-NetworkError $m) { Emit 'error' 'Network problem during the install — check your connection (or proxy) and press Install again.' }
+  else { Emit 'error' $m }
   exit 1
 }

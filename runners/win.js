@@ -138,7 +138,19 @@ function installHooks(sdir, tabRuntimeId) {
   const statusPath = path.join(rt, 'status.json');
   const hooksPath = path.join(rt, 'hooks.ndjson');
   const contextPath = path.join(rt, 'context.json');   // identity/live-state main writes; the context hook reads it (matches main.js's per-tab path)
-  fs.mkdirSync(cdir, { recursive: true }); fs.mkdirSync(rt, { recursive: true });
+  // Classify the one Windows fs failure a user can actually act on. MAX_PATH is 260; a long username plus a
+  // deep adopted folder overruns it, and the raw throw ("ENAMETOOLONG: name too long, mkdir 'C:\\Users\\…'")
+  // used to bubble out of spawnClaude unexplained. Windows surfaces the overrun as ENAMETOOLONG or, from
+  // some APIs, EINVAL-with-the-path — match the code, not the message. main.js prints whatever this throws
+  // into the terminal (its spawn guard), so the message must be the complete instruction.
+  const longPathMsg = (p) => 'This project’s path is too long for Windows (' + p.length + ' chars; the classic limit is 260). '
+    + 'Either move the project to a shorter folder, or enable long paths once (PowerShell as admin: '
+    + 'Set-ItemProperty "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" -Name LongPathsEnabled -Value 1) and restart Windows.';
+  const guardLongPath = (fn, p) => {
+    try { return fn(); }
+    catch (e) { if (e && e.code === 'ENAMETOOLONG') throw new Error(longPathMsg(p)); throw e; }
+  };
+  guardLongPath(() => { fs.mkdirSync(cdir, { recursive: true }); fs.mkdirSync(rt, { recursive: true }); }, cdir);
   try { fs.writeFileSync(hooksPath, ''); fs.writeFileSync(statusPath, '{}'); } catch {}   // fresh per launch
   // Take ownership of <sdir>\.claude the same way wsl/session.sh does, and BEFORE the first overwrite below.
   // Claudible created the folder for its own workspaces, but an ADOPTED folder is the user's project: their
@@ -172,8 +184,8 @@ function installHooks(sdir, tabRuntimeId) {
     fs.copyFileSync(src, tmp); fs.renameSync(tmp, dest);
     return true;
   };
-  stage(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js'));
-  stage(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js'));
+  guardLongPath(() => stage(path.join(APP_ROOT, 'hooks', 'statusline.js'), path.win32.join(cdir, 'statusline.js')), cdir);
+  guardLongPath(() => stage(path.join(APP_ROOT, 'hooks', 'hook.js'), path.win32.join(cdir, 'hook.js')), cdir);
   // Stage the context hook too (additive; its absence in an older bundle just omits the identity injection).
   let hasContext = false;
   try { stage(path.join(APP_ROOT, 'hooks', 'context-hook.js'), path.win32.join(cdir, 'context-hook.js')); hasContext = true; } catch {}
@@ -185,7 +197,7 @@ function installHooks(sdir, tabRuntimeId) {
   const settingsTxt = JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2);
   const sPath = path.win32.join(cdir, 'settings.json');
   let same = false; try { same = fs.readFileSync(sPath, 'utf8') === settingsTxt; } catch {}
-  if (!same) { const tmp = sPath + '.cltmp.' + process.pid; fs.writeFileSync(tmp, settingsTxt); fs.renameSync(tmp, sPath); }
+  if (!same) { const tmp = sPath + '.cltmp.' + process.pid; guardLongPath(() => { fs.writeFileSync(tmp, settingsTxt); fs.renameSync(tmp, sPath); }, sPath); }
   return { cdir, statusPath, hooksPath, contextPath };
 }
 

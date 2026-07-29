@@ -563,10 +563,16 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // still sandboxed downstream regardless; session.sh / win.js print that override into the terminal.)
     console.log('[claudible] spawn tab=' + tabId + ' ws=' + ((ws && (ws.slug || ws.id)) || 'default')
       + ' permission-mode=' + (registry.permissionMode || 'default') + ' (from workspaces.json registry)');
-    const proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId, modelStrategy: modelStrategyNow() });
+    // A THROW from spawnClaude (installHooks hitting a too-long path, a hostile fs state) used to bubble
+    // straight out of this handler — the terminal showed nothing at all, which is the worst of the three
+    // outcomes. Catch it onto the same surface the null case uses; runners raise classified messages
+    // (see win.js's long-path guard) precisely so this line has something human to print.
+    let proc = null, spawnErr = '';
+    try { proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId, modelStrategy: modelStrategyNow() }); }
+    catch (e) { spawnErr = (e && e.message) || String(e); console.error('[claudible] spawnClaude threw:', spawnErr); }
     if (!proc) {   // node-pty failed to load/build — on Linux this is almost always a missing C toolchain. Tell the user how to fix it instead of a bare error.
       const hint = process.platform === 'linux' ? '\r\n  On Linux node-pty builds from source — install: sudo apt install build-essential python3   (then: npm rebuild)\r\n' : '';
-      winSend('pty:data', { tabId, data: `\r\n[claudible] terminal backend (node-pty) unavailable: ${pty.err}\r\n${hint}` }); return;
+      winSend('pty:data', { tabId, data: `\r\n[claudible] ${spawnErr || `terminal backend (node-pty) unavailable: ${pty.err}`}\r\n${hint}` }); return;
     }
     // Win-runner parity with session.sh's foreign notice: the wsl/posix bootstrap echoes "opening a
     // collaborator's session…" into the terminal itself; claude.exe is spawned directly (no wrapping shell),
