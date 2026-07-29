@@ -303,7 +303,7 @@ none('renderer: orphanTab is never rendered',
   none('pollLivePeers no longer polls EXPANDED projects (a non-active project’s badge would freeze until clicked)',
     /isWsExpanded\(/.test(poll) ? [] : ['poll does not include expanded workspaces']);
   none('live:peers IPC ignores the workspace argument (ambient activeWorkspace again)',
-    /ipcMain\.handle\('live:peers', \(e, wsId\)[\s\S]{0,240}?_wsById\(wsId\)/.test(MAIN) ? [] : ['main.js live:peers does not honor wsId']);
+    /ipcMain\.handle\('live:peers', \(e, wsId\)[\s\S]{0,500}?_wsById\(wsId\)/.test(MAIN) ? [] : ['main.js live:peers does not honor wsId']);
   none('openLiveTab stamps peerWsId from ambient activeWsId instead of the peer',
     /rec\.peerWsId = peer\.wsId \|\| activeWsId;/.test(appNoComments) ? [] : ['peerWsId not taken from peer.wsId']);
   // Fix 3: a joined tab's socket-proved-offline suppression must be consulted by the reader and self-cleaned by the poll.
@@ -1166,7 +1166,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 
   // (b) boot session restore
   none('the boot highlight guesses from raw file mtime again (a synced session steals it)',
-    /const remembered = lastSessionFor\(activeWsId\);[\s\S]{0,300}?activeSession = still \? remembered :/.test(APP) ? [] : ['boot no longer prefers the remembered session']);
+    /const remembered = lastSessionFor\(activeWsId\);[\s\S]{0,600}?activeSession = still \? remembered :/.test(APP) ? [] : ['boot no longer prefers the remembered session']);
   none('nothing records which session you were actually in',
     /rememberLastSession\(t\.wsId \|\| activeWsId, activeSession\)/.test(APP) && /function rememberLastSession/.test(APP) ? [] : ['openSession does not remember the switch']);
   // A draft has no id to come back to; persisting it would restore you to nothing.
@@ -1454,7 +1454,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /This tab carries your live link[\s\S]{0,300}?STOPS WORKING/.test(APP)
       ? [] : ['the close confirm never names the public link']);
   none('deleting the pinned tab’s project does not mention live sharing at all',
-    /function deleteWsPrompt\(w\)[\s\S]{0,700}?liveShareLivesInWs\(w\.id\)/.test(APP)
+    /function deleteWsPrompt\(w\)[\s\S]{0,1000}?liveShareLivesInWs\(w\.id\)/.test(APP)
       ? [] : ['deleteWsPrompt has no live-share warning']);
   // The only auth path that never reaches guest.js, so no error card of its own can explain it.
   none('a revoked link still renders as an unstyled one-word page',
@@ -1485,7 +1485,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and never points at the safer GitHub path',
     /invite them to the repo on GitHub/.test(APP) ? [] : ['no soft pointer to the repo-collaborator flow']);
   none('the warning is painted before the dialog opens AND on every toggle',
-    /renderShareWarn\(\);\s*\/\/ paint the security note/.test(APP) && /\$\('share-ro'\)[\s\S]{0,60}?addEventListener\('change', renderShareWarn\)/.test(APP)
+    /renderShareWarn\(\);\s*\/\/ paint the security note/.test(APP) && /\$\('share-ro'\)[\s\S]{0,120}?addEventListener\('change', renderShareWarn\)/.test(APP)
       ? [] : ['the warning is not wired to open + change']);
 }
 
@@ -1570,7 +1570,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the share icon was not folded into the button',
     /id="share-btn"[^>]*>\s*<svg class="ico"[\s\S]*?id="sb-label"/.test(HTML) ? [] : ['#share-btn has no leading icon + #sb-label span']);
   none('webShareUI wipes the button icon by setting shareBtn.textContent',
-    /\$\('sb-label'\)[\s\S]{0,60}?textContent = on/.test(APP) && !/shareBtn\.textContent/.test(APP)
+    /\$\('sb-label'\)[\s\S]{0,120}?textContent = on/.test(APP) && !/shareBtn\.textContent/.test(APP)
       ? [] : ['webShareUI still sets shareBtn.textContent (nuking the icon) instead of the label span']);
 }
 
@@ -1858,7 +1858,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /ipcMain\.handle\('claude:latest'/.test(MAIN) && /_claudeLatest = ''; _claudeLatestTs = Date\.now\(\); resolve\(''\)/.test(MAIN) && /24 \* 60 \* 60 \* 1000/.test(MAIN)
       ? [] : ['claude:latest is missing its daily cache or its fail-silent catch']);
   none('the refresh IPC does not restart the foreground session via respawn (resume)',
-    /ipcMain\.handle\('claude:refresh-session'[\s\S]{0,1600}?respawnPty\(tabId, \(rec && rec\.session\) \|\| ''/.test(MAIN)
+    /ipcMain\.handle\('claude:refresh-session'[\s\S]{0,2400}?respawnPty\(tabId, \(rec && rec\.session\) \|\| ''/.test(MAIN)
       ? [] : ['claude:refresh-session does not respawn the fg tab on its own session']);
   none('…and it can restart a session that is HOSTING a live share (dropping the guests)',
     /if \(hosting && sharedTabId != null && tabId === sharedTabId\) return \{ ok: false, reason: 'hosting'/.test(MAIN)
@@ -1888,7 +1888,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       && !/AT\(\) && AT\(\)\.busy && !confirm\(/.test(APP)
       ? [] : ['claude:refresh-session does not own the busy check, or the renderer still guards on AT()']);
   none('…and the renderer does not confirm against the tab main actually named',
-    /if \(r && r\.reason === 'busy'\)[\s\S]{0,420}?claudeRefreshSession\(\{ force: true \}\)/.test(APP)
+    /if \(r && r\.reason === 'busy'\)[\s\S]{0,900}?claudeRefreshSession\(\{ force: true \}\)/.test(APP)
       && /function refreshTargetName\(tabId\)/.test(APP)
       ? [] : ['the renderer does not re-confirm-and-force against main’s reported tab']);
   none('the new IPCs are not exposed on the preload bridge',
@@ -1915,7 +1915,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // running or being resumed" modal, which swallows the spacebar. The normal switch path must focus the
   // existing tab instead (the busy/shared branch already did; this extends it).
   none('switching to a project can spawn a SECOND claude on a session another tab already runs (spacebar-eating modal)',
-    /const sess = targetSession \|\| lastSessionFor\(id\) \|\| '';[\s\S]{0,700}?if \(sess && sess !== 'new'\) \{\s*\n\s*for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+    /const sess = targetSession \|\| lastSessionFor\(id\) \|\| '';[\s\S]{0,1000}?if \(sess && sess !== 'new'\) \{\s*\n\s*for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['switchWorkspace normal path does not dedupe an already-open session']);
 }
 

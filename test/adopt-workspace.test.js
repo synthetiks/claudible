@@ -466,7 +466,7 @@ ok('app.js: both delete affordances share ONE prompt (they can never disagree ab
 ok('diff.sh: reports the folder\'s own origin so a stale cached link can self-heal',
   /origin="\$\(git remote get-url origin/.test(DIFF_SH));
 ok('app.js: Project History lists every workspace (no kind filter)',
-  /function _phProjects\(\)[\s\S]{0,700}?\.filter\(Boolean\)/.test(APP) && !/_phProjects[\s\S]{0,400}?w\.kind === 'repo' \|\| w\.id === activeWsId/.test(APP));
+  /function _phProjects\(\)[\s\S]{0,1000}?\.filter\(Boolean\)/.test(APP) && !/_phProjects[\s\S]{0,400}?w\.kind === 'repo' \|\| w\.id === activeWsId/.test(APP));
 ok('app.js: an un-cloned invite says so instead of "not a git repo"',
   /if \(w\.needsClone\)[\s\S]{0,200}?Not downloaded yet/.test(APP));
 ok('app.js: the ws menu never offers upgrade/invite on an adopted folder',

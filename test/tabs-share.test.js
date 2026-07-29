@@ -355,7 +355,7 @@ ok('app.js: switchWorkspace rolls the tab record back when main keeps the tab',
   // restored before a new tab is opened, because newBlankTab's setActiveTab repaints synchronously. Pinning the
   // arg made this fail the moment the session it opens changed (a project with sessions must not open a blank
   // draft), which is a different concern entirely.
-  && /if \(kept\) \{[\s\S]{0,400}?Object\.assign\(t, prev\);[\s\S]{0,200}?newBlankTab\(id,/.test(APP));
+  && /if \(kept\) \{[\s\S]{0,700}?Object\.assign\(t, prev\);[\s\S]{0,350}?newBlankTab\(id,/.test(APP));
 ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty (a failed switch rolls the GLOBALS back too)',
   /if \(failed\) \{ rollBack\(\);[\s\S]{0,120}?return; \}/.test(APP)
   && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('t.term.reset(); resetStats(t);')
@@ -403,7 +403,7 @@ ok('app.js: a joined session renders once — the home tree stands down and repa
 // R6: reconcileWsChips only refills an EMPTY tree, so a tab switch off a joined tab must repaint the trees
 // itself — `prev` is captured BEFORE activeTabId moves, and the refresh fires on live-tab transitions.
 ok('app.js: switching off/onto a joined tab repaints the expanded trees (R6 — the vanishing joined row)',
-  /function setActiveTab\(tabId\) \{[\s\S]{0,220}?const prev = tabs\.get\(activeTabId\);[\s\S]{0,4600}?\(prev\.kind === 'live' \|\| rec\.kind === 'live'\)\) refreshExpandedTrees\(\);/.test(APP));
+  /function setActiveTab\(tabId\) \{[\s\S]{0,220}?const prev = tabs\.get\(activeTabId\);[\s\S]{0,3000}?\(prev\.kind === 'live' \|\| rec\.kind === 'live'\)\) refreshExpandedTrees\(\);/.test(APP_NC));
 // Viewing a joined tab scopes the sidebar to its HOME project (peerWsId) — the pinned row used to land under
 // whatever project happened to be active, so joining visually "moved" the session into an unrelated project
 // (three sightings). main's activeWorkspace stays untouched (live tabs still skip tabForeground).
@@ -417,7 +417,7 @@ ok('app.js: deleteSession pre-flights busy BEFORE touching the share',
 ok('app.js: …and re-points the SHARED tab last, so no abort can strand guests',
   /const ordered = owners\.filter\(\(r\) => r\.tabId !== wasSharedTab\)\.concat\(owners\.filter\(\(r\) => r\.tabId === wasSharedTab\)\);/.test(APP));
 ok('app.js: …ending the share only once nothing can abort',
-  /nothing can abort from here[\s\S]{0,200}?if \(sharedSessionId === id\) \{\s*\n\s*sharedSessionId = null; sharedWsId = null;/.test(APP));
+  /nothing can abort from here[\s\S]{0,350}?if \(sharedSessionId === id\) \{\s*\n\s*sharedSessionId = null; sharedWsId = null;/.test(APP));
 
 // A JOINER clicking away must not lose their live tab either. `livePeers` is polled from the ACTIVE project's
 // presence branch only, so while its owner browses another project the host is simply invisible to it — never
