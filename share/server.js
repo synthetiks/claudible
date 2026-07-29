@@ -133,7 +133,11 @@ function takeToken(ws, key, rate, burst) {
   const now = Date.now();
   let b = ws[key];
   if (!b) { b = ws[key] = { tokens: burst, last: now }; }
-  b.tokens = Math.min(burst, b.tokens + ((now - b.last) * rate) / 1000);
+  // Date.now() is wall-clock, not monotonic: an NTP step BACKWARDS makes the delta negative, and an
+  // unclamped refill would charge the bucket that deficit (an hour's step = -360k tokens) — silently
+  // muting the guest until real time catches up. Clamp to zero: worst case a clock jump grants no refill
+  // for one call, which costs nothing.
+  b.tokens = Math.min(burst, b.tokens + (Math.max(0, now - b.last) * rate) / 1000);
   b.last = now;
   if (b.tokens < 1) return false;
   b.tokens -= 1;

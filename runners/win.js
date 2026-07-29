@@ -140,9 +140,11 @@ function installHooks(sdir, tabRuntimeId) {
   const contextPath = path.join(rt, 'context.json');   // identity/live-state main writes; the context hook reads it (matches main.js's per-tab path)
   // Classify the one Windows fs failure a user can actually act on. MAX_PATH is 260; a long username plus a
   // deep adopted folder overruns it, and the raw throw ("ENAMETOOLONG: name too long, mkdir 'C:\\Users\\…'")
-  // used to bubble out of spawnClaude unexplained. Windows surfaces the overrun as ENAMETOOLONG or, from
-  // some APIs, EINVAL-with-the-path — match the code, not the message. main.js prints whatever this throws
-  // into the terminal (its spawn guard), so the message must be the complete instruction.
+  // used to bubble out of spawnClaude unexplained. Match ENAMETOOLONG by CODE, not message text. (Some
+  // Windows APIs surface an overrun as EINVAL instead — deliberately NOT matched: EINVAL is a catch-all for
+  // a dozen unrelated causes, and mislabelling one of those as "path too long" would send the user chasing
+  // the wrong fix.) main.js prints whatever this throws into the terminal (its spawn guard), so the message
+  // must be the complete instruction.
   const longPathMsg = (p) => 'This project’s path is too long for Windows (' + p.length + ' chars; the classic limit is 260). '
     + 'Either move the project to a shorter folder, or enable long paths once (PowerShell as admin: '
     + 'Set-ItemProperty "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" -Name LongPathsEnabled -Value 1) and restart Windows.';
