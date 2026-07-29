@@ -4991,6 +4991,19 @@ function renderWsChips() {
     cv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>';
     cv.addEventListener('click', (e) => { e.stopPropagation(); setWsExpanded(w.id, !isWsExpanded(w.id)); renderWsChips(); });
     chip.insertAdjacentHTML('beforeend', w.kind === 'repo' ? WS_REPO_SVG : WS_FOLDER_SVG);   // workspace logo — now the leftmost element
+    // STATUS LIGHT LEADS THE ROW — same rule as a session's busy dot (.sess-prev::before): "a status light
+    // belongs at the left edge, not buried in the right cluster". This dot used to sit in .ws-right, pressed
+    // against the manage button, which both crowded that cluster and split the app's own convention in two.
+    // ALWAYS rendered, .off (visibility:hidden) when the project is neither shared nor syncing: the slot is
+    // reserved so toggling share/sync cannot shift the project name sideways — this sidebar has had enough of
+    // things moving under the pointer.
+    const st0 = wsSyncState[w.id] || {};
+    const dot = document.createElement('span');
+    const dotOn = w.shared || w.syncSessions;
+    dot.className = 'ws-dot' + (dotOn ? ((w.syncSessions ? ' sync' : ' live')
+      + (st0.status === 'syncing' ? ' syncing' : '') + (st0.status === 'error' ? ' err' : '')) : ' off');
+    if (dotOn) dot.title = [w.shared ? 'screen-share ON' : '', w.syncSessions ? 'session-sync ON' : ''].filter(Boolean).join(' · ');
+    chip.appendChild(dot);
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
     if (isLastLocal(w)) {                                              // a tiny "default" tag on the sole local workspace (the protected home)
       const tag = document.createElement('span'); tag.textContent = 'default';
@@ -5005,15 +5018,7 @@ function renderWsChips() {
     // Right edge: a passive status dot (at-a-glance share/sync state) + a single ▾ that opens the options
     // menu. All actions (share, invite, sync, rename, delete) now live in that menu so the chip stays clean
     // and the full workspace name is readable — no row of icons crowding it out.
-    const right = document.createElement('div'); right.className = 'ws-right';
-    if (w.shared || w.syncSessions) {
-      const st0 = wsSyncState[w.id] || {};
-      const dot = document.createElement('span');
-      dot.className = 'ws-dot' + (w.syncSessions ? ' sync' : ' live')
-        + (st0.status === 'syncing' ? ' syncing' : '') + (st0.status === 'error' ? ' err' : '');
-      dot.title = [w.shared ? 'screen-share ON' : '', w.syncSessions ? 'session-sync ON' : ''].filter(Boolean).join(' · ');
-      right.appendChild(dot);
-    }
+    const right = document.createElement('div'); right.className = 'ws-right';   // the status dot moved OUT of here, to the left of the name (see above)
     const mb = document.createElement('button');
     mb.className = 'ws-menu-btn'; mb.title = 'Manage — rename, share, export, delete';
     mb.innerHTML = OPTIONS_SVG;   // settings sliders — same glyph as the session-row options trigger (visual continuity); sits left of the expand chevron, never confused with it

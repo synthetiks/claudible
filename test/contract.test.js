@@ -2247,5 +2247,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['accent class, PLUS_SVG or the .ws-mi.accent rule is absent']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 70. ONE CONVENTION FOR A STATUS LIGHT: LEFT OF THE NAME. A session's busy dot is a ::before on .sess-prev,
+//   with index.html's own note — "a status light belongs at the left edge, not buried in the right cluster".
+//   The project chip's .ws-dot contradicted that: it was appended into .ws-right, pressed against the manage
+//   button. Pins the dot's position (before .ws-name, out of .ws-right), and that its slot is RESERVED when
+//   idle — an unreserved dot would shift the project name every time share/sync is toggled, which is the class
+//   of movement this sidebar has been getting rid of.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the project status dot is back in the right cluster (crowds the manage button, splits the convention)',
+    /right\.appendChild\(dot\)/.test(APP) ? ['.ws-dot is appended into .ws-right again'] : []);
+  none('…or no longer leads the chip, immediately before the project name',
+    /chip\.appendChild\(dot\);\s*\n\s*const nm = document\.createElement\('span'\); nm\.className = 'ws-name'/.test(APP)
+      ? [] : ['the dot is not built directly before .ws-name']);
+  none('the idle slot is no longer reserved — toggling share/sync will nudge the project name',
+    /' off'/.test(APP) && /\.ws-chip \.ws-dot\.off\{visibility:hidden\}/.test(HTML)
+      ? [] : ['no .off class on the idle dot, or no visibility:hidden rule for it']);
+  // the session side of the convention must stay put, or "one standard" quietly becomes none
+  none('a session\u2019s status light left the left edge (the convention this dot was aligned to)',
+    /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{/.test(HTML)
+      ? [] : ['the busy dot is no longer a ::before on .sess-prev']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

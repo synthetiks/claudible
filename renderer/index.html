@@ -898,7 +898,11 @@
     .ws-chip:hover .ws-name,.ws-chip.active .ws-name{color:var(--ink)}
     /* right edge: passive status dot + the ▾ options trigger (all actions moved into the dropdown) */
     .ws-chip .ws-right{flex:none;display:flex;align-items:center;gap:6px;margin-left:6px}
+    /* Sits to the LEFT of .ws-name (not in .ws-right) — one convention with a session's busy dot, which is a
+       ::before on .sess-prev for the same stated reason. .off keeps its 6px + gap so switching share/sync on or
+       off never nudges the project name. */
     .ws-chip .ws-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ink-faint)}
+    .ws-chip .ws-dot.off{visibility:hidden}
     .ws-chip .ws-dot.live{background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}      /* green = live screen-share */
     .ws-chip .ws-dot.sync{background:var(--sync);box-shadow:0 0 6px -1px var(--sync)}      /* blue  = session-sync on */
     .ws-chip .ws-dot.syncing{animation:ws-sync-pulse 1s ease-in-out infinite}
