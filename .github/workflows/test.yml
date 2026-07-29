@@ -1,7 +1,7 @@
 name: Tests
 
-# Two gates. `test` is the pure-Node+bash acceptance suite (parity across backends, the win.js core, live
-# Posix runScript, hooks parity, python3->Node port parity) — no npm install, no Electron, no display, fast.
+# Two gates. `test` is the acceptance suite (parity across backends, the win.js core, live Posix runScript,
+# hooks parity, python3->Node port parity) — prod deps only, no Electron, no display, fast.
 # `lint` installs deps and runs ESLint (correctness rules — no-undef, no-unused-vars, …) + shellcheck over the
 # wsl scripts, which eat collaborator- and repo-controlled input.
 on:
@@ -21,8 +21,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.12.0"
-      # The suite needs no npm deps (pure Node + bash); python3 is preinstalled on
-      # ubuntu-latest, which the port-parity test uses to diff old-vs-new output.
+      # `ws` IS required, despite the old "needs no npm deps" claim: share/server.js requires it, and without it
+      # test/share-names.test.js catches the module error and skips Parts B/C/D — resume, supersede-zombie-socket,
+      # roster-bound, voice-relay-dedup — while still printing "0 failed" and exiting 0. So the deepest live-share
+      # coverage in the suite never ran in CI, and the green check said otherwise.
+      # --omit=dev keeps Electron out (this job needs none of it) and --ignore-scripts skips node-pty's native
+      # build, which the suite never loads — together they buy the real coverage without slowing the fast gate.
+      # python3 is preinstalled on ubuntu-latest; port-parity uses it to diff old-vs-new output.
+      - name: Install runtime deps the suite actually needs (ws)
+        run: npm ci --omit=dev --ignore-scripts
       - name: Runner + hooks + port parity suite
         run: npm test
 

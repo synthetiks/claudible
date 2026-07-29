@@ -2034,5 +2034,24 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['run-all.js does not discover test files']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 62. CI's TEST JOB MUST INSTALL THE DEPS THE SUITE ACTUALLY USES. It ran `npm test` with no install, on the
+//   claim that the suite is "pure Node + bash". share/server.js requires `ws`, so share-names.test.js caught the
+//   module error and skipped Parts B/C/D — resume, supersede-zombie-socket, roster-bound, voice-relay-dedup —
+//   while still printing "0 failed" and exiting 0. Measured: 16 assertions without ws, 43 with it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const CI = read('.github/workflows/test.yml');
+  none('the CI test job runs the suite without the deps it needs (live-share coverage skips, silently green)',
+    /npm ci --omit=dev --ignore-scripts/.test(CI) && /run: npm test/.test(CI)
+      ? [] : ['test.yml does not install prod deps before npm test']);
+  none('…and the install is ordered after npm test (too late to matter)',
+    CI.indexOf('npm ci --omit=dev --ignore-scripts') < CI.indexOf('run: npm test')
+      ? [] : ['deps are installed after the suite runs']);
+  none('a ws-less run reports itself as fully passing',
+    /SKIPPED: ws module unavailable/.test(read('test/share-names.test.js'))
+      ? [] : ['share-names.test.js no longer announces a skipped integration']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

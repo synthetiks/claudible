@@ -56,7 +56,16 @@ function done() {
   process.exit(fail ? 1 : 0);
 }
 
-if (!WebSocket) { console.log('  (ws module unavailable — integration skipped)'); done(); }
+// A skip here silently drops Parts B/C/D — resume, supersede-zombie-socket, roster-bound, voice-relay-dedup —
+// i.e. the deepest live-share coverage in the suite, while the summary below still reads "0 failed". CI now
+// installs prod deps so it can't happen there; if it happens locally, say so loudly and say how to fix it,
+// rather than leaving a green line that overstates what ran.
+if (!WebSocket) {
+  console.log('\n  ⚠ SKIPPED: ws module unavailable — Parts B/C/D (the real ws-server integration:');
+  console.log('    resume, supersede-zombie-socket, roster-bound, voice-relay-dedup) did NOT run.');
+  console.log('    Run `npm ci` to exercise them. The pure-function checks below still gated.\n');
+  done();
+}
 
 // connect a guest; resolve with the `you` name from its hello (and stash its resume token).
 function joinAndHello(port, cred) {
