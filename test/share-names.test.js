@@ -290,6 +290,57 @@ function joinAndHello(port, cred) {
     fail++; console.error('  FAIL flood-control threw: ' + (e && e.message));
   } finally {
     try { srv4.stop(); } catch {}
+  }
+
+  // ---- Part F: the pending lobby has a frame allowance -------------------------------------------------------
+  // An unapproved socket used to get 90 free seconds of frame traffic. It now gets PENDING_MAX_FRAMES(40) total —
+  // NOT kill-on-first-frame, because a legitimate waiting guest sends presence pings on tab visibility changes
+  // (guest.js: readyState is OPEN while pending). Pins: a flooder is terminated and its approval card cancelled;
+  // a guest who pinged a few times while waiting is still admittable and fully functional; the allowance stands
+  // down at admission (an admitted guest's frames are governed by the Part-E budgets, not the pending counter).
+  const approvals = [];
+  const srv5 = createShareServer({ onApprovalRequest: (info, finish) => approvals.push({ info, finish }) });
+  try {
+    const st5 = await srv5.start({ requireApproval: true, name: 'Host' });
+    const settle = (ms) => new Promise((res) => setTimeout(res, ms));
+    const rawJoin = (cred) => new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${st5.port}/?${cred}`);
+      ws.on('open', () => resolve(ws));
+      ws.on('error', reject);
+    });
+
+    // a flooder: 100 frames while pending → terminated, never admitted, approval card cancelled
+    const flood = await rawJoin(`t=${st5.token}&n=Flood`);
+    await settle(100);
+    eq('the flooder reached the lobby first (sanity)', approvals.length, 1);
+    const floodClosed = new Promise((res) => flood.on('close', res));
+    const t0 = Date.now();
+    for (let i = 0; i < 100; i++) flood.send(JSON.stringify({ type: 'presence', state: 'active' }));
+    // The time bound IS the assertion: without the guard this socket still closes — denied at the 90s approval
+    // timeout — so "it closed" alone cannot distinguish the fix from the bug it fixes.
+    const raced = await Promise.race([floodClosed.then(() => 'closed'), new Promise((res) => setTimeout(() => res('hung'), 5000))]);
+    ok(`the flooder is terminated promptly, not waited out (${raced} after ${Date.now() - t0}ms)`, raced === 'closed' && Date.now() - t0 < 5000);
+
+    // a legit waiter: a handful of visibility pings, then approval → admitted and fully functional
+    const waiter = await rawJoin(`t=${st5.token}&n=Patient`);
+    const hello = new Promise((res) => waiter.on('message', (d) => { try { const m = JSON.parse(d.toString()); if (m.type === 'hello') res(m); } catch {} }));
+    await settle(100);
+    for (let i = 0; i < 6; i++) waiter.send(JSON.stringify({ type: 'presence', state: i % 2 ? 'idle' : 'active' }));   // tab-toggling while waiting
+    await settle(100);
+    eq('the waiter is still pending (pings did not kill it)', approvals.length, 2);
+    approvals[1].finish(true);
+    eq('…and is admitted with its name intact', (await hello).you, 'Patient');
+    // past admission the pending counter must be gone: 60 more frames (> PENDING_MAX_FRAMES) must NOT disconnect
+    let waiterClosed = false; waiter.on('close', () => { waiterClosed = true; });
+    for (let i = 0; i < 60; i++) waiter.send(JSON.stringify({ type: 'presence', state: 'active' }));
+    await settle(250);
+    ok('the allowance stood down at admission (60 post-admit frames, still connected)', !waiterClosed);
+
+    try { waiter.close(); } catch {}
+  } catch (e) {
+    fail++; console.error('  FAIL pending-lobby threw: ' + (e && e.message));
+  } finally {
+    try { srv5.stop(); } catch {}
     done();
   }
 })();

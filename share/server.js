@@ -49,6 +49,7 @@ const MAX_AUDIO_B64 = 128 * 1024;   // reject an oversized relayed voice frame. 
 // Excess frames are DROPPED, not answered — an error reply would hand the flooder its own amplifier.
 const MSG_RATE = 100, MSG_BURST = 200;   // all JSON frames, charged BEFORE the parse
 const CHAT_RATE = 10, CHAT_BURST = 20;   // chat only, charged after type dispatch (fan-out amplification)
+const PENDING_MAX_FRAMES = 40;           // total frames an UNAPPROVED lobby socket may send before it is dropped
 const NAME_MAX = 40;
 const ROSTER_MAX = 32;           // MAX_GUESTS(8) live + up to 24 'left' tombstones. Beyond that, the oldest tombstone is evicted (see trimRoster) — the Map had no delete at all and grew one entry per distinct name, forever.
 const newToken = () => crypto.randomBytes(16).toString('hex');
@@ -306,6 +307,8 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
   // Start streaming to a guest. Fresh 'link' joins mint a private resume token + announce them.
   function admit(ws, mode, name, resumeTok) {
     if (ws.readyState !== ws.OPEN) return;
+    // Approved: the pending frame-allowance guard stands down (the admitted handler below has real budgets).
+    if (ws._pendingGuard) { try { ws.off('message', ws._pendingGuard); } catch {} ws._pendingGuard = null; }
     // Re-check the guest cap HERE, not only at connect (the check at the bottom of onConnection). With approval
     // ON (the default), a fresh joiner waits in `pending` — bounded by MAX_PENDING(16), not MAX_GUESTS(8) —
     // between that connect-time check and this admission, so a backlog of approvals could otherwise seat more
@@ -519,6 +522,16 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
       return;
     }
     const id = String(++pendingSeq);
+    // An UNAPPROVED socket gets a frame allowance, not a free 90 seconds. It has almost nothing legitimate
+    // to say — the one real pre-admission sender is guest.js's visibilitychange presence ping (readyState is
+    // OPEN while pending), so a waiting guest who toggles tabs emits a frame or two per toggle. 40 covers
+    // that with an order of magnitude to spare; past it the socket is terminate()d — no denial frame (a
+    // reply would feed the flooder), and the existing 'close' listener below reclaims the lobby slot and
+    // cancels the host's approval card. NOT kill-on-first-frame: that would disconnect a legitimate guest
+    // for looking at another tab while they wait. The guard stands down at admission (see admit()).
+    ws._pendingFrames = 0;
+    ws._pendingGuard = () => { if (++ws._pendingFrames > PENDING_MAX_FRAMES) { try { ws.terminate(); } catch {} } };
+    ws.on('message', ws._pendingGuard);
     try { ws.send(JSON.stringify({ type: 'pending' })); } catch {}
     const finish = (ok) => {
       if (!pending.has(id)) return;
