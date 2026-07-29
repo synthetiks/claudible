@@ -1930,5 +1930,31 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['.sess-rename-actions is not an in-flow flex child']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 59. SWITCHING PROJECTS MUST NOT LURCH THE SIDEBAR.
+//   A cold session cache used to replace the whole list with ONE .sess-empty block (measured 56.75px) and then
+//   snap open to N rows (6 rows = 205.25px) — a 148.5px jump that only happened for projects you hadn't visited,
+//   so the same click felt smooth or glitchy at random. Skeleton rows now hold the height (measured: identical
+//   32.38px per row, swap delta 0.00px).
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('a cold project switch collapses the list to the tall placeholder again',
+    /const n = Math\.max\(3, Math\.min\(8, outgoing \|\| 5\)\);/.test(APP) && /sk\.className = 'sess-skel'/.test(APP)
+      ? [] : ['primeSessionListForWs no longer paints height-matched skeletons']);
+  // THE TRAP: app.js maps .sess rows to dataset.id for the persisted drag order — a skeleton carrying .sess
+  // would write `undefined` into it. It must be its own class.
+  none('the skeleton carries the .sess class and can poison the persisted session order',
+    !/className = 'sess sess-skel'/.test(APP) && !/classList\.add\('sess'\)[\s\S]{0,40}sess-skel/.test(APP)
+      ? [] : ['skeleton rows are in the .sess set used by the drag/order queries']);
+  // A real row's height comes from the 22px ▾ (in flow at opacity:0), NOT its 16.2px text line box.
+  none('the skeleton lost the strut that matches the ▾ button’s box (rows drift ~6px each)',
+    /\.sess-skel::after\{content:'';flex:none;width:0;height:22px\}/.test(flat)
+      ? [] : ['.sess-skel::after strut missing — skeleton height no longer matches a real row']);
+  none('…and refreshSessions clobbers the skeletons straight back to the tall placeholder',
+    /!sessListEl\.querySelector\('\.sess,\.sess-skel'\)/.test(APP)
+      ? [] : ['the cold-list guard does not treat skeletons as already-painted']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

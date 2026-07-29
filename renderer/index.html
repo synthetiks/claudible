@@ -735,6 +735,25 @@
       50%{background-color:color-mix(in srgb,var(--ok) 8%,transparent)}}   /* railless glow — the old frames drew an inset 2px rail-shaped shadow */
     @media (prefers-reduced-motion:reduce){.sess.sess-done{animation:none}}
     .sess-empty{color:var(--ink-faint);font-size:var(--fs-xs);text-align:center;padding:20px;line-height:1.5}
+    /* SWITCH-IN SKELETON. Clicking a project whose session cache is cold used to replace the whole list with one
+       56px "loading…" block (.sess-empty above) and then snap open to N×26.6px rows — a ~115px lurch that only
+       happened for projects you hadn't visited, so the same gesture felt smooth or glitchy at random. These rows
+       mimic .sess's box EXACTLY (same padding, same 2px transparent border-left, same 1.35em line box on the same
+       --fs-sm) so the swap is height-neutral; .sess-list's gap:2px applies to them unchanged.
+       Deliberately NOT class .sess: app.js's drag/order queries map .sess rows to dataset.id, and a skeleton in
+       that set would write `undefined` into the persisted session order. */
+    .sess-skel{display:flex;align-items:center;padding:5.2px 6px;border-left:2px solid transparent;border-radius:6px;
+      font-size:var(--fs-sm);pointer-events:none;user-select:none}
+    /* STRUT — mirrors .sess-menu-btn's 22px box. A real row's height is set by the ▾ (22px), NOT by its text line
+       box (16.2px), because the ▾ stays in flow at opacity:0. Measured: real row 32.38px. Without this the
+       skeleton computes 26.56px and the swap still drifts ~6px per row. */
+    .sess-skel::after{content:'';flex:none;width:0;height:22px}
+    .sess-skel::before{content:'';display:block;height:10px;width:62%;border-radius:4px;
+      background:linear-gradient(90deg,rgba(255,255,255,.04),rgba(255,255,255,.085),rgba(255,255,255,.04));
+      background-size:200% 100%;animation:skelShimmer 1.5s ease-in-out infinite}
+    .sess-skel:nth-child(2n)::before{width:47%}
+    .sess-skel:nth-child(3n)::before{width:71%}
+    @keyframes skelShimmer{0%{background-position:150% 0}100%{background-position:-150% 0}}
     /* per-row options: a single ▾ button opens the actions menu (mirrors the workspace ▾ menu), so the row
        stays a clean title — nothing crowds it and there's no inline confirm strip to overflow the narrow row */
     /* Centered with top/bottom/margin:auto, NOT transform:translateY(-50%). The global button:active press is

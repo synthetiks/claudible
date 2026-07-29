@@ -4362,7 +4362,7 @@ async function refreshSessions() {
   if (sdrag && sdrag.moved) return;                                                // a row drag is in progress → defer: a mid-drag rebuild would orphan the dragged row's DOM node and reinsert a stale (pre-refresh) element into the fresh list; onSessPointerUp re-runs refreshSessions
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
   closeSessMenu();                                                                  // a re-render replaces the rows the open ▾ menu was anchored to
-  if (!sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render)
+  if (!sessListEl.querySelector('.sess,.sess-skel')) sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';   // only show the spinner on a cold list (no flash on re-render) — skeletons count as "already painted", else primeSessionListForWs's height-neutral swap would be clobbered right back to the tall placeholder
   // Fetch by EXPLICIT workspace id — never "whatever main's active workspace is". The two can differ (a joined
   // live tab moves the sidebar's scope here but deliberately never re-points main), and the ambient fetch painted
   // + cached the OTHER workspace's sessions under this header (the "my local project shows the other repo's
@@ -5514,7 +5514,14 @@ function primeSessionListForWs(id) {
     sessListEl.innerHTML = '';
     ordered.forEach((s) => sessListEl.appendChild(renderSessionRow(s)));
   } else {
-    sessListEl.innerHTML = '<div class="sess-empty">loading…</div>';
+    // Cold cache → don't collapse the list to a single 56px placeholder and then snap open to N rows (the
+    // "sidebar lurches when I switch projects" glitch). Paint skeleton rows sized to the list we're REPLACING,
+    // which we can still read here because the outgoing rows are on screen until the line below runs — so the
+    // swap itself costs zero height change. Clamped so a huge project can't paint an absurd wall of them.
+    const outgoing = sessListEl.querySelectorAll('.sess').length;
+    const n = Math.max(3, Math.min(8, outgoing || 5));
+    sessListEl.innerHTML = '';
+    for (let i = 0; i < n; i++) { const sk = document.createElement('div'); sk.className = 'sess-skel'; sessListEl.appendChild(sk); }
   }
 }
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
