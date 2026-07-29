@@ -1963,5 +1963,42 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.sess-skel\{[^}]*min-height:29px/.test(flat) ? [] : ['.sess-skel no longer shares .sess’s 29px box']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 60. A PROJECT THAT HAS SESSIONS MUST NOT OPEN AS A BLANK DRAFT.
+//   switchWorkspace's busy / live-shared branches used to pass 'new' unconditionally to newBlankTab, so
+//   switching projects while the current session was mid-turn (i.e. most of the time) produced a
+//   "New session · draft · unsaved" row even for a project full of sessions — and because the dedupe guard only
+//   ran when an explicit targetSession was supplied, every click minted ANOTHER blank tab (two clicks = two
+//   drafts). sessionToOpenFor resolves a real id first; 'new' is now the last resort, not the default.
+//   The block below EXECUTES the shipped helper (lift-and-run, like the isTypingBytes check) — not a text match.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the busy / live-shared switch still hands newBlankTab a hardcoded draft',
+    /const want = sessionToOpenFor\(id, targetSession\);/.test(APP) && /if \(!newBlankTab\(id, want\)\)/.test(APP)
+      ? [] : ['switchWorkspace\'s busy branch does not resolve a real session before opening a tab']);
+  none('…and the dedupe still only runs for an explicit targetSession (so repeat clicks stack blank tabs)',
+    /if \(want !== 'new'\) \{[\s\S]{0,260}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+      ? [] : ['the busy-branch dedupe is not keyed on the resolved session']);
+  none('…and the kept-tab rollback path still opens a blank draft',
+    /newBlankTab\(id, sessionToOpenFor\(id, targetSession\)\)/.test(APP)
+      ? [] : ['the keptTab branch does not use sessionToOpenFor']);
+  // Behavioural: lift the real function out of app.js and run it against stubbed collaborators.
+  const m = APP.match(/function sessionToOpenFor\(wsId, targetSession\)\{?[\s\S]*?\n\}/);
+  if (!m) { none('sessionToOpenFor is gone', ['helper not found in renderer/app.js']); }
+  else {
+    const mk = (remembered, cacheList) => new Function('lastSessionFor', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor',
+      m[0] + '; return sessionToOpenFor;')(() => remembered, new Map(cacheList ? [['W', { list: cacheList }]] : []), () => false, (ws, l) => l);
+    const cases = [
+      ['an explicitly requested session', mk(null, null)('W', 'EXPLICIT'), 'EXPLICIT'],
+      ['the session you were last in', mk('REMEMBERED', null)('W'), 'REMEMBERED'],
+      ['the project’s newest saved session', mk(null, [{ id: 'S1', msgs: 3 }, { id: 'S2', msgs: 1 }])('W'), 'S1'],
+      ['a blank draft for an EMPTY project', mk(null, [])('W'), 'new'],
+      ['a blank draft when the cache is cold', mk(null, null)('W'), 'new'],
+      ['a blank draft when only stubs exist', mk(null, [{ id: 'S1', msgs: 0 }])('W'), 'new'],
+    ];
+    none('sessionToOpenFor no longer resolves to', cases.filter(([, got, want]) => got !== want).map(([d, got, want]) => d + ' (got ' + got + ', want ' + want + ')'));
+  }
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -346,7 +346,11 @@ ok('app.js: createWorkspace repaints NOTHING when superseded',
 // sidebar highlight forever. And its terminal must not be cleared for a switch that never happened.
 ok('app.js: switchWorkspace rolls the tab record back when main keeps the tab',
   /const prev = \{ wsId: t\.wsId, session: t\.session, label: t\.label, curSessionLabel: t\.curSessionLabel, pendingTitle: t\.pendingTitle \};/.test(APP)
-  && /if \(kept\) \{[\s\S]{0,400}?Object\.assign\(t, prev\);[\s\S]{0,200}?newBlankTab\(id, sess \|\| 'new'\)/.test(APP));
+  // Deliberately NOT pinned to newBlankTab's ARGUMENT: what this check is about is the ORDER — the record must be
+  // restored before a new tab is opened, because newBlankTab's setActiveTab repaints synchronously. Pinning the
+  // arg made this fail the moment the session it opens changed (a project with sessions must not open a blank
+  // draft), which is a different concern entirely.
+  && /if \(kept\) \{[\s\S]{0,400}?Object\.assign\(t, prev\);[\s\S]{0,200}?newBlankTab\(id,/.test(APP));
 ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty (a failed switch rolls the GLOBALS back too)',
   /if \(failed\) \{ rollBack\(\);[\s\S]{0,120}?return; \}/.test(APP)
   && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('t.term.reset(); resetStats(t);')

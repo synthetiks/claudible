@@ -5524,6 +5524,23 @@ function primeSessionListForWs(id) {
     for (let i = 0; i < n; i++) { const sk = document.createElement('div'); sk.className = 'sess-skel'; sessListEl.appendChild(sk); }
   }
 }
+// What a project should OPEN when we can't re-point the current tab and must give it a new one (the busy /
+// live-shared paths below). Order: an explicitly requested session → the one you were last in → that project's
+// most recent saved session → and only when the project genuinely has nothing to open, a real blank draft.
+//
+// Those paths used to pass 'new' unconditionally, so switching to a project while your current session was
+// mid-turn — i.e. most of the time — greeted you with a "New session · draft · unsaved" row even though the
+// project was full of sessions. newBlankTab can't be handed '' to mean "resume latest" either: makeTab coerces
+// `session || 'new'`, so an empty string becomes a draft anyway. Hence resolving a REAL id here.
+function sessionToOpenFor(wsId, targetSession) {
+  if (targetSession) return targetSession;
+  const remembered = lastSessionFor(wsId);
+  if (remembered) return remembered;
+  const c = _wsSessCache.get(wsId);
+  const saved = (c && Array.isArray(c.list) ? c.list : []).filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, wsId));   // same stub rule the lists use
+  const top = saved.length ? orderedSessionsFor(wsId, saved)[0] : null;                                                        // same ordering helper as every render path
+  return (top && top.id) || 'new';
+}
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
 async function switchWorkspace(id, targetSession) {
@@ -5543,13 +5560,16 @@ async function switchWorkspace(id, targetSession) {
   //     (or an "out of sync" chip on another project's row, which switches first) ended the live session.
   // Either way: open the target in a NEW tab and leave this one running. main refuses the reroute regardless.
   if (t.busy || t.tabId === sharedTabIdR) {
-    if (targetSession && targetSession !== 'new') {        // dedupe: a tab may already host it (newBlankTab never checks)
-      for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === targetSession) { setActiveTab(rec.tabId); return; }
+    // Resolve BEFORE the dedupe: with no explicit targetSession the old guard was skipped entirely, so every
+    // click here minted ANOTHER blank tab — click twice while mid-turn and you had two "New session" drafts.
+    const want = sessionToOpenFor(id, targetSession);
+    if (want !== 'new') {                                 // dedupe: a tab may already host it (newBlankTab never checks)
+      for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
     }
     const tws = workspaces.find((w) => w.id === id);
     if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
     setWsExpanded(id, true);                                                  // expand it like the normal switch does, so its sessions are right there
-    if (!newBlankTab(id, targetSession || 'new')) {
+    if (!newBlankTab(id, want)) {
       if (t.busy) toast('That session is still running — finish it or close a tab before switching');
       else toast('This tab is live-shared — close a tab to open that project beside it');
     }
@@ -5597,7 +5617,7 @@ async function switchWorkspace(id, targetSession) {
     // reached us yet. Its pty never moved, so put the RECORD back (a tab claiming a workspace its process isn't in
     // orphans the sidebar highlight forever) and give the project a tab of its own, exactly like the guards above.
     Object.assign(t, prev);                        // restore BEFORE newBlankTab — its setActiveTab repaints synchronously and must not see the optimistic record
-    if (newBlankTab(id, sess || 'new')) return;    // new tab in the target ws is now active → globals correctly point there
+    if (newBlankTab(id, sessionToOpenFor(id, targetSession))) return;    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft
     toast('That session is still running — close a tab to open that project beside it');
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back
     return;
