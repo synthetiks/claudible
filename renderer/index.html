@@ -766,7 +766,11 @@
        `transform:translateY(1px)` at higher specificity, so a centering transform gets REPLACED on mousedown —
        the button jumped from mid-row to the row's top edge and back (the "jiggle"). transform is the press
        animation's alone; layout must never borrow it. */
-    .sess-menu-btn{flex:none;margin-left:2px;display:flex;align-items:center;justify-content:center;
+    /* NO margin-left. The row already spaces its children (.sess{gap:6px}); an extra 2px here made the
+       options button sit 8px from the meta cluster while the flairs inside it sat 5px apart — a 3px box
+       anomaly (4.25px glyph-to-glyph) in a 3-icon cluster, which is precisely the "tiny unusual gap" a user
+       spotted on a selected row. One gap value now governs the whole cluster. */
+    .sess-menu-btn{flex:none;display:flex;align-items:center;justify-content:center;
       width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:7px;background:none;
       color:var(--ink-faint);opacity:0;cursor:pointer;box-shadow:none;
       transition:opacity var(--dur-fast),color var(--dur-fast),border-color var(--dur-fast),background var(--dur-fast)}
@@ -778,7 +782,7 @@
        icon+word — no pill ribbon extending across the row); a faint pill appears on hover to show it's clickable */
     .sess.renaming .sess-flair{display:none}   /* nothing floats beside the rename input while editing (the old .sess-chip pill styles retired with the text labels) */
     /* live collaboration — a compact pill INLINE at the right of the meta line (normal flow → it can never overflow the row) */
-    .sess-meta{display:flex;align-items:center;gap:5px}
+    .sess-meta{display:flex;align-items:center;gap:6px}   /* 6, matching .sess's own gap — the cluster reads as one evenly-spaced run of icons instead of 5px inside / 8px before the ▾ */
     .sess-meta-t{flex:0 1 auto;min-width:0;max-width:13em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:var(--tk-base)}   /* .sess-meta is uppercase for its BADGES; a timestamp ("now", "5m ago") and a peer line ("MK is live now") are prose, and prose in caps reads as shouting */   /* don't grow → tags hug right after the time instead of being shoved to the far-right edge (no "ribbon across the row"). max-width bounds a long peer line ("someVeryLongName is live now") so the flex:none cluster can't eat the whole row and starve the title. */
     .sess-meta{flex-wrap:nowrap}   /* keep the tag (out-of-sync / live) on ONE line WITH the timestamp — the time (flex:0 1 auto, its OWN overflow:hidden/ellipsis) shrinks to make room, so the chip never drops to a 2nd line; its colour still hugs just the icon+word (inline-flex). No container overflow:hidden — it would clip the live pill's "Join →" hover reveal. */
     .sess-live-ind{flex:none;width:auto;display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;
@@ -897,7 +901,11 @@
     .ws-chip .ws-name{flex:1;min-width:0;font-size:var(--fs-xs);font-weight:600;letter-spacing:.01em;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color var(--dur-base) ease}   /* ② quiet section label — held back by SIZE + COLOUR, never by forced caps */
     .ws-chip:hover .ws-name,.ws-chip.active .ws-name{color:var(--ink)}
     /* right edge: passive status dot + the ▾ options trigger (all actions moved into the dropdown) */
-    .ws-chip .ws-right{flex:none;display:flex;align-items:center;gap:6px;margin-left:6px}
+    /* Since the status dot moved out to lead the row, this holds ONLY the two controls — manage and collapse.
+       At 6px they read as two unrelated buttons (13.5px glyph-to-glyph, the loosest icon pair in the sidebar);
+       at 2px they read as one control pair. Both keep their full 20px hit target. No session row has an
+       adjacent control PAIR (it has a single ▾), so tightening here cannot diverge from that surface. */
+    .ws-chip .ws-right{flex:none;display:flex;align-items:center;gap:2px;margin-left:6px}
     /* Sits to the LEFT of .ws-name (not in .ws-right) — one convention with a session's busy dot, which is a
        ::before on .sess-prev for the same stated reason. .off keeps its 6px + gap so switching share/sync on or
        off never nudges the project name. */

@@ -2270,5 +2270,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the busy dot is no longer a ::before on .sess-prev']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 71. ICON CLUSTERS USE ONE GAP EACH. Two spacing anomalies a user's eye caught before any test did:
+//   (a) a selected session row's cluster ran 5px between flairs but 8px before the ▾ — .sess-meta{gap:5px}
+//       against .sess{gap:6px} PLUS .sess-menu-btn{margin-left:2px}. Measured 4.25px glyph-to-glyph.
+//   (b) the chip's manage+collapse pair sat 6px apart (13.5px glyph-to-glyph) reading as two loose buttons.
+//   Both are pure spacing, but they are the visible kind of wrong, so they get pinned. The ▾ stays 22px on
+//   purpose — it is what sets the 29px row height (see check 64 and .sess-skel's strut); shrinking it to match
+//   the 18px flairs would silently resize every row.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('the session meta cluster is back to a gap that differs from the row it sits in',
+    /\.sess-meta\{display:flex;align-items:center;gap:6px\}/.test(flat) ? [] : ['.sess-meta gap is not 6px (the row\u2019s own gap)']);
+  none('the options button re-grew its extra margin (8px before the ▾, 6px everywhere else)',
+    /\.sess-menu-btn\{flex:none;margin-left:/.test(flat) ? ['.sess-menu-btn has a margin-left again'] : []);
+  none('the chip\u2019s two controls drifted apart again (they are one pair, not two buttons)',
+    /\.ws-chip \.ws-right\{flex:none;display:flex;align-items:center;gap:2px;margin-left:6px\}/.test(flat)
+      ? [] : ['.ws-right gap is not 2px']);
+  // the ▾ must KEEP the 22px box the 29px row height is built on
+  none('the session ▾ left its 22px box — every row height and the skeleton strut are derived from it',
+    /\.sess-menu-btn\{[^}]*width:22px;height:22px/.test(flat) ? [] : ['.sess-menu-btn is no longer 22x22']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
