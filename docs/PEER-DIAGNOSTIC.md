@@ -10,7 +10,7 @@ Set `$app` once to your Claudible folder (where `main.js` / `package.json` live 
 ```powershell
 $app = "$env:USERPROFILE\claudible"; git -C $app remote get-url origin; git -C $app branch --show-current
 ```
-GOOD: `https://github.com/thecrazydev1/claudible(.git)` and `main`. Anything else → fix this first; nothing below means anything.
+GOOD: `https://github.com/synthetiks/claudible(.git)` and `main`. Anything else → fix this first; nothing below means anything.
 
 **2 — Exact commit on disk:**
 ```powershell

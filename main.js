@@ -3423,7 +3423,7 @@ function checkForUpdate() {
   try {
     const https = require('https');
     const req = https.get({
-      host: 'api.github.com', path: '/repos/thecrazydev1/claudible/releases/latest',
+      host: 'api.github.com', path: '/repos/synthetiks/claudible/releases/latest',
       headers: { 'User-Agent': 'claudible-update-check', Accept: 'application/vnd.github+json' }, timeout: 8000,
     }, (res) => {
       if (res.statusCode !== 200) { res.resume(); return; }

@@ -4,7 +4,7 @@ Thanks for your interest in Claudible! It's an early-stage project, so issues, i
 welcome.
 
 ## Reporting issues
-Open an issue at https://github.com/thecrazydev1/claudible/issues. Helpful things to include:
+Open an issue at https://github.com/synthetiks/claudible/issues. Helpful things to include:
 - **Which install path you're on** — this matters more than anything else, because the four paths use
   different backends (`runners/wsl.js`, `runners/win.js`, `runners/posix.js`) and a bug is usually specific
   to one of them:
@@ -18,7 +18,7 @@ Open an issue at https://github.com/thecrazydev1/claudible/issues. Helpful thing
 
 ## Development setup
 Node **22.12+** everywhere (Electron 42 requires it), and Claude Code installed and signed in.
-`git clone https://github.com/thecrazydev1/claudible && cd claudible` first, then follow your platform:
+`git clone https://github.com/synthetiks/claudible && cd claudible` first, then follow your platform:
 
 **Windows + WSL2** (the most-travelled path)
 ```

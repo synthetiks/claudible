@@ -4,13 +4,13 @@
   "description": "Multiplayer cockpit for Claude Code: invite anyone into your live session to watch, talk, and co-drive. Fully-local push-to-talk voice, live telemetry, an agents cockpit, session history with one-click revert. Windows (WSL2 or native) \u00b7 Linux \u00b7 macOS.",
   "license": "MIT",
   "author": "the_crazydev",
-  "homepage": "https://github.com/thecrazydev1/claudible#readme",
+  "homepage": "https://github.com/synthetiks/claudible#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thecrazydev1/claudible.git"
+    "url": "git+https://github.com/synthetiks/claudible.git"
   },
   "bugs": {
-    "url": "https://github.com/thecrazydev1/claudible/issues"
+    "url": "https://github.com/synthetiks/claudible/issues"
   },
   "keywords": [
     "claude",

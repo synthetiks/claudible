@@ -55,9 +55,9 @@ sections under [Install & run](#install--run) list their own, lighter requiremen
 | **For** | Most people — just want to run it | Developers · Linux · terminal users |
 | **Windows** | Double-click `Claudible-Setup.exe` | `install.ps1` (clone + build) |
 | **Linux / macOS** | *(installers coming)* | `bash setup/setup.sh` |
-| **Comes from** | [**Releases**](https://github.com/thecrazydev1/claudible/releases) | `git clone` |
+| **Comes from** | [**Releases**](https://github.com/synthetiks/claudible/releases) | `git clone` |
 
-Claudible is in **public beta** — expect fast releases and the occasional rough edge; [issues](https://github.com/thecrazydev1/claudible/issues) are very welcome.
+Claudible is in **public beta** — expect fast releases and the occasional rough edge; [issues](https://github.com/synthetiks/claudible/issues) are very welcome.
 
 ---
 
@@ -65,7 +65,7 @@ Claudible is in **public beta** — expect fast releases and the occasional roug
 
 The simplest path. **No git, no `npm`, no PowerShell scripts, no `system32` snags** — the app is prebuilt.
 
-1. Open **[Releases](https://github.com/thecrazydev1/claudible/releases)** and download the latest **`Claudible-Setup-<version>-x64.exe`**.
+1. Open **[Releases](https://github.com/synthetiks/claudible/releases)** and download the latest **`Claudible-Setup-<version>-x64.exe`**.
 2. Double-click it. It's **unsigned** during beta, so Windows SmartScreen shows *“Windows protected your PC”* → click **More info → Run anyway** (one time).
 3. Launch Claudible from the Start menu / Desktop shortcut. **On first run it sets up local voice automatically** — the Whisper + Kokoro models are a few-hundred-MB download, so you'll see a *“Setting up voice…”* note while it works in the background (it's resumable; reopen if interrupted).
 
@@ -88,7 +88,7 @@ For developers, Linux, and terminal users who'd rather `git clone` and run a scr
 
 **One line** — asks where to install (Enter for the default), installs git if you don't have it, clones, installs everything, and launches:
 ```powershell
-$dir = (Read-Host "Install folder for Claudible (Enter for default) [$HOME\claudible]").Trim().Trim('"'); if (-not $dir) { $dir = "$HOME\claudible" }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); if (Test-Path "$env:ProgramFiles\Git\cmd\git.exe") { $env:Path = "$env:ProgramFiles\Git\cmd;$env:Path" } }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "`n[!] Git for Windows is required and couldn't be auto-installed (no winget on this system?). Install it from https://git-scm.com/download/win, reopen PowerShell, then run this line again." -ForegroundColor Yellow } else { git clone https://github.com/thecrazydev1/claudible "$dir"; if ($LASTEXITCODE -ne 0) { Write-Host "`n[!] git clone failed -- see git's error above. Likely causes: no internet/proxy blocking github.com, or `"$dir`" already exists and isn't empty. Fix that, then run this line again." -ForegroundColor Yellow } elseif (Test-Path "$dir\install.ps1") { powershell -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" } else { Write-Host "`n[!] install.ps1 is missing after clone -- your antivirus most likely quarantined it (a false positive). To fix: allow/exclude the folder `"$dir`" in your antivirus, then run these two lines:`n    git -C `"$dir`" restore install.ps1`n    powershell -NoProfile -ExecutionPolicy Bypass -File `"$dir\install.ps1`"`nPer-antivirus steps are in `"$dir\SETUP.md`" (the Antivirus section)." -ForegroundColor Yellow } }
+$dir = (Read-Host "Install folder for Claudible (Enter for default) [$HOME\claudible]").Trim().Trim('"'); if (-not $dir) { $dir = "$HOME\claudible" }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); if (Test-Path "$env:ProgramFiles\Git\cmd\git.exe") { $env:Path = "$env:ProgramFiles\Git\cmd;$env:Path" } }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "`n[!] Git for Windows is required and couldn't be auto-installed (no winget on this system?). Install it from https://git-scm.com/download/win, reopen PowerShell, then run this line again." -ForegroundColor Yellow } else { git clone https://github.com/synthetiks/claudible "$dir"; if ($LASTEXITCODE -ne 0) { Write-Host "`n[!] git clone failed -- see git's error above. Likely causes: no internet/proxy blocking github.com, or `"$dir`" already exists and isn't empty. Fix that, then run this line again." -ForegroundColor Yellow } elseif (Test-Path "$dir\install.ps1") { powershell -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" } else { Write-Host "`n[!] install.ps1 is missing after clone -- your antivirus most likely quarantined it (a false positive). To fix: allow/exclude the folder `"$dir`" in your antivirus, then run these two lines:`n    git -C `"$dir`" restore install.ps1`n    powershell -NoProfile -ExecutionPolicy Bypass -File `"$dir\install.ps1`"`nPer-antivirus steps are in `"$dir\SETUP.md`" (the Antivirus section)." -ForegroundColor Yellow } }
 ```
 It **prompts for an install folder** (Enter for the default `…\claudible`, or paste any path), **auto-installs Git for Windows** via winget if it's missing, clones, then `install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL — installing their Linux deps for you (it may ask for your WSL sudo password) — then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again — it resumes.
 
@@ -97,7 +97,7 @@ It **prompts for an install folder** (Enter for the default `…\claudible`, or 
 <details><summary>Prefer to run the steps by hand?</summary>
 
 ```powershell
-git clone https://github.com/thecrazydev1/claudible
+git clone https://github.com/synthetiks/claudible
 cd claudible
 npm install        # deps + node-pty's N-API prebuilt + the small JS patch (no compiler needed)
 npm run setup      # builds the WSL voice services (installs their deps; ~480 MB models on first run)
@@ -112,7 +112,7 @@ Optional Desktop shortcut: `powershell -NoProfile -ExecutionPolicy Bypass -File 
 A WSL-free path: native Windows Claude Code + **prebuilt** voice services (no compiler), driven by the `win` runner.
 **Needs:** Windows **Node 22.12+** and **Git for Windows** (`bash.exe`). The installer installs Claude Code for Windows if it's missing.
 ```powershell
-git clone https://github.com/thecrazydev1/claudible
+git clone https://github.com/synthetiks/claudible
 cd claudible
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Native
 ```
@@ -127,7 +127,7 @@ This: installs Claude Code (`npm i -g @anthropic-ai/claude-code`) if absent → 
 
 **Needs:** **Node 22.12+**, a **C toolchain** (`build-essential` + `python3` — `node-pty` compiles on install), **Claude Code on your PATH** (`claude`, signed in), and the voice build deps — `bash setup/setup.sh` installs them via `apt` (`git cmake build-essential ffmpeg espeak-ng python3` + [`uv`](https://docs.astral.sh/uv/)).
 ```bash
-git clone https://github.com/thecrazydev1/claudible
+git clone https://github.com/synthetiks/claudible
 cd claudible
 npm install            # builds node-pty for Linux (needs build-essential + python3)
 bash setup/setup.sh    # whisper.cpp + Kokoro (~480 MB models on first run)  ·  NOT `npm run setup` (that's the Windows→WSL wrapper)
@@ -141,7 +141,7 @@ Packaged installers build with `npm run dist:linux` (AppImage + `.deb`). The nat
 Same backend as Linux, with **Homebrew** for the voice build deps.
 **Needs:** **Node 22.12+**, **Claude Code on your PATH**, **Xcode Command Line Tools** (`xcode-select --install`), and `brew install cmake ffmpeg espeak-ng`.
 ```bash
-git clone https://github.com/thecrazydev1/claudible
+git clone https://github.com/synthetiks/claudible
 cd claudible
 npm install
 bash setup/setup.sh    # detects Homebrew for the build deps  ·  NOT `npm run setup` (Windows→WSL only)
