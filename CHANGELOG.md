@@ -46,6 +46,13 @@ All notable changes to Claudible are documented here.
 - **Live sharing: advertise on the shared session's project**, not whichever tab happens to be in front — a host
   focused on a local project silently failed every presence write. An empty presence read now clears peers
   instead of resurrecting them, and a "going live…" row can no longer strand.
+- **Accepting a shared project no longer opens as a phantom "New session" draft.** Accept-invite imported the
+  team's transcripts in the background but returned "done" before they hit disk, so the app switched into a
+  project whose session list was still empty and resolved to a blank draft — which nothing reconciled once the
+  import landed a moment later. The import is now awaited before the switch, and a strictly-gated safety net
+  re-points a still-untouched auto-opened draft to the newest real session if any project's sessions arrive
+  while you're sitting on it (never a draft you opened deliberately or typed into, never onto a session already
+  open in another tab).
 - **Fixes.** The session options ▾ no longer jumps when pressed (the global press animation was overriding the
   centring). Toasts sit over the terminal, hug their text, and no longer stretch to a fixed width. A live row
   keeps its hover timestamp hidden, since the Live pill already claims that space.

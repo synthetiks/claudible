@@ -74,6 +74,20 @@ function mk(remembered, warmList, fetchImpl) {
       () => null, cache, () => false, (ws, l) => [...l].reverse(), { sessionListWs: async () => { calls.push(1); return []; } }, Date);
     eq('the TOP OF THE ORDER wins, not raw list position (same helper as every render path)', await fn('W'), 'B'); }
 
+  // ---- the phantom-draft ROOT fix + safety net (grep pins over the shipped renderer) ----
+  // Fix A lives in main.js; the renderer half is the auto-draft marker + the onSyncChanged reconcile that can
+  // NEVER hijack a deliberate + New or a typed draft.
+  ok('tab records default autoDraft:false', /session: session \|\| '', altFrac: 0, autoDraft: false,/.test(APP));
+  ok('any real keystroke clears autoDraft (a typed draft becomes the user\'s, un-reconcilable)',
+    /if \(r && r\.autoDraft\) r\.autoDraft = false; claudible\.ptyInput/.test(APP));
+  ok('adopting a real session id clears autoDraft', /t\.session = s\.sessionId;[\s\S]{0,120}?t\.autoDraft = false;/.test(APP));
+  ok('auto-draft is marked ONLY when the resolver returned \'new\' (a real id is never an auto-draft)',
+    (APP.match(/autoDraft = \(want === 'new'\)/g) || []).length >= 2 && /t\.autoDraft = \(sess === 'new'\)/.test(APP));
+  ok('onSyncChanged reconciles ONLY an active, autoDraft, still-\'new\', non-busy tab, and re-checks after the async resolve',
+    /at\.session === 'new' && at\.autoDraft && !at\.busy/.test(APP)
+    && /want && want !== 'new' && t2 && t2 === AT\(\) && t2\.session === 'new' && t2\.autoDraft && !t2\.busy/.test(APP)
+    && /openSession\(want, sessIndex\[want\]/.test(APP));
+
   console.log(`session-resolution: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

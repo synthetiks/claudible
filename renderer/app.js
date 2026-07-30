@@ -200,9 +200,9 @@ function makeTab(tabId, wsId, session, opts) {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
       if (d) claudible.liveInput(tabId, d);             // co-drive: keystrokes AND scroll bytes → the peer's terminal (shared view, shared scroll)
     });
-  } else t.onData((d) => claudible.ptyInput(tabId, d));          // keystrokes → THIS tab's pty
+  } else t.onData((d) => { const r = tabs.get(tabId); if (r && r.autoDraft) r.autoDraft = false; claudible.ptyInput(tabId, d); });   // keystrokes → THIS tab's pty. Any real input makes an auto-opened draft the USER's — onSyncChanged must never reconcile it out from under them.
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
-  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0,
+  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0, autoDraft: false,
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, curCtxPct: null, curSessionLabel: '',
     agents: new Map(), workflows: [], agentTok: 0,
     liveReadOnly: false, hostCols: 120, hostRows: 32, liveState: '', liveCost: null, liveTokens: null, hostName: '' };
@@ -621,6 +621,7 @@ claudible.onStatus((s) => {
     const wasNew = (t.session === 'new');   // adopting a real id FROM an explicit 'new' = a genuine user-created session (keep its live·unsaved row until it saves). Adopting one from ''/another id = a switch/resume → NOT born-new, so it can never flash a phantom row.
     t.session = s.sessionId;
     t.bornNew = wasNew;
+    t.autoDraft = false;                    // it has a real session now — never a reconcile target
     if (t.tabId === activeTabId) activeSession = s.sessionId;
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
@@ -5623,10 +5624,9 @@ async function switchWorkspace(id, targetSession) {
     const tws = workspaces.find((w) => w.id === id);
     if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
     setWsExpanded(id, true);                                                  // expand it like the normal switch does, so its sessions are right there
-    if (!newBlankTab(id, want)) {
-      if (t.busy) toast('That session is still running — finish it or close a tab before switching');
-      else toast('This tab is live-shared — close a tab to open that project beside it');
-    }
+    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); }   // want==='new' → auto-draft (onSyncChanged may reconcile once sessions land); a real id is not
+    else if (t.busy) toast('That session is still running — finish it or close a tab before switching');
+    else toast('This tab is live-shared — close a tab to open that project beside it');
     return;
   }
   // Resolve the session to open HERE (renderer-side) rather than leaving it '' for main to guess: '' picks the
@@ -5679,13 +5679,14 @@ async function switchWorkspace(id, targetSession) {
     if (want !== 'new') {   // same dedupe as the busy branch — main may have refused BECAUSE that session is live in another tab (its respawn dedupe), and duplicating it here would re-create the two-claude modal
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
     }
-    if (newBlankTab(id, want)) return;    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft
+    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); return; }    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft (want==='new' → auto-draft, reconcilable once sessions land)
     toast('That session is still running — close a tab to open that project beside it');
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back
     return;
   }
   if (failed) { rollBack(); focusTermSoon(150); return; }
   t.term.reset(); resetStats(t);                   // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
+  t.autoDraft = (sess === 'new');                  // opened blank ONLY because the resolver found no session (e.g. sessions not synced to disk yet) → onSyncChanged may reconcile it once they land; a real id is never an auto-draft. Set on SUCCESS only (a rolled-back switch never marks).
   refreshSessions();
   focusTermSoon(150);
 }
@@ -5832,6 +5833,30 @@ claudible.onSyncChanged((s) => {
   // Repo Review (diff + history feed) was never wired to sync: a pulled commit/revert only showed after switching
   // away and back. Refresh it now (no-op when the drawer is closed / the card is collapsed).
   try { refreshDiff({ quiet: true }); } catch (e) {}
+  // PHANTOM-DRAFT SAFETY NET: you're sitting on an AUTO-opened "New session" draft for the project that just
+  // synced — it opened blank only because its sessions weren't on disk yet — and real sessions have now landed.
+  // Re-point that draft to the newest real session. STRICTLY gated so it can never hijack a deliberate + New or
+  // a draft you've typed into: only an `autoDraft` tab still on 'new' qualifies (any keystroke clears autoDraft,
+  // any real session id clears it), and it must still be the active, non-busy tab AFTER the async resolve.
+  // Fix A (awaiting the import in acceptInvite) makes this rare; this covers a lagged import or a collaborator's
+  // first session arriving while you wait on an empty project.
+  if (s.id === activeWsId) {
+    const at = AT();
+    if (at && at.kind !== 'live' && at.wsId === s.id && at.session === 'new' && at.autoDraft && !at.busy) {
+      const tabId = at.tabId;
+      (async () => {
+        let want = 'new'; try { want = await sessionToOpenFor(s.id); } catch (e) {}
+        const t2 = tabs.get(tabId);
+        if (!(want && want !== 'new' && t2 && t2 === AT() && t2.session === 'new' && t2.autoDraft && !t2.busy)) return;
+        // NEVER re-point onto a session already open in another tab — two claudes on one transcript is the
+        // dead-spacebar modal. If it's already open, leave the draft alone (the user still has a usable New tab).
+        const dup = [...tabs.values()].some((r) => r.kind !== 'live' && r.tabId !== tabId && r.wsId === s.id && r.session === want);
+        if (dup) return;
+        t2.autoDraft = false;
+        openSession(want, sessIndex[want] ? sessTitle(sessIndex[want]) : '', { inPlace: true });
+      })();
+    }
+  }
 });
 // Main respawned an open tab because a sync replaced its transcript on disk (the "out of sync doesn't
 // update the open session" fix). Mirror openSession's respawn housekeeping for THAT tab — clear the xterm

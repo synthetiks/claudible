@@ -2143,11 +2143,19 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
     // project" on a modal that states sessions sync IS the consent — honor it, and kick the first sync so the
     // team's sessions appear now, not at the next poll tick (mirrors workspace:upgrade's post-enable kick).
     after.syncSessions = true; saveRegistry();
-    (async () => {
-      if (syncLock.has(after.id)) return; syncLock.add(after.id);
-      let ir; try { ir = await runSync(after, 'init', {}); } finally { syncLock.delete(after.id); }
-      if (ir && ir.ok) doSync(after, 'sync', {});
-    })();
+    // IMPORT THE TEAM'S SESSIONS BEFORE RETURNING OK — the renderer switches into this project the instant
+    // acceptInvite resolves, and its session resolver (sessionToOpenFor) reads the ON-DISK list. The old
+    // fire-and-forget IIFE returned ok with that dir still empty, so the switch resolved to 'new' and opened
+    // a PHANTOM "New session" draft that nothing reconciled once the import (seconds later) landed — the
+    // "second/synced project opens blank" bug. init sets up the sessions worktree; the `sync` op is what
+    // actually copies the transcripts to disk, so BOTH are awaited. Best-effort: an import failure never fails
+    // the accept (the clone is what makes the project valid; sessions still arrive on the next poll) — it just
+    // leaves the residual phantom, which the renderer's onSyncChanged auto-draft reconcile then covers.
+    if (!syncLock.has(after.id)) {
+      syncLock.add(after.id);
+      try { const ir = await runSync(after, 'init', {}); if (ir && ir.ok) await doSync(after, 'sync', {}); }
+      catch {} finally { syncLock.delete(after.id); }
+    }
   }
   return c.ok ? { ok: true, path: after.path || null } : { ok: false, error: c.error || 'clone failed' };
 });

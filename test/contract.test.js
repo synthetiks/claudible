@@ -765,6 +765,12 @@ none('renderer: orphanTab is never rendered',
     /after\.syncSessions = true; saveRegistry\(\);/.test(acc) ? [] : ['no syncSessions enable in acceptInvite']);
   none('acceptInvite enables sync but never kicks the first one (team sessions would wait for a poll tick)',
     /runSync\(after, 'init'/.test(acc) && /doSync\(after, 'sync'/.test(acc) ? [] : ['no init/sync kick after enabling']);
+  // The import must be AWAITED before the handler returns ok — the renderer switches into the project the
+  // instant acceptInvite resolves and reads the on-disk session list; a fire-and-forget import returned ok with
+  // the dir still empty → the resolver said 'new' → the phantom draft. Both init and the transcript-copying
+  // `sync` op are awaited, in order.
+  none('acceptInvite returns before the session import lands (the phantom-draft race)',
+    /await runSync\(after, 'init', \{\}\); if \(ir && ir\.ok\) await doSync\(after, 'sync', \{\}\);/.test(acc) ? [] : ['acceptInvite does not await the session import before returning']);
   // A SHARED project created from the modal must behave like an upgraded one from birth: sync enabled + the
   // sessions-branch init/first-push kicked inside workspace:create's attach(). Without this, the "Shared repo
   // project" tile mints a repo whose creator can't see collaborators' sessions until a manual menu click.
