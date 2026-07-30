@@ -19,7 +19,7 @@
 
 ## Claude Code is single-player. Claudible makes it multiplayer — and wraps it in a cockpit.
 
-Claude Code is one person, one terminal, one agent. Claudible turns your *running* session into a room your team can join: drop a private, approval-gated link in Slack, a teammate opens it in their browser — laptop or phone — and they're inside your live session. They can watch, chat, or take the keyboard and co-drive the same Claude: pair-program, onboard someone by handing them the wheel, debug together in real time.
+Claude Code is one person, one terminal, one agent. Claudible turns your *running* session into a room your team can join: drop a private, approval-gated link in your team chat, a teammate opens it in their browser — laptop or phone — and they're inside your live session. They can watch, chat, or take the keyboard and co-drive the same Claude: pair-program, onboard someone by handing them the wheel, debug together in real time.
 
 Around that session sits the cockpit: fully-local **two-way voice** (talk to it, hear it back), **live context/cost/token telemetry** with a `/compact` guardrail, a **live agents cockpit** (watch subagents and workflow swarms work — tools, tokens, results), and **one-click** slash-commands. All wrapping the real Claude Code TUI, untouched (xterm.js, full scrollback).
 
