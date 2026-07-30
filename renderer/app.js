@@ -5904,9 +5904,33 @@ $('sidebar-close').addEventListener('click', () => openSidebar(false));
 // it touches is defined. sidebarReady is still false here, so setActiveTab skips the sidebar refresh; the
 // async loader below does workspaces + sessions once. (term resolves; the foreground pty starts fitted.)
 makeTab('main', null, '');
+// BOOT PHANTOM-DRAFT FIX: the launch tab is created with session:'' BEFORE the restored workspace is even known,
+// and — unlike switchWorkspace / acceptInvite — it NEVER runs the resolver, so a restored project full of synced-in
+// (collaborator-authored) sessions opened as a blank "New session" row. It never self-corrected because main's own
+// boot spawn deliberately refuses to auto-resume a FOREIGN session (session.sh), and no sync:changed event fires for
+// an already-synced project, so the onSyncChanged safety net can't reach it either. Mark the tab auto-draft — like
+// switchWorkspace's want==='new' tabs — then resolve once, here, after the workspace is bound.
+tabs.get('main').autoDraft = true;
 setActiveTab('main');
 sidebarReady = true;   // the sessions/workspace section is now fully initialized — tab switches may refresh the sidebar
-(async () => { await refreshWorkspaces(); refreshSessions(); })();   // load workspaces first, then this workspace's conversations
+(async () => {
+  await refreshWorkspaces();                                          // binds the 'main' tab's wsId to the restored project
+  const at = AT();
+  if (at && at.session === '' && at.autoDraft && at.wsId && !at.busy) {
+    let want = 'new'; try { want = await sessionToOpenFor(at.wsId); } catch (e) {}
+    const t2 = tabs.get(at.tabId);
+    // Re-check AFTER the async resolve (a keystroke may have cleared autoDraft, making the draft the user's) and
+    // never re-point onto a session already open elsewhere (the two-claude / dead-spacebar guard) — the exact
+    // discipline of the onSyncChanged reconcile. Gated on session==='' (only ever the boot tab; every deliberate
+    // + New uses 'new'), so it can never hijack a real draft.
+    if (want && want !== 'new' && t2 && t2 === AT() && t2.session === '' && t2.autoDraft && !t2.busy
+        && ![...tabs.values()].some((r) => r.kind !== 'live' && r.tabId !== t2.tabId && r.wsId === t2.wsId && r.session === want)) {
+      t2.autoDraft = false;
+      await openSession(want, sessIndex[want] ? sessTitle(sessIndex[want]) : '', { inPlace: true });
+    }
+  }
+  refreshSessions();                                                  // load this workspace's conversations
+})();
 
 // ---------- desktop clipboard shortcuts (Ctrl on Win/Linux, ⌘ on Mac) ----------
 // In the TERMINAL: Ctrl/⌘+C copies the selection (or passes through as interrupt/SIGINT when nothing

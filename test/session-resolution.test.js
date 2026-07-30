@@ -88,6 +88,16 @@ function mk(remembered, warmList, fetchImpl) {
     && /want && want !== 'new' && t2 && t2 === AT\(\) && t2\.session === 'new' && t2\.autoDraft && !t2\.busy/.test(APP)
     && /openSession\(want, sessIndex\[want\]/.test(APP));
 
+  // ---- the BOOT phantom-draft fix: the launch tab ('' placeholder, never resolved) is marked auto-draft and
+  // reconciled ONCE after the workspace binds — mirroring onSyncChanged but gated on session==='' (only ever the
+  // boot tab), since no sync:changed event fires for an already-synced project on restart.
+  ok('the boot tab is marked auto-draft so a restored, already-synced project is reconcilable (no boot phantom draft)',
+    /tabs\.get\('main'\)\.autoDraft = true;/.test(APP));
+  ok('boot resolves the restored project\'s real session in place instead of leaving a blank \'\' draft',
+    /await refreshWorkspaces\(\);[\s\S]{0,600}?want = await sessionToOpenFor\(at\.wsId\)/.test(APP)
+    && /want && want !== 'new' && t2 && t2 === AT\(\) && t2\.session === '' && t2\.autoDraft && !t2\.busy/.test(APP)
+    && /await openSession\(want, sessIndex\[want\] \? sessTitle\(sessIndex\[want\]\) : '', \{ inPlace: true \}\)/.test(APP));
+
   console.log(`session-resolution: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
