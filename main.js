@@ -1138,7 +1138,14 @@ const _beatArgs = new Map();   // ws.id -> the args of a queued-but-not-started 
 function runPresence(args, cb, ws, opts) {
   if (!APPDIR_WSL) return cb && cb(null);
   const w = ws || activeWorkspace;   // presence lifecycle pins to the advertised ws (else a workspace switch clears/stamps the WRONG repo's branch)
-  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), onSpawn: opts && opts.onSpawn, extraEnv: (opts && opts.extraEnv) || '' }).then(({ err, stdout }) => {
+  // CLOCK DOMAIN: a presence ts (and the one-host arbiter) must age on the SAME clock every READER uses — the
+  // renderer's Date.now(). Under the WSL runner the backend's own `date +%s` is the WSL2 guest clock, which
+  // silently drifts after a Windows sleep/resume; a host stamping there read as minutes-stale to peers and its
+  // live row vanished until WSL re-synced (the "takes minutes to see a live session" report). Inject THIS
+  // process's clock (Electron = Windows/NTP, the exact domain the renderer reads) so write and read share a time
+  // base. Computed inside exec (RUN time) so a coalesced/queued beat stays as fresh as one issued now;
+  // sessions-sync.sh + sessions-sync-tool.js fall back to local time when it's unset (direct CLI / non-main callers).
+  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), onSpawn: opts && opts.onSpawn, extraEnv: `CLAUDIBLE_NOW=${Math.floor(Date.now() / 1000)} ` + ((opts && opts.extraEnv) || '') }).then(({ err, stdout }) => {
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);

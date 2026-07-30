@@ -608,11 +608,15 @@ case "$op" in
     # ONE live host per session, enforced per attempt: the arbiter reads origin/$BR's live/ blobs (locally -
     # no network), and every rejected push refreshes that view before the re-check. The tool's deterministic
     # tie-break (earlier ts, then login) makes exactly one of two simultaneous claimants yield - never both.
+    # ts from the app's Electron clock (CLAUDIBLE_NOW, injected by main.js) — the SAME clock peers READ stamps with;
+    # the WSL2 `date` here drifts after a host sleep and made live rows read stale. Digit-guarded so a malformed env
+    # can never break the one-line JSON; falls back to local time for direct/standalone invocation.
+    now_ts="${CLAUDIBLE_NOW:-}"; case "$now_ts" in ''|*[!0-9]*) now_ts="$(date +%s)" ;; esac
     pushed=0
     for i in 1 2 3; do
       refuse="$(presence_holder_refuse "$psid")"
       if [ -n "$refuse" ]; then presence_yield_own "$psid"; emit "$refuse"; exit 0; fi
-      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"url\":\"$purl\",\"token\":\"$ptok\",\"name\":\"$pname\",\"sha\":\"$psha\",\"ts\":$(date +%s)}" && { pushed=1; break; }
+      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"url\":\"$purl\",\"token\":\"$ptok\",\"name\":\"$pname\",\"sha\":\"$psha\",\"ts\":$now_ts}" && { pushed=1; break; }
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-set\"}" || emit "{\"ok\":false,\"op\":\"presence-set\",\"error\":\"push failed\"}"
     ;;
@@ -630,11 +634,14 @@ case "$op" in
     pname=""
     [ -n "$pname_b64" ] && pname="$(printf '%s' "$pname_b64" | base64 -d 2>/dev/null | tr -d '"\\' | tr -d '\000-\037')"
     [ -n "$(presence_base)" ] || ensure_worktree >/dev/null 2>&1
+    # Same Electron-clock stamp as presence-set (see the note there) — this phase-1 "going live…" write is the most
+    # latency-critical, and a WSL-clock ts here would age-out on skewed peers before the full advertisement even lands.
+    now_ts="${CLAUDIBLE_NOW:-}"; case "$now_ts" in ''|*[!0-9]*) now_ts="$(date +%s)" ;; esac
     pushed=0
     for i in 1 2 3; do
       refuse="$(presence_holder_refuse "$psid")"
       if [ -n "$refuse" ]; then presence_yield_own "$psid"; emit "$refuse"; exit 0; fi
-      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"name\":\"$pname\",\"sha\":\"$psha\",\"starting\":true,\"ts\":$(date +%s)}" && { pushed=1; break; }
+      presence_attempt set "{\"login\":\"$author\",\"session\":\"$psid\",\"name\":\"$pname\",\"sha\":\"$psha\",\"starting\":true,\"ts\":$now_ts}" && { pushed=1; break; }
     done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"presence-starting\"}" || emit "{\"ok\":false,\"op\":\"presence-starting\",\"error\":\"push failed\"}"
     ;;

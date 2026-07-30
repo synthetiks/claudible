@@ -473,7 +473,11 @@ function liveHolder() {
   const sid = process.env.CL_SID || '';
   const me = process.env.CL_ME || '';
   if (!dir || !sid) return;
-  const now = Math.floor(Date.now() / 1000);
+  // Age claims on the SAME clock the stamps were written with. main.js injects CLAUDIBLE_NOW (its Electron/Windows
+  // clock) for every presence op, so post-fix ts values live in that domain; reading the WSL2 Date.now() here
+  // instead would re-introduce the very sleep-drift skew the injection removes. Falls back to local time for direct CLI.
+  const envNow = Number(process.env.CLAUDIBLE_NOW);
+  const now = Number.isFinite(envNow) && envNow > 0 ? Math.floor(envNow) : Math.floor(Date.now() / 1000);
   const claims = [];
   let names = [];
   try { names = fs.readdirSync(dir); } catch (e) { return; }          // no live/ dir → nobody holds anything

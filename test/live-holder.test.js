@@ -22,12 +22,17 @@ const FRESH = NOW - 10, STALE = NOW - 400;   // TTL is 300s (matches the rendere
 const SKEWED = NOW + 4000;   // a machine whose clock is ~an hour fast (WSL2 after host sleep, a restored VM snapshot, or a hand-written blob — any peer with push access can write any author path)
 
 // build a temp live/ dir from {author: claimObjOrRawString}, run the tool as `me` claiming `sid`.
-function run(files, sid, me) {
+function run(files, sid, me, extraEnv) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-livehold-'));
   for (const [author, v] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, author + '.json'), typeof v === 'string' ? v : JSON.stringify(Object.assign({ login: author }, v)));
   }
-  const r = spawnSync(process.execPath, [TOOL, 'live-holder'], { encoding: 'utf8', env: Object.assign({}, process.env, { CL_DIR: dir, CL_SID: sid, CL_ME: me }) });
+  // Hermetic: strip any inherited CLAUDIBLE_NOW so the default cases age on the tool's own clock; a case that wants
+  // to pin the injected clock passes it via extraEnv.
+  const env = Object.assign({}, process.env, { CL_DIR: dir, CL_SID: sid, CL_ME: me });
+  delete env.CLAUDIBLE_NOW;
+  Object.assign(env, extraEnv || {});
+  const r = spawnSync(process.execPath, [TOOL, 'live-holder'], { encoding: 'utf8', env });
   fs.rmSync(dir, { recursive: true, force: true });
   return (r.stdout || '').trim();
 }
@@ -116,6 +121,23 @@ eq('rival file with no ts → treated stale (free)', run({ daisy: { session: 's1
   ok('a claim just inside the skew tolerance is still honoured', !!refusal(kept));
   const dropped = run({ daisy: { session: 's1', ts: NOW + 240 } }, 's1', 'niburu');
   ok('a claim beyond the skew tolerance is ignored', dropped === '');
+}
+
+// ---- CLOCK DOMAIN: the arbiter ages claims on CLAUDIBLE_NOW (the app's Electron clock, injected by main.js) when
+// present, NOT the tool's own Date.now(). Under the WSL runner Date.now() is the drift-prone WSL2 clock; a stamp is
+// written from the SAME injected clock (sessions-sync.sh), so write and read must judge it on that one time base. -----
+{
+  // A claim stamped at real-NOW, judged with an injected clock 1000s AHEAD → age 1000s > LIVE_TTL(120) → STALE → free.
+  eq('CLAUDIBLE_NOW ahead of the stamp ages a real-now claim out (arbiter honors the injected clock)',
+    run({ daisy: { session: 's1', ts: NOW, name: 'CrazyDev' } }, 's1', 'niburu', { CLAUDIBLE_NOW: String(NOW + 1000) }), '');
+  // The SAME claim WITHOUT the injection is fresh (age ~0) and refuses — so the verdict flipped because of the
+  // injected clock, not the stamp. Guards a no-op "fix" that reads the env but never uses it.
+  ok('the same claim without CLAUDIBLE_NOW is fresh and refuses (the injected clock moved the verdict)',
+    !!refusal(run({ daisy: { session: 's1', ts: NOW, name: 'CrazyDev' } }, 's1', 'niburu')));
+  // A claim stamped AT the injected clock is fresh under it — end-to-end agreement between the bash ts stamp and
+  // the arbiter. Without the injection this same +1000s ts is future-rejected (free); with it, it's a valid refusal.
+  ok('a claim stamped at CLAUDIBLE_NOW is fresh under it (write and read share the clock)',
+    !!refusal(run({ daisy: { session: 's1', ts: NOW + 1000, name: 'CrazyDev' } }, 's1', 'niburu', { CLAUDIBLE_NOW: String(NOW + 1000) })));
 }
 
 console.log(`live-holder: ${pass} passed, ${fail} failed`);

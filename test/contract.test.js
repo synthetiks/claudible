@@ -1141,6 +1141,19 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   const tolApp = (APP.match(/const SKEW_TOL_S = (\d+)/) || [])[1];
   none('the skew tolerances drifted apart (arbiter vs renderer)',
     tolTool && tolApp && tolTool === tolApp ? [] : [`SKEW_TOL=${tolTool} vs SKEW_TOL_S=${tolApp}`]);
+
+  // (c) CLOCK DOMAIN — a presence ts is stamped from the app's Electron clock (main injects CLAUDIBLE_NOW), the SAME
+  // clock every reader ages a stamp with. Under the WSL runner the backend's own `date +%s` is the WSL2 guest clock,
+  // which silently drifts after a host sleep/resume — a stamp written there reads minutes-stale to peers and the live
+  // row vanishes until WSL re-syncs. This trio (main INJECTS → the bash stamp CONSUMES → the arbiter AGES on it) keeps
+  // write and read on one time base; the WSL `date` remains ONLY as a fallback for direct/standalone CLI invocation.
+  const SYNC = read('wsl/sessions-sync.sh');
+  none('main no longer injects its Electron clock into presence stamps (WSL-clock drift hides live sessions)',
+    MAIN.includes('CLAUDIBLE_NOW=${Math.floor(Date.now() / 1000)} ') ? [] : ['runPresence does not inject CLAUDIBLE_NOW']);
+  none('the presence ts stopped reading CLAUDIBLE_NOW (falls back to the drift-prone WSL `date`)',
+    SYNC.includes('now_ts="${CLAUDIBLE_NOW:-}"') && SYNC.includes('\\"ts\\":$now_ts') ? [] : ['presence-set/starting no longer stamp ts from CLAUDIBLE_NOW']);
+  none('the arbiter ages claims on the WSL clock again (skew vs the Electron-stamped ts it compares)',
+    TOOL.includes('const envNow = Number(process.env.CLAUDIBLE_NOW);') ? [] : ['liveHolder no longer honors CLAUDIBLE_NOW']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

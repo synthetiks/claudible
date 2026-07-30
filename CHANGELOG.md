@@ -12,7 +12,7 @@ All notable changes to Claudible are documented here.
      tagged, and six more days of work landed on top of it. Those commits go HERE, not under [Unreleased] —
      build.yml's release-notes step extracts ONLY the `## [<tag version>]` block, so anything parked under
      [Unreleased] when `v0.9.1` is pushed is silently absent from the release page. -->
-## [0.9.1] — 2026-07-29
+## [0.9.1] — 2026-07-30
 
 - **Plan usage in the top bar.** A gauge next to the context meter shows how much of your Claude 5-hour limit
   you have burned — a 4-cell battery that fills as you consume, with the same `used_percentage` figure `/usage`
@@ -43,6 +43,12 @@ All notable changes to Claudible are documented here.
   one machine and read by another; a clock running fast made a claim look permanently fresh, which could refuse
   every later claim on that session with no expiry able to clear it. Such stamps are now distrusted past a
   generous tolerance, in both the arbiter and the sidebar.
+- **Live sharing: a live session reaches collaborators within seconds, not minutes.** The presence timestamp was
+  stamped by the WSL backend's own clock (`date +%s`), but every peer ages that stamp with the app's clock — and a
+  WSL2 clock silently drifts *behind* after a Windows sleep/resume, so a freshly-shared session read as
+  minutes-stale and its join-on-hover button never appeared until WSL re-synced. The stamp (and the one-host
+  arbiter) now carry the app's own clock — the exact one every reader uses — so write and read can no longer
+  disagree, whichever way a machine's backend clock has drifted.
 - **Live sharing: advertise on the shared session's project**, not whichever tab happens to be in front — a host
   focused on a local project silently failed every presence write. An empty presence read now clears peers
   instead of resurrecting them, and a "going live…" row can no longer strand.
@@ -52,7 +58,10 @@ All notable changes to Claudible are documented here.
   import landed a moment later. The import is now awaited before the switch, and a strictly-gated safety net
   re-points a still-untouched auto-opened draft to the newest real session if any project's sessions arrive
   while you're sitting on it (never a draft you opened deliberately or typed into, never onto a session already
-  open in another tab).
+  open in another tab). **On launch, too:** the boot tab is created before the restored project is even known and,
+  unlike every other navigation path, never resolved its session — and no sync event fires for an already-synced
+  project, so nothing reconciled it. Boot now resolves the restored project's real session in place, behind that
+  same guard.
 - **Fixes.** The session options ▾ no longer jumps when pressed (the global press animation was overriding the
   centring). Toasts sit over the terminal, hug their text, and no longer stretch to a fixed width. A live row
   keeps its hover timestamp hidden, since the Live pill already claims that space.
