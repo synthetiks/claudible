@@ -1915,7 +1915,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // running or being resumed" modal, which swallows the spacebar. The normal switch path must focus the
   // existing tab instead (the busy/shared branch already did; this extends it).
   none('switching to a project can spawn a SECOND claude on a session another tab already runs (spacebar-eating modal)',
-    /const sess = targetSession \|\| lastSessionFor\(id\) \|\| '';[\s\S]{0,1000}?if \(sess && sess !== 'new'\) \{\s*\n\s*for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+    /const sess = await sessionToOpenFor\(id, targetSession\);[\s\S]{0,1000}?if \(sess !== 'new'\) \{[\s\S]{0,400}?for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['switchWorkspace normal path does not dedupe an already-open session']);
 }
 
@@ -1973,40 +1973,41 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 60. A PROJECT THAT HAS SESSIONS MUST NOT OPEN AS A BLANK DRAFT.
-//   switchWorkspace's busy / live-shared branches used to pass 'new' unconditionally to newBlankTab, so
-//   switching projects while the current session was mid-turn (i.e. most of the time) produced a
-//   "New session · draft · unsaved" row even for a project full of sessions — and because the dedupe guard only
-//   ran when an explicit targetSession was supplied, every click minted ANOTHER blank tab (two clicks = two
-//   drafts). sessionToOpenFor resolves a real id first; 'new' is now the last resort, not the default.
-//   The block below EXECUTES the shipped helper (lift-and-run, like the isTypingBytes check) — not a text match.
+// 60. A PROJECT THAT HAS SESSIONS MUST NOT OPEN AS A BLANK DRAFT — AND NEVER TWO CLAUDES ON ONE SESSION.
+//   Two faces of one root cause (a session resolved lazily or not at all):
+//   * sessionToOpenFor consulted only lastSessionFor + a cache that is warmed exclusively by activating or
+//     expanding a project — so a never-visited project (typically a SHARED one whose sessions synced in from a
+//     collaborator) resolved to 'new' and opened as a phantom blank draft. It now FETCHES on a cold cache
+//     (async), so 'new' means "genuinely empty", not "not looked". Behavioural cases live in
+//     test/session-resolution.test.js (an async helper can't be lifted into this synchronous file).
+//   * the NORMAL switch path fell back to '' — which skipped the very dedupe gate added for ec9308f (it was
+//     keyed on a non-empty id) and left main's `--continue` to resume by mtime, possibly a session ALREADY
+//     live in another tab: two claudes, the "already running" modal, a dead spacebar. Every switch path now
+//     awaits a real id, and main's respawnPty carries its own cross-tab dedupe as defence in depth.
 // ---------------------------------------------------------------------------------------------------------
 {
-  none('the busy / live-shared switch still hands newBlankTab a hardcoded draft',
-    /const want = sessionToOpenFor\(id, targetSession\);/.test(APP) && /if \(!newBlankTab\(id, want\)\)/.test(APP)
-      ? [] : ['switchWorkspace\'s busy branch does not resolve a real session before opening a tab']);
-  none('…and the dedupe still only runs for an explicit targetSession (so repeat clicks stack blank tabs)',
-    /if \(want !== 'new'\) \{[\s\S]{0,260}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
-      ? [] : ['the busy-branch dedupe is not keyed on the resolved session']);
-  none('…and the kept-tab rollback path still opens a blank draft',
-    /newBlankTab\(id, sessionToOpenFor\(id, targetSession\)\)/.test(APP)
-      ? [] : ['the keptTab branch does not use sessionToOpenFor']);
-  // Behavioural: lift the real function out of app.js and run it against stubbed collaborators.
-  const m = APP.match(/function sessionToOpenFor\(wsId, targetSession\)\{?[\s\S]*?\n\}/);
-  if (!m) { none('sessionToOpenFor is gone', ['helper not found in renderer/app.js']); }
-  else {
-    const mk = (remembered, cacheList) => new Function('lastSessionFor', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor',
-      m[0] + '; return sessionToOpenFor;')(() => remembered, new Map(cacheList ? [['W', { list: cacheList }]] : []), () => false, (ws, l) => l);
-    const cases = [
-      ['an explicitly requested session', mk(null, null)('W', 'EXPLICIT'), 'EXPLICIT'],
-      ['the session you were last in', mk('REMEMBERED', null)('W'), 'REMEMBERED'],
-      ['the project’s newest saved session', mk(null, [{ id: 'S1', msgs: 3 }, { id: 'S2', msgs: 1 }])('W'), 'S1'],
-      ['a blank draft for an EMPTY project', mk(null, [])('W'), 'new'],
-      ['a blank draft when the cache is cold', mk(null, null)('W'), 'new'],
-      ['a blank draft when only stubs exist', mk(null, [{ id: 'S1', msgs: 0 }])('W'), 'new'],
-    ];
-    none('sessionToOpenFor no longer resolves to', cases.filter(([, got, want]) => got !== want).map(([d, got, want]) => d + ' (got ' + got + ', want ' + want + ')'));
-  }
+  none('a switch path stopped awaiting the resolver (an unawaited call hands a Promise to newBlankTab)',
+    (APP.match(/await sessionToOpenFor\(id, targetSession\)/g) || []).length === 3
+      && !/[^t] sessionToOpenFor\(id/.test(APP)
+      ? [] : ['expected exactly 3 awaited sessionToOpenFor call sites (busy, normal, kept) and no bare ones']);
+  none('the normal switch path fell back to \'\' again (it walks straight past the dedupe gate)',
+    /const sess = await sessionToOpenFor\(id, targetSession\);/.test(APP)
+      && !/lastSessionFor\(id\) \|\| ''/.test(APP)
+      ? [] : ['switchWorkspace resolves sess with an \'\' fallback again']);
+  none('…or the dedupe gate is keyed on truthiness again (\'\' would skip it)',
+    /if \(sess !== 'new'\) \{[\s\S]{0,400}?rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+      ? [] : ['the normal-path dedupe is not keyed on the resolved id']);
+  none('the cold-cache fetch is gone (a never-visited shared project resolves to a phantom draft again)',
+    /async function sessionToOpenFor\(wsId, targetSession\)[\s\S]{0,1500}?claudible\.sessionListWs\(wsId\)/.test(APP)
+      ? [] : ['sessionToOpenFor no longer fetches on a cold cache']);
+  none('the kept-tab rollback path lost its dedupe (main may have refused BECAUSE the session is live elsewhere)',
+    /Object\.assign\(t, prev\);[\s\S]{0,900}?const want = await sessionToOpenFor\(id, targetSession\);[\s\S]{0,500}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+      ? [] : ['the keptTab branch does not dedupe before newBlankTab']);
+  none('main lost its one-session-one-claude guard (the renderer dedupe is the only defence again)',
+    /function respawnPty\(tabId, session, opts\) \{[\s\S]{0,2600}?for \(const \[tid, r2\] of ptys\) if \(tid !== tabId && !liveTabs\.has\(tid\) && r2\.session === session\) return false;[\s\S]{0,8000}?ptys\.delete\(tabId\);/.test(MAIN)
+      ? [] : ['respawnPty has no cross-tab session dedupe before the destructive re-point']);
+  none('an empty-string session strands the active tab without a sidebar row again',
+    /if \(sid === ''\) return t;/.test(APP) ? [] : ['orphanTab no longer covers the \'\' shape']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

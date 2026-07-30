@@ -660,6 +660,18 @@ function respawnPty(tabId, session, opts) {
   // never kills a mid-turn Claude even when the renderer's own busy flag is still stale from the poll latency.
   // The caller opens the target session in a NEW background tab instead, leaving this one running.
   if (opts && opts.guardBusy && rec && rec.busy) return false;
+  // ONE SESSION, ONE CLAUDE — defence in depth under the renderer's dedupe. Resuming a session that is ALREADY
+  // live in another tab spawns a second claude on the same transcript, and Claude Code answers with the
+  // "already running or being resumed" selection modal — which swallows every keystroke, spacebar included
+  // (the ec9308f bug, reachable again whenever any caller resolves a session the renderer didn't check: e.g.
+  // rememberedSessionFor below used to fill in exactly such an id). The renderer treats false as "the tab kept
+  // its session" and opens/focuses elsewhere, so refusing here is always safe. Same-tab respawns (post-sync
+  // reload, claude:refresh-session) are excluded by tid !== tabId; 'new' is excluded because several drafts
+  // may legitimately coexist. NOTE: this cannot cover session:'' (--continue picks inside session.sh where no
+  // dedupe can see it) — which is why the renderer no longer sends '' from any switch path.
+  if (session && session !== 'new') {
+    for (const [tid, r2] of ptys) if (tid !== tabId && !liveTabs.has(tid) && r2.session === session) return false;
+  }
   // THE LIVE SESSION IS NOT COLLATERAL. The pinned tab (sharedTabId) IS the conversation guests are watching.
   // Re-pointing it at a different session respawns its pty — `old.kill()` below — so the shared conversation
   // simply ENDS. The previous guard paused the mirror first (no foreign bytes leaked, which was its job) and

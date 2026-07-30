@@ -355,7 +355,7 @@ ok('app.js: switchWorkspace rolls the tab record back when main keeps the tab',
   // restored before a new tab is opened, because newBlankTab's setActiveTab repaints synchronously. Pinning the
   // arg made this fail the moment the session it opens changed (a project with sessions must not open a blank
   // draft), which is a different concern entirely.
-  && /if \(kept\) \{[\s\S]{0,700}?Object\.assign\(t, prev\);[\s\S]{0,350}?newBlankTab\(id,/.test(APP));
+  && /if \(kept\) \{[\s\S]{0,700}?Object\.assign\(t, prev\);[\s\S]{0,600}?newBlankTab\(id,/.test(APP_NC));   // comment-stripped + widened: the kept branch gained a dedupe (and its WHY) between the restore and the open — the ORDER this check pins is unchanged
 ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty (a failed switch rolls the GLOBALS back too)',
   /if \(failed\) \{ rollBack\(\);[\s\S]{0,120}?return; \}/.test(APP)
   && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('t.term.reset(); resetStats(t);')
