@@ -2592,7 +2592,12 @@ ipcMain.handle('update:run', () => {
       if (d.dirty) return { ok: false, error: 'this checkout has local changes — commit, stash, or discard them first:\n' + d.detail };
       const before = await selfUpdate.currentSha(__dirname);
       prog('pulling', 'Pulling update…');
-      const pr = await selfUpdate.pull(__dirname);
+      // Reuse the gh login the app already has so a PRIVATE repo doesn't pop Windows' GCM sign-in on a
+      // machine that's already signed in (the button runs host-side git, a separate credential store from
+      // WSL's gh). Best-effort: no token → plain pull (public repos need none; private falls back to GCM).
+      let _authEnv = {};
+      try { const _cred = await _relayGetCred(); if (_cred && _cred.token) _authEnv = selfUpdate.authEnvFor(_cred.token); } catch {}
+      const pr = await selfUpdate.pull(__dirname, _authEnv);
       if (!pr.ok && pr.kind === 'non-ff') {
         // Upstream history was rewritten (a force-push), so ff-only can never succeed again and `git pull`
         // is a permanent dead end — the state that forced collaborators to run git by hand. The tree is
@@ -2600,7 +2605,7 @@ ipcMain.handle('update:run', () => {
         // upstream tip instead of handing them a manual chore.
         prog('pulling', 'History diverged — resetting to the latest…');
         _liveTiming('update: non-ff — resetting clean checkout to upstream');
-        const rr = await selfUpdate.resetToUpstream(__dirname);
+        const rr = await selfUpdate.resetToUpstream(__dirname, _authEnv);
         if (!rr.ok) return { ok: false, error: 'this checkout has diverged and could not be reset automatically: ' + String(rr.detail || '') };
       } else if (!pr.ok) {
         const msg = pr.kind === 'offline' ? 'could not reach GitHub — check your connection and retry'

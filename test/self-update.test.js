@@ -122,6 +122,26 @@ function mkrepo(files) {
     fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
   }
 
+  // ---- authEnvFor: the gh token becomes git auth WITHOUT a second login, and stays out of argv ----
+  {
+    ok('authEnvFor: no token → empty (public repo / no gh needs nothing; falls back to today)', Object.keys(su.authEnvFor('')).length === 0 && Object.keys(su.authEnvFor(null)).length === 0);
+    const e = su.authEnvFor('ghp_SECRETtoken123');
+    const b64 = Buffer.from('x-access-token:ghp_SECRETtoken123').toString('base64');
+    ok('authEnvFor: never prompts (GIT_TERMINAL_PROMPT=0)', e.GIT_TERMINAL_PROMPT === '0');
+    ok('authEnvFor: token rides the github extraheader as Basic x-access-token', e.GIT_CONFIG_VALUE_0 === 'Authorization: Basic ' + b64 && /extraheader$/.test(e.GIT_CONFIG_KEY_0));
+    ok('authEnvFor: credential.helper is reset so GCM is never consulted', e.GIT_CONFIG_KEY_1 === 'credential.helper' && e.GIT_CONFIG_VALUE_1 === '');
+    ok('authEnvFor: the raw token never appears in a value (only its base64 form)',
+      !Object.values(e).some((v) => String(v).includes('ghp_SECRETtoken123')));
+    // A real ff pull still succeeds when handed an authEnv (the github extraheader is inert against a file:// origin).
+    const origin = mkrepo({ 'g.txt': 'a\n' });
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-selfupd-auth-'));
+    execFileSync('git', ['clone', '-q', origin, clone]);
+    fs.writeFileSync(path.join(origin, 'g.txt'), 'b\n'); sh(origin, 'add', '-A');
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@x', 'commit', '-qm', 'c2'], { cwd: origin });
+    ok('pull(cwd, authEnv) still fast-forwards a local clone (auth env is harmless off-github)', (await su.pull(clone, e)).ok === true);
+    fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
+  }
+
   // ---- wiring pins: the restart path must reuse the ONE quit teardown; the chip button exists; opt-out honored ----
   const MAIN = read('main.js');
   const APP = read('renderer/app.js');
@@ -145,7 +165,11 @@ function mkrepo(files) {
     /presence-clear ' \+ how/.test(MAIN));
   ok('main: single-flight lock on update:run', /updateInFlight/.test(MAIN));
   ok('main: a diverged checkout self-heals instead of telling the user to run git',
-    /pr\.kind === 'non-ff'/.test(MAIN) && /resetToUpstream\(__dirname\)/.test(MAIN));
+    /pr\.kind === 'non-ff'/.test(MAIN) && /resetToUpstream\(__dirname, _authEnv\)/.test(MAIN));
+  // Reuse the gh login the app already has, so a PRIVATE repo doesn't pop Windows GCM on an already-signed-in
+  // machine. The token must reach BOTH network ops (pull + the reset's fetch), sourced from _relayGetCred.
+  ok('main: update:run authenticates the pull with the existing gh token (no second GitHub login)',
+    /_relayGetCred\(\)/.test(MAIN) && /selfUpdate\.authEnvFor\(_cred\.token\)/.test(MAIN) && /selfUpdate\.pull\(__dirname, _authEnv\)/.test(MAIN));
   ok('main: an Electron runtime bump is refused before npm can touch the running binary', /electronVersionChanged/.test(MAIN) && /re-run install\.ps1/.test(MAIN));
   ok('renderer: the chip button exists and confirms before killing busy/live work', /build-drift-update/.test(HTML) && /amHostingLive\(\)/.test(APP) && /Updating restarts Claudible now/.test(APP));
   ok('preload: updateRun/onUpdateProgress bridge the new channels', /update:run/.test(PRELOAD) && /update:progress/.test(PRELOAD));

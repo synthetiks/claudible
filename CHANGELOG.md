@@ -83,7 +83,11 @@ still open. The presence relay ships **inert** (no default URL) — it is opt-in
   --ff-only, streams npm install when the lockfile changed, refuses dirty trees with the evidence (never a
   silent skip, never an auto-stash), names the one case that needs the full installer (an Electron runtime
   bump), runs the SAME teardown as a normal quit, and relaunches. Installer -NoUpdate persists an opt-out
-  the button honors. The build-drift goose chase that ate this whole day is structurally over.
+  the button honors. The build-drift goose chase that ate this whole day is structurally over. **Update no
+  longer pops a second GitHub login:** the button runs host-side git, whose credential store is separate from
+  the WSL `gh` login every other feature uses, so a private repo prompted Windows' credential manager on an
+  already-signed-in machine. It now reuses the gh token to authenticate the pull (over an HTTP auth header,
+  token kept out of argv) — no popup; best-effort, so a public repo or a machine without gh is unaffected.
 
 - **Realtime presence relay (opt-in) — "went live"/"ended" reach every collaborator in under a second.** A
   ~130-line Cloudflare Worker (relay/, free tier, deploy once with wrangler) fans presence frames out over
