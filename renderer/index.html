@@ -921,7 +921,14 @@
     .ws-chip .ws-menu-btn:hover{color:var(--ink);border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
     .ws-chip.active .ws-menu-btn{color:var(--ink-dim)}
     /* the ▾ dropdown (reuses .ctxmenu) — icon + label rows, with a danger row for delete */
-    .ws-menu{min-width:184px;padding:6px;box-sizing:border-box}   /* border-box so JS width == the workspace bar's full box (exact alignment) */
+    /* ONE width rule for BOTH row menus (#ws-menu and #sess-menu share this class), so neither can drift from
+       the other: content-sized between a 184px floor and a 232px ceiling. The project menu used to be given an
+       inline width equal to its chip's full box — 279px at a 289px sidebar, i.e. the whole pane. 232px fits every
+       real label (the longest, "Collaborate in Claudible…", needs 226px); only the variable sync-status suffix
+       ("· 12 synced · 3 to review") ellipsizes, and its full text is in that item's tooltip. Forcing both to one
+       IDENTICAL number was the alternative and is worse either way: 184px truncates five genuine labels, while
+       226px+ pads the session menu (widest label 171px) with dead space. */
+    .ws-menu{min-width:184px;max-width:232px;padding:6px;box-sizing:border-box}
     .ws-menu .ws-mi{justify-content:flex-start;gap:8px;color:var(--ink-dim);font-size:var(--fs-xs);padding:6px 9px}
     /* label flexes + ellipsizes so every row fits the bar-width box at one uniform size (no half-cut text) */
     .ws-menu .ws-mi-lb{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}

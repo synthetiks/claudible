@@ -4127,6 +4127,7 @@ let sessMenuFor = null;     // key ('s:'+id saved | 't:'+tabId live) of the row 
 let sessMenuRow = null;     // the row element, so it can be un-highlighted when the menu closes
 function openSessMenu(btn, row, items, key) {
   const m = $('sess-menu'); if (!m) return;
+  closeWsMenu(); closeWsInfo();   // one sidebar popover at a time — see the note in openWsMenu
   m.innerHTML = '';
   items.forEach((it) => {
     if (it.sep) { const s = document.createElement('div'); s.className = 'ws-menu-sep'; m.appendChild(s); return; }
@@ -5259,7 +5260,8 @@ function wsMenuItems(chip, nm, w) {
     hint: 'Start a new named session in this project.',
     act: () => promptNewSession(w.id),
   });
-  items.push({ sep: true });
+  // No separator under it: at 1px + 10px of margin the rule read as a hole in the menu rather than a grouping,
+  // and with New session first the ordering already says what a divider would have.
   // live screen-share (guests watch the terminal) — available on every workspace
   items.push({
     icon: w.shared ? EYE_ON_SVG : EYE_OFF_SVG,
@@ -5310,6 +5312,11 @@ function wsMenuItems(chip, nm, w) {
 }
 function openWsMenu(btn, chip, nm, w) {
   const m = $('ws-menu'); if (!m) return;
+  // Only ONE of the sidebar's popovers may be open. Each menu's trigger calls e.stopPropagation(), which is
+  // exactly what stopped the OTHER menu's document-level click listener from ever firing — so a session menu
+  // and a project menu could sit open on top of each other. Closing siblings HERE (not at the call site)
+  // means all three triggers get it, and a future one cannot forget.
+  closeSessMenu(); closeWsInfo();
   m.innerHTML = '';
   wsMenuItems(chip, nm, w).forEach((it) => {
     if (it.sep) { const s = document.createElement('div'); s.className = 'ws-menu-sep'; m.appendChild(s); return; }
@@ -5321,15 +5328,14 @@ function openWsMenu(btn, chip, nm, w) {
     b.addEventListener('click', (e) => { e.stopPropagation(); closeWsMenu(); it.act(); });
     m.appendChild(b);
   });
-  // Drop straight down as if it were the next workspace chip: EXACT same left edge and EXACT same width as
-  // the bar it came off of (the menu is border-box, so width == the bar's full box). Flips above only if it
-  // would overflow the viewport bottom.
-  const r = (chip || btn).getBoundingClientRect();
-  m.style.minWidth = '0';
-  m.style.width = Math.round(r.width) + 'px';
+  // Positioned EXACTLY like the session ▾ menu (openSessMenu): dropped from its own trigger, right-aligned to
+  // it, clamped to the viewport, flipped above when it would overflow the bottom. It used to mirror the chip's
+  // full box instead — same left edge, same width — which made it as wide as the sidebar itself (279px at a
+  // 289px sidebar) and covered the whole pane. Width is CSS's job now (.ws-menu: min 184, max 232), so both
+  // menus are sized by one rule and this one shrinks to its content: 232px.
   m.style.display = 'block';
-  const mh = m.offsetHeight;
-  m.style.left = Math.round(r.left) + 'px';
+  const r = btn.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.round(Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8))) + 'px';
   m.style.top = (r.bottom + 5 + mh > window.innerHeight - 8 ? Math.max(8, r.top - 5 - mh) : r.bottom + 5) + 'px';
   wsMenuFor = w.id;
 }

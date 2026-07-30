@@ -2293,5 +2293,34 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.sess-menu-btn\{[^}]*width:22px;height:22px/.test(flat) ? [] : ['.sess-menu-btn is no longer 22x22']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 72. THE TWO ROW MENUS ARE ONE COMPONENT: same width rule, same positioning rule, mutually exclusive.
+//   The project menu was given an INLINE width equal to its chip's full box (279px at a 289px sidebar — the
+//   whole pane), while the session menu was content-sized by CSS. And both triggers call e.stopPropagation(),
+//   which is exactly what prevented the OTHER menu's document-level click listener from firing — so the two
+//   could sit open on top of each other. The mutual close lives INSIDE the openers, so all three trigger
+//   sites inherit it and a fourth cannot forget it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const flat = HTML.replace(/\s*\n\s*/g, '');
+  none('openWsMenu forces an inline width again (the menu re-covers the sidebar)',
+    [/m\.style\.width = Math\.round\(r\.width\)/.test(APP) ? 'inline width from the chip box is back' : '',
+     /m\.style\.minWidth = '0'/.test(APP) ? "minWidth:'0' overrides the shared floor" : ''].filter(Boolean));
+  none('the two menus no longer share ONE width rule',
+    /\.ws-menu\{min-width:184px;max-width:232px;/.test(flat) ? [] : ['.ws-menu lost its shared min/max width']);
+  none('the project menu stopped being positioned from its own trigger like the session menu is',
+    /const r = btn\.getBoundingClientRect\(\), mw = m\.offsetWidth, mh = m\.offsetHeight;/.test(APP)
+      ? [] : ['openWsMenu does not use the session menu’s trigger-anchored math']);
+  none('opening a project menu leaves a session menu (or the info popover) open underneath',
+    /function openWsMenu\(btn, chip, nm, w\) \{[\s\S]{0,700}?closeSessMenu\(\); closeWsInfo\(\);/.test(APP)
+      ? [] : ['openWsMenu does not close its sibling popovers']);
+  none('…or the reverse: opening a session menu leaves the project menu open',
+    /function openSessMenu\(btn, row, items, key\) \{[\s\S]{0,300}?closeWsMenu\(\); closeWsInfo\(\);/.test(APP)
+      ? [] : ['openSessMenu does not close its sibling popovers']);
+  none('the New-session separator is back (a 1px rule reading as a hole in the menu)',
+    /act: \(\) => promptNewSession\(w\.id\),\s*\n\s*\}\);\s*\n\s*items\.push\(\{ sep: true \}\);/.test(APP)
+      ? ['a separator was re-added under New session'] : []);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
