@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Claudible logo" width="200">
+  <img src="assets/logo.png" alt="Claudible logo" width="180">
 </p>
 
 <h1 align="center">Claudible</h1>
 
-<p align="center"><b>Multiplayer Claude Code: the collaboration cockpit.</b></p>
-<p align="center"><i>Invite anyone into your live Claude Code session to watch, talk, and build together, with fully local voice, live telemetry, and a real-time agents view baked in.</i></p>
+<p align="center"><b>Claude Code, multiplayer.</b><br>
+<i>Share your live session with a link. Your team watches, talks, and co-drives: any browser, any device, even a phone.</i></p>
 
 <p align="center">
   <img alt="multiplayer co-work" src="https://img.shields.io/badge/multiplayer-co--work-e08cc0">
@@ -17,82 +17,36 @@
 
 ---
 
-## Claude Code is single-player. Claudible makes it multiplayer, and wraps it in a cockpit.
+Claude Code is one person, one terminal. Claudible makes it a team sport:
 
-Claude Code is one person, one terminal, one agent. Claudible turns your *running* session into a room your team can join: drop a private, approval-gated link in your team chat, a teammate opens it in their browser (laptop or phone), and they're inside your live session. They can watch, chat, or take the keyboard and co-drive the same Claude: pair-program, onboard someone by handing them the wheel, debug together in real time.
-
-Around that session sits the cockpit: fully local **two-way voice** (talk to it, hear it back), **live context/cost/token telemetry** with a `/compact` guardrail, a **live agents cockpit** (watch subagents and workflow swarms work: tools, tokens, results), and **one-click** slash-commands. All wrapping the real Claude Code TUI, untouched (xterm.js, full scrollback).
-
-## 🤝 Multiplayer: your session, shared
-Click **Share** and Claudible hands you a private invite link to your *live* session. The link is reusable, approval-gated (each guest waits in a lobby until you approve them by name, up to 8), and **read-only** (watch + chat) or **interactive** (type into the same session) per share. Guests get a chat, a voice room, and a mobile-friendly viewer; with [`cloudflared`](https://github.com/cloudflare/cloudflared) the link is a free `https://…trycloudflare.com` tunnel that works across networks (without it, localhost/LAN). Nothing is hosted by us; the tunnel connects *out* from your machine. → [details + security](#live-session-sharing--pair-programming)
-
-## 🧰 The cockpit: a Swiss-army knife for Claude Code
-- 🖥️ **The real Claude Code, embedded.** The actual TUI (xterm.js, full scrollback) in an obsidian-dark UI. Your session, untouched.
-- 🎙️ **Two-way local voice.** Hold a key and talk; hear replies read back. Whisper + Kokoro run **on your machine**: no cloud, no Claude.ai voice sign-in, no telemetry from Claudible. (The embedded Claude Code talks to Anthropic exactly as the normal CLI does.)
-- 📊 **Live telemetry.** Context %, cost, and tokens at a glance, with a guardrail (amber → red) and a one-tap `/compact` before you run out of room.
-- 🛰️ **Live agents cockpit.** Watch your subagents and workflow swarms work in real time: their task, tool-by-tool activity, token burn, **which model runs each agent**, and final results.
-- 🎛️ **One-click controls.** Fire `/effort`, `/compact`, `/status` & friends from buttons; no commands to memorize.
-- 🕘 **Session history + one-click Revert.** A per-prompt activity feed (who ran what, when, and what changed: "3 files (+42/−10)"), with a git-backed snapshot per turn so you can roll the code back to any of the last 10 prompts, and undo the revert. Live guests see the feed too.
-- 🗂️ **Projects + session sync.** Organize sessions per repo, and (with `gh`) keep shared sessions in sync with collaborators.
-
-## Prerequisites
-*(These cover the **Windows + WSL2** path, the recommended default. The native Windows, Linux, and macOS
-sections under [Install & run](#install--run) list their own, lighter requirements.)*
-- **Windows 11 + WSL2** (Ubuntu, or any Debian-family default distro)
-- **Claude Code CLI** installed **and signed in** inside WSL (`claude` on your PATH; run `claude` once and complete login first, since Claudible embeds your already-authenticated session)
-- **Git for Windows**, to clone the repo. The one-line installer below **auto-installs it via winget** if you don't have it; otherwise grab it from [git-scm.com](https://git-scm.com/download/win).
-- **Node.js 22.12+** on Windows (Electron 42 requires it). That's the *only* Windows-side tooling: **no compiler, no Python, no Visual Studio Build Tools** (the one native module, `node-pty`, ships a ready-to-run N-API prebuilt).
-- Inside WSL, for the voice setup: `git`, `cmake`, `build-essential`, `ffmpeg`, `espeak-ng`, `python3`, `curl`, and [`uv`](https://docs.astral.sh/uv/); `npm run setup` checks for these and prints the exact apt line if any are missing
-- **Optional, for remote co-work:** [`cloudflared`](https://github.com/cloudflare/cloudflared) on Windows (`winget install Cloudflare.cloudflared`, or point `CLAUDIBLE_CLOUDFLARED` at the binary). Without it, **Share** still works but the invite link is **localhost/LAN-only**.
-- **Optional, for private-repo projects + session sync:** the GitHub CLI [`gh`](https://cli.github.com/) installed and signed in **inside WSL** (`gh auth login`).
-
-## Install & run
-
-**Two ways in:**
-
-| | ⬇️ **Download the app** | 🛠️ **Build from source** |
-|---|---|---|
-| **For** | Most people who just want to run it | Developers · Linux · terminal users |
-| **Windows** | Double-click `Claudible-Setup.exe` | `install.ps1` (clone + build) |
-| **Linux / macOS** | *(installers coming)* | `bash setup/setup.sh` |
-| **Comes from** | [**Releases**](https://github.com/synthetiks/claudible/releases) | `git clone` |
+- 🤝 **Live multiplayer.** Invite anyone into your *running* session: they watch, chat, or take the keyboard and co-drive the same Claude.
+- 🎙️ **Voice, 100% local.** Talk to Claude, hear it answer. Whisper + Kokoro run on your machine, not in a cloud.
+- 📊 **Live telemetry.** Context, cost, and tokens at a glance, with a one-tap `/compact` before you run out of room.
+- 🛰️ **Agents cockpit.** Watch subagents and workflow swarms work in real time: task, tools, token burn, which model runs each agent.
+- 🕘 **Per-prompt history + revert.** Every prompt gets a git-backed snapshot. Roll the code back to any of the last 10, and undo the revert.
+- 🔒 **Nothing hosted.** Invite links tunnel *out* from your machine, every guest waits in a lobby until you approve them by name, and the real Claude Code TUI stays untouched (xterm.js, full scrollback).
 
 Claudible is in **public beta**: expect fast releases and the occasional rough edge; [issues](https://github.com/synthetiks/claudible/issues) are very welcome.
 
----
+## Get started
 
-### ⬇️ Download: Windows installer (no terminal, no clone)
+### 🪟 Windows: download and run
+1. Grab the latest **`Claudible-Setup-<version>-x64.exe`** from **[Releases](https://github.com/synthetiks/claudible/releases)**.
+2. Run it. It's unsigned during beta, so SmartScreen shows *"Windows protected your PC"*: click **More info → Run anyway** once.
+3. Launch Claudible from the Start menu. First run sets up local voice by itself (a few hundred MB of models; resumable if interrupted).
 
-The simplest path. **No git, no `npm`, no PowerShell scripts, no `system32` snags**: the app is prebuilt.
-
-1. Open **[Releases](https://github.com/synthetiks/claudible/releases)** and download the latest **`Claudible-Setup-<version>-x64.exe`**.
-2. Double-click it. It's **unsigned** during beta, so Windows SmartScreen shows *“Windows protected your PC”* → click **More info → Run anyway** (one time).
-3. Launch Claudible from the Start menu / Desktop shortcut. **On first run it sets up local voice automatically**: the Whisper + Kokoro models are a few-hundred-MB download, so you'll see a *“Setting up voice…”* note while it works in the background (it's resumable; reopen if interrupted).
-
-**Already needs to be on the PC** (the same native-Windows prerequisites; the installer just skips the clone/build):
-- **Claude Code for Windows**, signed in: run `claude` once in any terminal and log in. *(This is what Claudible embeds; it can't run without it.)*
-- **Node.js 22.12+** for Windows ([nodejs.org](https://nodejs.org)): Claude Code's hooks need a real `node`.
-- **Git for Windows** ([git-scm.com](https://git-scm.com/download/win)): provides the `bash.exe` the voice services run through.
-
-> 🧪 The native-Windows runtime (esp. voice) is the newest path. If voice doesn't come up, the WSL build below is the proven one, and the log is at `%USERPROFILE%\.claudible\logs\`.
-
----
+Already needs to be on the PC: **Claude Code for Windows** (run `claude` once in any terminal and sign in), **Node.js 22.12+** ([nodejs.org](https://nodejs.org)), and **Git for Windows** ([git-scm.com](https://git-scm.com/download/win)). Native-Windows voice is the newest path; if it snags, logs are at `%USERPROFILE%\.claudible\logs\` and the WSL build below is the proven one.
 
 ### 🛠️ Build from source
+Maturity, honestly: **Windows + WSL2** is the battle-tested path, **Linux** is verified, **native Windows** and **macOS** are code-complete with runtime smoke tests in progress.
 
-For developers, Linux, and terminal users who'd rather `git clone` and run a script (no installer). One `Runner` seam picks the backend per OS. Maturity, honestly: **Windows + WSL2** is the battle-tested path; **Linux** is verified (native backend live-tested, packaged AppImage boot-tested); **native Windows** and **macOS** are code-complete with runtime smoke tests in progress.
+<details open><summary><b>🪟 Windows 11 + WSL2 · recommended</b></summary>
 
-<details open><summary><h3>🪟 Windows 11 + WSL2 · recommended</h3></summary>
-
-**Run in Windows PowerShell, not inside WSL.** (Claudible is a *Windows* Electron app that embeds Claude Code running in WSL; running it from inside WSL installs the Linux Electron and dies on `libnspr4.so`.) You need **WSL2** + a **signed-in Claude Code** inside it (see [Prerequisites](#prerequisites)).
-
-**One line** that asks where to install (Enter for the default), installs git if you don't have it, clones, installs everything, and launches:
+You need **WSL2** with a **signed-in Claude Code** inside it (`claude` on your PATH), plus **Node.js 22.12+** on Windows. **Run this in Windows PowerShell, not inside WSL** (Claudible is a Windows Electron app that embeds Claude Code running in WSL):
 ```powershell
 $dir = (Read-Host "Install folder for Claudible (Enter for default) [$HOME\claudible]").Trim().Trim('"'); if (-not $dir) { $dir = "$HOME\claudible" }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); if (Test-Path "$env:ProgramFiles\Git\cmd\git.exe") { $env:Path = "$env:ProgramFiles\Git\cmd;$env:Path" } }; if (!(Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "`n[!] Git for Windows is required and couldn't be auto-installed (no winget on this system?). Install it from https://git-scm.com/download/win, reopen PowerShell, then run this line again." -ForegroundColor Yellow } else { git clone https://github.com/synthetiks/claudible "$dir"; if ($LASTEXITCODE -ne 0) { Write-Host "`n[!] git clone failed -- see git's error above. Likely causes: no internet/proxy blocking github.com, or `"$dir`" already exists and isn't empty. Fix that, then run this line again." -ForegroundColor Yellow } elseif (Test-Path "$dir\install.ps1") { powershell -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" } else { Write-Host "`n[!] install.ps1 is missing after clone -- your antivirus most likely quarantined it (a false positive). To fix: allow/exclude the folder `"$dir`" in your antivirus, then run these two lines:`n    git -C `"$dir`" restore install.ps1`n    powershell -NoProfile -ExecutionPolicy Bypass -File `"$dir\install.ps1`"`nPer-antivirus steps are in `"$dir\SETUP.md`" (the Antivirus section)." -ForegroundColor Yellow } }
 ```
-It **prompts for an install folder** (Enter for the default `…\claudible`, or paste any path), **auto-installs Git for Windows** via winget if it's missing, clones, then `install.ps1` checks Windows Node (offers to install it via winget), runs `npm install`, builds the local voice services in WSL, installing their Linux deps for you (it may ask for your WSL sudo password), then makes a Desktop shortcut and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models, so it can churn for 10–20 min; if it's interrupted, just run the line again and it resumes.
-
-> **No `winget`?** (older Windows) Install Git from **[git-scm.com/download/win](https://git-scm.com/download/win)** with the defaults, **reopen PowerShell**, then run the line above.
+One line: asks where to install, auto-installs git via winget if missing, clones, installs everything, and launches. **First run only:** the voice build compiles whisper.cpp and downloads ~480 MB of models (10–20 min; rerunning the line resumes). Voice build deps inside WSL (`git cmake build-essential ffmpeg espeak-ng python3 curl` + [`uv`](https://docs.astral.sh/uv/)): `npm run setup` checks and prints the exact apt line. No `winget`? Install [Git for Windows](https://git-scm.com/download/win) manually, reopen PowerShell, rerun. Full troubleshooting: **[SETUP.md](SETUP.md)**.
 
 <details><summary>Prefer to run the steps by hand?</summary>
 
@@ -107,25 +61,20 @@ Optional Desktop shortcut: `powershell -NoProfile -ExecutionPolicy Bypass -File 
 </details>
 </details>
 
-<details><summary><h3>🪟 Windows native (no WSL) · new</h3></summary>
+<details><summary><b>🪟 Windows native (no WSL) · new</b></summary>
 
-A WSL-free path: native Windows Claude Code + **prebuilt** voice services (no compiler), driven by the `win` runner.
-**Needs:** Windows **Node 22.12+** and **Git for Windows** (`bash.exe`). The installer installs Claude Code for Windows if it's missing.
+Needs Windows **Node 22.12+** and **Git for Windows** (`bash.exe`). Installs Claude Code for Windows if it's missing.
 ```powershell
 git clone https://github.com/synthetiks/claudible
 cd claudible
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Native
 ```
-> Run it through `powershell -ExecutionPolicy Bypass -File …` as shown; Windows blocks `.\install.ps1` directly under its default `Restricted` policy ("running scripts is disabled on this system"). The `Bypass` applies to this one launch only and changes nothing on the machine. Also: clone into your **home/projects folder, not `C:\WINDOWS\system32`** (and use a normal, non-Admin PowerShell).
-
-This: installs Claude Code (`npm i -g @anthropic-ai/claude-code`) if absent → runs `setup\setup-win.ps1`, which downloads the prebuilt `whisper-server.exe` + the speech model and sets up Kokoro (CPU) via [`uv`](https://docs.astral.sh/uv/) (**no Visual Studio / Python / cmake**) → pins `CLAUDIBLE_RUNNER=win`. Remove that user env var to fall back to WSL.
-
-> 🧪 **Newer path, runtime smoke test in progress.** Terminal + telemetry are expected solid; the Windows **voice** runtime (Kokoro `:8880`) is the most likely rough edge. If anything snags, the **WSL path above is the proven one**.
+Downloads the prebuilt `whisper-server.exe` + speech model and sets up Kokoro via [`uv`](https://docs.astral.sh/uv/) (no Visual Studio, Python, or cmake), then pins `CLAUDIBLE_RUNNER=win` (remove that user env var to fall back to WSL). Run it through `powershell -ExecutionPolicy Bypass -File` exactly as shown; Windows' default policy blocks `.\install.ps1` directly. Clone into your home or projects folder with a normal, non-admin PowerShell.
 </details>
 
-<details><summary><h3>🐧 Linux · verified backend</h3></summary>
+<details><summary><b>🐧 Linux · verified backend</b></summary>
 
-**Needs:** **Node 22.12+**, a **C toolchain** (`build-essential` + `python3`; `node-pty` compiles on install), **Claude Code on your PATH** (`claude`, signed in), and the voice build deps, which `bash setup/setup.sh` installs via `apt` (`git cmake build-essential ffmpeg espeak-ng python3` + [`uv`](https://docs.astral.sh/uv/)).
+Needs **Node 22.12+**, a C toolchain (`build-essential` + `python3`; `node-pty` compiles on install), and **Claude Code on your PATH** (`claude`, signed in).
 ```bash
 git clone https://github.com/synthetiks/claudible
 cd claudible
@@ -133,13 +82,12 @@ npm install            # builds node-pty for Linux (needs build-essential + pyth
 bash setup/setup.sh    # whisper.cpp + Kokoro (~480 MB models on first run)  ·  NOT `npm run setup` (that's the Windows→WSL wrapper)
 npm start              # auto-selects the native Linux backend (no WSL involved)
 ```
-Packaged installers build with `npm run dist:linux` (AppImage + `.deb`). The native backend (`runScript` + a real node-pty spawn) is live-tested, and the dev path above (`npm start`) is the one most testers use.
+Packaged installers build with `npm run dist:linux` (AppImage + `.deb`).
 </details>
 
-<details><summary><h3>🍎 macOS · new</h3></summary>
+<details><summary><b>🍎 macOS · new</b></summary>
 
-Same backend as Linux, with **Homebrew** for the voice build deps.
-**Needs:** **Node 22.12+**, **Claude Code on your PATH**, **Xcode Command Line Tools** (`xcode-select --install`), and `brew install cmake ffmpeg espeak-ng`.
+Needs **Node 22.12+**, **Claude Code on your PATH**, **Xcode Command Line Tools** (`xcode-select --install`), and `brew install cmake ffmpeg espeak-ng`.
 ```bash
 git clone https://github.com/synthetiks/claudible
 cd claudible
@@ -147,14 +95,41 @@ npm install
 bash setup/setup.sh    # detects Homebrew for the build deps  ·  NOT `npm run setup` (Windows→WSL only)
 npm start
 ```
-A signed **`.dmg`** is the planned release artifact (`npm run dist:mac`).
-
-> 🧪 **Newer path, runtime smoke test pending** (needs a Mac to build/sign + verify voice).
+A signed `.dmg` is the planned release artifact (`npm run dist:mac`). Runtime smoke pending (needs a Mac).
 </details>
 
-Full steps + troubleshooting for the Windows + WSL2 path: **[SETUP.md](SETUP.md)**. (Linux/macOS: the steps above are the complete guide.)
+## Live sharing, in 20 seconds
+Click **Share**: Claudible starts a tiny server on your own machine and hands you a private link. With [`cloudflared`](https://github.com/cloudflare/cloudflared) installed it's a free `https://<random>.trycloudflare.com` tunnel that works across networks; without it, localhost/LAN only. Up to 8 guests open the link, wait in a lobby, and see nothing until you approve each by name. Per share you pick **read-only** (watch + chat) or **interactive** (type into the same session). Guests get a chat, a voice room, and a mobile-friendly viewer. The link is ephemeral: it dies the moment you stop sharing, and **New link** locks out anyone holding the old one. A guest who can't reach the link is almost always a network or VPN issue; a fresh link or a phone hotspot sorts it.
 
-## Configuration
+Two things worth knowing before you share:
+- **Share live** in a synced project doesn't just mint a link; it also advertises it on the project's `claudible/sessions` branch so teammates see a **● LIVE** badge and can join without you pasting anything. Anyone with git access to that repo can read the link (they still wait in your lobby). Want exactly one invitee? Use plain **Share** and send the link yourself.
+- Turning on **session sync** for a repo-backed project commits full transcripts to that private repo: prompts, code, tool output, anything Claude read, plus your name, `gh` login, git email and machine. Every collaborator with git access can read them. Disclosed in-app before you enable it, and off until you do.
+
+## Security & privacy
+- **Permissions are yours.** The embedded Claude Code prompts before running tools, exactly like the normal CLI; Settings can remember **Accept edits** or **Bypass permissions** for a one-click/voice flow. A session synced from a collaborator is **always sandboxed** (normal prompting, never auto-resumed), regardless of your setting.
+- **Voice is local; Claude Code is not.** Whisper and Kokoro never leave your machine and Claudible sends no telemetry. The embedded Claude Code talks to Anthropic exactly as the normal CLI does.
+- **Interactive guests type into your session**, which may run with skipped permissions. Grant it only to people you trust, prefer read-only otherwise, and rotate or stop the share when you're done.
+- The voice services bind `0.0.0.0` so the Windows app can reach them over the WSL2 NIC; on WSL2's default NAT networking they aren't exposed to your LAN. Full threat model and disclosures: **[SECURITY.md](SECURITY.md)**.
+
+## Platform support
+Every OS-coupled call goes through one `Runner` seam (`runners/{wsl,posix,win}.js`); the script fleet is Python-free, so the only per-OS runtime is Node + a shell.
+
+| Platform | Status |
+|---|---|
+| **Windows + WSL2** | Battle-tested; the recommended path |
+| **Linux** | Native backend live-tested; AppImage + `.deb` build in CI |
+| **Windows native (no WSL)** | Code-complete; runtime smoke in progress |
+| **macOS** | Code-complete; needs a Mac for smoke + signing |
+
+Deep dive: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Staying up to date
+- **Clone installs update themselves.** An **Update & restart** chip appears when a newer commit lands; one click pulls, reinstalls deps if they changed, and relaunches (`install.ps1 -NoUpdate` opts out). Packaged `.exe` installs get a notice-only "newer release available" toast.
+- In a live session, a peer on a different commit shows a **build-skew note** on their ● LIVE badge, so "did you restart onto the update?" answers itself.
+- **Optional sub-second presence:** by default "went live" reaches collaborators in a few seconds over the shared git branch; a team that wants faster can self-host the tiny Cloudflare Worker in [`relay/`](relay/). Off unless configured. See [`relay/README.md`](relay/README.md).
+
+<details><summary><b>Configuration (env vars)</b></summary>
+
 | Env var | Default | Meaning |
 |---|---|---|
 | `CLAUDIBLE_WHISPER` | `http://localhost:2022` | STT endpoint (any OpenAI `/v1/audio/transcriptions`) |
@@ -164,102 +139,18 @@ Full steps + troubleshooting for the Windows + WSL2 path: **[SETUP.md](SETUP.md)
 | `CLAUDIBLE_WHISPER_PORT` | `2022` | port `services.sh` binds Whisper on |
 | `CLAUDIBLE_KOKORO_PORT` | `8880` | port `services.sh` binds Kokoro on |
 
-Claudible speaks the **OpenAI audio API**, so you can point it at any compatible STT/TTS (LM Studio, your own server) instead of the bundled local ones. If you change a port, set the matching `CLAUDIBLE_WHISPER` / `CLAUDIBLE_KOKORO` URL too so the app and the services agree.
+Claudible speaks the OpenAI audio API, so any compatible STT/TTS works (LM Studio, your own server). If you change a port, set the matching URL too.
+</details>
 
-## Live session sharing & pair programming
-Click **Share** to live-share your *running* Claude Code session: Claudible spins up a local viewer and hands you a private invite link. With [`cloudflared`](https://github.com/cloudflare/cloudflared) installed it's a free `https://<random>.trycloudflare.com` quick-tunnel a colleague on another network can reach; without it the link is **localhost/LAN-only**. The link is **reusable and approval-gated**: several people can open it (up to 8), and each one waits in a lobby until you approve them by name. Pick the mode when you share:
+<details><summary><b>Uninstalling</b></summary>
 
-- **Read-only**: guests watch the live terminal and can chat, but can't type.
-- **Interactive**: guests type into the *same* Claude Code session you're driving.
+**Windows:** uninstall from *Settings → Apps*. Left behind on purpose so a reinstall keeps your work: `~/.claudible/` (projects, settings, session history) and `~/.claudible/voice/` on the WSL/Linux side (models + build, several hundred MB); delete them by hand to reclaim the space. The Whisper (`:2022`) and Kokoro (`:8880`) helpers can keep running after quit: `pkill -f whisper-server; pkill -f kokoro` (or close the WSL session).
 
-There's a **human↔human chat** alongside the terminal, names for the host and each guest, and a **mobile-friendly** browser viewer so someone can follow along from a phone. Rotate the invite anytime without dropping current guests. Nothing is hosted by us; the tunnel connects *out* from your machine. See [Security & privacy](#security--privacy) for what that exposes.
-
-### How joining works, and why it's safe
-When you click **Share**, Claudible starts a tiny web server **on your own machine** (loopback). If
-[`cloudflared`](https://github.com/cloudflare/cloudflared) is installed, it wraps that in a free Cloudflare
-**quick-tunnel** and gives you a `https://<random>.trycloudflare.com` link; without it, the link is
-`localhost`/LAN-only. A guest opens the link in any browser (laptop or phone), enters a name, and **waits in a
-lobby** until you approve them; they see nothing until you do. Read-only guests can only watch + chat;
-interactive guests share your keyboard, so only grant that to people you trust.
-
-**We don't host anything.** There's no Claudible server in the middle: the page, the live terminal, and the chat
-are all served **by your machine**. The Cloudflare tunnel is just a temporary last-mile pipe (like a disposable
-port-forward) that connects *out* from your computer, so the link is **ephemeral**: it exists only while you're
-sharing and dies the instant you stop or go offline. Click **New link** to invalidate the old one and lock out
-anyone who held it.
-
-> **A guest can't reach the link?** The address is a `*.trycloudflare.com` tunnel, so a guest's
-> network, ISP, VPN, or Cloudflare's own edge can occasionally block or rate-limit it. That's a *network* issue,
-> not your session or their identity. Fix: have them try a **different network** (a phone hotspot is the quickest
-> test) or send a **fresh link**. Only people you explicitly approve ever get in, so opening it up that way is safe.
-
-**One thing worth knowing about "Share live".** In a *synced project* (one backed by a GitHub repo), the **Share
-live** action in a session's `▾` menu doesn't only mint a link for you to paste; it also **advertises** that
-session to your collaborators, by writing the invite URL and its join token to `live/<your-login>.json` on the
-project's shared `claudible/sessions` branch. That's the feature: it's how a teammate sees a **● LIVE** badge
-appear on your session and can click **Join** without you sending them anything. It also means **anyone with git
-access to that repo can read the link.** They still can't get in unseen (every guest waits in the lobby for your
-by-name approval), but if you want a session shared with exactly one person and nobody else, use the plain
-**Share** button and send the link yourself. Ending the share clears the advertisement.
-
-**And about turning on collaboration itself.** Enabling **Collaborate in Claudible** / session sync on a
-repo-backed project commits each session's **full transcript** into that **private** repo's history: prompts,
-code, tool output, anything Claude read (file contents, secrets, command output), plus a small per-turn block
-with your name, `gh` login, git email and machine. Every collaborator with git access can read it. That's how a shared conversation shows up on everyone's machine. It's disclosed in-app before you switch
-it on and stays on until you switch it off; nothing goes to a third party, but don't enable it on a repo whose
-collaborators shouldn't see a given session. See [SECURITY.md](SECURITY.md).
-
-## Security & privacy
-- **Permissions are yours to set.** By default the embedded Claude Code **prompts before running tools**, exactly like the normal CLI. In **Settings** you can pick a remembered mode: **Accept edits**, or **Bypass permissions** (`--dangerously-skip-permissions --add-dir $HOME`) for a frictionless one-click/voice flow; that's powerful, so only use it on a machine you trust. A session **synced from a collaborator is ALWAYS sandboxed** (normal prompting, no `--add-dir`, never auto-resumed) regardless of your setting, so an untrusted transcript can't drive tools with full `$HOME` access.
-- **Voice is local; Claude Code is not.** Speech-to-text (Whisper) and text-to-speech (Kokoro) run entirely on your machine, and Claudible sends no telemetry. The embedded **Claude Code** sends your prompts and code to Anthropic exactly as the normal CLI does; Claudible doesn't change that.
-- **The voice services bind `0.0.0.0`** so the Windows app can reach them across the WSL2 NIC. On WSL2's default NAT networking they aren't exposed to your LAN; if you enable WSL2 *mirrored* networking they become reachable from the host's interfaces, so don't run mirrored networking on an untrusted network.
-- **Live co-work is off until you click Share, and exposes your session for as long as it's on.** The quick-tunnel URL is public-but-unguessable; anyone with the link reaches the lobby, but **no one sees or touches your terminal until you approve them**, and **interactive** access lets an approved guest type into a Claude Code session that runs with skipped permissions. So: only share interactive with people you trust, prefer read-only otherwise, and stop sharing (or rotate the link) when you're done.
-
-## Platform support
-**Windows (WSL2 or native), Linux, and macOS.** Every OS-coupled call goes through one `Runner` seam
-(`runners/{wsl,posix,win}.js`), selected by `CLAUDIBLE_RUNNER` or the platform:
-- **Windows + WSL2**: spawns `wsl.exe`, embeds Claude Code in Linux. The most-tested path.
-- **Windows native**: runs Windows `claude.exe` directly (ConPTY) and the `wsl/*.sh` fleet via Git-for-Windows `bash`; no WSL.
-- **Linux**: spawns `bash -lc` directly; native backend live-tested, AppImage builds.
-- **macOS**: shares the Linux backend + Homebrew/`lsof` voice branches; `.dmg` is the planned artifact.
-
-The script fleet is **Python-free** (the JSON transforms were ported to Node, byte-parity proven), so the only
-per-OS runtime is Node + a shell. See [docs/OS-CONVERSION-PLAN.md](docs/OS-CONVERSION-PLAN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Staying up to date
-- **Build-from-source (clone) installs update themselves.** Re-running `install.ps1` does a `git pull` first
-  (skipped if you have local edits), and the app shows an **"Update & restart"** chip when a newer commit is
-  on disk under the running process; one click pulls, reinstalls dependencies if they changed, and relaunches.
-  Pass `install.ps1 -NoUpdate` to opt out of the auto-pull. *(Packaged `.exe` installs instead show a
-  notice-only "newer release available" toast; nothing installs itself there.)*
-- **Which build am I / is my collaborator on?** In a live session, a peer running a different commit shows a
-  small build-skew note on their **● LIVE** badge (e.g. *"different build abc1234 vs yours def5678"*), so
-  "did you restart onto the update?" is answered at a glance instead of guessed.
-- **Faster presence (optional, self-hosted).** By default "went live"/"ended" reaches collaborators in ~3–5s
-  over the shared git branch. A team that wants **sub-second** presence can self-host the tiny Cloudflare
-  Worker in [`relay/`](relay/); it's off unless configured, and git stays the source of truth. See
-  [`relay/README.md`](relay/README.md) and the disclosure in [`SECURITY.md`](SECURITY.md).
-
-## Uninstalling
-On **Windows**, uninstall from *Settings → Apps* (or the Start-menu uninstaller); that removes the app and its
-shortcuts. A few things are **intentionally left behind** so a reinstall or upgrade keeps your work; remove
-them by hand if you want to reclaim the space fully:
-
-- **Your projects & settings:** `~/.claudible/`. The app's durable state lives at `~/.claudible/app/`
-  (`settings.json`, `workspaces.json`, session history), with project clones under `~/.claudible/repos/` and
-  `~/.claudible/workspaces/`. Kept on purpose so a reinstall keeps every project, setting, and sync consent.
-- **The voice models & build** (several hundred MB): `~/.claudible/voice/` on the **WSL/Linux** side,
-  holding whisper.cpp's build plus the Kokoro clone and downloaded model weights. Delete this folder to reclaim it.
-- **Background voice services:** the Whisper (`:2022`) and Kokoro (`:8880`) helpers can keep running after you
-  quit or uninstall. Stop them from your WSL/Linux terminal, e.g. `pkill -f whisper-server; pkill -f kokoro`
-  (or just close the WSL session / reboot).
-
-On **Linux/macOS** (dev install), delete the cloned repo, `~/.claudible/`, and, if you ran the voice setup,
-`~/.claudible/voice/`, then stop the voice services as above.
+**Linux/macOS:** delete the cloned repo and `~/.claudible/`, then stop the voice services the same way.
+</details>
 
 ## License
-[MIT](LICENSE). Third-party components bundled in the installer are listed in
-[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+[MIT](LICENSE). Third-party components bundled in the installer are listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 
 ---
 
