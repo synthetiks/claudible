@@ -12,8 +12,14 @@ All notable changes to Claudible are documented here.
      tagged, and six more days of work landed on top of it. Those commits go HERE, not under [Unreleased] —
      build.yml's release-notes step extracts ONLY the `## [<tag version>]` block, so anything parked under
      [Unreleased] when `v0.9.1` is pushed is silently absent from the release page. -->
-## [0.9.1] — 2026-07-30
+## [0.9.1] — 2026-07-31
 
+- **Native-Windows voice setup no longer dies before it starts.** Windows PowerShell reads a BOM-less
+  script as ANSI, not UTF-8 — so an em dash inside a string in `setup-win.ps1` decoded into a curly
+  closing quote, the parser's quote state flipped, and every packaged install failed voice provisioning
+  at parse time ("The string is missing the terminator"), caught by the 0.9.1 release smoke. All
+  PowerShell scripts are pure ASCII now, and a new suite gate (`test/ps1-ascii.test.js`) fails the build
+  if a non-ASCII byte ever lands in a `.ps1` again.
 - **Plan usage in the top bar.** A gauge next to the context meter shows how much of your Claude 5-hour limit
   you have burned — a 4-cell battery that fills as you consume, with the same `used_percentage` figure `/usage`
   prints, coloured green through red as you approach the cap. Click it for both windows and their reset times.

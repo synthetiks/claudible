@@ -87,14 +87,14 @@ if (-not (Test-Path (Join-Path $kokoro '.git'))) {
   Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue
   git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI $kokoro
   # $ErrorActionPreference='Stop' does NOT catch a native-exe non-zero exit, so check it explicitly and clean up
-  # the partial clone — else the Test-Path guard above treats a half-clone as "already installed" on the next run.
+  # the partial clone - else the Test-Path guard above treats a half-clone as "already installed" on the next run.
   if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue; Warn 'Kokoro clone failed (network?). Re-run setup-win.ps1.'; exit 1 }
 }
 # CPU-only torch (matches setup.sh): the --extra cpu pulls torch+cpu, not the multi-GB CUDA wheel.
 Say 'Installing/refreshing Kokoro CPU dependencies (this is the heavy step)...'
 Push-Location $kokoro
 try { uv sync --extra cpu } finally { Pop-Location }
-# Pop-Location is a cmdlet so it leaves $LASTEXITCODE = uv's exit; a failed sync means broken voice deps — abort
+# Pop-Location is a cmdlet so it leaves $LASTEXITCODE = uv's exit; a failed sync means broken voice deps - abort
 # loudly instead of letting install.ps1 pin the win runner on a non-functional TTS stack.
 if ($LASTEXITCODE -ne 0) { Warn 'uv sync failed - Kokoro CPU deps not installed. Re-run setup-win.ps1.'; exit 1 }
 
@@ -112,7 +112,7 @@ if (-not (Test-Kokoro)) {
   Say 'Downloading Kokoro model weights (~327 MB)...'
   Remove-Item -Recurse -Force $kDir -ErrorAction SilentlyContinue          # clear any partial from a prior failed run
   Push-Location $kokoro
-  try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0; if ($LASTEXITCODE -ne 0) { Warn "  model downloader exited $LASTEXITCODE — will try the direct fallback" } } catch { Warn "  model downloader errored: $($_.Exception.Message)" } finally { Pop-Location }
+  try { uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0; if ($LASTEXITCODE -ne 0) { Warn "  model downloader exited $LASTEXITCODE - will try the direct fallback" } } catch { Warn "  model downloader errored: $($_.Exception.Message)" } finally { Pop-Location }
   if (-not (Test-Kokoro)) {
     Warn 'Python downloader did not produce a valid model - falling back to a direct download of the release assets...'
     New-Item -ItemType Directory -Force -Path $kDir | Out-Null
