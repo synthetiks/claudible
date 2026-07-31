@@ -14,6 +14,11 @@ All notable changes to Claudible are documented here.
      [Unreleased] when `v0.9.1` is pushed is silently absent from the release page. -->
 ## [0.9.1] — 2026-07-31
 
+- **The setup wizard connects GitHub for real.** The "Link GitHub" step used to print a `gh auth login`
+  command for you to go run in a terminal yourself — on a packaged install (no terminal in sight, sometimes
+  no `gh` at all) nobody ever connected. It's now a one-click flow like the Claude step: an Install button
+  when the CLI is missing, a **Connect GitHub** button that shows your one-time code right in the wizard and
+  opens the GitHub approval page, and a ✓ that flips by itself once you approve. Still skippable, as always.
 - **Native-Windows voice setup no longer dies before it starts.** Windows PowerShell reads a BOM-less
   script as ANSI, not UTF-8 — so an em dash inside a string in `setup-win.ps1` decoded into a curly
   closing quote, the parser's quote state flipped, and every packaged install failed voice provisioning

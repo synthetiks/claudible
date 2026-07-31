@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onboardStatus: () => ipcRenderer.invoke('onboard:status'),             // { claudeInstalled, claudeSignedIn, claudeVersion, ghInstalled, ghSignedIn, ghAccount, voiceReady, voiceProvisioning }
   onboardInstallClaude: () => ipcRenderer.invoke('onboard:install-claude'),
   onboardClaudeLogin: () => ipcRenderer.invoke('onboard:claude-login'),
+  onboardGhLogin: () => ipcRenderer.invoke('onboard:gh-login'),          // → { ok, code } — code shown in the wizard; success lands via the onboardStatus poll
   // self-bootstrapping dependency provisioner (the "System check" wizard step)
   preflightStatus: () => ipcRenderer.invoke('preflight:status'),        // { runner, gitBash, deps: [{ id, label, hint, state, version, account, required, auth, authSoft, installable, restartOnInstall, requires }] }
   preflightInstall: (depId) => ipcRenderer.invoke('preflight:install', depId),   // → { ok, error, restartRequired }; progress streams via onProvision({dep,phase,msg})

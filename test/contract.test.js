@@ -2211,6 +2211,21 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   const signIns = [...APP.matchAll(/async function signIn\(\) \{\n\s*if \(signInFlight\) return;/g)];
   none('a signIn() lost its in-flight guard (double-click respawns the fg tab twice)',
     signIns.length === 2 ? [] : [`found ${signIns.length} guarded signIn()s, expected 2`]);
+
+  // The wizard's GitHub step is a real CONNECT, not printed shell instructions (the packaged-install smoke
+  // found nobody ever connected from the old DIY text). Guarded one-click flow: device code shown in the
+  // wizard, main opens ONLY the fixed github device URL (never a URL parsed from child output — a hostile
+  // PATH gh must not choose what we open), and ✓ lands via the status poll, which must cover step 4.
+  none('the wizard gh step regressed to DIY instructions (no guarded connect action)',
+    /async function connectGh\(\) \{\n\s*if \(ghFlight\) return;/.test(APP) && /claudible\.onboardGhLogin\(\)/.test(APP) ? [] : ['no guarded connectGh()']);
+  none('the gh install button lost its guard or its preflight route',
+    /async function installGh\(\) \{\n\s*if \(ghFlight\) return;/.test(APP) && /preflightInstall\('gh'\)/.test(APP) ? [] : ['no guarded installGh()']);
+  none('gh-login opens a child-supplied URL (must be the fixed device page)',
+    MAIN.includes("shell.openExternal('https://github.com/login/device')") ? [] : ['gh-login openExternal is not the fixed URL']);
+  none('the wizard poll ignores the gh wait (step 4 could never flip to ✓)',
+    /step === 4 && ghWaiting/.test(APP) ? [] : ['tick has no step-4 branch']);
+  none('preload: onboardGhLogin is not bridged',
+    /onboardGhLogin: \(\) => ipcRenderer\.invoke\('onboard:gh-login'\)/.test(PRELOAD) ? [] : ['no onboardGhLogin bridge']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

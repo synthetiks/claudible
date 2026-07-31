@@ -6015,6 +6015,7 @@ window.addEventListener('keydown', (e) => {
 (function () {
   const wiz = $('wizard'); if (!wiz || !claudible.onboardStatus) return;
   let step = 1, poll = null, pollSince = 0, signingIn = false, hasWs = false, done = false, ticking = false;
+  let ghWaiting = false, ghFlight = false;   // gh device-flow: waiting on the browser approval · in-flight guard shared by BOTH gh buttons (a double-click must not spawn two winget/gh children)
   const status = async () => { try { return await claudible.onboardStatus(); } catch { return null; } };
   function show(n) {
     step = n;
@@ -6024,16 +6025,22 @@ window.addEventListener('keydown', (e) => {
   function pollStart() { if (poll || done) return; pollSince = Date.now(); poll = setInterval(tick, 3000); }   // never re-arm after a Skip (done)
   function pollStop() { if (poll) { clearInterval(poll); poll = null; } }
   async function tick() {
-    if (done || step !== 2 || ticking) return;   // ticking: never overlap probes (each spawns bash/node/network) — Claude is step 2 (after System check)
+    if (done || ticking) return;   // ticking: never overlap probes (each spawns bash/node/network)
+    if (step !== 2 && !(step === 4 && ghWaiting)) return;   // Claude is step 2 (after System check); step 4 polls only while a gh device-flow waits on the browser
     // 6-min cap ONLY for the genuine orphan case: sign-in clicked → wizard HIDDEN to reveal the terminal → user
     // abandons the browser flow. While the wizard is visible there's no orphan risk (Skip/Escape always dismiss),
     // so the cap must not fire during a slow install and stomp its message or kill the poll mid-flow.
-    if (signingIn && Date.now() - pollSince > 360000) {
+    if (step === 2 && signingIn && Date.now() - pollSince > 360000) {
       pollStop(); signingIn = false; if (!wiz.classList.contains('show')) { wiz.classList.add('show'); show(2); }
       const b = $('wiz-claude-busy'); if (b) { b.classList.add('err'); b.textContent = 'Didn’t detect sign-in — try again, or Skip for now.'; } return;
     }
+    // Same budget for an abandoned gh approval (main kills its login child on the same clock).
+    if (step === 4 && ghWaiting && Date.now() - pollSince > 360000) {
+      pollStop(); ghWaiting = false;
+      const b = $('wiz-gh-busy'); if (b) { b.classList.add('err'); b.textContent = 'Didn’t detect the GitHub approval — try again, or Skip for now.'; } return;
+    }
     ticking = true;
-    try { const s = await status(); if (s) applyClaude(s); } finally { ticking = false; }
+    try { const s = await status(); if (s) { if (step === 2) applyClaude(s); else applyGh(s); } } finally { ticking = false; }
   }
   async function open() {
     try {
@@ -6113,10 +6120,49 @@ window.addEventListener('keydown', (e) => {
   }
 
   async function goGh() { show(4); const s = await status(); if (s) applyGh(s); }
+  // Three states, mirroring applyClaude: missing → Install button (the System-check installer, reused);
+  // installed-not-connected → a REAL one-click Connect (device code shown here, browser opened by main,
+  // ✓ lands via the status poll — the old text told users to go run `gh auth login` in a terminal
+  // themselves, which on a packaged install meant nobody connected); connected → ✓.
   function applyGh(s) {
-    const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck');
-    if (s.ghSignedIn) { msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : ''); rc.style.display = 'none'; }
-    else { msg.textContent = 'GitHub isn’t connected yet — connect it to sync your projects across devices and invite people. In a WSL terminal (run `wsl` from PowerShell; on the native flavor any terminal) run:  gh auth login  (choose “Login with a web browser”), approve it, then click Re-check.'; rc.style.display = ''; }
+    const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck'), act = $('wiz-gh-action'), b = $('wiz-gh-busy');
+    if (s.ghSignedIn) {
+      msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : '');
+      rc.style.display = 'none'; act.style.display = 'none';
+      ghWaiting = false; pollStop();   // the device-flow (if any) landed — the poll has nothing left to watch
+      if (b) { b.classList.remove('err'); b.textContent = ''; }
+    } else if (!s.ghInstalled) {
+      msg.textContent = 'The GitHub CLI isn’t installed — it powers project sync, invites and live badges. Install it here, then connect.';
+      act.style.display = ''; act.textContent = 'Install GitHub CLI'; act.onclick = installGh;
+      rc.style.display = '';
+    } else {
+      msg.textContent = 'Connect GitHub to sync projects across devices, invite collaborators, and see who’s live. One click — you approve it in your browser.';
+      act.style.display = ''; act.textContent = 'Connect GitHub'; act.onclick = connectGh;
+      rc.style.display = '';
+    }
+  }
+  async function installGh() {
+    if (ghFlight) return;
+    ghFlight = true;
+    const b = $('wiz-gh-busy'), a = $('wiz-gh-action');
+    a.disabled = true; b.classList.remove('err'); b.textContent = 'Installing the GitHub CLI…';
+    let r; try { r = await claudible.preflightInstall('gh'); } catch (e) { r = { ok: false, error: e && e.message }; }
+    a.disabled = false; ghFlight = false;
+    if (r && r.ok) { b.textContent = r.restartRequired ? 'Installed — restart Claudible, then connect.' : ''; goGh(); }
+    else { b.classList.add('err'); b.textContent = 'Install failed: ' + installErrText((r && r.error) || 'unknown') + ' — retry, or Skip for now.'; }   // same shared filter as the Claude step (R18)
+  }
+  async function connectGh() {
+    if (ghFlight) return;
+    ghFlight = true;
+    const b = $('wiz-gh-busy'), a = $('wiz-gh-action');
+    a.disabled = true; b.classList.remove('err'); b.textContent = 'Starting GitHub sign-in…';
+    let r; try { r = await claudible.onboardGhLogin(); } catch (e) { r = { ok: false, error: e && e.message }; }
+    a.disabled = false; ghFlight = false;
+    if (r && r.ok) {
+      // no code = a login child from an earlier click is still polling — keep the code already on screen
+      if (r.code) b.textContent = 'Your code: ' + r.code + ' — enter it on the GitHub page that just opened. This flips to ✓ by itself.';
+      ghWaiting = true; pollSince = Date.now(); pollStart();   // anchor the 6-min abandon budget at THIS hand-off, like the Claude step
+    } else { b.classList.add('err'); b.textContent = 'Couldn’t start GitHub sign-in: ' + ((r && r.error) || 'unknown') + ' — retry, or Skip for now.'; }
   }
 
   // ---- System check (step 1): detect every dependency, install the missing ones --------------------

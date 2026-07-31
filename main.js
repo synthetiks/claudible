@@ -2994,6 +2994,44 @@ ipcMain.handle('onboard:claude-login', async () => {
     return { ok: true };
   } catch (e) { return { ok: false, error: (e && e.message) || 'could not start Claude' }; }
 });
+// Connect GitHub from the wizard, one click. `gh auth login --web` in a non-TTY child prints the one-time
+// device code up front and then POLLS github in the background until the browser approval lands (verified
+// empirically) — so the wizard shows the code, we pop the device page, and the child needs no input at all.
+// Success is detected by the wizard's existing onboard:status poll (gh writes hosts.yml), NOT by this
+// handler: the child is fire-and-watch. gh runs where the deps probe found it — inside WSL on the wsl
+// flavor (wsl.exe pass-through), on PATH otherwise.
+let ghLoginProc = null;   // one in-flight login child, ever — a second click while one polls is a no-op
+ipcMain.handle('onboard:gh-login', async () => {
+  if (ghLoginProc) return { ok: true, code: '' };                    // already waiting on the browser — renderer keeps its code on screen
+  const args = ['auth', 'login', '--web', '--hostname', 'github.com', '--git-protocol', 'https'];
+  const [cmd, argv] = runner.id === 'wsl' ? ['wsl.exe', ['--', 'gh', ...args]] : [process.platform === 'win32' ? 'gh.exe' : 'gh', args];
+  let child;
+  try { child = require('child_process').spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+  catch (e) { return { ok: false, error: (e && e.message) || 'could not start gh' }; }
+  ghLoginProc = child;
+  const drop = () => { if (ghLoginProc === child) ghLoginProc = null; };
+  child.on('exit', drop); child.on('error', drop);
+  const killTimer = setTimeout(() => { try { child.kill(); } catch {} }, 360000);   // same 6-min abandon budget as the Claude step
+  killTimer.unref && killTimer.unref();
+  return await new Promise((resolve) => {
+    let out = '', err = '', done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    child.stdout.on('data', (d) => {
+      out += d;
+      const m = /one-time code: ([A-Z0-9-]{6,})/i.exec(out);
+      if (m) {
+        // ALWAYS the fixed, known device URL — never a URL parsed out of child output (a compromised PATH gh
+        // must not get to choose what we open).
+        try { require('electron').shell.openExternal('https://github.com/login/device'); } catch {}
+        finish({ ok: true, code: m[1] });
+      }
+    });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('error', (e) => finish({ ok: false, error: (e && e.message) || 'could not start gh' }));
+    child.on('exit', (codeN) => finish(codeN === 0 ? { ok: true, code: '' } : { ok: false, error: (err || out || 'gh exited ' + codeN).trim().split('\n').slice(-2).join(' ').slice(0, 300) }));
+    setTimeout(() => finish({ ok: false, error: (err || 'gh printed no device code in 20s').trim().split('\n').slice(-2).join(' ').slice(0, 300) }), 20000);
+  });
+});
 
 // ---- self-bootstrapping dependency provisioner (the System-check wizard step) ----------------------
 // Detect every dependency Claudible needs and install the missing ones. The renderer renders deps.detect's
