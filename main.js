@@ -577,7 +577,19 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // Win-runner parity with session.sh's foreign notice: the wsl/posix bootstrap echoes "opening a
     // collaborator's session…" into the terminal itself; claude.exe is spawned directly (no wrapping shell),
     // so the runner flags the decision and main injects the same line — the sandbox override must never be silent.
-    if (proc.claudibleForeign) winSend('pty:data', { tabId, data: "[claudible] opening a collaborator's session — Claude will ask before running tools.\r\n" });
+    // NAME THE OVERRIDE. The old line ("opening a collaborator's session") explained nothing to the person it
+    // actually confuses most: someone whose OWN session synced over from their OWN second machine, running with
+    // Bypass set, watching Claude prompt anyway. That reads as the setting being broken, not as a guard doing its
+    // job (a real report). So when the user's remembered mode is one this guard is currently overriding, say so
+    // outright, and say where the setting DOES apply. Text only — the guard itself is untouched.
+    if (proc.claudibleForeign) {
+      const overridden = ['bypass', 'acceptEdits'].includes(registry.permissionMode || 'default');
+      winSend('pty:data', { tabId, data: overridden
+        ? "[claudible] This session synced in from another machine, so Claude asks before running tools — your '"
+          + (registry.permissionMode === 'bypass' ? 'Bypass permissions' : 'Accept edits')
+          + "' setting does NOT apply here (anyone with repo access can write a transcript). Sessions started on this machine use your setting.\r\n"
+        : "[claudible] opening a collaborator's session — Claude will ask before running tools.\r\n" });
+    }
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
