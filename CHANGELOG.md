@@ -19,6 +19,12 @@ All notable changes to Claudible are documented here.
   no `gh` at all) nobody ever connected. It's now a one-click flow like the Claude step: an Install button
   when the CLI is missing, a **Connect GitHub** button that shows your one-time code right in the wizard and
   opens the GitHub approval page, and a ✓ that flips by itself once you approve. Still skippable, as always.
+- **Native-Windows voice actually works now (three separate bugs).** The v0.9.1 install smoke on a real
+  Windows box found the whole native voice path dead, in layers: the setup script could not be *parsed*
+  (below), then `uv sync` demanded a C++ toolchain that this path exists specifically to avoid, and finally
+  speech-to-text started but failed every transcription because `ffmpeg` was never installed on Windows
+  (Linux gets it from apt, macOS from brew; this script simply never did). All three are fixed, and both
+  services are now verified running natively: Whisper on `:2022`, Kokoro on `:8880` with its full voice list.
 - **Native-Windows voice setup no longer dies before it starts.** Windows PowerShell reads a BOM-less
   script as ANSI, not UTF-8 — so an em dash inside a string in `setup-win.ps1` decoded into a curly
   closing quote, the parser's quote state flipped, and every packaged install failed voice provisioning

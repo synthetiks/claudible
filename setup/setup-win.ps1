@@ -34,6 +34,26 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   }
 }
 
+# --- 1b. ffmpeg - whisper-server decodes incoming audio with it ------------------------------------
+# setup.sh installs ffmpeg on BOTH other platforms (apt on Linux, brew on macOS); this file simply never
+# did, so whisper-server.exe started, loaded its CPU backend, then died on every transcription with
+# "ffmpeg is not found. Please ensure that ffmpeg is installed and ... in your system's PATH" - STT was
+# dead on arrival for every native-Windows install (found by the v0.9.1 smoke). Not fatal if it can't be
+# installed: TTS is independent, so warn and continue rather than abort the whole voice setup.
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+  Say 'Installing ffmpeg (whisper needs it to decode audio)...'
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements
+    # winget updates the machine PATH, but THIS process keeps its stale copy - refresh it so the
+    # verification below (and anything this script spawns later) can actually see the new exe.
+    $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+  }
+  if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    Warn 'ffmpeg is not on PATH - speech-to-text will not work until it is (text-to-speech is unaffected).'
+    Warn 'Install it with:  winget install -e --id Gyan.FFmpeg   then restart Claudible.'
+  }
+}
+
 # --- 2. Whisper - PREBUILT whisper-server.exe (no compiler) -----------------------------------------
 $whisperExe = Join-Path $VOICE 'whisper\Release\whisper-server.exe'
 if (-not (Test-Path $whisperExe)) {
