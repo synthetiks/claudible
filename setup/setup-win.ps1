@@ -90,6 +90,21 @@ if (-not (Test-Path (Join-Path $kokoro '.git'))) {
   # the partial clone - else the Test-Path guard above treats a half-clone as "already installed" on the next run.
   if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue; Warn 'Kokoro clone failed (network?). Re-run setup-win.ps1.'; exit 1 }
 }
+# Kokoro asks for misaki[en,ja,ko,zh]; the ja extra drags in pyopenjtalk, which ships NO Windows wheel and
+# builds from source with cmake + an MSVC toolchain. A normal Windows box has neither, so `uv sync` died with
+# "CMAKE_C_COMPILER not set" / "'nmake' failed" and voice never installed - the whole point of this native
+# path is no Visual Studio, no compiler. We speak English here (services.sh serves the en voices), so keep
+# misaki[en] and drop the CJK extras: pure wheels, no toolchain. Rewritten in the CLONE, not upstream, and
+# idempotent (the regex only matches the un-patched line, and a re-run re-applies it after any git pull).
+$pyproj = Join-Path $kokoro 'pyproject.toml'
+if (Test-Path $pyproj) {
+  $tomlRaw = [System.IO.File]::ReadAllText($pyproj)
+  $tomlNew = [regex]::Replace($tomlRaw, 'misaki\[[a-z,]*\]', 'misaki[en]')
+  if ($tomlNew -ne $tomlRaw) {
+    [System.IO.File]::WriteAllText($pyproj, $tomlNew, (New-Object System.Text.UTF8Encoding $false))
+    Say 'Patched Kokoro deps for Windows: English voices only (the CJK extras need a C++ compiler).'
+  }
+}
 # CPU-only torch (matches setup.sh): the --extra cpu pulls torch+cpu, not the multi-GB CUDA wheel.
 Say 'Installing/refreshing Kokoro CPU dependencies (this is the heavy step)...'
 Push-Location $kokoro
