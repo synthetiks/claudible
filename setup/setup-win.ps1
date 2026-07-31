@@ -16,6 +16,26 @@ function Warn($m) { Write-Host "  $m" -ForegroundColor Yellow }
 $VOICE = if ($env:CLAUDIBLE_VOICE) { $env:CLAUDIBLE_VOICE } else { Join-Path $env:USERPROFILE '.claudible\voice' }
 New-Item -ItemType Directory -Force -Path $VOICE, (Join-Path $env:USERPROFILE '.claudible\logs') | Out-Null
 
+# --- 0. Stop any voice server that is still running -------------------------------------------------
+# A LIVE server blocks its own reinstall on Windows: it holds its .venv / model files open, Windows refuses
+# to delete an open file, and the `Remove-Item ... -ErrorAction SilentlyContinue` guards below swallow that
+# failure. The directory then survives as a husk (typically just .venv), the git clone aborts with
+# "already exists and is not an empty directory", and setup exits 1 - "Voice setup didn't finish (code 1)"
+# on a machine whose voice looked fine, because the survivor was still answering on its port. Observed on a
+# real box during the v0.9.1 smoke. So: stop them FIRST, every run. They are about to be replaced anyway,
+# and the app restarts them (services.sh port-checks, so it is idempotent).
+function Stop-VoiceServers {
+  $stopped = 0
+  Get-Process -Name 'whisper-server' -ErrorAction SilentlyContinue | ForEach-Object { $stopped++; Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+  # Match Kokoro's python on its COMMAND LINE (its venv lives under the voice dir), never by name: killing
+  # every python.exe on the machine would take out unrelated work.
+  Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -match 'claudible' -and $_.CommandLine -match 'kokoro|uvicorn' } |
+    ForEach-Object { $stopped++; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  if ($stopped) { Say "Stopped $stopped running voice service(s) so their files can be replaced."; Start-Sleep -Seconds 2 }
+}
+Stop-VoiceServers
+
 # --- 1. uv (Python package manager for Kokoro) ------------------------------------------------------
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   Say 'Installing uv...'
@@ -105,6 +125,16 @@ $kokoro = Join-Path $VOICE 'kokoro'
 if (-not (Test-Path (Join-Path $kokoro '.git'))) {
   Say 'Installing Kokoro (TTS)...'
   Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue
+  # VERIFY the removal. It is silenced above, and on Windows it half-fails whenever any file is open - which is
+  # exactly what a still-running Kokoro does to its own .venv. git clone then aborts with "already exists and is
+  # not an empty directory", and the old message blamed the NETWORK for a file lock, sending people to check
+  # their wifi over a held handle. Stop-VoiceServers ran at the top, so a survivor here is something else
+  # holding the folder (an open shell sitting in it, an antivirus scan, an editor) - name that instead.
+  if (Test-Path $kokoro) {
+    Warn "Could not clear $kokoro - a file in it is still open."
+    Warn 'Close anything using that folder (a terminal sitting in it, an editor, an antivirus scan), then re-run setup-win.ps1.'
+    exit 1
+  }
   git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI $kokoro
   # $ErrorActionPreference='Stop' does NOT catch a native-exe non-zero exit, so check it explicitly and clean up
   # the partial clone - else the Test-Path guard above treats a half-clone as "already installed" on the next run.
