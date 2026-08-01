@@ -19,6 +19,13 @@ All notable changes to Claudible are documented here.
   no `gh` at all) nobody ever connected. It's now a one-click flow like the Claude step: an Install button
   when the CLI is missing, a **Connect GitHub** button that shows your one-time code right in the wizard and
   opens the GitHub approval page, and a ✓ that flips by itself once you approve. Still skippable, as always.
+- **The setup wizard reopens itself when a required component goes missing.** It used to be strictly
+  first-run: skip it once and the flag was written forever, so anyone who later *lost* a required tool (an
+  uninstall, an antivirus quarantine, a failed update) was stranded — Claudible could still detect the
+  missing tool and still had a working Install button for it, but nothing in the interface could reach
+  them. Now a blocking component reopens the System check at step 1 on the next launch, using the same
+  rule that decides whether you can continue. It stays skippable, runs after startup so it never delays
+  the app, and stays quiet if the check itself can't run.
 - **Native-Windows voice actually works now (three separate bugs).** The v0.9.1 install smoke on a real
   Windows box found the whole native voice path dead, in layers: the setup script could not be *parsed*
   (below), then `uv sync` demanded a C++ toolchain that this path exists specifically to avoid, and finally

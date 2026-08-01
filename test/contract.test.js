@@ -2226,6 +2226,18 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /step === 4 && ghWaiting/.test(APP) ? [] : ['tick has no step-4 branch']);
   none('preload: onboardGhLogin is not bridged',
     /onboardGhLogin: \(\) => ipcRenderer\.invoke\('onboard:gh-login'\)/.test(PRELOAD) ? [] : ['no onboardGhLogin bridge']);
+
+  // REPAIR MODE: the wizard was first-run-only, and dismiss() persists onboardingDone — so a user who LOST a
+  // required dep afterwards (an uninstall, an AV quarantine, a half-elevated teardown) had no way back to the
+  // installer UI, even though detection and every per-row Install button still worked. Nothing was broken but
+  // the door. It must reopen on a blocking row, reuse sysBlocking (one definition of "blocking", so the thing
+  // that POPS the wizard and the thing that HOLDS it open cannot drift), and stay off the boot path.
+  none('the wizard can no longer reopen when a required dep goes missing',
+    /async function maybeRepair\(\)/.test(APP) && /setTimeout\(maybeRepair, \d+\)/.test(APP) ? [] : ['no maybeRepair boot hook']);
+  none('repair mode re-derives "blocking" instead of reusing sysBlocking (the two can drift apart)',
+    /const bad = r\.deps\.filter\(\(d\) => d && sysBlocking\(d\)\);/.test(APP) ? [] : ['maybeRepair does not use sysBlocking']);
+  none('a failed dep probe can throw the full-screen wizard up ("could not check" is not "missing")',
+    /if \(!r \|\| r\.unavailable \|\| !Array\.isArray\(r\.deps\) \|\| !r\.deps\.length\) return;/.test(APP) ? [] : ['maybeRepair does not bail on an unusable probe']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

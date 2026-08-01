@@ -6042,7 +6042,7 @@ window.addEventListener('keydown', (e) => {
     ticking = true;
     try { const s = await status(); if (s) { if (step === 2) applyClaude(s); else applyGh(s); } } finally { ticking = false; }
   }
-  async function open() {
+  async function open(pre) {
     try {
       const wl = await claudible.workspaceList();
       const real = ((wl && wl.workspaces) || []).filter((w) => w && w.kind && w.kind !== 'legacy');
@@ -6053,7 +6053,7 @@ window.addEventListener('keydown', (e) => {
       // one triggers the existing placeholder cleanup); any other run keeps the old skip-if-any rule.
       hasWs = real.length > (bootFirstRun ? 1 : 0);   // bootFirstRun is captured in maybeFirstRun BEFORE the registry flag is cleared; reading wl.firstRun here raced that clear and always saw false, so step 3 was skipped for every fresh install (R23's re-break via the wizard's second workspaceList read).
     } catch {}
-    wiz.classList.add('show'); show(1); refreshSystem();
+    wiz.classList.add('show'); show(1); refreshSystem(pre);
   }
   function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch {} } }   // the wizard owns first-run (maybeFirstRun defers to it), so IT clears the registry flag on finish/skip — else the next boot, onboarding now done, would fall through to the legacy ws-modal.
   function finish() { dismiss(); focusTermSoon(150); }
@@ -6190,9 +6190,12 @@ window.addEventListener('keydown', (e) => {
   }
   function setSysPill(id, cls, text) { const r = document.querySelector('#wiz-dep-list .dep-row[data-dep="' + id + '"]'); if (!r) return; const p = r.querySelector('.dep-pill'); if (p) { p.className = 'dep-pill ' + cls; p.textContent = text; } }
   function disableSysActs(on) { document.querySelectorAll('#wiz-dep-list .dep-act').forEach((b) => { b.disabled = on; }); const i = $('wiz-sys-install'); if (i) i.disabled = on; }
-  async function refreshSystem() {
+  async function refreshSystem(pre) {
     const list = $('wiz-dep-list'); if (!list) return;
-    let r; try { r = await claudible.preflightStatus(); } catch { r = null; }
+    // `pre`: a preflightStatus payload the caller already fetched (repair mode probes BEFORE it decides to
+    // open at all) — reuse it instead of paying for a second full deps scan milliseconds after the first.
+    let r = pre || null;
+    if (!r) { try { r = await claudible.preflightStatus(); } catch { r = null; } }
     // The probe couldn't run at all. Without this, every dependency row rendered "missing" — six separate failures
     // for one cause the user was never told, and no discoverable way forward.
     if (r && r.unavailable) {
@@ -6278,7 +6281,38 @@ window.addEventListener('keydown', (e) => {
   $('wiz-skip').addEventListener('click', dismiss);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && wiz.classList.contains('show')) { e.preventDefault(); dismiss(); } });
 
-  try { if (!loadPrefs().onboardingDone) setTimeout(open, 700); } catch {}
+  // ---- Repair mode: a REQUIRED dep went MISSING after onboarding -----------------------------------
+  // The wizard was first-run-only (gated on prefs.onboardingDone) and dismiss() persists that flag, so it could
+  // never open twice. A returning user who LOST a required dep — an uninstall, an AV quarantine, a half-elevated
+  // teardown script — was stranded: deps.detect, the per-row Install buttons and preflightInstall all still
+  // worked, but nothing in the UI could reach them. Nothing was broken except the door. This reopens it.
+  //
+  // Deliberate choices, each guarding a way this could go wrong:
+  //  • DEFERRED, never on the boot path. The full deps scan is exactly the "gh network / 6-tool scan" the
+  //    claude-dot probe documents avoiding per-launch, so it runs after the UI has settled and blocks nothing.
+  //    One scan per launch, and only for users who are already past onboarding.
+  //  • SILENT when the probe can't run. `unavailable` / empty / throw all return early: "couldn't check" is not
+  //    evidence of a missing dep, and a transient probe failure must never throw up a full-screen scrim.
+  //  • REUSES sysBlocking — the SAME predicate that disables step 1's Next button. One definition of "blocking",
+  //    so the thing that pops the wizard and the thing that holds it open can never disagree.
+  //  • NEVER STACKS under another modal (the ws-modal first-run fallback), and no-ops if already shown.
+  //  • STILL DISMISSABLE: plain open()/dismiss(), so Skip and Escape behave exactly as on first run. It reopens
+  //    next launch while the dep is still gone — the app genuinely cannot work without it — and stops for good
+  //    the moment the row goes ready. For git the row's own restartRequired path ends the flow in one click.
+  async function maybeRepair() {
+    if (done || wiz.classList.contains('show')) return;
+    if (document.querySelector('.approve.show')) return;
+    let r; try { r = await claudible.preflightStatus(); } catch { return; }
+    if (!r || r.unavailable || !Array.isArray(r.deps) || !r.deps.length) return;
+    const bad = r.deps.filter((d) => d && sysBlocking(d));
+    if (!bad.length) return;
+    await open(r);   // hand the wizard the payload we just probed — no second scan
+    try { toast(bad.length === 1 ? (bad[0].label + ' is missing — Claudible needs it') : (bad.length + ' required components are missing')); } catch (e) {}
+  }
+  try {
+    if (!loadPrefs().onboardingDone) setTimeout(open, 700);
+    else setTimeout(maybeRepair, 2500);
+  } catch {}
 })();
 
 // ---------- Connect Claude Code (topbar mascot button + auto-pop when a terminal finds no claude) ----------
