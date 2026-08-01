@@ -4703,6 +4703,14 @@ function openSessionInNewTab(wsId, id, label) {
 // forces the legacy recycle-this-tab behavior for the flows that structurally need it (toggleShareSession
 // pinning the share to THIS tab). At the tab cap we degrade to recycling an idle, non-shared tab so the user
 // is never stuck.
+// Session ids with an open IN FLIGHT. The tab-scan below can only see sessions already ADOPTED into a tab
+// record, and a tab does not record its session until sessionOpen's IPC resolves — so two clicks inside that
+// window (a double-click, or two different rows in quick succession) both passed the scan and spawned a
+// SECOND claude on the same transcript. Two claudes on one transcript is the frozen-terminal failure: the
+// loser cannot take the session and the tab just sits there dead, which reads as "the session won't open".
+// Observed live: two claude.exe processes each resuming the same id. A same-tick set closes the window that
+// the async scan cannot.
+const _openingSessions = new Set();
 async function openSession(id, label, opts) {
   const inPlace = !!(opts && opts.inPlace);
   // inPlace callers need THIS tab moved onto `id`; focusing some other tab that already hosts it would leave
@@ -4712,6 +4720,7 @@ async function openSession(id, label, opts) {
     for (const rec of tabs.values()) {                // focus an existing tab for this (ws, session)
       if (rec.wsId === activeWsId && rec.session === id) { setActiveTab(rec.tabId); return; }
     }
+    if (_openingSessions.has(id)) return;             // an open for this id is mid-flight — the second click is a no-op, not a second claude
   }
   const t = AT(); if (!t) return;
   // A joined live mirror is IMMUTABLE — re-pointing it hijacks the peer's session: it spawns a local pty on
@@ -4748,7 +4757,13 @@ async function openSession(id, label, opts) {
   // completely intact.
   // opts.endShare: deleteSession moving the live-shared tab off the session it's deleting. Main refuses every other
   // attempt to re-point the pinned tab; this one it allows, freezing the mirror first.
-  let r = null; try { r = await claudible.sessionOpen(t.tabId, id, opts && opts.endShare); } catch {}
+  // Held across the ONE await that spawns the pty — the whole race window — and released in `finally` so a
+  // throw, a refusal or an early return can never strand the id and make it permanently un-openable.
+  let r = null;
+  if (id !== 'new') _openingSessions.add(id);
+  try { r = await claudible.sessionOpen(t.tabId, id, opts && opts.endShare); }
+  catch {}
+  finally { if (id !== 'new') _openingSessions.delete(id); }
   if (r && r.ok === false) {   // main refused: this pty is genuinely mid-turn → open the click in a NEW tab, leave this one running + on screen
     if (!newBlankTab(activeWsId, id)) toast('That session is still running — finish it or close a tab before switching');
     return;

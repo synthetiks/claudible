@@ -2234,6 +2234,15 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // that POPS the wizard and the thing that HOLDS it open cannot drift), and stay off the boot path.
   none('the wizard can no longer reopen when a required dep goes missing',
     /async function maybeRepair\(\)/.test(APP) && /setTimeout\(maybeRepair, \d+\)/.test(APP) ? [] : ['no maybeRepair boot hook']);
+  // TWO CLAUDES ON ONE TRANSCRIPT: the tab scan in openSession only sees sessions already ADOPTED into a tab
+  // record, and a tab records its session only after sessionOpen's IPC resolves. Two clicks inside that window
+  // both passed and spawned a second claude on the same id — the frozen-terminal failure, seen live as two
+  // claude.exe processes resuming one session. The in-flight set must be checked BEFORE the spawn and released
+  // in `finally`, or a refusal/throw strands the id and the session becomes permanently un-openable.
+  none('openSession lost its in-flight dedupe (a double-click spawns a second claude on one transcript)',
+    /if \(_openingSessions\.has\(id\)\) return;/.test(APP) && /_openingSessions\.add\(id\)/.test(APP) ? [] : ['no in-flight session guard']);
+  none('the in-flight session guard is not released in finally (a strand makes the session un-openable)',
+    /finally \{ if \(id !== 'new'\) _openingSessions\.delete\(id\); \}/.test(APP) ? [] : ['guard not released in finally']);
   none('repair mode re-derives "blocking" instead of reusing sysBlocking (the two can drift apart)',
     /const bad = r\.deps\.filter\(\(d\) => d && sysBlocking\(d\)\);/.test(APP) ? [] : ['maybeRepair does not use sysBlocking']);
   none('a failed dep probe can throw the full-screen wizard up ("could not check" is not "missing")',
