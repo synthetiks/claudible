@@ -4,7 +4,7 @@
 
 <h1 align="center">Claudible</h1>
 
-<p align="center"><b>Claude Code, multiplayer.</b><br>
+<p align="center"><b>Claude Code made Multiplayer with live telemetry and UI.</b><br>
 <i>Share your live session with a link. Your team watches, talks, and co-drives: any browser, any device, even a phone.</i></p>
 
 <p align="center">
@@ -14,6 +14,12 @@
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-6aa9ff">
   <img alt="status public beta" src="https://img.shields.io/badge/status-public%20beta-e0a93b">
 </p>
+
+<p align="center">
+  <img src="assets/screenshots/01-interface.png" alt="The Claudible desktop app: projects and sessions in the left sidebar, the real Claude Code terminal in the middle, live telemetry across the top" width="900">
+</p>
+
+<p align="center"><sub>Your projects and sessions on the left, the real Claude Code terminal in the middle, live telemetry across the top.</sub></p>
 
 ---
 
@@ -27,6 +33,47 @@ Claude Code is one person, one terminal. Claudible makes it a team sport:
 - 🔒 **Nothing hosted.** Invite links tunnel *out* from your machine, every guest waits in a lobby until you approve them by name, and the real Claude Code TUI stays untouched (xterm.js, full scrollback).
 
 Claudible is in **public beta**: expect fast releases and the occasional rough edge; [issues](https://github.com/synthetiks/claudible/issues) are very welcome.
+
+## A look inside
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="assets/screenshots/02-settings.png" alt="The settings panel, open over a session" width="100%">
+      <p><sub><b>One settings panel.</b> Voice in and out, alerts, default effort, permission mode, model strategy.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="assets/screenshots/03-live-session.png" alt="A live session with a guest in the group chat beside the terminal" width="100%">
+      <p><sub><b>Go live.</b> Guests land beside your terminal and chat while Claude keeps working.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="assets/screenshots/04-approve-guest.png" alt="An approval dialog asking whether to let a named guest join the session" width="100%">
+      <p><sub><b>A lobby, not a free-for-all.</b> Every guest waits until you approve them by name.</sub></p>
+    </td>
+    <td width="50%" valign="middle" align="center">
+      <img src="assets/screenshots/05a-live-telemetry.png" alt="The telemetry strip showing usage, context and token counters" width="380">
+      <p><sub><b>Live telemetry.</b> Usage, context and tokens, always in the title bar.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="assets/screenshots/05b-session-history.png" alt="The project history panel listing session history and recent commits" width="320">
+      <p><sub><b>Session history.</b> Past sessions and recent commits, per project.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="assets/screenshots/06-browser-session.png" alt="The same live session viewed in a web browser by a guest" width="100%">
+      <p><sub><b>Any browser.</b> Guests open a link and they are in. Nothing to install.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top" align="center">
+      <img src="assets/screenshots/07-projects.png" alt="The projects sidebar listing local folders and GitHub repos with their sessions" width="240">
+      <p><sub><b>Projects and repos.</b> Local folders and GitHub repos in one sidebar.</sub></p>
+    </td>
+  </tr>
+</table>
 
 ## Get started
 
@@ -154,4 +201,4 @@ Claudible speaks the OpenAI audio API, so any compatible STT/TTS works (LM Studi
 
 ---
 
-*Built by the_crazydev with Claude.*
+*Built by thecrazydev1 and MKDevv05 with Claude, published under the synthetiks organization.*
