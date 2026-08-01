@@ -70,10 +70,16 @@ eq('argv resume FOREIGN sandboxed even with bypass', claudeArgv({ mode: 'resume'
 
 // ---- settingsJson (Node hooks via the Windows node path, per-tab args baked) ----
 const s = settingsJson('C:\\Users\\X\\.claudible\\session\\.claude', 'C:\\node.exe', 'C:\\rt\\status.json', 'C:\\rt\\hooks.ndjson');
+// The exe token is UNQUOTED. Claude Code hands a hook command to the user's shell and does not promise WHICH
+// one: cmd.exe on some Windows boxes, Windows PowerShell on others. A leading QUOTED path is correct cmd but a
+// PowerShell PARSER ERROR ("Unexpected token ... in expression or statement") — it fails before node starts, so
+// every hook dies silently and hooks.ndjson stays 0 bytes (observed on a real machine: telemetry, the identity
+// context block and the status line had never once worked there). Verified in both shells: an unquoted first
+// token passes in each, `& "path"` passes PowerShell and BREAKS cmd. Arguments stay quoted — both agree on those.
 eq('settings statusLine cmd', s.statusLine.command,
-  '"C:\\node.exe" "C:\\Users\\X\\.claudible\\session\\.claude\\statusline.js" "C:\\rt\\status.json"');
+  'C:\\node.exe "C:\\Users\\X\\.claudible\\session\\.claude\\statusline.js" "C:\\rt\\status.json"');
 eq('settings Stop hook cmd', s.hooks.Stop[0].hooks[0].command,
-  '"C:\\node.exe" "C:\\Users\\X\\.claudible\\session\\.claude\\hook.js" "C:\\rt\\hooks.ndjson"');
+  'C:\\node.exe "C:\\Users\\X\\.claudible\\session\\.claude\\hook.js" "C:\\rt\\hooks.ndjson"');
 eq('settings PostToolUse matcher', s.hooks.PostToolUse[0].matcher, 'Task|Agent');
 eq('settings PreToolUse matcher', s.hooks.PreToolUse[0].matcher, 'Task|Agent');
 ok('settings is valid JSON', (() => { try { JSON.parse(JSON.stringify(s)); return true; } catch { return false; } })());
@@ -86,10 +92,31 @@ eq('no contextPath → UserPromptSubmit has only the telemetry hook', s.hooks.Us
 const sc = settingsJson('C:\\Users\\X\\.claudible\\session\\.claude', 'C:\\node.exe', 'C:\\rt\\status.json', 'C:\\rt\\hooks.ndjson', 'C:\\rt\\context.json');
 ok('contextPath → SessionStart wired', Array.isArray(sc.hooks.SessionStart) && sc.hooks.SessionStart[0].hooks.length === 1);
 eq('contextPath → SessionStart runs context-hook.js', sc.hooks.SessionStart[0].hooks[0].command,
-  '"C:\\node.exe" "C:\\Users\\X\\.claudible\\session\\.claude\\context-hook.js" "C:\\rt\\context.json"');
+  'C:\\node.exe "C:\\Users\\X\\.claudible\\session\\.claude\\context-hook.js" "C:\\rt\\context.json"');
 eq('contextPath → UserPromptSubmit has telemetry + context (2 hooks)', sc.hooks.UserPromptSubmit[0].hooks.length, 2);
 eq('contextPath → telemetry hook still first', sc.hooks.UserPromptSubmit[0].hooks[0].command, s.hooks.Stop[0].hooks[0].command);
 ok('contextPath settings still valid JSON', (() => { try { JSON.parse(JSON.stringify(sc)); return true; } catch { return false; } })());
+// The real-world case: Node installs to "C:\Program Files\nodejs\node.exe". That path CANNOT be emitted bare
+// (the space would split it into two tokens) and CANNOT be emitted quoted (PowerShell parser error), so it
+// falls back to bare `node` — safe precisely because whichNode() resolved this path via `where node`, i.e.
+// node is provably on PATH. This is the exact configuration that was broken in the field.
+const sp = settingsJson('C:\\p\\.claude', 'C:\\Program Files\\nodejs\\node.exe', 'C:\\rt\\status.json', 'C:\\rt\\hooks.ndjson', 'C:\\rt\\context.json');
+eq('a node path WITH SPACES falls back to bare node (never a quoted first token)', sp.hooks.Stop[0].hooks[0].command,
+  'node "C:\\p\\.claude\\hook.js" "C:\\rt\\hooks.ndjson"');
+// One sweep over EVERY generated command in both shapes: no command may start with a quote. This is the
+// regression that matters — a future edit re-adding `"${nodeBin}"` would silently kill hooks on PowerShell
+// machines while every other assertion here kept passing.
+{
+  const cmds = [];
+  for (const o of [s, sc, sp]) {
+    cmds.push(o.statusLine.command);
+    for (const ev of Object.values(o.hooks)) for (const g of ev) for (const h of g.hooks) cmds.push(h.command);
+  }
+  ok('no generated hook/statusLine command starts with a quote (PowerShell parse-error shape)',
+    cmds.length >= 15 && cmds.every((c) => !c.startsWith('"')));
+  ok('every generated command still quotes its ARGUMENTS (paths with spaces must survive both shells)',
+    cmds.every((c) => (c.match(/"/g) || []).length >= 4));
+}
 
 // ---- spawnEnv (the SPACEBAR fix: suppress Claude's blocking "resume from summary?" modal that swallows
 //      every keystroke — space included — on big/old resumed sessions; parity with wsl/session.sh) ----

@@ -19,6 +19,13 @@ All notable changes to Claudible are documented here.
   no `gh` at all) nobody ever connected. It's now a one-click flow like the Claude step: an Install button
   when the CLI is missing, a **Connect GitHub** button that shows your one-time code right in the wizard and
   opens the GitHub approval page, and a ✓ that flips by itself once you approve. Still skippable, as always.
+- **Hooks work on every Windows machine, not just some.** Claudible writes its telemetry, identity and
+  status-line hooks as commands for Claude Code to run, and Claude Code hands them to whichever shell the
+  machine uses. The path was quoted, which cmd.exe accepts and PowerShell rejects outright as a syntax
+  error — so on a PowerShell box every hook failed before it started, and Claude Code only logged a
+  non-blocking status code. The visible cost: no live telemetry, no status line, and the assistant never
+  received the note telling it which machine and live session it was on. Found on a collaborator's machine
+  where the hook log had been empty since install. The command now uses a form both shells accept.
 - **The setup wizard reopens itself when a required component goes missing.** It used to be strictly
   first-run: skip it once and the flag was written forever, so anyone who later *lost* a required tool (an
   uninstall, an antivirus quarantine, a failed update) was stranded — Claudible could still detect the

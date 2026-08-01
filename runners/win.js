@@ -109,10 +109,32 @@ function claudeArgv(launch, home, effort, permMode) {
   if (launch.mode === 'fresh') return [...perm, ...eff];
   return [...perm, '--resume', launch.id, ...eff];
 }
+// The EXE token for a hook command, in a form BOTH Windows shells accept.
+//
+// Claude Code hands a hook's command string to the user's shell, and which shell that is is not ours to
+// choose: on some boxes it is cmd.exe, on others Windows PowerShell. `"C:\Program Files\nodejs\node.exe" ...`
+// is correct cmd, but in PowerShell a leading quoted string is a STRING LITERAL, not a command — it dies with
+// "Unexpected token ... in expression or statement" before node ever starts. Every hook then fails silently:
+// on the machine that surfaced this, hooks.ndjson sat at 0 bytes and status.json at "{}", so telemetry, the
+// identity/live-state context block and the status line had NEVER worked, while Claude Code logged only a
+// non-blocking status code. `& "path"` is not the fix either: it repairs PowerShell and BREAKS cmd.
+//
+// The portable shape is a FIRST TOKEN THAT NEEDS NO QUOTES (verified in both shells with single-level
+// parsing; arguments after it may stay quoted — both shells handle those identically):
+//   1. the absolute path when it needs no quoting (no spaces or shell metacharacters); else
+//   2. bare `node` — which whichNode() already returns whenever `where node` comes up empty, and which is
+//      safe here precisely because nodeBin was RESOLVED BY `where node`: node is demonstrably on PATH.
+// (An 8.3 short name would keep an absolute path in the spaces case, but Windows lets a volume disable 8.3
+// creation entirely, so it cannot be relied on — and it is not worth a cmd spawn per tab to sometimes get.)
+function exeToken(p) {
+  const s = String(p || '');
+  return (s && !/[\s"'%&^<>|()]/.test(s)) ? s : 'node';
+}
 // settings.json content (Node hooks invoked via the Windows node path, per-tab paths baked as argv).
 function settingsJson(claudeDir, nodeBin, statusPath, hooksPath, contextPath) {
-  const sl = `"${nodeBin}" "${path.win32.join(claudeDir, 'statusline.js')}" "${statusPath}"`;
-  const hk = `"${nodeBin}" "${path.win32.join(claudeDir, 'hook.js')}" "${hooksPath}"`;
+  const nb = exeToken(nodeBin);   // UNQUOTED on purpose — see exeToken: a quoted first token is a PowerShell parser error
+  const sl = `${nb} "${path.win32.join(claudeDir, 'statusline.js')}" "${statusPath}"`;
+  const hk = `${nb} "${path.win32.join(claudeDir, 'hook.js')}" "${hooksPath}"`;
   const oneHook = [{ hooks: [{ type: 'command', command: hk }] }];
   const tagHook = [{ matcher: 'Task|Agent', hooks: [{ type: 'command', command: hk }] }];
   // Identity/live-state context hook (same as the wsl backend): tells the model which machine/user/live-session
@@ -120,7 +142,7 @@ function settingsJson(claudeDir, nodeBin, statusPath, hooksPath, contextPath) {
   // UserPromptSubmit (so it survives compaction). contextPath falsy → omitted (parity with session.sh's CX guard).
   const hooks = { Stop: oneHook, UserPromptSubmit: oneHook, PreToolUse: tagHook, PostToolUse: tagHook };
   if (contextPath) {
-    const cx = `"${nodeBin}" "${path.win32.join(claudeDir, 'context-hook.js')}" "${contextPath}"`;
+    const cx = `${nb} "${path.win32.join(claudeDir, 'context-hook.js')}" "${contextPath}"`;
     hooks.SessionStart = [{ hooks: [{ type: 'command', command: cx }] }];
     hooks.UserPromptSubmit = [{ hooks: [{ type: 'command', command: hk }, { type: 'command', command: cx }] }];
   }
