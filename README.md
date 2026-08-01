@@ -62,15 +62,15 @@ Claudible is in **public beta**: expect fast releases and the occasional rough e
       <img src="assets/screenshots/05b-session-history.png" alt="The project history panel listing session history and recent commits" width="320">
       <p><sub><b>Session history.</b> Past sessions and recent commits, per project.</sub></p>
     </td>
-    <td width="50%" valign="top">
-      <img src="assets/screenshots/06-browser-session.png" alt="The same live session viewed in a web browser by a guest" width="100%">
-      <p><sub><b>Any browser.</b> Guests open a link and they are in. Nothing to install.</sub></p>
+    <td width="50%" valign="top" align="center">
+      <img src="assets/screenshots/07-projects.png" alt="The projects sidebar listing local folders and GitHub repos with their sessions" width="240">
+      <p><sub><b>Projects and repos.</b> Local folders and GitHub repos in one sidebar.</sub></p>
     </td>
   </tr>
   <tr>
     <td colspan="2" valign="top" align="center">
-      <img src="assets/screenshots/07-projects.png" alt="The projects sidebar listing local folders and GitHub repos with their sessions" width="240">
-      <p><sub><b>Projects and repos.</b> Local folders and GitHub repos in one sidebar.</sub></p>
+      <img src="assets/screenshots/06-browser-session.png" alt="The same live session viewed in a web browser by a guest" width="100%">
+      <p><sub><b>Any browser.</b> Guests open a link and they are in. Nothing to install.</sub></p>
     </td>
   </tr>
 </table>
