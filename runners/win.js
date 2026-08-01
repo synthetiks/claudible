@@ -26,17 +26,64 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const HOME = () => process.env.USERPROFILE || process.env.HOME || '';
 
 // ---- git-bash resolution (for runScript: reuse the wsl/*.sh fleet) ------------------------------
+// A bash.exe is only usable here if it is MSYS (Git Bash): everything downstream — appDirGuest, toGuestPath,
+// the whole wsl/*.sh fleet — needs `cygpath`, which exists in MSYS and NOT in a WSL distro. Probing for it is
+// the difference between "this is Git Bash" and "this is a Linux shell wearing the same filename".
+function isGitBash(p) {
+  // Windows' own bash.exe is the WSL launcher, and the WindowsApps one is its Store alias. Neither is ever
+  // MSYS, and both are SLOW to say so — the launcher can spin up a distro before answering, measured at 15s
+  // against a 15s timeout. Reject them by location, for free, before any probe runs.
+  if (/\\(system32|sysnative|windowsapps)\\/i.test(String(p))) return false;
+  // FAST PATH, no process at all: an MSYS tree ships cygpath.exe beside bash, so `<root>\bin\bash.exe` implies
+  // `<root>\usr\bin\cygpath.exe`. A stat is ~0.1ms and it rejects WSL's System32\bash.exe outright — which
+  // matters, because spawning bash here is not cheap: measured on a real box, `bash -lc` took 37s and `bash -c`
+  // 5s, so probing every candidate by execution would stall startup for half a minute.
+  try { if (fs.existsSync(path.join(path.dirname(path.dirname(p)), 'usr', 'bin', 'cygpath.exe'))) return true; } catch {}
+  // SLOW PATH, only when the layout is unusual: package managers (scoop, chocolatey) put a SHIM on PATH whose
+  // neighbours tell us nothing, so ask the shell itself. `-c`, never `-lc`: the login shell sources the whole
+  // profile and is the 37s case above. A WSL distro answers this instantly with nothing, so it stays rejected.
+  try { return /cygpath/.test(cp.execFileSync(p, ['-c', 'command -v cygpath'], { encoding: 'utf8', timeout: 15000, windowsHide: true }) || ''); }
+  catch { return false; }
+}
 let _bash = undefined;
 function gitBash() {
   if (_bash !== undefined) return _bash;
+  const seen = new Set();
+  const take = (c) => {
+    if (!c || seen.has(c)) return false;
+    seen.add(c);
+    try { if (!fs.existsSync(c)) return false; } catch { return false; }
+    if (!isGitBash(c)) return false;   // exists but is not MSYS (WSL's launcher, a busybox shim, a gutted Git) — keep looking
+    _bash = c; return true;
+  };
+  // Canonical install locations first: cheapest, and right on the overwhelming majority of machines. Each is
+  // still PROBED, because "the file is there" is not the same as "it works" — a Git uninstall that ran while
+  // Claude Code held bash.exe open leaves exactly this: a hollow Program Files\Git with a stranded binary.
   const cands = [
     process.env.CLAUDIBLE_GIT_BASH,
     path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
     path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Git', 'bin', 'bash.exe'),
     path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
   ].filter(Boolean);
-  for (const c of cands) { try { if (fs.existsSync(c)) { _bash = c; return _bash; } } catch {} }
-  try { const w = cp.execFileSync('where', ['bash.exe'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim(); if (w) { _bash = w; return _bash; } } catch {}
+  for (const c of cands) if (take(c)) return _bash;
+  // EVERY `where bash.exe` hit, validated — not just the first. The old code took hit [0] blind, and on any
+  // Windows box with WSL enabled that is ALWAYS C:\Windows\System32\bash.exe, the WSL launcher. cygpath does
+  // not exist in a distro, so appDirGuest threw, APPDIR_WSL went falsy, and every workspace/sync/diff entry
+  // point short-circuited to ERR_NO_BACKEND — SILENTLY, while the terminal and voice kept working perfectly.
+  // A real Git Bash sitting further down the list (scoop, chocolatey, a portable install) never got a look in.
+  try {
+    for (const h of cp.execFileSync('where', ['bash.exe'], { encoding: 'utf8' }).split(/\r?\n/).map((s) => s.trim())) if (take(h)) return _bash;
+  } catch {}
+  // Last resort: derive it from wherever git itself lives. Git Bash ships beside git.exe, so `<git>\..\bin\
+  // bash.exe` (and one level up, for the cmd\ layout) covers package managers that keep Git off the canonical
+  // paths entirely. Shims are handled by the probe: a shim that cannot run bash simply fails isGitBash.
+  try {
+    for (const g of cp.execFileSync('where', ['git.exe'], { encoding: 'utf8' }).split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+      const root = path.dirname(path.dirname(g));                       // …\Git\cmd\git.exe -> …\Git
+      if (take(path.join(root, 'bin', 'bash.exe'))) return _bash;
+      if (take(path.join(path.dirname(root), 'bin', 'bash.exe'))) return _bash;   // …\Git\mingw64\bin\git.exe -> …\Git\bin
+    }
+  } catch {}
   _bash = null; return _bash;   // null -> runScript degrades (workspaces/sync/diff), but terminal+voice still work
 }
 // App dir as git-bash (MSYS) sees it: C:\Users\X\claudible -> /c/Users/X/claudible (via cygpath).

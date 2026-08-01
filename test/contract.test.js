@@ -2239,6 +2239,20 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // both passed and spawned a second claude on the same id — the frozen-terminal failure, seen live as two
   // claude.exe processes resuming one session. The in-flight set must be checked BEFORE the spawn and released
   // in `finally`, or a refusal/throw strands the id and the session becomes permanently un-openable.
+  // GIT-BASH RESOLUTION: `where bash.exe` returns C:\Windows\System32\bash.exe FIRST on every Windows box with
+  // WSL enabled — that is the WSL launcher, not MSYS. Taking hit [0] blind meant cygpath was missing, appDirGuest
+  // threw, APPDIR_WSL went falsy, and every workspace/sync/diff path short-circuited to ERR_NO_BACKEND while the
+  // terminal and voice kept working — so the only symptom was that sync silently did nothing. Validate the pick,
+  // walk EVERY hit, and never pay a process spawn for the two paths that are never MSYS.
+  const WINR = read('runners/win.js');
+  none('gitBash accepts an unvalidated bash again (WSL\'s launcher wins `where` on every WSL-enabled box)',
+    /function isGitBash\(p\)/.test(WINR) && /if \(!isGitBash\(c\)\) return false;/.test(WINR) ? [] : ['no MSYS validation in gitBash']);
+  none('gitBash still takes only the FIRST `where bash.exe` hit (a real Git Bash further down never gets a look)',
+    /for \(const h of cp\.execFileSync\('where', \['bash\.exe'\][\s\S]{0,120}?if \(take\(h\)\)/.test(WINR) ? [] : ['where fallback does not iterate every hit']);
+  none('the WSL launcher is probed by execution again (measured 15s to say no)',
+    /system32\|sysnative\|windowsapps/i.test(WINR) ? [] : ['no location-based WSL rejection']);
+  none('the MSYS probe uses a LOGIN shell again (bash -lc measured 37s vs 5s for -c)',
+    /'-c', 'command -v cygpath'/.test(WINR) && !/'-lc', 'command -v cygpath'/.test(WINR) ? [] : ['probe uses a login shell']);
   none('openSession lost its in-flight dedupe (a double-click spawns a second claude on one transcript)',
     /if \(_openingSessions\.has\(id\)\) return;/.test(APP) && /_openingSessions\.add\(id\)/.test(APP) ? [] : ['no in-flight session guard']);
   none('the in-flight session guard is not released in finally (a strand makes the session un-openable)',

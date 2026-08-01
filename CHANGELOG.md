@@ -19,6 +19,14 @@ All notable changes to Claudible are documented here.
   no `gh` at all) nobody ever connected. It's now a one-click flow like the Claude step: an Install button
   when the CLI is missing, a **Connect GitHub** button that shows your one-time code right in the wizard and
   opens the GitHub approval page, and a ✓ that flips by itself once you approve. Still skippable, as always.
+- **Projects, sync and Repo Review no longer go silently dead when WSL is installed.** On native Windows,
+  Claudible finds the shell its scripts run on by asking Windows for `bash.exe` — and on any machine with
+  WSL enabled, the first answer is WSL's launcher, not Git Bash. Everything that needs a project then failed
+  at the first step and gave up quietly: shared sessions never appeared, no project could be created, and
+  Repo Review stayed empty, while the terminal and voice worked perfectly and nothing on screen said why.
+  Claudible now checks that what it found is really Git Bash, considers every candidate rather than the
+  first, and can locate it from Git itself for installs in unusual places (scoop, Chocolatey, portable).
+  Found on a collaborator's machine whose sync had never once worked.
 - **Hooks work on every Windows machine, not just some.** Claudible writes its telemetry, identity and
   status-line hooks as commands for Claude Code to run, and Claude Code hands them to whichever shell the
   machine uses. The path was quoted, which cmd.exe accepts and PowerShell rejects outright as a syntax
