@@ -2411,6 +2411,25 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// 75. S1 — AUTOMATIC DISCOVERY MUST ANNOUNCE ITSELF. The manual Check-for-invites button toasts; the boot timer
+//   and maybeDiscoverOnFocus did not, so an invited project appeared as an inert sidebar row and nothing said a
+//   single click sets it up (three sat unnoticed on a real machine). Q3 decided first-sighting-per-repo-per-run:
+//   a toast on every focus rediscovery would nag daily about an invite deliberately not accepted. The dedupe set
+//   is the whole mechanism, so pin it — and pin that an EMPTY added list stays quiet, since workspace:added also
+//   fires when discovery merely reconciled a rename.
+//   NOT pinned as changed: the clone-on-consent gate. It is deliberate and load-bearing for privacy.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const wa = (APP.match(/claudible\.onWorkspaceAdded\(\(list\) => \{[\s\S]*?\n\}\);/) || [''])[0];
+  none('automatic discovery went silent again (an invited project is an inert row nobody knows to click)',
+    /toast\(fresh\.length === 1/.test(wa) ? [] : ['onWorkspaceAdded does not toast a fresh invite']);
+  none('the per-run dedupe is gone (every window focus re-nags about the same invite)',
+    /_invitesAnnounced/.test(wa) && /new Set\(\)/.test(APP) ? [] : ['no first-sighting-per-repo set']);
+  none('an empty added list can toast again (discovery fires workspace:added on a rename-only reconcile)',
+    /if \(!fresh\.length\) return;/.test(wa) ? [] : ['no empty-list guard']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // 74. I4 — A REFUSAL MUST SAY WHICH GUARD FIRED. respawnPty has four deliberate refusal branches and every one
 //   of them reached the renderer as a bare `{ ok:false }`, so "I can't open any session but the active one"
 //   was indistinguishable from a dead click. The reason travels BESIDE the boolean (a module-level token read

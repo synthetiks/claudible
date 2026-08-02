@@ -5895,7 +5895,27 @@ if (claudible.onSessionReloaded) claudible.onSessionReloaded((s) => {
   toast('Session updated with synced changes');
   refreshSessions();
 });
-claudible.onWorkspaceAdded(() => { refreshWorkspaces(); });
+// S1 — DISCOVERY MUST NOT BE SILENT. Repos you were invited to are registered with needsClone and no path, and
+// hiding their sessions is correct by necessity (the folder does not exist until you consent to the clone — the
+// gate is deliberate, documented in SECURITY.md, and NOT what this changes). The gap was purely that nothing
+// SAID so: the manual "Check for invites" button toasts its result, but the two automatic paths — the 3s boot
+// timer and maybeDiscoverOnFocus — repainted the sidebar in silence, so a shared project appeared as an inert
+// row with no hint that one click sets it up. Q3: first sighting per repo, per app run. Toasting on every
+// focus-driven rediscovery would nag daily about an invite the user has deliberately not accepted; never
+// toasting is how three of them sat unnoticed. `workspace:added` also fires with an EMPTY list when discovery
+// only reconciled a rename, so the empty case must stay quiet.
+const _invitesAnnounced = new Set();
+claudible.onWorkspaceAdded((list) => {
+  refreshWorkspaces();
+  const fresh = (Array.isArray(list) ? list : []).filter((w) => w && w.id && !_invitesAnnounced.has(w.id));
+  if (!fresh.length) return;
+  fresh.forEach((w) => _invitesAnnounced.add(w.id));
+  try {
+    toast(fresh.length === 1
+      ? ('Shared project “' + (fresh[0].label || 'untitled') + '” found — click it to set it up')
+      : ('Found ' + fresh.length + ' shared projects — click one to set it up'));
+  } catch (e) {}
+});
 // S-root/I3 — the ONE message that would have saved hours. With no script backend every project, sync and Repo
 // Review call short-circuits, but the terminal keeps working (it runs through node-pty, never this shell), so
 // the app looks healthy and the failure reads as "GitHub is broken". Fires once, at boot, only when main
