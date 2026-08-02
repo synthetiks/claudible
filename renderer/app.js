@@ -253,6 +253,7 @@ function sync() {
 claudible.onPtyData((tabId, d) => {
   const t = tabs.get(tabId); if (!t) return;
   if (t.kind === 'live') return;   // invariant: a joined mirror renders ONLY live:data; local-pty bytes here mean the hijack guard failed upstream — drop them so two streams can't interleave into one xterm
+  if (t.bootOv) { t.bootOv = false; setPtyBootOverlay(t, ''); }   // claude has painted — drop the "Opening…" label. First byte, not a timer: it clears exactly when there is something to look at.
   const b = t.term.buffer.active;
   const wasAtBottom = b.viewportY >= b.baseY - 1;
   t.term.write(d, () => { if (tabId === activeTabId) { if (wasAtBottom) t.term.scrollToBottom(); updateScrollbar(); } });
@@ -3731,6 +3732,21 @@ function fitLiveTab(rec) {
   try { rec.term.resize(cols, rows); } catch {}
 }
 // Per-tab overlay for the non-streaming states (connecting / waiting / reconnecting / paused / declined / offline).
+// A LOCAL TAB WAITING ON ITS PTY GETS THE SAME COURTESY A JOINED ONE ALREADY HAD. Switching sessions clears the
+// terminal and then shows nothing until claude.exe has booted and painted its first frame — several hundred ms
+// of flat black that reads as "broken", not "loading". That wait is claude's own startup and is not ours to
+// shorten (measured: the app's avoidable overhead was ~65ms of it, removed in 3l), so the honest fix is to say
+// what is happening. `.live-ov` already does exactly this for joined mirror tabs ("Connecting to X's live
+// session…") — it was simply gated to rec.kind === 'live' and unreachable from a local switch.
+// Cleared by the first byte of pty data, so a fast session never flashes it.
+function setPtyBootOverlay(rec, label) {
+  if (!rec || !rec.container || rec.kind === 'live') return;   // joined tabs keep setLiveState's own messaging — never two overlays
+  let ov = rec.container.querySelector('.live-ov');
+  if (!label) { if (ov) ov.classList.remove('show'); return; }
+  if (!ov) { ov = document.createElement('div'); ov.className = 'live-ov'; rec.container.appendChild(ov); }
+  ov.textContent = label;
+  ov.classList.add('show');
+}
 function setLiveState(rec, state, detail) {
   if (state === 'offline' || state === 'reconnecting' || state === 'denied') rec.liveWasLost = true;   // R27: a fresh hello after any loss re-arms the voice room
   if (!rec || rec.kind !== 'live') return;
@@ -4792,6 +4808,7 @@ async function openSession(id, label, opts) {
   updateAdvertise();                                  // if I'm sharing in a repo workspace, advertise the now-active session
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
   t.term.reset(); t.altFrac = 0;                       // clear this tab's view (the new pty repaints it) + reset its scroll estimate
+  t.bootOv = true; setPtyBootOverlay(t, 'Opening ' + (t.label || 'session') + '…');   // the pane is blank from here until claude paints — say so rather than showing a dead black rectangle
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
   focusTermSoon(150);
 }
@@ -5758,7 +5775,8 @@ async function switchWorkspace(id, targetSession) {
   }
   if (failed) { rollBack(); focusTermSoon(150); return; }
   t.term.reset(); resetStats(t);                   // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
-  t.autoDraft = (sess === 'new');                  // opened blank ONLY because the resolver found no session (e.g. sessions not synced to disk yet) → onSyncChanged may reconcile it once they land; a real id is never an auto-draft. Set on SUCCESS only (a rolled-back switch never marks).
+  t.bootOv = true; setPtyBootOverlay(t, 'Opening ' + (t.label || t.curSessionLabel || 'session') + '…');   // same blank window as a session switch — a project switch respawns the pty too
+  t.autoDraft = (sess === 'new');                // opened blank ONLY because the resolver found no session (e.g. sessions not synced to disk yet) → onSyncChanged may reconcile it once they land; a real id is never an auto-draft. Set on SUCCESS only (a rolled-back switch never marks).
   refreshSessions();
   focusTermSoon(150);
 }
