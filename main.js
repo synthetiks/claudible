@@ -740,6 +740,11 @@ function _pushHistoryEntryToShare(wsId, entry) {
 // silently). So the reason travels beside the return value, not inside it: respawnPty writes the last refusal
 // here and session:open reads it immediately after. Same-tick read, single-threaded main — no interleaving.
 let _lastRespawnRefusal = '';
+// X/2d — which respawn currently OWNS a tab's pending spawn. A second respawn inside the kill window bumps the
+// token, so the earlier call's deferred spawn finds a token it no longer holds and does nothing: one tab can
+// never end up with two spawns in flight, which is the very failure this defers for.
+let _respawnSeq = 0;
+const _respawnPending = new Map();   // tabId -> token of the respawn allowed to spawn
 function respawnPty(tabId, session, opts) {
   _lastRespawnRefusal = '';
   if (liveTabs.has(tabId)) { _lastRespawnRefusal = 'live'; return false; }                    // a joined live tab is a client WebSocket, never a local pty — never spawn/kill a pty on its id (the hijack defense, mirrors setForegroundTab's guard)
@@ -807,15 +812,53 @@ function respawnPty(tabId, session, opts) {
   const old = rec && rec.proc;
   if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // a pending post-sync reload for the OLD generation dies with it (the new pty re-reads the transcript anyway)
   ptys.delete(tabId);                                       // drop the entry first → the old handlers' guard goes quiet
-  if (old) { try { old.kill(); } catch {} }
-  if (rec) _killSessionTree(rec.runtimeId);                 // the ConPTY kill never reaches the WSL side — reap the old generation's bash/claude tree
+  // X/2d — DO NOT SPAWN INTO A TREE THAT IS STILL DYING. On Windows the facade's kill fires `taskkill /T /F`
+  // DETACHED and returns immediately (runners/win.js), so the replacement used to be spawned in the SAME TICK,
+  // while the old claude.exe was still alive on the same transcript. Claude Code answers two claudes on one
+  // transcript with its "already running or being resumed" modal, which swallows every keystroke — including
+  // space. Both existing dedupe fixes (e10ff48, d42bd8d) guard only USER-initiated opens; the sync-triggered
+  // reload path (reloadChangedTabs → tryPendingReload → respawnPty) is not one, which is why enabling sync on a
+  // project with an open idle tab could break that tab's spacebar.
+  //
+  // ❗The signature stays SYNCHRONOUS true/false. Nine call sites use `!respawnPty(...)` as a guard, several in
+  // non-async contexts; if this returned a Promise then `!Promise` is always false and the busy guard, the
+  // one-session-one-claude dedupe (the d42bd8d fix) and the live-reroute refusal would ALL silently stop
+  // refusing — no error, no log, no failing test. So the wait happens INSIDE, after the decision is made: every
+  // guard above has already run by this point, and `true` keeps meaning "accepted", not "already finished".
+  //
+  // A later respawn for the same tab supersedes this one by token, so a second call inside the window can never
+  // schedule a second spawn — the exact double-spawn this fix exists to prevent. Capped at 1.5s so a taskkill
+  // that never reports (AV interference, a pid already gone) cannot strand the tab with no pty at all.
+  const spawnToken = ++_respawnSeq;
+  _respawnPending.set(tabId, spawnToken);
+  let spawned = false;
+  const doSpawn = () => {
+    if (spawned) return;
+    spawned = true;
+    if (_respawnPending.get(tabId) !== spawnToken) return;   // a newer respawn owns this tab now — it will spawn, we must not
+    _respawnPending.delete(tabId);
+    spawnPty(tabId, cols, rows, ws, session);
+    // syncShare re-derives pause from isShareable(mirrorWs()) — which would UNPAUSE the freeze above. Skip it there:
+    // the mirror stays frozen until the renderer's share:force-end drops the tunnel for real.
+    if (tabId === mirrorTabId() && !freezeMirror) syncShare();   // refresh the granted library (live flag) for guests
+  };
+  // The kill itself is unchanged and still happens BEFORE _killSessionTree, exactly as it always has — only
+  // WHEN THE REPLACEMENT SPAWNS moves. `killWaits` records whether this runner's kill took our reaped-callback;
+  // if it did not, we spawn same-tick and behave exactly as before. doSpawn is fully initialised by this point
+  // because win.js's catch path can invoke the callback SYNCHRONOUSLY when the taskkill spawn itself throws.
   // Each generation writes to its OWN runtime dir now (nextRuntimeId), so clearing the poller cursors is both
   // safe (the new file starts empty — nothing to replay) and required (stale offsets belong to the old gen's file).
+  // Moved ABOVE the kill: doSpawn can now run inside it (win.js settles the callback synchronously if the
+  // taskkill spawn throws), and clearing these AFTER a spawn would wipe the NEW generation's cursors.
   hookState.delete(tabId); lastStatusByTab.delete(tabId);
-  spawnPty(tabId, cols, rows, ws, session);
-  // syncShare re-derives pause from isShareable(mirrorWs()) — which would UNPAUSE the freeze above. Skip it there:
-  // the mirror stays frozen until the renderer's share:force-end drops the tunnel for real.
-  if (tabId === mirrorTabId() && !freezeMirror) syncShare();   // refresh the granted library (live flag) for guests
+  let killWaits = false;
+  if (old) {
+    if (runner.id === 'win') { try { old.kill(undefined, doSpawn); killWaits = true; } catch { killWaits = false; } }
+    if (!killWaits) { try { old.kill(); } catch {} }
+  }
+  if (rec) _killSessionTree(rec.runtimeId);                 // the ConPTY kill never reaches the WSL side — reap the old generation's bash/claude tree
+  if (killWaits) { const t = setTimeout(doSpawn, 1500); if (t.unref) t.unref(); }   // the callback normally wins this race; the cap only covers a taskkill that never reports
+  else doSpawn();                                           // wsl/posix, or no old pty at all — nothing detached to race, so keep the original same-tick behaviour
   return true;
 }
 // Make a tab the foreground/mirrored one WITHOUT killing it (the no-kill analogue of respawnPty). Points

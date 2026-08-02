@@ -545,7 +545,12 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
     resize(c, r) { dims.cols = c; dims.rows = r; try { inner.resize(c, r); } catch {} },
     pause() { try { inner.pause(); } catch {} },
     resume() { try { inner.resume(); } catch {} },
-    kill(signal) {
+    // `onReaped` (optional) fires once the taskkill child has finished walking the tree — or immediately if
+    // there was nothing to kill / the spawn threw. X/2d: a caller that is about to spawn a REPLACEMENT claude
+    // on the same transcript must not do so while the old tree is still dying, or Claude Code answers with its
+    // "already running or being resumed" modal, which swallows every keystroke including space. Omitting the
+    // callback keeps the exact fire-and-forget behaviour every other caller relies on.
+    kill(signal, onReaped) {
       killedByUs = true;
       // R22: ConPTY's kill can be single-process under the known Electron/node-pty failure — the
       // claude.exe → node child tree survived every close path and piled up across restarts (the
@@ -554,8 +559,14 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
       // Detached + unref'd so the quit sweep's reap outlives app.quit() — the same guarantee the WSL
       // reaper relies on. Captured BEFORE kill: inner.pid may be unreadable after the process dies.
       const pid = inner && inner.pid;
+      const settleOnce = (() => { let done = false; return () => { if (done || !onReaped) return; done = true; try { onReaped(); } catch {} }; })();
       try { inner.kill(signal); } catch {}
-      if (pid) { try { const c = cp.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, detached: true, stdio: 'ignore' }); c.unref(); } catch {} }
+      if (!pid) { settleOnce(); return; }                       // nothing to reap — never leave a waiting caller hanging on its timeout
+      try {
+        const c = cp.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, detached: true, stdio: 'ignore' });
+        c.once('exit', settleOnce); c.once('error', settleOnce);   // listen BEFORE unref — still detached, so the quit sweep's reap outlives app.quit() exactly as before
+        c.unref();
+      } catch { settleOnce(); }
     },
   };
   // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —

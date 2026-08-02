@@ -977,9 +977,14 @@ none('the wizard create-step gate ignores firstRun again (step 3 is dead code fo
 // ---------------------------------------------------------------------------------------------------------
 {
   const WIN = read('runners/win.js');
+  // kill() gained an OPTIONAL onReaped callback (X/2d — respawnPty must not spawn a replacement claude into a
+  // tree that is still dying), so the body is no longer one straight line. Every invariant this pin exists for
+  // is unchanged and still asserted: the pid is captured BEFORE inner.kill, taskkill walks the tree with /T /F
+  // on that pid, and the child stays detached + unref'd so the quit sweep's reap outlives app.quit().
   none('win.js facade.kill no longer tree-reaps (children pile up across restarts on win-native)',
-    /const pid = inner && inner\.pid;\s*\n\s*try \{ inner\.kill\(signal\); \} catch \{\}\s*\n\s*if \(pid\) \{ try \{ const c = cp\.spawn\('taskkill', \['\/PID', String\(pid\), '\/T', '\/F'\]/.test(WIN)
-    && /detached: true, stdio: 'ignore'/.test(WIN) ? [] : ['taskkill /T /F tree-reap missing from facade.kill']);
+    /const pid = inner && inner\.pid;[\s\S]{0,400}?try \{ inner\.kill\(signal\); \} catch \{\}[\s\S]{0,240}?cp\.spawn\('taskkill', \['\/PID', String\(pid\), '\/T', '\/F'\]/.test(WIN)
+    && /detached: true, stdio: 'ignore'/.test(WIN) && /c\.unref\(\);/.test(WIN)
+      ? [] : ['taskkill /T /F tree-reap missing from facade.kill']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -2531,6 +2536,43 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('provision-win.ps1 quietly grew a voice case with no implementation',
     /ValidateSet\('node', 'git', 'claude', 'uv', 'cloudflared', 'gh'\)/.test(read('setup/provision-win.ps1'))
       ? [] : ['the ValidateSet changed — voice must not be accepted without a real switch case']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 79. X/2d — respawnPty STAYS SYNCHRONOUS. This is the #1 entry on the patch plan's risk register, and it is a
+//   silent failure, which is why it gets a pin rather than a code review. On Windows the facade's kill fires
+//   `taskkill /T /F` detached and returns immediately, so the replacement claude used to spawn in the SAME TICK
+//   as the old one died — two claudes on one transcript, and Claude Code's "already running or being resumed"
+//   modal swallows every keystroke including space. The sync-triggered reload path reaches this, and neither
+//   e10ff48 nor d42bd8d covers it: both guard USER-initiated opens only.
+//
+//   The obvious fix — make respawnPty async and await the kill — is a TRAP. Nine call sites use
+//   `!respawnPty(...)` as a guard, several in plain synchronous contexts (a share-server callback, session:open,
+//   claude:refresh-session, openWorkspaceInTab). `!Promise` is ALWAYS false, so miss one and the busy guard, the
+//   one-session-one-claude dedupe (the d42bd8d fix) and the live-reroute refusal all quietly stop refusing —
+//   no error, no log, no failing test, and the bug this fixes comes back wearing a different hat.
+//   So: the wait lives INSIDE, after every guard has run and after `true` has been decided.
+//   If a future session proposes making this async, this pin is the answer.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const rp = (MAIN.match(/\nfunction respawnPty\(tabId, session, opts\) \{[\s\S]*?\n\}/) || [''])[0];
+  none('respawnPty stopped being synchronous — `!respawnPty(...)` becomes `!Promise` (always false) at nine call sites',
+    [/\nasync function respawnPty\(/.test(MAIN) ? 'declared async' : '',
+     /\bawait\b/.test(rp) ? 'awaits inside the body' : '',
+     /return new Promise/.test(rp) ? 'returns a Promise' : '',
+     rp ? '' : 'respawnPty could not be located at all'].filter(Boolean));
+  none('every respawnPty exit is still a literal boolean',
+    (rp.match(/^ {2}return .*/gm) || []).filter((r) => !/^ {2}return (true|false);$/.test(r)));
+  none('the Windows spawn is no longer deferred until the old tree is reaped (the two-claude window is back)',
+    /old\.kill\(undefined, doSpawn\); killWaits = true;/.test(rp) && /setTimeout\(doSpawn, 1500\)/.test(rp)
+      ? [] : ['respawnPty does not wait for the taskkill callback on win']);
+  none('the supersede token is gone (a second respawn inside the window can double-spawn again)',
+    /_respawnPending\.get\(tabId\) !== spawnToken/.test(rp) ? [] : ['no token check before the deferred spawn']);
+  none('win.js kill stopped reporting when the tree is reaped',
+    /kill\(signal, onReaped\)/.test(read('runners/win.js')) && /c\.once\('exit', settleOnce\); c\.once\('error', settleOnce\);/.test(read('runners/win.js'))
+      ? [] : ['the facade kill lost its optional reaped callback']);
+  none('…and listening for the reap must not have cost us the detach (the quit sweep outlives app.quit())',
+    /c\.unref\(\);/.test(read('runners/win.js')) ? [] : ['taskkill child is no longer unref\'d']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
