@@ -4512,7 +4512,11 @@ function renderLiveTabRow(rec) {
   row.dataset.tab = rec.tabId; row.setAttribute('role', 'button'); row.tabIndex = 0;
   const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = rec.label || 'New session';
   const m = document.createElement('div'); m.className = 'sess-meta';
-  m.innerHTML = '<span class="sess-draftdot"></span>' + (rec.busy ? 'working…' : 'draft · unsaved');
+  // The amber dot moved to a ::before on .sess-prev (see index.html) so it LEADS the row like every other
+  // status light. Two words also said one thing: "draft" and "unsaved" are the same claim, and the meta line
+  // is the narrowest text in the sidebar — the rename field measured 9.8px of usable width against the old
+  // string. `draft` alone carries it. textContent, not innerHTML: there is no markup left to build.
+  m.textContent = rec.busy ? 'working…' : 'draft';
   row.appendChild(p); row.appendChild(m);
   const mb = document.createElement('button');
   mb.className = 'sess-menu-btn'; mb.title = 'Session options'; mb.setAttribute('aria-label', 'Session options');
@@ -4564,7 +4568,7 @@ function markTabBusy(tabId, busy) {
     const row = tabRow(rec);
     if (row && row.classList.contains('sess-draft')) {   // the draft row's meta line is per-tab text, not a flair
       const meta = row.querySelector('.sess-meta');
-      if (meta) meta.innerHTML = '<span class="sess-draftdot"></span>' + (busy ? 'working…' : 'draft · unsaved');
+      if (meta) meta.textContent = busy ? 'working…' : 'draft';   // must mirror renderLiveTabRow exactly — this is the SECOND render path, and it is how the dot/text drifted apart before
     }
   }
   syncRowFlairs();   // authority: recomputes EVERY row, so a rail can't be orphaned by a closed/re-pointed tab

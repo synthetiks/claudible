@@ -488,13 +488,36 @@ none('renderer: orphanTab is never rendered',
     /\.sess\.busy:not\(\.sess-draft\) \.sess-prev::before\{[^}]*animation:sess-busy-blink 10s/.test(flat) ? [] : ['the busy dot has no sess-busy-blink 10s animation']);
   none('…and sess-busy-blink must hold steady and blink, not fade across the whole cycle',
     /@keyframes sess-busy-blink\{0%,100%\{opacity:1\}[\d.]+%\{opacity:\.\d+\}/.test(styleBlk) ? [] : ['sess-busy-blink is missing or is not a short-duty blink']);
-  // A DRAFT row builds its OWN .sess-draftdot span and the rule above already pulses it when .busy is set. If the
-  // busy dot stops excluding draft rows, a busy draft wears TWO dots — a red one and an amber one, side by side.
-  // That shipped for one commit; it must not ship twice.
-  none('the busy dot no longer excludes draft rows (a busy draft would wear two dots)',
+  // A DRAFT row owns this SAME ::before now (its amber dot moved out of the meta line to join the left-edge
+  // convention). So the exclusion matters more than it used to, for a sharper reason: without it BOTH rules
+  // target one pseudo-element on a busy draft and the later declaration simply repaints the amber dot --sync
+  // blue — the row loses the amber that says "not saved yet" exactly while it is working. (Before the move the
+  // same guard prevented a different symptom: two dots side by side, red ::before beside the meta's amber span.
+  // That shipped for one commit; it must not ship twice, in either form.)
+  none('the busy dot no longer excludes draft rows (a busy draft would lose its amber)',
     /\.sess\.busy(?!:not\(\.sess-draft\))[^{,]*\.sess-prev::before/.test(flat) ? ['.sess.busy .sess-prev::before is not :not(.sess-draft)-guarded'] : []);
-  none('…and draft rows must still pulse their OWN dot while busy (the indicator they already had)',
-    /\.sess\.busy \.sess-draftdot\{[^}]*animation:ws-sync-pulse/.test(flat.replace(/\.sess\.busy \.sess-livedot,/, '.sess.busy ')) ? [] : ['.sess.busy .sess-draftdot lost its pulse']);
+  none('a draft row lost its leading amber dot (the only at-rest signal a brand-new session has)',
+    /\.sess\.sess-draft \.sess-prev::before\{[^}]*background:var\(--warn\)/.test(flat)
+      ? [] : ['no amber ::before on .sess-draft .sess-prev']);
+  none('…and draft rows must still pulse that dot while busy (the indicator they already had)',
+    /\.sess\.sess-draft\.busy \.sess-prev::before\{[^}]*animation:ws-sync-pulse/.test(flat)
+      ? [] : ['the draft dot lost its pulse']);
+  // The dot is markup-free now, so the old span must not creep back into either render path — but scope this to
+  // the FUNCTIONS and to real CSS. The prose around both deliberately names the old span and the old label to
+  // explain what moved and why, and a whole-file grep matched that history and failed on it. (Third time this
+  // file's own opening warning about comment-blind matching has proven itself, twice while writing new pins.)
+  const draftRender = (APP.match(/function renderLiveTabRow\(rec\) \{[\s\S]*?\n\}/) || [''])[0]
+    + (APP.match(/function markTabBusy\(tabId, busy\) \{[\s\S]*?\n\}/) || [''])[0];
+  const cssOnly = HTML.replace(/\/\*[\s\S]*?\*\//g, '');
+  none('the draft dot went back into the meta line as a span',
+    [/sess-draftdot/.test(draftRender) ? 'a draft render path still builds .sess-draftdot' : '',
+     /sess-draftdot/.test(cssOnly) ? 'index.html still styles .sess-draftdot' : ''].filter(Boolean));
+  // Two words, one claim. "unsaved" restated "draft" in the narrowest text in the sidebar.
+  none('the draft label says the same thing twice again',
+    /draft · unsaved/.test(draftRender) ? ['"draft · unsaved" is back in a render path'] : []);
+  none('the two draft render paths disagree (they drifted apart before)',
+    (APP.match(/\? 'working…' : 'draft'/g) || []).length === 2
+      ? [] : ['expected exactly 2 identical draft-label render sites (renderLiveTabRow + markTabBusy)']);
   // The title is NOT a busy channel. Red-on-title is the regression this replaced; it must not come back.
   none('mid-turn repaints the session TITLE again (the loud look CrazyDev rejected)',
     /\.sess\.busy[^{]*\.sess-prev\{[^}]*color:var\(--live\)/.test(flat) ? ['.sess.busy .sess-prev sets a red title'] : []);

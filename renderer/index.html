@@ -365,7 +365,7 @@
        rail went first (it read as a stale selection); then the green live rail went the same way: rail + wash is
        structurally the deprecated selected look, so a genuinely-live row "wore the old bug" whenever it wasn't
        selected — reported ten times as a styling regression. One visual grammar now: soft tinted boxes.
-       State is carried by pills/text/dots: ● LIVE pill (green tint), 'draft · unsaved' (amber dot+text),
+       State is carried by pills/text/dots: ● LIVE pill (green tint), a leading amber dot + 'draft',
        red title while a turn runs, green title pulse for finished-while-away. Guarded by contract check 15:
        a coloured border-left on a .sess rule fails the build. */
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
@@ -711,11 +711,18 @@
        word/blue of anything "live": LIVE is the collab-share state (green, .sess-live-row family) and this
        indicator masquerading as "live" made brand-new sessions look shared for their first turn */
     .sess.sess-draft .sess-meta{color:var(--warn)}
+    /* A DRAFT'S DOT LEADS THE ROW, like every other status light (see 70. in contract.test.js, and the busy
+       rule below: "a status light belongs at the left edge, not buried in the right cluster"). It used to be a
+       .sess-draftdot span written into the META line, so the only at-rest signal a brand-new session carries
+       sat on the SECOND line while every other row's light sat left of the title — the one row type that never
+       joined the convention. Same 6px geometry as the busy dot, amber instead of --sync. The span and its
+       class are gone with the markup that built them. */
+    .sess.sess-draft .sess-prev::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;
+      margin-right:6px;vertical-align:middle;background:var(--warn);box-shadow:0 0 6px -1px var(--warn)}
+    .sess.sess-draft.busy .sess-prev::before{animation:ws-sync-pulse 1s ease-in-out infinite}   /* the pulse the .sess-draftdot span had — moved with the dot, not dropped */
     .sess-livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#6aa6e0;
       margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px #6aa6e0}
-    .sess-draftdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);
-      margin-right:6px;vertical-align:middle;box-shadow:0 0 6px -1px var(--warn)}
-    .sess.busy .sess-livedot,.sess.busy .sess-draftdot{animation:ws-sync-pulse 1s ease-in-out infinite}
+    .sess.busy .sess-livedot{animation:ws-sync-pulse 1s ease-in-out infinite}
     /* DONE-WHILE-AWAY: a background session finished its turn. Green (success), pulsing until you open it —
        distinct from busy (red/live accent) and from draft (amber). Cleared on activation, so it never nags. */
     .sess.sess-done{animation:sess-done-pulse 1.6s ease-in-out infinite}
@@ -727,10 +734,13 @@
        rows. So: the same dot, in the busy red, for the rows that had no busy indicator at all. ::before on the
        meta line, which is already a flex container, so it needs no markup change on any render path.
        Red stays reserved for busy/error (the standing rule); the title stays neutral.
-       :not(.sess-draft) is load-bearing. A DRAFT row already builds its own dot — renderLiveTabRow writes a
-       .sess-draftdot span into the meta line, and the rule above pulses it whenever .busy is set — so without the
-       exclusion a busy draft row wore BOTH, a red ::before dot beside its own amber one. Draft rows keep the
-       amber-pulse + "working…" they already had. They are also the only overlap that can occur: syncRowFlairs
+       :not(.sess-draft) is STILL load-bearing, for a sharper reason than before. A draft row now owns this very
+       same ::before (the amber rule above), so without the exclusion both declarations would target ONE
+       pseudo-element on a busy draft and the later one would simply repaint the amber dot --sync blue — the row
+       would lose the amber it uses to say "not saved yet" at exactly the moment it is working. (Before the dot
+       moved, the same exclusion prevented a different symptom: two dots side by side, a red ::before beside the
+       meta line's amber span.) Draft rows keep amber + their own pulse + "working…". They are also the only
+       overlap that can occur: syncRowFlairs
        toggles .busy on .sess[data-id] and .sess[data-tab] alone, so a peer-live/joined row (which owns a
        .sess-livedot) never receives .busy and cannot double up either. */
     /* ws-sync-pulse is a 50%-duty breathe; stretched to 10s it would read as slow DIMMING, not a flash. This
@@ -808,8 +818,10 @@
     /* …and the meta cluster must step aside while editing. Pre-flex it was position:absolute (zero layout
        width), so whatever it showed during a rename was cosmetic. Now it's a real flex sibling that TAKES
        width: on a saved row :focus-within reveals the timestamp (the input auto-focuses, so this is always
-       true while renaming) and on a draft row "draft · unsaved" is an ungated text node. Measured before this
-       rule: a draft row's rename field had 9.8px of usable text area. .sess-menu-btn/.sess-flair/.sess-live-ind
+       true while renaming) and on a draft row the "draft" label is an ungated text node. Measured before this
+       rule, against the longer "draft · unsaved" it then said: a draft row's rename field had 9.8px of usable
+       text area. The label is one word now, but this rule still earns its place — hiding beats narrowing, and
+       the timestamp case is unchanged. .sess-menu-btn/.sess-flair/.sess-live-ind
        already had exactly this guard — .sess-meta was the one that was missed. */
     .sess.renaming .sess-meta{display:none}
     .sess-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
