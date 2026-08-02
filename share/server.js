@@ -714,6 +714,12 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
 
   function stop() {
     if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    // Dismiss any open "X wants to join" prompt, for the reason regenerateLink already documents: the ws
+    // 'close' handler cannot do it, because by the time it fires `pending` is cleared and it returns early.
+    // Without this, stopping the share while a guest is waiting left the host's approve modal on screen —
+    // and clicking Approve then did nothing visible (the entry is gone, decideApproval returns ok:false, the
+    // renderer ignores it), so the host was left believing they had just let someone in.
+    for (const [id, p] of Array.from(pending.entries())) { try { p.finish && p.finish(false); } catch {} try { onApprovalCancel && onApprovalCancel(id); } catch {} }
     for (const [, p] of pending) { try { p.ws.close(); } catch {} }
     pending.clear();
     for (const ws of clients) { try { ws.close(); } catch {} }

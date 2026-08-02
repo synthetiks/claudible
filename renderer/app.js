@@ -1,5 +1,15 @@
 // Claudible — renderer controller.
 'use strict';
+// DECLARED AT THE TOP ON PURPOSE — do not move it back down beside loadPrefs(). It used to live at the prefs
+// section (~line 3000), but two top-level IIFEs call loadPrefs() DURING module evaluation, hundreds of lines
+// earlier: the theme selector and the collab-name field. `const` is not hoisted-and-initialised, so reading
+// PREFS_KEY from loadPrefs() before this line was a temporal-dead-zone ReferenceError — swallowed by the bare
+// `catch {}` around the localStorage read, leaving `ls = {}` and MEMOIZING that empty result for the process.
+// Two things silently died as a result: the one-time localStorage→settings.json migration (gated on
+// `Object.keys(ls).length`, always 0) and localStorage as a fallback when settings.json is missing. savePrefs()
+// still wrote to localStorage — it runs after evaluation — so the read that would have rescued the data was
+// dead while the write that overwrote it worked. Same class as the usage-gauge TDZ noted around line 750.
+const PREFS_KEY = 'claudible_prefs';
 const $ = (id) => document.getElementById(id);
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
 const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
@@ -3002,7 +3012,9 @@ chatReset();
 // pref survive restarts and hard process kills — localStorage alone loses unflushed writes on a force-kill. An
 // in-memory cache keeps the synchronous get/set API every caller relies on; localStorage stays as a legacy mirror
 // + one-time migration source (so an older install's username carries over to the durable file on first run).
-const PREFS_KEY = 'claudible_prefs';
+// PREFS_KEY is declared at the TOP of this file, not here — see the note there. Two top-level IIFEs call
+// loadPrefs() during module evaluation, long before this point, and a `const` at this line put the read
+// inside its own temporal dead zone.
 function loadPrefs() {
   if (!loadPrefs._cache) {
     let disk = {}, ls = {};

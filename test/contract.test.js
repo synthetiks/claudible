@@ -2748,5 +2748,53 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /ir\.error === 'already'/.test(APP) ? [] : ['the renderer does not handle the typed already-exists result']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 84. THE 2026-08-02 BUG SWEEP. Five defects found by an audit of the whole tree, each verified before fixing.
+//   They share no root cause, but four of them share a SHAPE: a value that is correct at one point in time,
+//   read at another point where it is no longer correct. Worth pinning individually — none had a test.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) PREFS_KEY was `const` beside loadPrefs (~line 3000), but two top-level IIFEs call loadPrefs DURING
+  //     module evaluation. TDZ ReferenceError, swallowed by the bare catch around the localStorage read, so
+  //     `ls` stayed {} and was MEMOIZED — killing both the one-time migration and the settings.json fallback,
+  //     while savePrefs (which runs later, so it works) kept overwriting the mirror.
+  none('PREFS_KEY moved back below its callers (its own read re-enters the temporal dead zone)',
+    /^'use strict';\n(?:\/\/[^\n]*\n)*const PREFS_KEY = 'claudible_prefs';/m.test(APP)
+      ? [] : ['PREFS_KEY is no longer declared at the top of renderer/app.js, before any loadPrefs() caller']);
+  // (b) settings:set REPLACES settings.json with the renderer's cache, which is seeded once at boot. Anything
+  //     main wrote afterwards died on the next pref write — and the only such key, depEnv, is what makes a
+  //     no-UAC portable Git/Node survive the restart it asks for.
+  none('a renderer pref write can erase main-owned settings keys again (depEnv → "I installed Git and it came back missing")',
+    /if \(prev\.depEnv && !next\.depEnv\) next\.depEnv = prev\.depEnv;/.test(MAIN)
+      ? [] : ['settings:set no longer carries depEnv forward']);
+  // (c) .claude/settings.json is WORKSPACE-shared but bakes PER-GENERATION hook paths. wsl/session.sh exports
+  //     the paths so each claude routes by its own env; win.js set only CLAUDIBLE_TAB, so a second tab on the
+  //     same project silently stole the first tab's telemetry.
+  none('the win runner stopped routing per-tab hook output by env (two tabs on one project cross-write)',
+    [/env\.CLAUDIBLE_STATUS = rtPaths\.statusPath;/.test(read('runners/win.js')) ? '' : 'CLAUDIBLE_STATUS not set',
+     /env\.CLAUDIBLE_HOOKS = rtPaths\.hooksPath;/.test(read('runners/win.js')) ? '' : 'CLAUDIBLE_HOOKS not set',
+     /env\.CLAUDIBLE_CONTEXT = rtPaths\.contextPath;/.test(read('runners/win.js')) ? '' : 'CLAUDIBLE_CONTEXT not set'].filter(Boolean));
+  none('…and the hooks must still prefer the env over the baked argv, or setting it achieves nothing',
+    [/process\.env\.CLAUDIBLE_HOOKS \|\| process\.argv\[2\]/.test(read('hooks/hook.js')) ? '' : 'hook.js no longer env-first',
+     /process\.env\.CLAUDIBLE_STATUS \|\| process\.argv\[2\]/.test(read('hooks/statusline.js')) ? '' : 'statusline.js no longer env-first'].filter(Boolean));
+  // (d) respawnPty defers the spawn on win having already dropped the ptys entry; tab:close inside that window
+  //     killed nothing and doSpawn then spawned a pty for a tab that no longer exists — invisible, polled
+  //     forever, and able to become fgTabId.
+  none('closing a tab mid-respawn can strand an invisible pty again',
+    /_respawnPending\.delete\(tabId\);\s*\n\s*ptys\.delete\(tabId\); hookState\.delete\(tabId\);/.test(MAIN)
+      ? [] : ['tab:close does not cancel a pending deferred respawn']);
+  // (e) stop() cleared `pending` without firing onApprovalCancel — the ws 'close' handler cannot, because by
+  //     then the entry is gone. regenerateLink already got this right; stop() did not.
+  none('stopping a share strands the host’s "X wants to join" modal',
+    /onApprovalCancel && onApprovalCancel\(id\); \} catch \{\} \}\s*\n\s*for \(const \[, p\] of pending\) \{ try \{ p\.ws\.close/.test(read('share/server.js'))
+      ? [] : ['stop() clears pending without cancelling the host prompt']);
+  // (f) workspace:import sanitized the repo NAME and then cloned the sanitized result — `vercel/next.js`
+  //     fetched `vercel/nextjs`, a different repository. Refusing is the honest behaviour until the folder
+  //     name and the clone target are carried separately end to end.
+  none('workspace:import silently mangles a repo name into a different repo again',
+    /const repoName = m\[2\];[\s\S]{0,200}?if \(!\/\^\[A-Za-z0-9-\]\+\$\/\.test\(repoName\)\)/.test(MAIN)
+      ? [] : ['import no longer refuses names it cannot represent — it may be sanitizing them again']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

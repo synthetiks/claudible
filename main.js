@@ -229,7 +229,15 @@ const SETTINGS_FILE = path.join(PERSIST, 'settings.json');
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; } catch { return {}; } }
 function writeSettings(obj) { fs.mkdirSync(PERSIST, { recursive: true }); atomicWriteJson(fs, SETTINGS_FILE, obj); }
 ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
-ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); writeSettings(obj && typeof obj === 'object' ? obj : {}); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
+// MAIN-OWNED KEYS SURVIVE A RENDERER WRITE. This handler REPLACES settings.json with the object the renderer
+// sends, and the renderer's savePrefs() sends `loadPrefs._cache` — seeded ONCE from the boot-time settingsInitial
+// snapshot and never re-hydrated. So anything main writes to settings.json AFTER the window loaded was destroyed
+// by the very next pref write. There is exactly one such key and it is load-bearing: `depEnv`, written by
+// preflight:install when the no-UAC provisioner falls back to a portable Node/Git/cloudflared, and re-applied by
+// applyPersistedDepEnv below BEFORE the git-bash resolve. Losing it produced the worst possible shape of bug —
+// "I installed Git, it worked, and after the restart the System check says it's missing again", with the
+// backend silently dead and nothing anywhere explaining why. Carry it forward instead.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); const next = (obj && typeof obj === 'object') ? Object.assign({}, obj) : {}; if (prev.depEnv && !next.depEnv) next.depEnv = prev.depEnv; writeSettings(next); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -956,6 +964,14 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   const rec = ptys.get(tabId);
   setGenBusy(tabId, false);
   if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // parity with the other per-tab timers — no orphaned post-sync reload timer
+  // CANCEL ANY PENDING RESPAWN FOR THIS TAB. On the win runner respawnPty defers the replacement spawn until
+  // taskkill reaps the old tree (or a 1.5s cap), having ALREADY removed the ptys entry. Close the tab inside
+  // that window — trivially reachable, since a sessions-sync reload respawns in the background where the user
+  // cannot see it — and this handler found nothing to kill, then doSpawn fired anyway and spawned a pty for a
+  // tab the renderer had already discarded: a live claude.exe with no UI, polled forever, never reaped until
+  // quit. Worse, spawnPty's `if (!fgTabId) fgTabId = tabId` could make that phantom the FOREGROUND tab, which
+  // is what a later share pins. Dropping the token makes doSpawn's own supersede check short-circuit it.
+  _respawnPending.delete(tabId);
   ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId); tabIntent.delete(tabId);
   if (rec) { try { rec.proc.kill(); } catch {} }
   if (rec) _killSessionTree(rec.runtimeId);                            // reap the WSL-side tree too (ConPTY kill stops at the Windows boundary)
@@ -2342,8 +2358,21 @@ ipcMain.handle('workspace:import', async (e, payload) => {
     .match(/^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/);
   if (!m) return { ok: false, error: 'Use owner/repo, or paste the repository URL' };
   const owner = m[1];
-  const slug = m[2].replace(/[^A-Za-z0-9-]/g, '');   // the folder + every transcript key off this; match clone-workspace.sh's own charset
-  if (!slug) return { ok: false, error: 'bad repository name' };
+  // REFUSE rather than silently clone something else. This used to sanitize the repo name down to
+  // [A-Za-z0-9-] and then use the RESULT as the clone target, so `vercel/next.js` cloned `vercel/nextjs`
+  // and `myorg/my_repo` cloned `myorg/myrepo` — a different repository, or none, reported as
+  // "clone failed (check access to …)" naming a repo the user never typed. Worse, if that other repo
+  // happened to exist and be theirs, it was cloned and registered as the one they asked for.
+  // The charset is not arbitrary: the slug names the on-disk folder AND keys every transcript path, and
+  // clone-workspace.sh applies the same [A-Za-z0-9-] guard to its own argument. Widening it safely means
+  // carrying the folder name and the clone target as SEPARATE values end to end (main → ensureClone →
+  // clone-workspace.sh), which is a real change with a shell-quoting surface — not something to slip in
+  // untested. Until then this says so plainly instead of guessing.
+  const repoName = m[2];
+  if (!/^[A-Za-z0-9-]+$/.test(repoName)) {
+    return { ok: false, error: 'Claudible can’t import repositories whose name contains “.” or “_” yet — clone it manually, then use “Add a folder I already have”.' };
+  }
+  const slug = repoName;
   const wid = `repo-${slug}`;
   const existing = registry.workspaces.find((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner));
   if (existing) return { ok: false, error: 'already', id: existing.id };   // typed, so the renderer can just switch to it rather than dead-ending

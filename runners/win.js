@@ -500,7 +500,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
   const sdir = sessionDir(ws, home);
-  installHooks(sdir, runtimeId);
+  const rtPaths = installHooks(sdir, runtimeId);   // keep the per-tab paths — they go into the child env below
   // pick resume target from claude's own projects store
   let jsonl = [], foreign = new Set();
   try {
@@ -514,6 +514,22 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const launch = pickResumeTarget(session, jsonl, foreign);
   const claude = whichClaude();
   const env = spawnEnv(runtimeId, undefined, modelStrategy);
+  // ROUTE EACH TAB'S HOOK OUTPUT BY ENV, NOT BY THE BAKED ARGV. `.claude/settings.json` is WORKSPACE-shared —
+  // installHooks says so itself — but the paths it bakes into those hook commands are PER-GENERATION. So two
+  // tabs on one project raced it: the second tab's spawn rewrote the shared settings.json, and the first tab's
+  // still-running claude.exe then wrote its hooks/status/context into the SECOND tab's runtime dir. The first
+  // tab's telemetry, agent list and busy state froze forever while the second double-counted, and the context
+  // hook fed the wrong tab's identity block into the prompt. Silent, and the exact shape win.js's own header
+  // already documents for a different cause ("hooks.ndjson sat at 0 bytes and status.json at {}").
+  // wsl/session.sh:25 solved this long ago by EXPORTING the three paths, and all three hooks already read
+  // `process.env.CLAUDIBLE_* || process.argv[2]` — env first, baked path as fallback. The win runner simply
+  // never set them: spawnEnv passed CLAUDIBLE_TAB alone. Setting them here makes each claude.exe route by its
+  // OWN environment, so a shared settings.json cannot misdirect it, and the argv fallback stays as a backstop.
+  if (rtPaths) {
+    env.CLAUDIBLE_STATUS = rtPaths.statusPath;
+    env.CLAUDIBLE_HOOKS = rtPaths.hooksPath;
+    env.CLAUDIBLE_CONTEXT = rtPaths.contextPath;
+  }
   const dims = { cols: cols || 120, rows: rows || 32 };
   // node-pty + a .cmd shim: spawn via cmd /c so the shim resolves (the known ConPTY .cmd quirk). Same for
   // both the initial launch and a fallback respawn (the claude binary/shim shape never changes mid-tab).
