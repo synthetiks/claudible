@@ -1296,6 +1296,14 @@
       box-shadow:0 20px 60px rgba(0,0,0,.6)}
     .approve .box h3{margin:0 0 9px;font-size:var(--fs-md);letter-spacing:.03em;color:var(--ink)}
     .approve .box p{margin:0 0 17px;font-size:var(--fs-sm);line-height:1.55;color:var(--ink-dim)}
+    /* The New-project modal alone runs wider: it is the only .approve box carrying FOUR radio tiles, each with
+       a title and a sentence, and at the shared 344px their text wrapped to three lines and the dialog barely
+       fit its area. Scoped to #ws-modal on purpose — `.approve .box` is shared by eight dialogs (approve-guest,
+       name, invite, sync, marketplace, wizard, claude-connect), and widening the shared rule would move all of
+       them to fix one. The tighter paragraph/tile spacing below buys back the height the fourth tile cost. */
+    #ws-modal .box{width:413px}
+    #ws-modal .box p{margin-bottom:12px}
+    #ws-modal .choice-row{gap:7px;margin:4px 0 11px}
     .approve .row{display:flex;gap:10px}
     .approve .row button{margin:0}
     /* view-only toggle + security warning, colocated inside the share dialog. Left-aligned in the otherwise
@@ -1723,7 +1731,10 @@
   <div class="approve" id="ws-modal">
     <div class="box">
       <h3>New project</h3>
-      <p>A project points Claude at a folder — it works inside those files, and you review &amp; revert its changes there. Start it private, start it shared, or bring your own folder — a private project can always be synced or shared later from its ▾ menu.</p>
+      <!-- Kept short deliberately: the four tiles below already explain themselves, so the old third clause
+           ("or bring your own folder") was restating the tile directly under it. This says only what the tiles
+           cannot — what a project IS, and that the private/shared choice is reversible. -->
+      <p>A project points Claude at a folder — it works there, you review and revert. Start private or shared; change it later from the ▾ menu.</p>
       <div class="choice-row">
         <div class="choice sel" id="ch-local" data-kind="local" role="radio" tabindex="0" aria-checked="true">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
