@@ -5884,6 +5884,19 @@ if (claudible.onSessionReloaded) claudible.onSessionReloaded((s) => {
   refreshSessions();
 });
 claudible.onWorkspaceAdded(() => { refreshWorkspaces(); });
+// S-root/I3 — the ONE message that would have saved hours. With no script backend every project, sync and Repo
+// Review call short-circuits, but the terminal keeps working (it runs through node-pty, never this shell), so
+// the app looks healthy and the failure reads as "GitHub is broken". Fires once, at boot, only when main
+// actually found no backend. Delayed so it lands after the first paint rather than under it.
+if (claudible.onBackendUnavailable) claudible.onBackendUnavailable((s) => {
+  setTimeout(() => {
+    try {
+      toast((s && s.runner === 'wsl')
+        ? 'WSL isn’t available — projects, sync and Repo Review can’t run. The terminal still works.'
+        : 'Git Bash isn’t available — projects, sync and Repo Review can’t run. Install Git for Windows (System check), then restart.');
+    } catch (e) {}
+  }, 2200);
+});
 $('invite-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); doInvite(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeInviteModal(); }

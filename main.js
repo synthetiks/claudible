@@ -253,6 +253,11 @@ const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; 
 // is not available' — because humanError() passes any sentence through verbatim, so whichever code path you hit
 // decided what you read. Names the real backend, matching detectDeps()'s `unavailable: 'wsl' | 'shell'`.
 const ERR_NO_BACKEND = runner.id === 'wsl' ? 'WSL is not available' : 'the shell backend is not available';
+// I3 — the shape of a terminal prompt that is WAITING ON INPUT. Used only to log a prompt we did not
+// auto-answer (see proc.onData below), never to answer one: guessing at claude.exe's wording is how the
+// trust-folder regex became the only coverage in the first place. Deliberately narrow — a false positive costs
+// one log line, but a noisy pattern would bury the capture this exists to produce.
+const PROMPT_SHAPE = /\((?:y\/n|yes\/no)\)|\by\/n\b|press\s+enter\s+to\s+continue|do\s+you\s+(?:want|trust|wish)\b|❯\s*\d?\s*(?:yes|no|allow|deny)\b/i;
 // Guest-side runtime root (host RT translated for the execution space: wslpath on WSL, cygpath on win, identity on
 // Posix). diff-apply hands bash a temp path UNDER runtime/, so it must track RT wherever RT now lives (not assume
 // it sits beside the app dir). Empty if translation is unavailable — diff then fails safe via diffAction's guard
@@ -319,8 +324,17 @@ function loadRegistry() {
 // whether the write actually landed so settings-like callers (permissionMode:set) can tell the user
 // instead of reporting success for a change that will vanish on relaunch.
 function saveRegistry() {
+  // It is SYNCHRONOUS, on the main thread, and every settings write goes through it — so a slow disk (a synced
+  // folder, an AV scanner mid-scan) stalls pty I/O and every poller with it, and the app reads as "frozen" with
+  // nothing anywhere naming the cause. Only slow writes are logged: the normal case is sub-millisecond and
+  // logging it every time would bury the signal it exists to give.
+  const t0 = Date.now();
   try { atomicWriteJson(fs, WORKSPACES, registry); return true; }
   catch (e) { console.error('[claudible] workspaces.json:', e.message); return false; }
+  finally {
+    const ms = Date.now() - t0;
+    if (ms > 250) console.error('[claudible] saveRegistry blocked the main thread for ' + ms + 'ms — slow disk on ' + WORKSPACES);
+  }
 }
 let registry = loadRegistry();
 let activeWorkspace = registry.workspaces.find((w) => w.id === registry.activeId) || registry.workspaces[0];
@@ -497,6 +511,15 @@ function createWindow() {
     appTimers.buildDrift = setInterval(checkBuildDrift, 5 * 60 * 1000);   // install-vs-running drift chip (git-clone installs have no other update signal)
     if (appTimers.buildDrift.unref) appTimers.buildDrift.unref();
     _liveTiming('boot: sha=' + (BUILD.short || 'unknown') + ' pid=' + process.pid);   // every future journal report identifies its own build
+    // S-root's real cost was not the bug, it was the SILENCE. With no script backend, ~35 handlers short-circuit
+    // to ERR_NO_BACKEND and the UI simply shows nothing happening: projects don't create, sync never runs, Repo
+    // Review stays empty, and the terminal keeps working (it never touches this shell), so the failure reads as
+    // "GitHub is broken". Hours went into finding that on real hardware. Say it once, at boot, in the UI.
+    if (!APPDIR_WSL) {
+      console.error('[claudible] ' + ERR_NO_BACKEND + ' — projects, sync and Repo Review cannot run (runner=' + runner.id + ')');
+      _liveTiming('boot: no-backend runner=' + runner.id);
+      try { win && win.webContents.send('backend:unavailable', { runner: runner.id, error: ERR_NO_BACKEND }); } catch {}
+    }
     startWorkflowPoll();    // live workflow/swarm agents for the foreground tab's Agents pane
     // Discover repos we've been invited to, then sync everything already enabled (background, post-launch).
     setTimeout(() => { _lastDiscover = Date.now(); discoverWorkspaces().then(syncAllEnabled); }, 3000);
@@ -599,6 +622,17 @@ function spawnPty(tabId, cols, rows, ws, session) {
     if (!fgTabId) fgTabId = tabId;                         // first tab becomes the foreground/mirrored one
     if (share.status().running && !sharedTabId) { sharedTabId = tabId; try { winSend('share:pinned', { tabId }); } catch {} }   // share started before any pty existed → the first tab becomes the shared one
     if (tabId === mirrorTabId()) { share.resetRing(); share.resetStatus(); share.setSize(rec.cols, rec.rows); }   // only the mirrored (shared-or-foreground) tab drives the guest mirror
+    // I3 — A PTY THAT RENDERS NOTHING MUST NOT LOOK LIKE A DEAD RECTANGLE. If claude.exe is sitting on a prompt
+    // we never learned to answer, it emits nothing and the pane stays blank forever with no hint that the app is
+    // waiting rather than broken. Say so in the terminal itself. Cleared the moment ANY byte arrives (r.sawData),
+    // so a healthy session never sees it; guarded on proc identity so a session switch inside the window can't
+    // print into the replacement tab.
+    rec.quietTimer = setTimeout(() => {
+      const q = ptys.get(tabId);
+      if (!q || q.proc !== proc || q.sawData) return;
+      winSend('pty:data', { tabId, data: '\r\n[claudible] still waiting for Claude — it may be asking something this pane cannot show. Try pressing Enter; the app log records any prompt it did not answer.\r\n' });
+    }, 12000);
+    if (rec.quietTimer.unref) rec.quietTimer.unref();
     // Handlers are guarded by `ptys.get(tabId)?.proc === proc` so a soon-to-die OLD pty (during a session
     // switch on this tab) can't stomp the NEW one's stream — the map entry is replaced/deleted before kill.
     proc.onData(d => {
@@ -608,11 +642,24 @@ function spawnPty(tabId, cols, rows, ws, session) {
       const r = ptys.get(tabId);
       if (r) { r.lastData = Date.now(); r.sawData = true; }   // feed the ultracode settle-detector (and prove claude rendered)
       if (r && !r.trustDone && /trust this folder/i.test(d)) { r.trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
+      // I3 — MAKE AN UNANSWERED PROMPT VISIBLE. The line above is Claudible's ENTIRE coverage for auto-answering
+      // claude.exe's startup questions: one regex, matching the trust-folder text only. Any other confirmation
+      // (notably the one a permission-mode change can introduce, via --dangerously-skip-permissions at
+      // runners/win.js:153) is never answered, the pty waits on input forever, and the tab looks frozen. We
+      // cannot widen the auto-answer blind — the literal string lives inside claude.exe, not this repo — so log
+      // the text ONCE per pty and widen deliberately once a real capture exists. Narrow shape + once-per-pty so
+      // this can never become a firehose over a long session.
+      if (r && !r.promptLogged && !r.trustDone && PROMPT_SHAPE.test(d)) {
+        r.promptLogged = true;
+        console.error('[claudible] unanswered prompt on tab ' + tabId + ' (not auto-answered — capture for I3): '
+          + String(d).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 400));
+      }
     });
     proc.onExit(() => {
       if (ptys.get(tabId)?.proc !== proc) return;          // an intentional switch already replaced us
       const r = ptys.get(tabId); const rws = r && r.ws;
       if (r && r.ultraTimer) { try { clearInterval(r.ultraTimer); } catch {} }
+      if (r && r.quietTimer) { try { clearTimeout(r.quietTimer); } catch {} }   // the pty is gone — never print "still waiting" into a tab that just ended
       const msg = '\r\n[claudible] session ended\r\n';
       winSend('pty:data', { tabId, data: msg });
       // If claude vanished (uninstalled, or a first-launch spawn that beat detection), point at the fix instead

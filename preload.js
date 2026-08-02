@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onSyncChanged: (cb) => ipcRenderer.on('sync:changed', (_e, s) => cb(s)),
   onSessionReloaded: (cb) => ipcRenderer.on('session:reloaded', (_e, s) => cb(s)),   // main respawned an open tab whose transcript a sync just replaced
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
+  onBackendUnavailable: (cb) => ipcRenderer.on('backend:unavailable', (_e, s) => cb(s)),   // I3/S-root: the script backend could not resolve at boot — say so instead of letting ~35 handlers fail in silence
   discoverWorkspaces: () => ipcRenderer.invoke('workspace:discover'),   // manual "check for invited projects"
   openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser
   sessionListWs: (wsId) => ipcRenderer.invoke('session:list-ws', wsId),   // list a (possibly non-active) workspace's sessions
