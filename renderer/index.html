@@ -867,6 +867,17 @@
     /* "what's a workspace?" popover — anchored under the ⓘ by JS; teaches the concept without crowding the sidebar */
     .ws-info-pop{position:fixed;z-index:80;width:250px;padding:13px 15px;border:1px solid var(--hairline);border-radius:11px;
       background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim)}
+    /* W4/3d — the GitHub row in Settings. Same reserved-slot discipline as .ws-chip .ws-dot: .off keeps the
+       dot's 6px + gap so resolving from "Checking…" to connected never nudges the text beside it. */
+    .gh-row{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--ink-dim)}
+    .gh-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ink-faint)}
+    .gh-dot.off{visibility:hidden}
+    .gh-dot.on{background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}
+    .gh-dot.warn{background:var(--warn);box-shadow:0 0 6px -1px var(--warn)}
+    .gh-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .gh-connect{flex:none;padding:3px 9px;border:1px solid var(--hairline);border-radius:6px;background:none;
+      color:var(--ink);font-family:inherit;font-size:var(--fs-xs);cursor:pointer}
+    .gh-connect:hover{background:rgba(255,255,255,.06)}
     .ws-info-pop b{color:var(--silver)}
     .ws-info-pop .wt{display:block;font-size:var(--fs-sm);color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
@@ -1503,6 +1514,18 @@
         <div class="username-row" id="username-edit-row">
           <input type="text" id="collab-name-in" class="name-field" maxlength="40" placeholder="e.g. Developer" autocomplete="off" />
           <button type="button" id="collab-name-save" class="name-save" title="Save username" aria-label="Save username">✓</button>
+        </div>
+      </div>
+      <!-- W4/3d: GitHub connection state. onboardStatus() has always returned ghInstalled/ghSignedIn/ghAccount,
+           but ONLY the first-run wizard ever rendered it — and after the repair fix that wizard reopens only for
+           a *blocking* dep, which a signed-out-but-installed gh is not. So the one place sync, invites and
+           project creation all depend on had no visible state anywhere in the running app. -->
+      <div class="sec">
+        <div class="label">github</div>
+        <div class="gh-row">
+          <span class="gh-dot off" id="gh-dot"></span>
+          <span class="gh-text" id="gh-text">Checking…</span>
+          <button type="button" id="gh-connect" class="gh-connect" style="display:none">Connect</button>
         </div>
       </div>
       <div class="sec">

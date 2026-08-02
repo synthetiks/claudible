@@ -2674,5 +2674,37 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['no label and/or no overlay copy for the starting state']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 81. 3e/I1 — AN EXPLAINER MUST NOT COVER THE THING IT EXPLAINS. Both ⓘ popovers anchored at `r.bottom + 6`,
+//   directly under the icon — which sits directly above the field the text is about. Opening one laid a 250px
+//   panel over that input, and since a click INSIDE a popover is not an outside-click, the field stopped
+//   responding until it was dismissed. That is the second half of "the username field is unclickable"; the
+//   first half (the wizard scrim over the drawer) shipped in v0.9.1. Prefer ABOVE the icon — that space holds
+//   the section label, never an input — and fall back to below only when there is genuinely no room.
+// 82. W4/3d — GITHUB STATE IS VISIBLE OUTSIDE THE WIZARD. onboardStatus() always returned it; only the
+//   first-run wizard rendered it, and that wizard now reopens only for a BLOCKING dep — which a gh that is
+//   installed but signed out is not. So the dependency behind sync, invites and repo projects had no visible
+//   state at all. The row reuses 2g's terminal route to connect rather than duplicating the device-code flow.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('an ⓘ popover anchors below its icon again (it lands on the field it describes)',
+    [/function placeInfoPop\(pop, anchor\)/.test(APP) ? '' : 'placeInfoPop is gone',
+     /const above = r\.top - h - 6;/.test(APP) ? '' : 'placeInfoPop no longer prefers ABOVE the anchor',
+     (APP.match(/pop\.style\.top = \(r\.bottom \+ 6\)/g) || []).length ? 'a popover still hard-codes bottom+6' : ''].filter(Boolean));
+  // The trailing `;` is load-bearing: without it this also matched `function placeInfoPop(pop, anchor) {`
+  // and counted the definition as a third call site. Same trap as the comment-blind matches elsewhere here.
+  none('both ⓘ popovers must share the one placer (they drifted apart before)',
+    (APP.match(/placeInfoPop\(pop, anchor\);/g) || []).length === 2
+      ? [] : ['expected exactly 2 placeInfoPop call sites (workspace ⓘ + username ⓘ)']);
+  none('Settings lost its GitHub row (the state sync/invites depend on is invisible again)',
+    [/id="gh-text"/.test(HTML) ? '' : 'no #gh-text row in the drawer',
+     /async function refreshGhRow\(\)/.test(APP) ? '' : 'no refreshGhRow()',
+     /if \(open\) \{ loadSkills\(\); loadPlugins\(\); try \{ refreshGhRow\(\); \} catch \(e\) \{\} \}/.test(APP) ? '' : 'refreshGhRow is not wired to the drawer opening'].filter(Boolean));
+  none('…and its dot has no reserved slot, so resolving the state nudges the text',
+    /\.gh-dot\.off\{visibility:hidden\}/.test(HTML) ? [] : ['.gh-dot.off is not visibility:hidden — the same shift .ws-dot.off exists to prevent']);
+  none('the Settings connect button duplicates the device-code flow instead of reusing 2g',
+    /gitCmd\('gh auth login'\)/.test(APP) ? [] : ['#gh-connect does not route through gitCmd']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

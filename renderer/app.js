@@ -2256,7 +2256,7 @@ function openDrawer(open) {
   drawer.classList.toggle('open', open);
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) { loadSkills(); loadPlugins(); }       // refresh extension inventory each time the drawer opens
+  if (open) { loadSkills(); loadPlugins(); try { refreshGhRow(); } catch (e) {} }       // refresh extension inventory + GitHub state each time the drawer opens (W4: a real gh subprocess — on open, never on a timer)
   if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
@@ -5130,6 +5130,22 @@ function closeWsInfo() {
 }
 function onWsInfoOutside(e) { if (wsInfoPop && !wsInfoPop.contains(e.target) && e.target.id !== 'ws-info') closeWsInfo(); }
 function onWsInfoKey(e) { if (e.key === 'Escape') closeWsInfo(); }
+// 3e — PUT THE EXPLAINER WHERE IT CANNOT SWALLOW THE THING IT EXPLAINS. Both ⓘ popovers anchored at
+// `r.bottom + 6`: directly under the icon, which sits directly above the field the text is about. So opening
+// the explainer laid a 250px panel over that input — and because a click INSIDE a popover is not an
+// outside-click, the field stopped responding until you dismissed it. That is the second half of the
+// "username field is unclickable" report (the first half was the wizard scrim, fixed in v0.9.1).
+// Prefer ABOVE the icon: that space holds the section label, never an input. Fall back to below only when
+// there is genuinely no room above, and clamp to the viewport in both axes either way.
+function placeInfoPop(pop, anchor) {
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+  pop.style.left = Math.max(8, left) + 'px';
+  const above = r.top - h - 6;
+  pop.style.top = Math.max(8, above >= 8 ? above : Math.min(r.bottom + 6, window.innerHeight - h - 8)) + 'px';
+}
 function openWsInfo() {
   if (wsInfoPop) { closeWsInfo(); return; }
   const anchor = $('ws-info'); if (!anchor) return;
@@ -5138,9 +5154,7 @@ function openWsInfo() {
     + '<p>A folder Claude works in — it edits those files, and you review changes there.</p>'
     + '<p><b>My Sessions</b> is the default (no project). The <b>+</b> adds one for a specific project — kept on your machine, or backed by a private GitHub repo to build with your team.</p>';
   document.body.appendChild(pop);
-  const r = anchor.getBoundingClientRect();
-  let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
-  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  placeInfoPop(pop, anchor);
   wsInfoPop = pop;
   setTimeout(() => { document.addEventListener('mousedown', onWsInfoOutside, true); document.addEventListener('keydown', onWsInfoKey, true); }, 0);
 }
@@ -5159,13 +5173,39 @@ function openUnameInfo() {
     + '<p>The name you appear as when you join (or host) a session through Claudible.</p>'
     + '<p>Stored <b>locally on this machine</b> and remembered for every session.</p>';
   document.body.appendChild(pop);
-  const r = anchor.getBoundingClientRect();
-  let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
-  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  placeInfoPop(pop, anchor);   // above the ⓘ, so it never lands on #collab-name-in — the field this text is about
   unameInfoPop = pop;
   setTimeout(() => { document.addEventListener('mousedown', onUnameInfoOutside, true); document.addEventListener('keydown', onUnameInfoKey, true); }, 0);
 }
 (function () { const b = $('username-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openUnameInfo(); }); })();
+// W4/3d — GITHUB STATE, VISIBLE OUTSIDE THE WIZARD. onboardStatus() has always returned ghInstalled /
+// ghSignedIn / ghAccount; nothing rendered it except the first-run wizard, which after the repair fix only
+// reopens for a *blocking* dep — and a gh that is installed but signed OUT is not blocking. So the thing sync,
+// invites and repo-backed projects all depend on had no visible state anywhere in the running app, and 2g's
+// terminal menu item exists partly to work around exactly that. Refreshed when the drawer OPENS rather than on
+// a timer: it is a real gh subprocess, and nobody needs it polled while the drawer is shut.
+async function refreshGhRow() {
+  const dot = $('gh-dot'), txt = $('gh-text'), btn = $('gh-connect');
+  if (!dot || !txt || !btn) return;
+  let s = null; try { s = await claudible.onboardStatus(); } catch (e) {}
+  dot.className = 'gh-dot off'; btn.style.display = 'none';
+  if (!s) { txt.textContent = 'Couldn’t check GitHub'; return; }
+  if (!s.ghInstalled) { txt.textContent = 'GitHub CLI not installed — run the System check'; return; }
+  if (!s.ghSignedIn) {
+    dot.className = 'gh-dot warn'; txt.textContent = 'Not connected';
+    btn.style.display = ''; btn.textContent = 'Connect';
+    return;
+  }
+  dot.className = 'gh-dot on';
+  txt.textContent = s.ghAccount ? ('Connected as ' + s.ghAccount) : 'Connected';
+}
+if ($('gh-connect')) $('gh-connect').addEventListener('click', () => {
+  // Reuse the terminal route (2g) rather than duplicating the wizard's device-code flow: it lands the user in
+  // the real `gh auth login` prompts, which are readable and answerable, and it is one already-tested path.
+  openDrawer(false);
+  gitCmd('gh auth login');
+  toast('Follow the prompts in the terminal, then reopen Settings to confirm');
+});
 // First launch: pop the explainer once so new users learn the concept; afterwards it lives behind the ⓘ.
 { const _wp = loadPrefs(); if (!_wp.wsHintSeen && _wp.onboardingDone) { savePrefs({ wsHintSeen: true }); setTimeout(() => { try { openWsInfo(); } catch (e) {} }, 1000); } }   // only post-onboarding; the first-run wizard owns workspace education (and sets wsHintSeen on finish/skip)
 // the bottom-left "share live" ⓘ — same click-popover as the workspace one, but anchored ABOVE the icon (the
