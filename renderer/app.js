@@ -5392,6 +5392,15 @@ if ($('git-btn')) {
   $('git-btn').addEventListener('click', (e) => { e.stopPropagation(); const m = $('git-menu'); (m && m.style.display === 'block') ? closeGitMenu() : openGitMenu(); });
   $('git-push').addEventListener('click', () => gitCmd('git push'));
   $('git-pull').addEventListener('click', () => gitCmd('git pull'));
+  // 2g — the one command that unblocks a disconnected GitHub, reachable from the running app. The wizard's
+  // one-click connect lives only INSIDE the wizard, which reopens only for a sysBlocking dep — and a gh that is
+  // installed but signed OUT is not blocking, so it never comes back for it. Settings shows no gh status either
+  // (that is W4). Users were left to know `gh auth login` by heart. Routing it through gitCmd like push/pull
+  // means it lands in the real terminal, where the device-code prompts are readable and answerable.
+  // Deliberately NOT probed/hidden when already signed in: an unnecessary IPC on every menu open, and the cost
+  // of showing it to a connected user is gh printing "already logged in" — whereas HIDING it on a glitched
+  // probe is exactly the silent refusal the rest of this phase exists to delete.
+  if ($('git-ghauth')) $('git-ghauth').addEventListener('click', () => gitCmd('gh auth login'));
   document.addEventListener('click', (e) => { const m = $('git-menu'); if (m && m.style.display === 'block' && !e.target.closest('#git-menu') && !e.target.closest('#git-btn')) closeGitMenu(); });
 }
 // inline workspace rename (mirrors session rename), persisted through main (registry is source of truth)

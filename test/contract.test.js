@@ -2411,6 +2411,23 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// 76. 2g — `gh auth login` IS REACHABLE FROM THE RUNNING APP. The wizard's one-click connect exists only inside
+//   the wizard, which after the repair fix reopens ONLY for a sysBlocking dep — and a gh that is installed but
+//   signed out is not blocking, so it never returns for it. Settings shows no gh status (W4, Phase 3). That left
+//   the single command that unblocks sync as something the user had to know by heart. It rides the git menu's
+//   existing gitCmd path (types into the live terminal), so the device-code flow is readable and answerable.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the git menu lost its connect-GitHub item (gh auth login is unreachable in-app again)',
+    /id="git-ghauth"/.test(HTML) ? [] : ['#git-ghauth is not in the git menu']);
+  none('connect-GitHub stopped routing through gitCmd (it must land in the live terminal, not a shell-out)',
+    /\$\('git-ghauth'\)\.addEventListener\('click', \(\) => gitCmd\('gh auth login'\)\)/.test(APP)
+      ? [] : ['#git-ghauth does not call gitCmd(\'gh auth login\')']);
+  none('the git button\'s tooltip no longer names all three actions',
+    /id="git-btn" title="Git — push \/ pull \/ connect GitHub"/.test(HTML) ? [] : ['#git-btn title is stale']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // 75. S1 — AUTOMATIC DISCOVERY MUST ANNOUNCE ITSELF. The manual Check-for-invites button toasts; the boot timer
 //   and maybeDiscoverOnFocus did not, so an invited project appeared as an inert sidebar row and nothing said a
 //   single click sets it up (three sat unnoticed on a real machine). Q3 decided first-sighting-per-repo-per-run:
