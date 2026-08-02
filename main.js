@@ -1450,7 +1450,13 @@ ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => { runPresence
 // call only; activeWorkspace is untouched).
 ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === wsId);
-  if (!APPDIR_WSL || !ws) return resolve([]);
+  // P — THE BARE `[]` WAS THE BUG. Every sibling handler returns a typed {ok:false,error} for these two gates,
+  // and the rest of THIS handler (below) already resolves {error} for a fetch failure precisely so a failure
+  // cannot masquerade as an empty list. These two lines were the hole: with no backend, or a workspace the
+  // registry does not know, `[]` said "this project genuinely has no sessions" — and sessionToOpenFor cannot
+  // tell that apart from the truth, so it committed the tab to a phantom 'new' draft.
+  if (!APPDIR_WSL) return resolve({ error: ERR_NO_BACKEND });
+  if (!ws) return resolve({ error: 'no such project' });
   runner.runScript('sessions.sh', '', { ws, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
     // A fetch FAILURE must never masquerade as an empty list: the renderer painted `[]` over a populated
     // sidebar with zero trace anywhere ("where are all my sessions"). Resolve a typed error instead — the

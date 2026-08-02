@@ -20,7 +20,7 @@ const eq = (label, a, b) => { try { assert.strictEqual(a, b); pass++; } catch { 
 const ok = (label, c) => { c ? pass++ : (fail++, console.error('  FAIL ' + label)); };
 
 // lift the real function — including its `async` keyword, or the await inside it is a SyntaxError
-const m = APP.match(/async function sessionToOpenFor\(wsId, targetSession\)[\s\S]*?\n\}/);
+const m = APP.match(/async function sessionToOpenFor\(wsId, targetSession(?:, \w+)?\)[\s\S]*?\n\}/);
 if (!m) { console.error('  FAIL sessionToOpenFor not found in renderer/app.js'); process.exit(1); }
 
 // mk(remembered, warmList, fetch) → the lifted resolver wired to stubs. `calls` records every IPC the

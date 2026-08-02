@@ -1934,7 +1934,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // running or being resumed" modal, which swallows the spacebar. The normal switch path must focus the
   // existing tab instead (the busy/shared branch already did; this extends it).
   none('switching to a project can spawn a SECOND claude on a session another tab already runs (spacebar-eating modal)',
-    /const sess = await sessionToOpenFor\(id, targetSession\);[\s\S]{0,1000}?if \(sess !== 'new'\) \{[\s\S]{0,400}?for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+    /const sess = await sessionToOpenFor\(id, targetSession(?:, \w+)?\);[\s\S]{0,1000}?if \(sess !== 'new'\) \{[\s\S]{0,400}?for \(const rec of tabs\.values\(\)\) if \(rec\.kind !== 'live' && rec\.wsId === id && rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['switchWorkspace normal path does not dedupe an already-open session']);
 }
 
@@ -2005,22 +2005,24 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 //     awaits a real id, and main's respawnPty carries its own cross-tab dedupe as defence in depth.
 // ---------------------------------------------------------------------------------------------------------
 {
+  // All three sites now pass an OPTIONAL out-object (P: "we could not look" ≠ "the project is empty"), hence
+  // the `(?:, \w+)?`. What this pin protects is unchanged: exactly three sites, every one awaited, none bare.
   none('a switch path stopped awaiting the resolver (an unawaited call hands a Promise to newBlankTab)',
-    (APP.match(/await sessionToOpenFor\(id, targetSession\)/g) || []).length === 3
+    (APP.match(/await sessionToOpenFor\(id, targetSession(?:, \w+)?\)/g) || []).length === 3
       && !/[^t] sessionToOpenFor\(id/.test(APP)
       ? [] : ['expected exactly 3 awaited sessionToOpenFor call sites (busy, normal, kept) and no bare ones']);
   none('the normal switch path fell back to \'\' again (it walks straight past the dedupe gate)',
-    /const sess = await sessionToOpenFor\(id, targetSession\);/.test(APP)
+    /const sess = await sessionToOpenFor\(id, targetSession(?:, \w+)?\);/.test(APP)
       && !/lastSessionFor\(id\) \|\| ''/.test(APP)
       ? [] : ['switchWorkspace resolves sess with an \'\' fallback again']);
   none('…or the dedupe gate is keyed on truthiness again (\'\' would skip it)',
     /if \(sess !== 'new'\) \{[\s\S]{0,400}?rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['the normal-path dedupe is not keyed on the resolved id']);
   none('the cold-cache fetch is gone (a never-visited shared project resolves to a phantom draft again)',
-    /async function sessionToOpenFor\(wsId, targetSession\)[\s\S]{0,1500}?claudible\.sessionListWs\(wsId\)/.test(APP)
+    /async function sessionToOpenFor\(wsId, targetSession(?:, \w+)?\)[\s\S]{0,1500}?claudible\.sessionListWs\(wsId\)/.test(APP)
       ? [] : ['sessionToOpenFor no longer fetches on a cold cache']);
   none('the kept-tab rollback path lost its dedupe (main may have refused BECAUSE the session is live elsewhere)',
-    /Object\.assign\(t, prev\);[\s\S]{0,900}?const want = await sessionToOpenFor\(id, targetSession\);[\s\S]{0,500}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
+    /Object\.assign\(t, prev\);[\s\S]{0,900}?const want = await sessionToOpenFor\(id, targetSession(?:, \w+)?\);[\s\S]{0,700}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['the keptTab branch does not dedupe before newBlankTab']);
   // The refusal now also records WHY (I4 — session:open reads _lastRespawnRefusal to toast a reason), so the
   // dedupe returns from a block rather than bare. What this pin protects is unchanged: the cross-tab scan still
@@ -2464,6 +2466,35 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the renderer mints a tab main will refuse for a session already open elsewhere',
     /r\.reason === 'open-elsewhere'[\s\S]{0,600}?setActiveTab\(rec\.tabId\)/.test(APP)
       ? [] : ['openSession does not focus the owning tab on open-elsewhere']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 77. P — "COULD NOT LOOK" MUST NOT RENDER AS "GENUINELY EMPTY". session:list-ws returned a bare [] on its two
+//   entry gates (no script backend / unknown project) while the REST of the same handler already resolved a
+//   typed {error} for a fetch failure — precisely so a failure could not masquerade as an empty list. Those two
+//   lines were the hole, and sessionToOpenFor could not tell the cases apart: it branched on Array.isArray for
+//   CACHING only, then fell through to 'new' regardless. Result: a phantom "New session" over a project full of
+//   work, which reads as data loss. Fourth trigger of this class (b68027c, e10ff48, ab0b8fa + 3c63eea before).
+//   The signal rides an OPTIONAL out-object, never a changed return type: this codebase's recurring injury is
+//   one missed call site silently disarming a guard, and a caller that ignores `out` behaves exactly as before.
+//   NOT claimed fixed: a LOCAL, non-shared project with the backend down still has no in-session recovery
+//   (onSyncChanged fires only for repo-backed, sync-enabled projects). The draft becomes honest and
+//   reconcilable — it is not repaired.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const lw = (MAIN.match(/ipcMain\.handle\('session:list-ws'[\s\S]*?\n\}\)\);/) || [''])[0];
+  none('session:list-ws resolves a bare [] again (a dead backend reads as "this project is empty")',
+    /return resolve\(\{ error: ERR_NO_BACKEND \}\);/.test(lw) && /return resolve\(\{ error: 'no such project' \}\);/.test(lw)
+      ? [] : ['the entry gates do not return the typed shape the rest of the handler already uses']);
+  none('…or the merged bare-[] gate came back',
+    /if \(!APPDIR_WSL \|\| !ws\) return resolve\(\[\]\);/.test(lw) ? ['the bare-[] gate is back'] : []);
+  none('sessionToOpenFor stopped recording that it could not look',
+    /else if \(out\) out\.unknown = true;/.test(APP) && /catch \{ if \(out\) out\.unknown = true; \}/.test(APP)
+      ? [] : ['no unknown signal on a typed error or on a throw']);
+  none('an unknown-derived draft is no longer announced or reconcilable',
+    /function noteUnknownSessions\(info\)/.test(APP)
+      && (APP.match(/noteUnknownSessions\(/g) || []).length >= 4   // the definition + all three tab-minting sites
+      ? [] : ['noteUnknownSessions is missing from a tab-minting path']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

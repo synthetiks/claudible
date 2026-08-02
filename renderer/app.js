@@ -5612,7 +5612,14 @@ function primeSessionListForWs(id) {
 // mid-turn — i.e. most of the time — greeted you with a "New session · draft · unsaved" row even though the
 // project was full of sessions. newBlankTab can't be handed '' to mean "resume latest" either: makeTab coerces
 // `session || 'new'`, so an empty string becomes a draft anyway. Hence resolving a REAL id here.
-async function sessionToOpenFor(wsId, targetSession) {
+// P — `out` is an OPTIONAL sink for "I could not find out", not a changed return type. main now answers this
+// fetch with a typed {error} instead of a bare [] when the backend is down or the project is unknown (the fix's
+// other half), but a typed error alone changes nothing here: this function only ever branched on
+// Array.isArray for CACHING, then fell through to 'new' regardless — so "the backend is down" and "this project
+// is empty" still produced the identical phantom draft. Callers that pass an object learn which one it was;
+// callers that pass nothing behave exactly as before. That asymmetry is deliberate — a required out-param, or a
+// changed return shape, is the class of edit where ONE missed call site silently breaks a guard.
+async function sessionToOpenFor(wsId, targetSession, out) {
   if (targetSession) return targetSession;
   const remembered = lastSessionFor(wsId);
   if (remembered) return remembered;
@@ -5626,11 +5633,28 @@ async function sessionToOpenFor(wsId, targetSession) {
     try {
       const list = await claudible.sessionListWs(wsId);
       if (Array.isArray(list)) { c = { list, ts: Date.now() }; _wsSessCache.set(wsId, c); }
-    } catch {}   // fetch failed → fall through to whatever the cache held; 'new' stays the last resort
+      else if (out) out.unknown = true;   // typed {error} from main — we did NOT learn this project is empty
+    } catch { if (out) out.unknown = true; }   // fetch failed → fall through to whatever the cache held; 'new' stays the last resort, but it is now a KNOWN guess
   }
   const saved = (c && Array.isArray(c.list) ? c.list : []).filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id, wsId));   // same stub rule the lists use
   const top = saved.length ? orderedSessionsFor(wsId, saved)[0] : null;                                                        // same ordering helper as every render path
   return (top && top.id) || 'new';
+}
+// A draft minted because we could not LOOK is not the same as a draft minted because the project is empty, and
+// until now they were indistinguishable on screen — which is why a phantom "New session" over a project full of
+// work reads as data loss. Two things make it honest: mark the tab autoDraft so the existing reconcilers
+// (onSyncChanged, the boot restore) re-point it the moment real sessions land, and say so, once per run.
+// Per the plan's own honest limitation: a LOCAL, non-shared project with the backend down has no in-session
+// recovery path — onSyncChanged only fires for repo-backed sync-enabled projects — so for that case the message
+// IS the fix, not a consolation.
+let _unknownSessionsToasted = false;
+function noteUnknownSessions(info) {
+  if (!info || !info.unknown) return false;
+  if (!_unknownSessionsToasted) {
+    _unknownSessionsToasted = true;
+    try { toast('Couldn’t read this project’s sessions — opened a new draft instead. Your existing sessions are still there.'); } catch (e) {}
+  }
+  return true;
 }
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
@@ -5653,14 +5677,15 @@ async function switchWorkspace(id, targetSession) {
   if (t.busy || t.tabId === sharedTabIdR) {
     // Resolve BEFORE the dedupe: with no explicit targetSession the old guard was skipped entirely, so every
     // click here minted ANOTHER blank tab — click twice while mid-turn and you had two "New session" drafts.
-    const want = await sessionToOpenFor(id, targetSession);
+    const info = {};
+    const want = await sessionToOpenFor(id, targetSession, info);
     if (want !== 'new') {                                 // dedupe: a tab may already host it (newBlankTab never checks)
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
     }
     const tws = workspaces.find((w) => w.id === id);
     if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
     setWsExpanded(id, true);                                                  // expand it like the normal switch does, so its sessions are right there
-    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); }   // want==='new' → auto-draft (onSyncChanged may reconcile once sessions land); a real id is not
+    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); noteUnknownSessions(info); }   // want==='new' → auto-draft (onSyncChanged may reconcile once sessions land); a real id is not
     else if (t.busy) toast('That session is still running — finish it or close a tab before switching');
     else toast('This tab is live-shared — close a tab to open that project beside it');
     return;
@@ -5672,7 +5697,8 @@ async function switchWorkspace(id, targetSession) {
   // gated on a non-empty id, so '' walked straight past it and main's `--continue` could resume a session
   // ALREADY live in another tab (two claudes → the modal that eats the spacebar, bug-1's second face); and ''
   // is invisible to the sidebar (liveTabs requires a non-empty session), so the active tab briefly had no row.
-  const sess = await sessionToOpenFor(id, targetSession);   // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
+  const nfo = {};
+  const sess = await sessionToOpenFor(id, targetSession, nfo);   // open this session DIRECTLY in the new workspace (ONE respawn) — not "resume latest, then re-point" (two respawns = the cross-workspace flicker)
   // DEDUPE — the "already running or being resumed" modal that swallows the spacebar (bug 2): resuming a session
   // that is ALREADY live in another tab spawns a SECOND claude on it, and Claude Code blocks with a selection
   // prompt that eats every space. Focus the existing tab instead of duplicating — the same guard the busy/shared
@@ -5686,6 +5712,10 @@ async function switchWorkspace(id, targetSession) {
   activeWsId = id; t.wsId = id; t.session = sess; t.pendingTitle = null; t.label = (sess === 'new') ? 'New session' : '';   // switching ws drops a stale pending name (typed for a new session in the OLD ws) so it can't be published onto a session in the NEW ws
   setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)
   activeSession = (sess && sess !== 'new') ? sess : null; t.curSessionLabel = (sess === 'new') ? 'New session' : '';
+  // We are committing this tab to 'new' WITHOUT having been able to look. Mark it reconcilable (the normal path
+  // never set autoDraft, so such a draft was permanent until restart) and say so once. Only on the unknown
+  // branch — a genuinely empty project keeps its existing, correct behaviour.
+  if (noteUnknownSessions(nfo) && sess === 'new') t.autoDraft = true;
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   primeSessionListForWs(id);                       // paint the new ws's rows from warm cache in the AUTHORITATIVE order (no blank gap, no reorder jump) before the live fetch lands
   renderWsChips();
@@ -5711,11 +5741,12 @@ async function switchWorkspace(id, targetSession) {
     // reached us yet. Its pty never moved, so put the RECORD back (a tab claiming a workspace its process isn't in
     // orphans the sidebar highlight forever) and give the project a tab of its own, exactly like the guards above.
     Object.assign(t, prev);                        // restore BEFORE newBlankTab — its setActiveTab repaints synchronously and must not see the optimistic record
-    const want = await sessionToOpenFor(id, targetSession);
+    const kinfo = {};
+    const want = await sessionToOpenFor(id, targetSession, kinfo);
     if (want !== 'new') {   // same dedupe as the busy branch — main may have refused BECAUSE that session is live in another tab (its respawn dedupe), and duplicating it here would re-create the two-claude modal
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
     }
-    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); return; }    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft (want==='new' → auto-draft, reconcilable once sessions land)
+    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); noteUnknownSessions(kinfo); return; }    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft (want==='new' → auto-draft, reconcilable once sessions land)
     toast('That session is still running — close a tab to open that project beside it');
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back
     return;
