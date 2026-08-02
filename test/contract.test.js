@@ -2392,5 +2392,20 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? ['a separator was re-added under New session'] : []);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 73. THE REPAIR WIZARD MUST NOT OPEN OVER THE SETTINGS DRAWER. maybeRepair() guards `done`, an already-shown
+//   wizard, and any other `.approve.show` — but the drawer is NOT a `.approve` modal, so none of those saw it.
+//   #wizard is `.approve` at z-index 10000; the drawer is 9001; nothing enforced mutual exclusion. 2.5s after
+//   every boot the wizard could therefore drop its full-screen scrim over an open drawer and swallow EVERY
+//   click in it — reported as "the username field is unclickable", which is #collab-name-in sitting under a
+//   scrim nobody could see. Strictly worse on Windows: a dead script backend makes preflightStatus() misreport
+//   deps as missing, which is exactly what makes sysBlocking fire and the wizard reopen.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const mr = (APP.match(/async function maybeRepair\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+  none('maybeRepair lost its drawer guard (the wizard scrim re-covers an open Settings drawer)',
+    /if \(drawer\.classList\.contains\('open'\)\) return;/.test(mr) ? [] : ['no drawer guard in maybeRepair']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

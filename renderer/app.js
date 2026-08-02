@@ -6311,12 +6311,19 @@ window.addEventListener('keydown', (e) => {
   //  • REUSES sysBlocking — the SAME predicate that disables step 1's Next button. One definition of "blocking",
   //    so the thing that pops the wizard and the thing that holds it open can never disagree.
   //  • NEVER STACKS under another modal (the ws-modal first-run fallback), and no-ops if already shown.
+  //  • NEVER STACKS OVER THE SETTINGS DRAWER either. The drawer is not a `.approve` modal, so the check above
+  //    did not see it: #wizard is `.approve` at z-index 10000, the drawer is 9001, and nothing enforced mutual
+  //    exclusion — so 2.5s after a boot the wizard could drop its full-screen scrim over an open drawer and eat
+  //    EVERY click in it (reported as "the username field is unclickable"). Skipping is the right answer, not a
+  //    compromise: the repair prompt already reopens next launch while the dep is still gone, so someone reading
+  //    Settings is never interrupted to be told about it.
   //  • STILL DISMISSABLE: plain open()/dismiss(), so Skip and Escape behave exactly as on first run. It reopens
   //    next launch while the dep is still gone — the app genuinely cannot work without it — and stops for good
   //    the moment the row goes ready. For git the row's own restartRequired path ends the flow in one click.
   async function maybeRepair() {
     if (done || wiz.classList.contains('show')) return;
     if (document.querySelector('.approve.show')) return;
+    if (drawer.classList.contains('open')) return;   // Settings is open — its clicks are not ours to swallow
     let r; try { r = await claudible.preflightStatus(); } catch { return; }
     if (!r || r.unavailable || !Array.isArray(r.deps) || !r.deps.length) return;
     const bad = r.deps.filter((d) => d && sysBlocking(d));

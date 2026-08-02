@@ -300,6 +300,11 @@ still open. The presence relay ships **inert** (no default URL) — it is opt-in
   no config block, so `eslint .` reported clean on files it was not reading. They are linted now, and a guard
   fails if a tracked JS file ever again resolves to an empty rule set.
 - Relay inertness is pinned by a test, and CONTRIBUTING covers all four install paths.
+- **Settings stays clickable when the setup check reopens.** The wizard that returns when a required tool has
+  gone missing could appear about two seconds after launch on top of an already-open Settings drawer, and its
+  full-screen backdrop then quietly absorbed every click underneath — most visibly on the username field,
+  which looked simply dead. It now waits instead: if Settings is open the check holds off and returns on the
+  next launch, which it was always going to do anyway while the tool is still missing.
 
 ## [0.8.4] — 2026-07-19
 
