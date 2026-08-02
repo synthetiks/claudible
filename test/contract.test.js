@@ -929,8 +929,34 @@ none('renderer: orphanTab is never rendered',
 //     The gate now reads bootFirstRun — the boot-time firstRun value captured in maybeFirstRun BEFORE the
 //     registry flag is cleared — because the wizard re-reads workspaceList ~700ms later, by which point
 //     reading wl.firstRun directly always saw false (re-breaking R23 via the second read + stacking a modal).
-none('the wizard create-step gate ignores firstRun again (step 3 is dead code for every user)',
-  /hasWs = real\.length > \(bootFirstRun \? 1 : 0\);/.test(APP) && /bootFirstRun = true;/.test(APP) ? [] : ['the firstRun-aware gate is gone']);
+// ⚠️ SUPERSEDED 2026-08-02 — R23's gate is gone because the STEP it gated is gone. Read this before "fixing" it.
+//   R23 made the create-project step reachable so users could name their first project. That was a real fix for
+//   a real problem (the step was dead code; every install kept the placeholder name). It also meant a fresh
+//   install ended up with TWO local projects: main.js's ensureDefaultLocal guarantees `local-local` at boot —
+//   startup needs a valid cwd, so it is synchronous at registry load and cannot just be dropped — and then this
+//   step created a second. Observed on a real registry: `local-local` "Local" alongside `local-my-project`
+//   "My Project", two placeholders, neither asked for.
+//   createWorkspace() (the sidebar modal) has a cleanup that deletes the leftover `local-local` in exactly this
+//   case. The wizard's createWs() never called it. That asymmetry was the bug.
+//   Owners (CRAZY + MK) chose to delete the step rather than port the cleanup: a step whose only job is to make
+//   a project you already have should not exist. Cost accepted — a new install keeps the name "Local" instead
+//   of one the user typed, which is the very thing R23 improved; against that, a click-through user was getting
+//   "My Project" AND "Local" anyway, and inline rename has always existed.
+//   Side effect, deliberate: GitHub now follows Claude directly — the patch plan's W3, for free.
+//   RESTORING THE STEP? Port the `local-local` cleanup with it, or make it RENAME `local-local` instead of
+//   creating a sibling. Do not re-add it alone; that is how the duplicate came back the first time.
+{
+  none('the wizard create-project step is back without the cleanup that made it safe',
+    [/wiz-ws-create/.test(HTML) ? 'index.html has the create-project step markup again' : '',
+     /function createWs\(\)/.test(APP) ? 'app.js has createWs() again' : ''].filter(Boolean));
+  none('the wizard no longer runs System check → Claude → GitHub as three steps',
+    (HTML.match(/class="wiz-step" data-step=/g) || []).length === 3
+      && ([...(HTML.match(/<div class="wiz-steps">[^<]*(?:<span[^>]*><\/span>)+<\/div>/) || [''])[0].matchAll(/wiz-dot/g)].length === 3)
+      ? [] : ['step count and the progress dots disagree, or there are not exactly 3 of each']);
+  none('GitHub is not the step the device-flow poll watches (an abandoned approval would never time out)',
+    /step === 3 && ghWaiting/.test(APP) && /async function goGh\(\) \{ show\(3\)/.test(APP)
+      ? [] : ['goGh/tick disagree about which step GitHub is']);
+}
 
 // ---------------------------------------------------------------------------------------------------------
 // 26. R11 — per-machine tags. "My login's branch copy differs from my local" is self-compaction ONLY when it
@@ -2248,15 +2274,17 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // The wizard's GitHub step is a real CONNECT, not printed shell instructions (the packaged-install smoke
   // found nobody ever connected from the old DIY text). Guarded one-click flow: device code shown in the
   // wizard, main opens ONLY the fixed github device URL (never a URL parsed from child output — a hostile
-  // PATH gh must not choose what we open), and ✓ lands via the status poll, which must cover step 4.
+  // PATH gh must not choose what we open), and ✓ lands via the status poll, which must cover the gh step.
+  // That step is 3, not 4, since the create-project step was removed (see the superseded R23 note above) —
+  // the number is asserted against goGh() in that block so the two can never drift apart silently.
   none('the wizard gh step regressed to DIY instructions (no guarded connect action)',
     /async function connectGh\(\) \{\n\s*if \(ghFlight\) return;/.test(APP) && /claudible\.onboardGhLogin\(\)/.test(APP) ? [] : ['no guarded connectGh()']);
   none('the gh install button lost its guard or its preflight route',
     /async function installGh\(\) \{\n\s*if \(ghFlight\) return;/.test(APP) && /preflightInstall\('gh'\)/.test(APP) ? [] : ['no guarded installGh()']);
   none('gh-login opens a child-supplied URL (must be the fixed device page)',
     MAIN.includes("shell.openExternal('https://github.com/login/device')") ? [] : ['gh-login openExternal is not the fixed URL']);
-  none('the wizard poll ignores the gh wait (step 4 could never flip to ✓)',
-    /step === 4 && ghWaiting/.test(APP) ? [] : ['tick has no step-4 branch']);
+  none('the wizard poll ignores the gh wait (the gh step could never flip to ✓)',
+    /step === 3 && ghWaiting/.test(APP) ? [] : ['tick has no gh-step branch']);
   none('preload: onboardGhLogin is not bridged',
     /onboardGhLogin: \(\) => ipcRenderer\.invoke\('onboard:gh-login'\)/.test(PRELOAD) ? [] : ['no onboardGhLogin bridge']);
 

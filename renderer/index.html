@@ -1764,7 +1764,12 @@
   <!-- first-run onboarding wizard: connect Claude → create workspace → link GitHub (optional) -->
   <div class="approve" id="wizard">
     <div class="box wiz-box">
-      <div class="wiz-steps"><span class="wiz-dot on"></span><span class="wiz-dot"></span><span class="wiz-dot"></span><span class="wiz-dot"></span></div>
+      <!-- THREE steps: System check → Claude → GitHub. The old step 3, "Create your project", is deliberately
+           gone (see the note above createWs's removal in app.js): the registry already guarantees a Local
+           project at boot, so that step handed every new user a SECOND one and they ended up with "Local" and
+           "My Project", both placeholders, neither asked for. Removing it also lands what the patch plan calls
+           W3 — GitHub now follows Claude directly — for free. -->
+      <div class="wiz-steps"><span class="wiz-dot on"></span><span class="wiz-dot"></span><span class="wiz-dot"></span></div>
 
       <div class="wiz-step" data-step="1">
         <h3>System check</h3>
@@ -1787,17 +1792,6 @@
       </div>
 
       <div class="wiz-step" data-step="3" style="display:none">
-        <h3>Create your project</h3>
-        <p>A project is where its sessions live. We'll create a local one — name it, or keep the default.</p>
-        <input type="text" id="wiz-ws-name" maxlength="60" placeholder="My Project" value="My Project" />
-        <div class="ws-busy" id="wiz-ws-busy"></div>
-        <div class="row">
-          <button id="wiz-ws-back" class="ghost">Back</button>
-          <button id="wiz-ws-create" class="primary">Create &amp; continue</button>
-        </div>
-      </div>
-
-      <div class="wiz-step" data-step="4" style="display:none">
         <h3>Link GitHub <span class="wiz-opt">optional</span></h3>
         <p id="wiz-gh-msg">Checking GitHub…</p>
         <div class="ws-busy" id="wiz-gh-busy"></div>

@@ -5519,7 +5519,7 @@ async function confirmSync() {
   if (r && r.ok) { w.syncSessions = true; wsSyncState[w.id] = { status: 'syncing' }; closeSyncModal(); await refreshWorkspaces(); updateCollab(); }   // sync on → a peer can now Join live
   else { busy.textContent = (r && r.error) ? humanError(r.error) : 'could not turn on sharing'; busy.classList.add('err'); }   // r.error may be a bare code ('sync-busy') — never paint one into the modal
 }
-let firstRunHandled = false, firstRunActive = false, bootFirstRun = false;
+let firstRunHandled = false, firstRunActive = false;   // bootFirstRun retired with the wizard's create-project step — it existed only to decide whether to show it
 // "Never delete the last local project" exists so there is always somewhere to open. An ADOPTED project is only
 // a POINTER at a folder the user already owned — removing it deletes nothing — so the rule that guards a real
 // folder must not lock it in place. (First-run repro: adopt a folder, the auto-created "Local" placeholder is
@@ -5547,10 +5547,11 @@ function deleteWsPrompt(w) {
 function maybeFirstRun(r) {
   if (firstRunHandled || !r || !r.firstRun) return;
   firstRunHandled = true;
-  bootFirstRun = true;   // remember the boot truth: the wizard re-reads workspaceList (~700ms) and by then this flag may be cleared — it must NOT read wl.firstRun directly, which skipped its create-project step (R23's re-break).
-  // On a genuine fresh install the onboarding WIZARD owns first-run — it has its own "create your project" step.
-  // Opening the ws-modal too would stack a SECOND full-screen dialog under the wizard and hold keyboard focus in
-  // its now-hidden input (the "typing goes nowhere, then a modal reappears" glitch on new projects). Only fall
+  // On a genuine fresh install the onboarding WIZARD owns first-run. It no longer has a "create your project"
+  // step — the registry already made one, and a second was the duplicate-project bug — but it still owns the
+  // flow, so the reasoning below is unchanged: opening the ws-modal too would stack a SECOND full-screen dialog
+  // under the wizard and hold keyboard focus in its now-hidden input (the "typing goes nowhere, then a modal
+  // reappears" glitch on new projects). Only fall
   // back to the standalone ws-modal when the wizard won't run (onboarding already finished, or no wizard). The
   // wizard clears firstRun itself on dismiss, so a returning user never lands here.
   let wizardWillRun = false;
@@ -6118,7 +6119,7 @@ window.addEventListener('keydown', (e) => {
 // already have a real workspace) skip the create step so it's never a forced workspace mutation.
 (function () {
   const wiz = $('wizard'); if (!wiz || !claudible.onboardStatus) return;
-  let step = 1, poll = null, pollSince = 0, signingIn = false, hasWs = false, done = false, ticking = false;
+  let step = 1, poll = null, pollSince = 0, signingIn = false, done = false, ticking = false;
   let ghWaiting = false, ghFlight = false;   // gh device-flow: waiting on the browser approval · in-flight guard shared by BOTH gh buttons (a double-click must not spawn two winget/gh children)
   const status = async () => { try { return await claudible.onboardStatus(); } catch { return null; } };
   function show(n) {
@@ -6130,7 +6131,7 @@ window.addEventListener('keydown', (e) => {
   function pollStop() { if (poll) { clearInterval(poll); poll = null; } }
   async function tick() {
     if (done || ticking) return;   // ticking: never overlap probes (each spawns bash/node/network)
-    if (step !== 2 && !(step === 4 && ghWaiting)) return;   // Claude is step 2 (after System check); step 4 polls only while a gh device-flow waits on the browser
+    if (step !== 2 && !(step === 3 && ghWaiting)) return;   // Claude is step 2 (after System check); step 3 — GitHub — polls only while a gh device-flow waits on the browser
     // 6-min cap ONLY for the genuine orphan case: sign-in clicked → wizard HIDDEN to reveal the terminal → user
     // abandons the browser flow. While the wizard is visible there's no orphan risk (Skip/Escape always dismiss),
     // so the cap must not fire during a slow install and stomp its message or kill the poll mid-flow.
@@ -6139,29 +6140,22 @@ window.addEventListener('keydown', (e) => {
       const b = $('wiz-claude-busy'); if (b) { b.classList.add('err'); b.textContent = 'Didn’t detect sign-in — try again, or Skip for now.'; } return;
     }
     // Same budget for an abandoned gh approval (main kills its login child on the same clock).
-    if (step === 4 && ghWaiting && Date.now() - pollSince > 360000) {
+    if (step === 3 && ghWaiting && Date.now() - pollSince > 360000) {
       pollStop(); ghWaiting = false;
       const b = $('wiz-gh-busy'); if (b) { b.classList.add('err'); b.textContent = 'Didn’t detect the GitHub approval — try again, or Skip for now.'; } return;
     }
     ticking = true;
     try { const s = await status(); if (s) { if (step === 2) applyClaude(s); else applyGh(s); } } finally { ticking = false; }
   }
-  async function open(pre) {
-    try {
-      const wl = await claudible.workspaceList();
-      const real = ((wl && wl.workspaces) || []).filter((w) => w && w.kind && w.kind !== 'legacy');
-      // R23: the registry GUARANTEES a default Local workspace exists at boot (startup needs a cwd), so
-      // "some workspace exists" was ALWAYS true and step 3 — naming your first project — was unreachable
-      // dead code for every user: the wizard's four dots lied, and every install kept the placeholder name.
-      // On a FIRST RUN the auto-created default doesn't count as "the user has a project" (creating a real
-      // one triggers the existing placeholder cleanup); any other run keeps the old skip-if-any rule.
-      hasWs = real.length > (bootFirstRun ? 1 : 0);   // bootFirstRun is captured in maybeFirstRun BEFORE the registry flag is cleared; reading wl.firstRun here raced that clear and always saw false, so step 3 was skipped for every fresh install (R23's re-break via the wizard's second workspaceList read).
-    } catch {}
-    wiz.classList.add('show'); show(1); refreshSystem(pre);
-  }
+  // No workspaceList read here any more: nothing in the wizard branches on how many projects you have, because
+  // it no longer offers to make one. (It used to compute hasWs to decide whether to show the create step.)
+  async function open(pre) { wiz.classList.add('show'); show(1); refreshSystem(pre); }
   function dismiss() { pollStop(); signingIn = false; wiz.classList.remove('show'); if (!done) { done = true; try { savePrefs({ onboardingDone: true, wsHintSeen: true }); } catch {} try { claudible.workspaceFirstRunDone && claudible.workspaceFirstRunDone(); } catch {} } }   // the wizard owns first-run (maybeFirstRun defers to it), so IT clears the registry flag on finish/skip — else the next boot, onboarding now done, would fall through to the legacy ws-modal.
   function finish() { dismiss(); focusTermSoon(150); }
-  function afterClaude() { if (hasWs) goGh(); else show(3); }   // existing users skip the create step (now step 3) — never a forced workspace mutation
+  // GITHUB FOLLOWS CLAUDE DIRECTLY. There is no create-project step to route around any more, so this is no
+  // longer a branch at all — which also removes the "existing users skip it, first-run users don't" split that
+  // R23 had to reason about, and delivers the patch plan's W3 (move GitHub up) as a side effect.
+  function afterClaude() { goGh(); }
 
   async function refreshClaude() { const s = await status(); if (s) applyClaude(s); }
   function applyClaude(s) {
@@ -6204,26 +6198,25 @@ window.addEventListener('keydown', (e) => {
     wiz.classList.remove('show');   // reveal the terminal; the poll re-shows the wizard once signed in (or after the 6-min cap)
   }
 
-  async function createWs() {
-    if ($('wiz-ws-create').disabled) return;                  // in-flight guard (Enter can bypass the disabled button)
-    const b = $('wiz-ws-busy'), btn = $('wiz-ws-create');
-    const name = ($('wiz-ws-name').value || '').trim() || 'My Project';
-    btn.disabled = true; b.classList.remove('err'); b.textContent = 'Creating project…';
-    let r; try { r = await claudible.workspaceCreate('local', name, false); } catch (e) { r = { ok: false, error: e && e.message }; }
-    btn.disabled = false;
-    if (r && !r.ok && /already exists/i.test(r.error || '')) { b.textContent = ''; goGh(); return; }   // a prior run made it → just continue (no dead-end)
-    if (!r || !r.ok) { b.classList.add('err'); b.textContent = (r && r.error) ? humanError(r.error) : 'Could not create the project.'; return; }
-    b.textContent = '';
-    // mirror createWorkspace()'s post-create reconcile so the foreground tab points at the NEW ws (else its
-    // session list / live tracking key off the old ws — a sidebar desync immediately after onboarding).
-    { const t = AT(); if (t) { t.wsId = (r.workspace && r.workspace.id) || activeWsId; t.session = 'new'; t.label = 'New session'; t.curSessionLabel = 'New session'; try { t.term.reset(); } catch {} resetStats(t); } }
-    activeSession = null;
-    try { await refreshWorkspaces(); } catch {}
-    try { refreshSessions(); } catch {}
-    goGh();
-  }
+  // ── createWs() lived here: the wizard's "Create your project" step. REMOVED DELIBERATELY, 2026-08-02, by
+  // CRAZY and MK after watching a fresh install produce TWO local projects.
+  //
+  // main.js's ensureDefaultLocal already guarantees a Local project at boot — startup needs a valid cwd, so it
+  // is created synchronously at registry load and cannot simply be dropped. This step then created a SECOND
+  // one, so every new user finished onboarding holding "Local" and "My Project": two placeholders, neither
+  // asked for. The sidebar's createWorkspace() has a cleanup that deletes the leftover `local-local` in exactly
+  // this situation — but it lives on the MODAL path, and this function never called it. That asymmetry is the
+  // whole bug, and it was reproduced on a real registry before this change.
+  //
+  // Fixing the asymmetry (porting the cleanup here) was the alternative, and is a defensible one. This is the
+  // owners' call: a step whose entire job is to make a project you already have is a step that should not
+  // exist. The cost is that a new install keeps the name "Local" rather than one the user typed — which is
+  // what R23 (contract 25) was addressing when it made this step reachable. Weighed and accepted: a
+  // click-through user got "My Project" AND "Local" anyway, two placeholders instead of one, and the sidebar
+  // has always offered inline rename. If you are reading this while considering restoring the step, restore
+  // the CLEANUP instead — or better, make it RENAME `local-local` rather than create a sibling.
 
-  async function goGh() { show(4); const s = await status(); if (s) applyGh(s); }
+  async function goGh() { show(3); const s = await status(); if (s) applyGh(s); }   // GitHub is step 3 now (was 4, behind the removed create-project step)
   // Three states, mirroring applyClaude: missing → Install button (the System-check installer, reused);
   // installed-not-connected → a REAL one-click Connect (device code shown here, browser opened by main,
   // ✓ lands via the status poll — the old text told users to go run `gh auth login` in a terminal
@@ -6393,9 +6386,6 @@ window.addEventListener('keydown', (e) => {
   $('wiz-sys-next').addEventListener('click', sysNext);
   $('wiz-sys-install').addEventListener('click', installAllMissing);
   $('wiz-claude-next').addEventListener('click', afterClaude);
-  $('wiz-ws-back').addEventListener('click', () => show(2));
-  $('wiz-ws-create').addEventListener('click', createWs);
-  $('wiz-ws-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') createWs(); });
   $('wiz-gh-recheck').addEventListener('click', goGh);
   $('wiz-finish').addEventListener('click', finish);
   $('wiz-skip').addEventListener('click', dismiss);
