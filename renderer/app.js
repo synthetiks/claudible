@@ -6354,11 +6354,27 @@ window.addEventListener('keydown', (e) => {
     }
     await refreshSystem();
   }
+  // 2a(3) — NEVER ABANDON THE REST OF THE LIST. Git carries restartOnInstall and sorts SECOND in the manifest,
+  // so `if (restartNeeded) break;` meant that on a fresh machine — the ONLY machine where "install all missing"
+  // is the path anyone takes — claude, uv, voice, cloudflared and gh were never even ATTEMPTED. Nothing said
+  // so, and restartNeeded is in-memory only, so nothing resumed after the relaunch either: the user restarted
+  // into a machine that still had five things missing and no memory of having asked for them.
+  //
+  // Keep going instead. Every other dep installs through winget or npm and is independent of git-bash, and
+  // voice re-derives the app dir now (2a(1)) rather than trusting a boot snapshot, so it can genuinely succeed
+  // in the same session Git arrived in. A dep that still can't proceed fails LOUDLY on its own row — which is
+  // strictly more than "silently never ran". The restart is still offered at the end; it just stops being an
+  // early exit from work the user explicitly asked for.
   async function installAllMissing() {
     disableSysActs(true);
-    const ids = depRows.filter(sysInstallable).map((d) => d.id);   // manifest order → node before claude, uv before voice
-    for (const id of ids) { await installDep(id); if (restartNeeded) break; }
+    const ids = depRows.filter(sysInstallable).map((d) => d.id);   // manifest order → node before claude, uv before voice, git before the things that need its bash
+    for (const id of ids) await installDep(id);
     disableSysActs(false);
+    if (restartNeeded) {
+      const n = $('wiz-sys-next');
+      if (n) { n.disabled = false; n.textContent = 'Restart now'; }
+      try { toast('Installed. Restart Claudible to finish wiring Git in.'); } catch (e) {}
+    }
   }
   function sysNext() { if (restartNeeded) { try { claudible.preflightRestart(); } catch {} return; } show(2); refreshClaude(); }
   // live per-dep install progress (a SECOND onProvision listener; the voice chip's is guarded to dep==='voice')

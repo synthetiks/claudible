@@ -393,6 +393,23 @@ function voiceProvisioned() {
   } catch { return false; }
 }
 let provisioning = false;
+// 2a(1) — APPDIR_WSL is resolved ONCE, at module load, and the win runner memoizes gitBash()/appDirGuest()
+// alongside it. On the machine where "install voice" actually matters — a fresh one, where the wizard itself
+// installs Git moments earlier — that snapshot is null for the entire session, so the voice branch below could
+// never install anything until a restart, and said nothing at all about why. The generic dep path already
+// drops those caches after an install (preflight:install), but the voice special-case RETURNS BEFORE that
+// line. Re-derive through the runner instead of trusting the boot snapshot. Cheap: a file check beside the
+// binary (~0.1ms), never a spawn — and only ever reached when the snapshot was already falsy.
+function appDirNow() {
+  if (APPDIR_WSL) return APPDIR_WSL;
+  try { if (typeof runner.resetCaches === 'function') runner.resetCaches(); } catch {}
+  try { return runner.appDirGuest() || null; } catch { return null; }
+}
+// A live PID is only evidence of a running installer for as long as a real provision could still be running.
+// Windows RECYCLES pids, so a crash between writing this lock and dropLock() could hand the pid to an
+// unrelated process and wedge voice permanently — every future click silently deferring to a "survivor" that
+// is actually Notepad. A provision that has not finished in this long is not going to.
+const VOICE_LOCK_MAX_MS = 45 * 60 * 1000;
 function ensureVoiceProvisioned() {
   // Only the packaged native-Windows path self-provisions; dev / WSL / the script install already set voice up.
   if (provisioning || !app.isPackaged || process.platform !== 'win32' || process.env.CLAUDIBLE_RUNNER !== 'win') return false;
@@ -401,7 +418,7 @@ function ensureVoiceProvisioned() {
   // (APPDIR_WSL non-null), skip: otherwise the Kokoro clone fails on first launch and shows a spurious
   // "voice setup didn't finish" chip that has nothing to do with the dependency provisioner. Voice provisions
   // cleanly on the next launch, once Git is present. No behavior change on an already-set-up machine.
-  if (!APPDIR_WSL) return false;
+  if (!appDirNow()) return false;
   if (voiceProvisioned()) return false;
   const home = app.getPath('home');
   // ON-DISK lock, not just the in-memory flag: an app crash/force-kill orphans a still-running setup-win.ps1
@@ -411,9 +428,14 @@ function ensureVoiceProvisioned() {
   const lockFile = path.join(home, '.claudible', 'voice-provision.lock');
   try {
     const pid = parseInt(fs.readFileSync(lockFile, 'utf8').trim(), 10);
-    if (Number.isFinite(pid) && pid > 0) {
+    let ageMs = Infinity; try { ageMs = Date.now() - fs.statSync(lockFile).mtimeMs; } catch {}
+    // 2a(2): the age cap comes FIRST — a lock older than a plausible provision is stale no matter how alive its
+    // recorded pid looks, because on Windows that pid may since have been handed to something else entirely.
+    if (ageMs < VOICE_LOCK_MAX_MS && Number.isFinite(pid) && pid > 0) {
       try { process.kill(pid, 0); return false; }   // signal 0 = liveness probe — an orphaned installer is still working; let it finish
       catch {}                                       // dead PID → stale lock from a crash → fall through and take it
+    } else if (ageMs >= VOICE_LOCK_MAX_MS) {
+      console.error('[claudible] voice-provision lock is ' + Math.round(ageMs / 60000) + 'min old — treating as stale (pid ' + pid + ')');
     }
   } catch {}
   provisioning = true;
@@ -3130,7 +3152,19 @@ ipcMain.handle('preflight:status', async () => {
 // report whether a restart is needed (Git on win, whose app-dir resolves at require-time).
 ipcMain.handle('preflight:install', async (_e, depId) => {
   const id = String(depId || '').replace(/[^a-z]/g, '');
-  if (id === 'voice' && runner.id === 'win') { const started = ensureVoiceProvisioned(); return { ok: started || voiceProvisioned(), restartRequired: false }; }
+  // 2a(1) — the silent false was the whole bug. ensureVoiceProvisioned has five separate reasons to decline and
+  // all five arrived here as a bare {ok:false} with no error, so the row snapped back to "install" and the user
+  // clicked it forever. Same gates, same order — now each one says which it was.
+  if (id === 'voice' && runner.id === 'win') {
+    if (voiceProvisioned()) return { ok: true, restartRequired: false };
+    if (ensureVoiceProvisioned()) return { ok: true, restartRequired: false };
+    const why = provisioning ? 'Voice setup is already running — watch the progress chip.'
+      : !app.isPackaged ? 'Voice provisions from the installed build; from a source checkout run setup/setup-win.ps1.'
+      : !appDirNow() ? 'Voice setup runs through Git Bash, which isn’t available yet. Install Git above, then try voice again.'
+      : 'Voice setup could not start — see ~/.claudible/logs/provision.out.';
+    console.error('[claudible] voice install declined:', why);
+    return { ok: false, error: why, restartRequired: false };
+  }
   const send = (m) => { try { win && win.webContents.send('provision', m); } catch {} };
   let res;
   try { res = await deps.install(runner, id, send); } catch (e) { return { ok: false, error: (e && e.message) || 'install failed', restartRequired: false }; }

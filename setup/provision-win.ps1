@@ -12,6 +12,14 @@
 # proven one (it's what install.ps1 uses). The portable fallbacks are the no-UAC route and need a Windows
 # smoke test (docs/SMOKE.md) - most Win10/11 boxes have winget, so the fallback is the exception, not the rule.
 
+# 'voice' is DELIBERATELY absent from this set, and that is load-bearing rather than an oversight. On Windows
+# voice does not come through here at all: main.js's preflight:install intercepts id==='voice' when
+# runner.id==='win' and routes it to ensureVoiceProvisioned, which runs setup/setup-win.ps1 (git clone of
+# Kokoro, model download, uv env) - work this per-dep installer has no case for. runners/deps.js says the same
+# thing from the other side. The set is what makes that contract fail LOUDLY: if the interception is ever
+# refactored away, voice-on-Windows dies here on a PowerShell parameter-binding error naming $Dep, instead of
+# silently doing nothing. Adding 'voice' without also adding a real implementation below would trade a loud
+# failure for a silent success - exactly backwards. If voice ever DOES belong here, add the switch case first.
 param([Parameter(Mandatory = $true)][ValidateSet('node', 'git', 'claude', 'uv', 'cloudflared', 'gh')][string]$Dep)
 $ErrorActionPreference = 'Stop'
 

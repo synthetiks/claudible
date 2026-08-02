@@ -2497,5 +2497,41 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['noteUnknownSessions is missing from a tab-minting path']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 78. V-button — THE VOICE INSTALL BUTTON, ALL THREE CAUSES. It survived every previous voice fix because
+//   setup-win.ps1 was only ever proven by running it MANUALLY, which bypasses all three of these.
+//   (1) APPDIR_WSL is a boot-time snapshot and the win runner memoizes beside it, so on a fresh machine — where
+//       the wizard installs Git moments earlier — it stays null all session and the voice branch could never
+//       install. The generic dep path drops those caches after an install; the voice special-case RETURNS
+//       BEFORE that line. It must re-derive, and it must SAY which gate closed instead of a bare {ok:false}.
+//   (2) The lock's pid liveness probe had no age cap. Windows recycles pids, so a crash between writing the
+//       lock and dropping it could wedge voice permanently behind an unrelated process.
+//   (3) "Install all missing" broke out of the loop on the first restart-requiring dep. Git has
+//       restartOnInstall and sorts SECOND, so on a fresh machine claude/uv/voice/cloudflared/gh were never
+//       attempted, nothing said so, and restartNeeded is in-memory only so nothing resumed after the relaunch.
+//   (1) and (3) MUST ship together: landing (1) alone still leaves "install all" visibly stalling after Git,
+//   and the team credits the wrong fix. Pinned together for that reason.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the voice branch trusts the boot-time app-dir snapshot again (voice cannot install until a restart)',
+    /function appDirNow\(\)/.test(MAIN) && /if \(!appDirNow\(\)\) return false;/.test(MAIN)
+      ? [] : ['ensureVoiceProvisioned does not re-derive the app dir']);
+  none('a declined voice install went silent again (the row snaps back to "install" with no reason)',
+    /return \{ ok: false, error: why, restartRequired: false \};/.test(MAIN) ? [] : ['no typed reason from the win voice branch']);
+  none('the voice lock lost its age cap (a recycled Windows pid wedges voice forever)',
+    /VOICE_LOCK_MAX_MS/.test(MAIN) && /ageMs < VOICE_LOCK_MAX_MS && Number\.isFinite\(pid\)/.test(MAIN)
+      ? [] : ['the pid probe runs without an age cap']);
+  // Scoped to the function BODY and comment-stripped: the prose above installAllMissing quotes the very line it
+  // removed, and a whole-file match happily passed on that quotation — the comment-blindness trap this file
+  // warns about at the top, walked into while writing a pin about walking into traps.
+  const iam = (APP.match(/async function installAllMissing\(\) \{[\s\S]*?\n  \}/) || [''])[0].replace(/\/\/.*$/gm, '');
+  none('install-all abandons the list on the first restart-requiring dep again (2a(3) — ships WITH 2a(1))',
+    /for \(const id of ids\) await installDep\(id\);/.test(iam) && !/\bbreak;/.test(iam)
+      ? [] : ['installAllMissing still breaks out of its loop']);
+  none('provision-win.ps1 quietly grew a voice case with no implementation',
+    /ValidateSet\('node', 'git', 'claude', 'uv', 'cloudflared', 'gh'\)/.test(read('setup/provision-win.ps1'))
+      ? [] : ['the ValidateSet changed — voice must not be accepted without a real switch case']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
