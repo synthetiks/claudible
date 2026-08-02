@@ -1737,8 +1737,16 @@
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14l3-3 3 3"/></svg>
           <div><div class="ct">Add a folder I already have</div><div class="cd">Point Claudible at an existing folder — your repo, your code. Nothing is moved, copied, or published, and its commits show up in Project History.</div></div>
         </div>
+        <!-- 3b/W1: the fourth kind. `repo` MINTS a brand-new repo and `adopt` takes a folder already on disk —
+             neither could clone a repo that already EXISTS on GitHub. The only path that did was invite
+             discovery, which requires someone to have invited you, so "I have a repo, work in it" had no route. -->
+        <div class="choice" id="ch-import" data-kind="import" role="radio" tabindex="0" aria-checked="false">
+          <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          <div><div class="ct">Import a GitHub project</div><div class="cd">Clone a repo you already have on GitHub and work in it here. Sessions stay private until you turn sharing on from its ▾ menu.</div></div>
+        </div>
       </div>
       <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dashes)" />
+      <input type="text" id="ws-repo-in" maxlength="140" placeholder="owner/repo — or paste the GitHub URL" style="display:none" />
       <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose where its folder goes (else it goes in ~/.claudible)</span></label>
       <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
       <div class="ws-busy" id="ws-busy"></div>

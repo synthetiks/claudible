@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
   onBackendUnavailable: (cb) => ipcRenderer.on('backend:unavailable', (_e, s) => cb(s)),   // I3/S-root: the script backend could not resolve at boot — say so instead of letting ~35 handlers fail in silence
   discoverWorkspaces: () => ipcRenderer.invoke('workspace:discover'),   // manual "check for invited projects"
+  workspaceImport: (repo) => ipcRenderer.invoke('workspace:import', { repo }),   // 3b: clone an EXISTING GitHub repo by owner/repo or URL (no invite gate)
   openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser
   sessionListWs: (wsId) => ipcRenderer.invoke('session:list-ws', wsId),   // list a (possibly non-active) workspace's sessions
   // audio

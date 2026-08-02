@@ -2322,6 +2322,44 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
   }
   return c.ok ? { ok: true, path: after.path || null } : { ok: false, error: c.error || 'clone failed' };
 });
+// 3b/W1 — IMPORT AN EXISTING GITHUB REPO. The fourth project kind, and the only genuinely new one: `local`
+// makes a folder, `repo` MINTS a brand-new private repo, `adopt` registers a folder you already have on disk.
+// None of them could clone a repo that already exists on GitHub — the only path that did was invite/topic
+// discovery, which is gated on someone having invited you. So "I have a repo, work in it" had no route.
+// This reuses ensureClone → clone-workspace.sh, the same generic `gh repo clone` discovery uses, but WITHOUT
+// the invite gate: you are asking for this repo by name, so there is nothing to consent to beyond the ask.
+// Deliberately does NOT enable syncSessions. An invite means "join our shared sessions"; importing your own
+// repo means "work here" — publishing transcripts is a separate, explicit choice, still one click away in the
+// ▾ menu. Turning it on here would silently start pushing conversations to a repo the user only wanted to code in.
+ipcMain.handle('workspace:import', async (e, payload) => {
+  if (!APPDIR_WSL) return { ok: false, error: ERR_NO_BACKEND };
+  // Q4: accept `owner/repo` AND a full URL, normalized to owner/repo. People paste whatever is on the
+  // clipboard, and a paste that silently fails is exactly the class of refusal Phase 2 existed to delete.
+  const raw = String((payload && payload.repo) || '').trim();
+  const m = raw.replace(/^https?:\/\/(www\.)?github\.com\//i, '')   // full URL → owner/repo
+    .replace(/^git@github\.com:/i, '')                              // ssh remote → owner/repo
+    .replace(/\.git$/i, '').replace(/\/+$/, '')
+    .match(/^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/);
+  if (!m) return { ok: false, error: 'Use owner/repo, or paste the repository URL' };
+  const owner = m[1];
+  const slug = m[2].replace(/[^A-Za-z0-9-]/g, '');   // the folder + every transcript key off this; match clone-workspace.sh's own charset
+  if (!slug) return { ok: false, error: 'bad repository name' };
+  const wid = `repo-${slug}`;
+  const existing = registry.workspaces.find((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner));
+  if (existing) return { ok: false, error: 'already', id: existing.id };   // typed, so the renderer can just switch to it rather than dead-ending
+  const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoName: slug,
+    repoUrl: `https://github.com/${owner}/${slug}`, createdAt: Date.now(), needsClone: true };
+  registry.workspaces.push(ws); saveRegistry();
+  const c = await ensureClone(ws);                                  // minutes, over the network; clears needsClone on success
+  if (!c.ok) {
+    // Roll the registration back — a repo row that could never be cloned is worse than no row: it looks like a
+    // pending invite, and discovery would keep reconciling it.
+    const i = registry.workspaces.findIndex((w) => w.id === wid);
+    if (i >= 0) { registry.workspaces.splice(i, 1); saveRegistry(); }
+    return { ok: false, error: c.error || 'clone failed' };
+  }
+  return { ok: true, workspace: registry.workspaces.find((w) => w.id === wid) || ws };
+});
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
 ipcMain.handle('workspace:create', (e, payload) => new Promise((resolve) => {
   const targetTab = fgTabId;                                       // the tab this create was FOR (see attach() below)

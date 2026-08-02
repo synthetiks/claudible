@@ -5841,7 +5841,7 @@ let wsChoiceKind = 'local';
 // none, which is the one thing not restored verbatim), and a created shared repo syncs from birth (main.js
 // attach() mirrors workspace:upgrade). The later ▾-menu flows (upgradeWorkspace / inviteToLocal / openSyncModal)
 // stay fully alive for projects that start private.
-const WS_KINDS = ['local', 'repo', 'adopt'];
+const WS_KINDS = ['local', 'repo', 'adopt', 'import'];   // 3b: 'import' clones an EXISTING GitHub repo — see workspace:import in main.js
 function selectWsKind(kind) {
   wsChoiceKind = kind;
   WS_KINDS.forEach((k) => {
@@ -5851,14 +5851,19 @@ function selectWsKind(kind) {
   });
   const pr = $('ws-pick-row'); if (pr) pr.style.display = (kind === 'local') ? '' : 'none';   // custom folder is local-only
   const nt = $('ws-adopt-note'); if (nt) nt.style.display = (kind === 'adopt') ? 'block' : 'none';
-  // Adopting takes its name from the folder you pick, so the name field is optional there.
+  // Import names itself from the repo, so it swaps the name field for the owner/repo field entirely — asking
+  // for both would invite them to disagree, and the folder + every transcript key off the repo slug anyway.
   const nm = $('ws-name-in');
+  const rp = $('ws-repo-in');
+  if (nm) nm.style.display = (kind === 'import') ? 'none' : '';
+  if (rp) rp.style.display = (kind === 'import') ? '' : 'none';
   if (nm) nm.placeholder = (kind === 'adopt') ? 'Project name (optional — defaults to the folder’s name)' : 'Project name (letters, numbers, dashes)';
-  const btn = $('ws-create'); if (btn) btn.textContent = (kind === 'adopt') ? 'Choose folder…' : 'Create';
+  const btn = $('ws-create'); if (btn) btn.textContent = (kind === 'adopt') ? 'Choose folder…' : (kind === 'import') ? 'Clone' : 'Create';
 }
 function openWsModal() {
   selectWsKind('local');
   $('ws-name-in').value = ''; $('ws-busy').textContent = ''; $('ws-busy').classList.remove('err');
+  if ($('ws-repo-in')) $('ws-repo-in').value = '';
   if ($('ws-pick')) $('ws-pick').checked = false;
   $('ws-modal').classList.add('show');
   setTimeout(() => $('ws-name-in').focus(), 60);
@@ -5869,6 +5874,29 @@ async function createWorkspace() {
   const name = $('ws-name-in').value.trim();
   const busy = $('ws-busy'); busy.classList.remove('err');
   const adopt = wsChoiceKind === 'adopt';
+  const isImport = wsChoiceKind === 'import';
+  // 3b — importing takes its identity from the repo, so it validates the owner/repo field instead of the name.
+  // No consent dialog: unlike `repo`, this publishes NOTHING. It clones a repo you already own into a local
+  // project with sync OFF; turning sharing on later goes through the ▾ menu's existing disclosure.
+  if (isImport) {
+    const repoRef = ($('ws-repo-in').value || '').trim();
+    if (!repoRef) { busy.textContent = 'enter owner/repo, or paste the URL'; busy.classList.add('err'); return; }
+    busy.textContent = 'cloning from GitHub…'; $('ws-create').disabled = true;
+    let ir = null; try { ir = await claudible.workspaceImport(repoRef); } catch (e) { ir = { ok: false, error: e && e.message }; }
+    $('ws-create').disabled = false;
+    if (ir && !ir.ok && ir.error === 'already') {          // typed, so an existing project is a destination, not a dead end
+      busy.textContent = ''; closeWsModal();
+      await refreshWorkspaces(); switchWorkspace(ir.id);
+      toast('You already have that project — switched to it');
+      return;
+    }
+    if (!ir || !ir.ok) { busy.textContent = (ir && ir.error) ? humanError(ir.error) : 'could not clone that repository'; busy.classList.add('err'); return; }
+    busy.textContent = ''; closeWsModal();
+    await refreshWorkspaces();
+    if (ir.workspace && ir.workspace.id) switchWorkspace(ir.workspace.id);
+    refreshSessions(); focusTermSoon(150);
+    return;
+  }
   if (!name && !adopt) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }   // adopt names itself from the folder
   const pick = wsChoiceKind === 'local' && $('ws-pick') && $('ws-pick').checked;   // custom folder (local only)
   // Creating SHARED publishes from birth (a private GitHub repo + session sync) — the same action the ▾-menu
@@ -5951,6 +5979,12 @@ WS_KINDS.forEach((k, i) => {
 $('ws-create').addEventListener('click', createWorkspace);
 $('ws-cancel').addEventListener('click', closeWsModal);
 $('ws-name-in').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); createWorkspace(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeWsModal(); }
+});
+// The import field gets the same keys — a paste-and-Enter is the whole interaction for that kind, and a field
+// where Enter does nothing while its sibling submits is the sort of inconsistency nobody reports but everyone feels.
+if ($('ws-repo-in')) $('ws-repo-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); createWorkspace(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeWsModal(); }
 });

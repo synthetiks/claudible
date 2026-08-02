@@ -714,8 +714,11 @@ none('renderer: orphanTab is never rendered',
 // ---------------------------------------------------------------------------------------------------------
 {
   none('the New-project modal lost its shared-repo tile', /id="ch-repo" data-kind="repo" role="radio"/.test(HTML) ? [] : ['index.html has no #ch-repo radio tile']);
+  // 3b added a FOURTH kind, 'import' (clone an existing GitHub repo). What this pin protects is unchanged —
+  // 'repo' must stay reachable from the modal with its creating-a-private-repo busy text — so the list is
+  // matched by membership rather than by exact equality, which would have to be edited for every future kind.
   none('the modal path cannot reach workspaceCreate with kind repo',
-    /const WS_KINDS = \['local', 'repo', 'adopt'\]/.test(APP) && /creating private repo on GitHub/.test(APP) ? [] : ['WS_KINDS lost repo (or its busy text is gone)']);
+    /const WS_KINDS = \[[^\]]*'repo'[^\]]*\]/.test(APP) && /creating private repo on GitHub/.test(APP) ? [] : ['WS_KINDS lost repo (or its busy text is gone)']);
   // Creating shared publishes transcripts from birth — the tile must gate on the same honest disclosure the
   // ▾-menu flows use (R2). Pinned to the repo branch of createWorkspace, not just any confirm() somewhere.
   none('the shared tile creates without the transcript-sync consent gate',
@@ -2704,6 +2707,45 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.gh-dot\.off\{visibility:hidden\}/.test(HTML) ? [] : ['.gh-dot.off is not visibility:hidden — the same shift .ws-dot.off exists to prevent']);
   none('the Settings connect button duplicates the device-code flow instead of reusing 2g',
     /gitCmd\('gh auth login'\)/.test(APP) ? [] : ['#gh-connect does not route through gitCmd']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 83. 3b/W1 — THE FOURTH PROJECT KIND. `local` makes a folder, `repo` MINTS a brand-new private repo, `adopt`
+//   registers a folder already on disk. None of them could clone a repo that already EXISTS on GitHub — the
+//   only path that did was invite/topic discovery, which requires someone to have invited you. So "I have a
+//   repo, I want to work in it here" had no route at all.
+//   It reuses ensureClone → clone-workspace.sh (the same generic `gh repo clone` discovery uses) WITHOUT the
+//   invite gate: you named the repo, so there is nothing further to consent to.
+//   Two decisions worth keeping:
+//     · Q4 — accept `owner/repo` AND a pasted URL (and an ssh remote). A paste that silently fails is exactly
+//       the class of silent refusal Phase 2 existed to delete.
+//     · syncSessions stays OFF. An invite means "join our shared sessions"; importing your own repo means
+//       "work here". Enabling sync would start publishing transcripts to a repo the user only wanted to code
+//       in — and that is a decision with its own disclosure, one click away in the ▾ menu.
+//   Registration is rolled BACK if the clone fails: a repo row that can never be cloned looks like a pending
+//   invite and discovery would keep reconciling it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the New-project modal lost its import tile',
+    /id="ch-import" data-kind="import" role="radio"/.test(HTML) ? [] : ['index.html has no #ch-import radio tile']);
+  none('…or the owner/repo field it needs',
+    /id="ws-repo-in"/.test(HTML) ? [] : ['no #ws-repo-in input']);
+  none('WS_KINDS cannot reach the import path',
+    /const WS_KINDS = \[[^\]]*'import'[^\]]*\]/.test(APP) ? [] : ["WS_KINDS has no 'import' kind"]);
+  none('the import IPC is not bridged, or main has no handler',
+    [/workspaceImport: \(repo\) => ipcRenderer\.invoke\('workspace:import'/.test(PRELOAD) ? '' : 'no workspaceImport bridge',
+     /ipcMain\.handle\('workspace:import'/.test(MAIN) ? '' : 'no workspace:import handler'].filter(Boolean));
+  none('a pasted GitHub URL is rejected again (Q4: accept both forms)',
+    /replace\(\/\^https\?:\\\/\\\/\(www\\\.\)\?github\\\.com\\\/\/i, ''\)/.test(MAIN)
+      ? [] : ['workspace:import no longer strips a github.com URL prefix']);
+  none('importing silently turns session sync on (it must not — that is a separate, disclosed choice)',
+    /ipcMain\.handle\('workspace:import'[\s\S]*?\n\}\);/.exec(MAIN)?.[0].includes('syncSessions = true')
+      ? ['workspace:import enables syncSessions'] : []);
+  none('a failed clone leaves a phantom repo row behind',
+    /registry\.workspaces\.splice\(i, 1\); saveRegistry\(\);/.test(MAIN)
+      ? [] : ['workspace:import does not roll back its registration when the clone fails']);
+  none('an already-imported repo dead-ends instead of switching to it',
+    /ir\.error === 'already'/.test(APP) ? [] : ['the renderer does not handle the typed already-exists result']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
