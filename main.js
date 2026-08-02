@@ -851,9 +851,19 @@ function respawnPty(tabId, session, opts) {
   // Moved ABOVE the kill: doSpawn can now run inside it (win.js settles the callback synchronously if the
   // taskkill spawn throws), and clearing these AFTER a spawn would wipe the NEW generation's cursors.
   hookState.delete(tabId); lastStatusByTab.delete(tabId);
+  // …but WAIT ONLY WHEN THE WAIT BUYS SOMETHING. The failure being avoided is two claudes on ONE TRANSCRIPT —
+  // so it can only occur when the replacement resumes the transcript the dying one held. Deferring every
+  // respawn made an ordinary session switch pay for taskkill before claude could even start booting: work that
+  // used to overlap the kill now queued behind it, which is the ~1s black screen CRAZY and MK reported right
+  // after 2d landed. Switching A→B cannot collide (different transcripts, and respawnPty's own cross-tab
+  // dedupe above already refuses a target that is live elsewhere), so those spawn immediately, as before.
+  //   session === 'new'      -> a fresh draft, no transcript exists to collide on          -> no wait
+  //   session === rec.session-> the post-sync reload: the exact bug path                   -> WAIT
+  //   session falsy ('')     -> "resume latest", which may well BE rec.session             -> WAIT (conservative)
+  const sameTranscript = !!rec && session !== 'new' && (!session || session === rec.session);
   let killWaits = false;
   if (old) {
-    if (runner.id === 'win') { try { old.kill(undefined, doSpawn); killWaits = true; } catch { killWaits = false; } }
+    if (runner.id === 'win' && sameTranscript) { try { old.kill(undefined, doSpawn); killWaits = true; } catch { killWaits = false; } }
     if (!killWaits) { try { old.kill(); } catch {} }
   }
   if (rec) _killSessionTree(rec.runtimeId);                 // the ConPTY kill never reaches the WSL side — reap the old generation's bash/claude tree

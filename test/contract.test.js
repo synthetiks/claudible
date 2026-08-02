@@ -2566,6 +2566,14 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the Windows spawn is no longer deferred until the old tree is reaped (the two-claude window is back)',
     /old\.kill\(undefined, doSpawn\); killWaits = true;/.test(rp) && /setTimeout\(doSpawn, 1500\)/.test(rp)
       ? [] : ['respawnPty does not wait for the taskkill callback on win']);
+  // …and the wait must stay NARROW. Deferring every respawn made an ordinary A→B session switch queue claude's
+  // boot behind taskkill instead of overlapping it — a visible ~1s black screen, reported on real hardware the
+  // same day 2d shipped. The collision needs ONE transcript, so only a same-transcript respawn can hit it.
+  // Both directions are pinned: broaden this and the black screen returns, drop it and the race returns.
+  none('the deferral went back to blocking EVERY respawn (the 1s black screen on every session switch)',
+    /const sameTranscript = !!rec && session !== 'new' && \(!session \|\| session === rec\.session\);/.test(rp)
+      && /runner\.id === 'win' && sameTranscript/.test(rp)
+      ? [] : ['the win deferral is not gated on sameTranscript']);
   none('the supersede token is gone (a second respawn inside the window can double-spawn again)',
     /_respawnPending\.get\(tabId\) !== spawnToken/.test(rp) ? [] : ['no token check before the deferred spawn']);
   none('win.js kill stopped reporting when the tree is reaped',
