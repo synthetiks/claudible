@@ -1302,8 +1302,18 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   const styleBlk2 = (HTML.match(/<style>[\s\S]*?<\/style>/) || [''])[0];
   none('the live badge shows the peer name again (it never fit the one-line row)',
     /textContent = 'live · ' \+ who|textContent = 'going live · ' \+ who/.test(APP) ? ['makeLiveBadge still interpolates the host name'] : []);
+  // 3a merged the two badge branches into ONE builder, so "both phases render the same word" stopped being a
+  // thing to check by counting two identical string literals and became true by construction. The assertion is
+  // now stronger, not weaker: there is a single `liw` label, and the separate inert `.sess-starting` span that
+  // could have drifted from it is gone entirely. Both phases are the same <button class="sess-join">, which is
+  // also what makes the "Join →" hover rule (index.html) apply while the host is still spinning up.
   none('…and both presence phases must render the SAME word',
-    (APP.match(/liw\.textContent = 'live';|sliw\.textContent = 'live';/g) || []).length === 2 ? [] : ['the starting and joinable badges no longer share one label']);
+    (APP.match(/liw\.textContent = 'live';/g) || []).length === 1
+      && !/sess-live-ind sess-starting/.test(APP)
+      ? [] : ['the two presence phases no longer share one badge builder']);
+  none('a phase-1 (going-live) row is inert again — the click that used to do nothing',
+    /const b = document\.createElement\('button'\); b\.className = 'sess-live-ind sess-join';\s*\n\s*if \(peer\.starting\) b\.style\.opacity/.test(APP)
+      ? [] : ['makeLiveBadge no longer builds a joinable button for peer.starting']);
   none('hovering a joinable live row no longer offers Join',
     /jx\.textContent = 'Join →'/.test(APP) ? [] : ['the joinx hover affordance is gone']);
 
@@ -2632,6 +2642,36 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the facade kill lost its optional reaped callback']);
   none('…and listening for the reap must not have cost us the detach (the quit sweep outlives app.quit())',
     /c\.unref\(\);/.test(read('runners/win.js')) ? [] : ['taskkill child is no longer unref\'d']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 80. 3a/L1-L3 — JOINING BEFORE THE HOST IS READY. Presence arrives in two phases: a phase-1 stamp the moment
+//   the host clicks Share, then the full url+token handle a few seconds later once their tunnel is up. The row
+//   appeared immediately and was INERT for those seconds — which is precisely the window in which someone
+//   watching for it tries to click. The click did nothing, said nothing, and the affordance changed under the
+//   pointer when the handle landed.
+//   Three parts, all riding machinery that already existed:
+//     L1 both phases build the SAME joinable button, so the "Join →" hover applies throughout
+//     L2 an early click builds the tab, parks it in 'starting', and returns BEFORE liveConnect (nothing to dial)
+//     L3 'starting' joins LIVE_RECONNECTABLE, so reconcileJoinedTabs — which already re-derives each tracked
+//        session's peer every poll and connects when a handle appears (built for host-handle ROTATION) —
+//        promotes that waiting tab by itself. One click, no second click, no new poll.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('L3: a waiting tab can no longer be auto-promoted when the handle lands',
+    /const LIVE_RECONNECTABLE = new Set\(\['offline', 'reconnecting', 'starting'\]\);/.test(APP)
+      ? [] : ["'starting' is not in LIVE_RECONNECTABLE — an early join would wait forever"]);
+  none('L2: an early join dials a handle that does not exist yet, or never returns early',
+    /if \(!peer\.url \|\| !peer\.token\) \{\s*\n\s*setLiveState\(rec, 'starting'\);[\s\S]{0,200}?return;\s*\n\s*\}/.test(APP)
+      ? [] : ['openLiveTab does not park a handle-less peer in starting and return']);
+  none('…and the top-of-function bail is back, which would make the click do nothing again',
+    /if \(!peer\.url \|\| !peer\.token\) return;/.test(APP) ? ['openLiveTab still hard-returns on a phase-1 peer'] : []);
+  none('L1: the whole phase-1 row is inert again',
+    /\/\/ L1 — the whole row is clickable in BOTH phases now[\s\S]{0,300}?row\.addEventListener\('click', \(\) => openLiveTab\(peer\)\);/.test(APP)
+      ? [] : ['renderLivePeerRow gates its click on !peer.starting again']);
+  none('the waiting state has no words (a blank overlay is the dead click, wearing a scrim)',
+    /starting: 'waiting to join…'/.test(APP) && /starting: 'Waiting for ' \+ who/.test(APP)
+      ? [] : ['no label and/or no overlay copy for the starting state']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

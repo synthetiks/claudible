@@ -3387,7 +3387,12 @@ function toggleShareSession(s) {
 // and shows "ended" forever — even though the host already re-advertised a fresh handle. On each presence refresh,
 // re-arm any offline/reconnecting joined tab whose host handle CHANGED, with the fresh url+token (mirrors the manual
 // rearm path in openLiveTab). Only fires on an actual url/token change, so it can't tight-loop on a stable dead URL.
-const LIVE_RECONNECTABLE = new Set(['offline', 'reconnecting']);
+// L3 — 'starting' rides along so an EARLY join auto-promotes itself. reconcileJoinedTabs already re-derives the
+// live peer for every tracked session on each poll and calls liveConnect the moment a handle appears; it was
+// built for host-handle rotation and simply never saw a tab that was waiting for the FIRST handle. Adding the
+// state here is the whole of L3 — no new poll, no new machinery, and the existing hold-off at the top of the
+// auto-close branch already protects a tab whose peer still carries a phase-1 stamp.
+const LIVE_RECONNECTABLE = new Set(['offline', 'reconnecting', 'starting']);
 function reconcileJoinedTabs(pollOk) {
   const ended = [];
   for (const rec of tabs.values()) {
@@ -3636,23 +3641,21 @@ function _skewNote(peer) {
 }
 function makeLiveBadge(peer, localLabel) {
   const who = peer.name || peer.login || 'host';
-  if (peer.starting) {
-    // Phase-1 presence: the host clicked Share and their tunnel is still spawning — visible NOW, joinable in a
-    // few seconds when the full (url+token) stamp replaces this one and the poll repaints it as a Join badge.
-    const s = document.createElement('span'); s.className = 'sess-live-ind sess-starting';
-    const sdot = document.createElement('span'); sdot.className = 'live-dot';
-    const sliw = document.createElement('span'); sliw.className = 'liw'; sliw.textContent = 'live';   // ONE displayed state. "going live · <name>" overflowed a one-line row, and the two-state vocabulary made a 3-second transition look like a status the reader had to learn. Who it is lives in the tooltip.
-    s.appendChild(sdot); s.appendChild(sliw);
-    s.title = who + ' is going live — joinable in a few seconds' + _skewNote(peer);
-    s.style.opacity = '0.75';
-    return s;
-  }
+  // L1 — PHASE-1 PRESENCE IS CLICKABLE TOO. The host has clicked Share and their tunnel is still spawning; the
+  // full (url+token) stamp lands a few seconds later. This used to render an inert <span>, so for those seconds
+  // the row said "live" and did nothing — the reader had to notice it had become clickable and try again.
+  // It is the SAME <button class="sess-live-ind sess-join"> now, so index.html's hover rule (scoped to
+  // .sess-join) reveals "Join →" in both phases and the affordance never changes under the pointer. Only the
+  // tooltip and the dimmed opacity distinguish the two, which is honest: you may click, it will take a moment.
   const b = document.createElement('button'); b.className = 'sess-live-ind sess-join';
+  if (peer.starting) b.style.opacity = '0.75';
   const dot = document.createElement('span'); dot.className = 'live-dot';
   const liw = document.createElement('span'); liw.className = 'liw'; liw.textContent = 'live';   // name dropped: the row is one line and the tooltip already names the host
   const jx = document.createElement('span'); jx.className = 'joinx'; jx.textContent = 'Join →';   // revealed on row hover
   b.appendChild(dot); b.appendChild(liw); b.appendChild(jx);
-  b.title = 'Join ' + who + '’s live session — co-drive it right here' + _skewNote(peer);
+  b.title = (peer.starting
+    ? 'Join ' + who + '’s live session — they’re still going live, so this waits a moment'
+    : 'Join ' + who + '’s live session — co-drive it right here') + _skewNote(peer);
   b.addEventListener('click', (e) => { e.stopPropagation(); openLiveTab(peer, localLabel); });   // native, in this same window — carry the clicked row's label
   return b;
 }
@@ -3666,14 +3669,14 @@ function renderLivePeerRow(peer) {
   mt.textContent = (peer.name || peer.login || 'a collaborator') + (peer.starting ? ' is going live…' : ' is live now');
   m.appendChild(mt); m.appendChild(makeLiveBadge(peer));
   row.appendChild(p); row.appendChild(m);
-  if (!peer.starting) {                       // a phase-1 row has no handle to join yet — inert until the full stamp lands
-    row.style.cursor = 'pointer';
-    row.addEventListener('click', () => openLiveTab(peer));
-  }
+  // L1 — the whole row is clickable in BOTH phases now. It used to be inert while the host's tunnel spawned,
+  // which is exactly the window in which someone watching for the row to appear tries to click it.
+  row.style.cursor = 'pointer';
+  row.addEventListener('click', () => openLiveTab(peer));
   return row;
 }
 // ---- native joined-session tab: render + drive a peer's live session inside the cockpit -----------------
-const LIVE_STATE_LABEL = { '': 'live', live: 'live', connecting: 'connecting…', pending: 'waiting for host…', reconnecting: 'reconnecting…', paused: 'paused', denied: 'declined', offline: 'ended' };
+const LIVE_STATE_LABEL = { '': 'live', live: 'live', connecting: 'connecting…', starting: 'waiting to join…', pending: 'waiting for host…', reconnecting: 'reconnecting…', paused: 'paused', denied: 'declined', offline: 'ended' };
 // ---- the joined row's meta: ONE builder, used by both paths that paint it ------------------------------
 // renderJoinedTabRow() creates the row and setLiveState() rebuilds this line on every state change. They used
 // to hold two copies of the same markup, so a fix to one silently reverted the moment the state moved. They
@@ -3776,6 +3779,7 @@ function setLiveState(rec, state, detail) {
   const who = (rec.peer && (rec.peer.name || rec.peer.login)) || rec.hostName || 'the host';
   ov.textContent = ({
     connecting: 'Connecting to ' + who + '’s live session…',
+    starting: 'Waiting for ' + who + ' to finish going live — you’ll join automatically.',   // L2: clicked during phase-1 presence; reconcileJoinedTabs promotes this tab the moment the handle lands
     pending: 'Waiting for ' + who + ' to let you in…',
     reconnecting: 'Reconnecting…',
     paused: who + ' stepped into a private project — the mirror is paused.',
@@ -3808,7 +3812,6 @@ function repaintLiveTracker(rec) {
 function openLiveTab(peer, localLabel) {
  try {
   if (!peer) return;
-  if (!peer.url || !peer.token) return;   // a phase-1 "going live…" stamp has no handle yet — nothing to dial (its rows are inert; this is the belt)
   for (const r of tabs.values()) {
     if (r.kind === 'live' && r.peer && r.peer.session === peer.session) {
       setActiveTab(r.tabId);
@@ -3834,6 +3837,16 @@ function openLiveTab(peer, localLabel) {
   rec.label = 'Live · ' + who; rec.curSessionLabel = 'Live · ' + who; rec.hostName = who;
   rec.joinedAsLabel = localLabel || '';                              // name the joined tab after the row you clicked, until the host broadcasts its own session name
   setActiveTab(id);
+  // L2 — CLICKED BEFORE THE HOST WAS READY. A phase-1 stamp carries no url/token, so there is nothing to dial
+  // yet; this used to `return` at the top of the function and the click did nothing at all. Instead: build the
+  // tab, park it in 'starting', and STOP HERE. reconnectJoinedTabs re-derives this session's peer on every poll
+  // and, because 'starting' is in LIVE_RECONNECTABLE, calls liveConnect itself the moment the full stamp lands.
+  // So the user clicks once, sees an honest "waiting" tab, and is joined automatically — no second click.
+  if (!peer.url || !peer.token) {
+    setLiveState(rec, 'starting');
+    refreshSessions(); refreshExpandedTrees();
+    return;
+  }
   setLiveState(rec, 'connecting');
   refreshSessions();                                                 // surface the joined-tab row immediately
   refreshExpandedTrees();                                            // …and stand its saved copy down in its home project's tree in the same paint (the cross-project duplicate)
