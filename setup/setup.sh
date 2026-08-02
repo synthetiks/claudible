@@ -91,11 +91,31 @@ if [ ! -d "$VOICE/kokoro/.git" ]; then
   # into calling it "already installed" on the next run (mirrors setup-win.ps1's Kokoro clone check).
   git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI "$VOICE/kokoro" || { rm -rf "$VOICE/kokoro"; say "Kokoro clone failed (network?). Re-run \`npm run setup\`."; exit 1; }
 fi
+# X-linux — MIRROR THE WINDOWS misaki PATCH HERE TOO. Kokoro asks for misaki[en,ja,ko,zh]; the ja extra drags
+# in pyopenjtalk, which builds from C++ source. On Windows that is fatal (no MSVC on a normal box) and is why
+# setup-win.ps1 rewrites it. On Linux/macOS the toolchain usually IS present, so this is not a hard break —
+# it compiles, slowly, and costs build time and disk for voices this app can never ask for. Claudible serves
+# English only: grep the UI and the TTS request builder and there is no path to a jf_/jm_/zf_/zm_/kf_ voice
+# id, so dropping the CJK extras is behaviour-preserving by construction, not by hope.
+# NOT claimed risk-free: removing an extra changes what the resolver sees and could in principle shift a shared
+# transitive pin (numpy, say) — a different failure class from "the regex didn't match". Hence one confirming
+# run on real hardware: `uv sync --extra cpu` completes, pyopenjtalk is absent from the resolved set, and
+# af_bella still synthesizes.
+# Patched in the CLONE, never upstream, and idempotent: the pattern only matches an un-patched line, so a
+# re-run after a `git pull` re-applies it. sed -i differs between GNU and BSD/macOS (macOS demands an argument
+# to -i), so write via a temp file — portable, and it also lets us report whether anything actually changed.
+pyproj="$VOICE/kokoro/pyproject.toml"
+if [ -f "$pyproj" ]; then
+  if grep -qE 'misaki\[[a-z,]*\]' "$pyproj" && ! grep -q 'misaki\[en\]' "$pyproj"; then
+    sed -E 's/misaki\[[a-z,]*\]/misaki[en]/g' "$pyproj" > "$pyproj.tmp" && mv "$pyproj.tmp" "$pyproj"
+    say "Patched Kokoro deps: English voices only (the CJK extras compile pyopenjtalk from source)."
+  fi
+fi
 # CPU install only — `--extra cpu` pulls torch==2.6.0+cpu from the pytorch-cpu index. A bare `uv sync`
 # resolves torch from default PyPI = the ~731MB CUDA wheel + ~2GB of nvidia-* packages (and that CUDA
 # torch segfaults here), so the extra is required.
 say "Installing/refreshing Kokoro CPU dependencies…"
-( cd "$VOICE/kokoro" && uv sync --extra cpu )
+( cd "$VOICE/kokoro" && uv sync --extra cpu ) || { say "Kokoro dependency install failed — see the output above, then re-run \`npm run setup\`."; exit 1; }
 
 # 3b. Kokoro model weights (~327 MB) — the repo gitignores *.pth, so a clone has NO model.
 # Without this the server exits at warmup (FileNotFoundError) and :8880 never binds. Idempotent:
