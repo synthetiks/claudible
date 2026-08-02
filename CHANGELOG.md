@@ -4,14 +4,48 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
-<!-- 0.9.0 was prepared but never tagged or released (latest published release is v0.8.2), so its section is
-     RENAMED to 0.9.1 rather than left behind a second dated heading — 0.8.3 and 0.8.4 are already sitting in
-     this file with no matching tag, and a third orphan would make the history actively misleading. Everything
-     below therefore ships together as 0.9.1.
-     DATE = last change in the section, not the day prep started: 0.9.1 was prepared on 07-23 but still is not
-     tagged, and six more days of work landed on top of it. Those commits go HERE, not under [Unreleased] —
-     build.yml's release-notes step extracts ONLY the `## [<tag version>]` block, so anything parked under
-     [Unreleased] when `v0.9.1` is pushed is silently absent from the release page. -->
+<!-- Notes style, agreed 2026-08-02: bullets and one or two short paragraphs. The 0.9.1 entry below is a wall
+     of prose nobody reads — write what changed for the person using it, put the reasoning in the commit.
+     KEEP EVERY EDITORIAL NOTE ABOVE THIS LINE. build.yml extracts from `## [<version>]` up to the NEXT
+     `## [`, so a comment sitting between two version headings lands inside the OLDER one's release body.
+     (GitHub hides HTML comments, so it renders as nothing — but the raw notes carry it, and the next person
+     reading them wonders why a release is explaining a version that shipped before it.)
+     On 0.9.1's naming, which used to be noted here: 0.9.0 was prepared but never tagged, so its section was
+     renamed to 0.9.1 rather than left as a second dated heading — 0.8.3 and 0.8.4 already sit in this file
+     with no matching tag, and a third orphan would have made the history actively misleading. -->
+## [0.9.2] — 2026-08-02
+
+Two rounds of work on things that were quietly broken rather than visibly failing: several guards were
+refusing correctly but saying nothing, so the app looked dead when it was actually protecting you. Those all
+speak now. The rest is the project/session UX that had been on the list for a while.
+
+**Fixed**
+
+- Voice installs from the in-app button — three separate causes, including "install all missing" silently
+  giving up after Git and never attempting the rest.
+- A brand-new session no longer appears as a phantom draft over a project that already has sessions.
+- Sessions that refuse to open now say why, and clicking one already open elsewhere jumps to its tab.
+- The spacebar no longer dies after enabling sync on a project with an open tab.
+- Switching sessions is quicker, and shows "Opening …" instead of a black rectangle.
+- The setup check no longer opens on top of Settings and swallows your clicks.
+- The ⓘ explainers no longer cover the field they are explaining.
+- Voice on Linux/macOS skips a source build it never needed.
+
+**New**
+
+- **Import a GitHub project** — clone a repo you already have and work in it. Sessions stay private unless you
+  turn sharing on yourself.
+- **Join a live session before the host is ready** — click the moment it appears; you join automatically once
+  their tunnel is up.
+- **Connect GitHub** in the terminal's git menu, and a GitHub status row in Settings.
+- Shared projects announce themselves instead of appearing as silent rows.
+
+**Changed**
+
+- Setup is three steps: System check → Claude → GitHub. It no longer creates a second project you did not ask
+  for — one is already there.
+- When the shell backend is unavailable, the app says so at launch instead of failing silently everywhere.
+
 ## [0.9.1] — 2026-07-31
 
 - **The setup wizard connects GitHub for real.** The "Link GitHub" step used to print a `gh auth login`
