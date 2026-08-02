@@ -294,20 +294,34 @@ function pickClaudeBin(hits) {
   const list = (hits || []).map((s) => String(s).trim()).filter(Boolean);
   return list.find((h) => /\.(cmd|exe|bat)$/i.test(h)) || list[0] || 'claude';
 }
+// MEMOIZED, like _bash above and _claudePresent below — these two sit on the hot path of EVERY pty spawn
+// (whichNode from installHooks, whichClaude from spawnClaude), and each `where` is a whole OS process spawned
+// and waited on synchronously, on the main thread. Measured on a real machine: ~31ms + ~34ms = ~65ms added to
+// every single session switch, during which main cannot forward pty data or answer any IPC. A resolved binary
+// path does not change under a running process, and the one thing that CAN change it — installing node or
+// claude mid-session — already calls resetCaches() below.
+let _claudeBin = undefined, _nodeBin = undefined;
 function whichClaude() {
-  if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;
-  try { return pickClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)); } catch { return 'claude'; }
+  if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;   // env override wins and is free — never cache around it
+  if (_claudeBin !== undefined) return _claudeBin;
+  try { _claudeBin = pickClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)); }
+  catch { _claudeBin = 'claude'; }
+  return _claudeBin;
 }
 // A real Windows node.exe for the hook commands (NEVER process.execPath = electron.exe).
 function whichNode() {
   if (process.env.CLAUDIBLE_NODE) return process.env.CLAUDIBLE_NODE;
-  try { const w = cp.execFileSync('where', ['node'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim(); if (w) return w; } catch {}
-  return 'node';   // installer guarantees Windows Node on PATH; bare 'node' resolves in claude's hook shell
+  if (_nodeBin !== undefined) return _nodeBin;
+  _nodeBin = 'node';   // installer guarantees Windows Node on PATH; bare 'node' resolves in claude's hook shell
+  try { const w = cp.execFileSync('where', ['node'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim(); if (w) _nodeBin = w; } catch {}
+  return _nodeBin;
 }
 
 // Drop the memoized git-bash / app-dir resolutions so a later runtime Git install can be picked up without a
 // process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
-function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; }
+// _claudeBin/_nodeBin ride along for the same reason: preflight:install calls this after installing a dep, so
+// a claude or node that arrived mid-session is picked up on the next spawn rather than staying stale.
+function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; }
 
 // ---- dependency detection (pure-Node; NO git-bash) ----------------------------------------------
 // The self-bootstrapping provisioner needs to know, on a possibly-bare Windows box, which deps are present.
