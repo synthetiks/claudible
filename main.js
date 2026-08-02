@@ -712,13 +712,20 @@ function _pushHistoryEntryToShare(wsId, entry) {
 // Switch a tab's terminal to a chosen session ('new' | <session-id> | '' = resume latest). Kills that
 // tab's current pty (its guarded handlers go quiet, since the map entry is deleted BEFORE the kill) and
 // respawns it with the selection. Only foreground-tab switches touch the guest mirror.
+// I4 — WHY a respawn was refused, for the one caller that can show it. respawnPty's contract is a synchronous
+// boolean and MUST stay one (see the 2d note in the patch plan: nine call sites use `!respawnPty(...)` as a
+// guard, several in non-async contexts, so a Promise return would make every one of them stop refusing —
+// silently). So the reason travels beside the return value, not inside it: respawnPty writes the last refusal
+// here and session:open reads it immediately after. Same-tick read, single-threaded main — no interleaving.
+let _lastRespawnRefusal = '';
 function respawnPty(tabId, session, opts) {
-  if (liveTabs.has(tabId)) return false;                    // a joined live tab is a client WebSocket, never a local pty — never spawn/kill a pty on its id (the hijack defense, mirrors setForegroundTab's guard)
+  _lastRespawnRefusal = '';
+  if (liveTabs.has(tabId)) { _lastRespawnRefusal = 'live'; return false; }                    // a joined live tab is a client WebSocket, never a local pty — never spawn/kill a pty on its id (the hijack defense, mirrors setForegroundTab's guard)
   const rec = ptys.get(tabId);
   // BUSY GUARD (opt-in): main's rec.busy is authoritative (set by the hook poller), so a user session-switch
   // never kills a mid-turn Claude even when the renderer's own busy flag is still stale from the poll latency.
   // The caller opens the target session in a NEW background tab instead, leaving this one running.
-  if (opts && opts.guardBusy && rec && rec.busy) return false;
+  if (opts && opts.guardBusy && rec && rec.busy) { _lastRespawnRefusal = 'busy'; return false; }
   // ONE SESSION, ONE CLAUDE — defence in depth under the renderer's dedupe. Resuming a session that is ALREADY
   // live in another tab spawns a second claude on the same transcript, and Claude Code answers with the
   // "already running or being resumed" selection modal — which swallows every keystroke, spacebar included
@@ -729,7 +736,7 @@ function respawnPty(tabId, session, opts) {
   // may legitimately coexist. NOTE: this cannot cover session:'' (--continue picks inside session.sh where no
   // dedupe can see it) — which is why the renderer no longer sends '' from any switch path.
   if (session && session !== 'new') {
-    for (const [tid, r2] of ptys) if (tid !== tabId && !liveTabs.has(tid) && r2.session === session) return false;
+    for (const [tid, r2] of ptys) if (tid !== tabId && !liveTabs.has(tid) && r2.session === session) { _lastRespawnRefusal = 'open-elsewhere'; return false; }
   }
   // THE LIVE SESSION IS NOT COLLATERAL. The pinned tab (sharedTabId) IS the conversation guests are watching.
   // Re-pointing it at a different session respawns its pty — `old.kill()` below — so the shared conversation
@@ -758,6 +765,7 @@ function respawnPty(tabId, session, opts) {
   if (movesShared && !endShare) {
     try { winSend('share:reroute-refused', { tabId, from: rec.session || '', to: session || '' }); } catch {}
     console.log('[claudible] refused to re-point the live-shared tab off its session — the share stays alive');
+    _lastRespawnRefusal = 'live-shared';
     return false;
   }
   setGenBusy(tabId, false);                                 // a switch ends any in-flight turn for sync gating
@@ -1462,7 +1470,15 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
 // off the very session it's about to trash — the one session-level reroute the share cannot survive (the tunnel is
 // already being torn down renderer-side). Without it, the refusal below would abort the delete with a misleading
 // "that session is still running".
-ipcMain.handle('session:open', (e, { tabId, id, endShare }) => { openGen++; const ok = respawnPty(tabId, id, { guardBusy: true, endShare: !!endShare }); return { ok }; });
+// I4 — "I can't open any session but the active one." Every refusal above is deliberate and correct, and every
+// one of them arrived here as a bare `{ ok: false }`: the renderer opened the target elsewhere (or did nothing
+// visible) and the click read as dead. Same guards, same behaviour — now they say which one fired. `reason` is
+// a stable token; the renderer owns the wording.
+ipcMain.handle('session:open', (e, { tabId, id, endShare }) => {
+  openGen++;
+  const ok = respawnPty(tabId, id, { guardBusy: true, endShare: !!endShare });
+  return ok ? { ok: true } : { ok: false, reason: _lastRespawnRefusal || 'refused' };
+});
 // Soft-delete a saved session: move its transcript to ~/.claudible/trash/ (recoverable). The renderer
 // switches the pty off this session BEFORE calling, so the file isn't held open by a live claude --resume.
 ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {

@@ -2022,8 +2022,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the kept-tab rollback path lost its dedupe (main may have refused BECAUSE the session is live elsewhere)',
     /Object\.assign\(t, prev\);[\s\S]{0,900}?const want = await sessionToOpenFor\(id, targetSession\);[\s\S]{0,500}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['the keptTab branch does not dedupe before newBlankTab']);
+  // The refusal now also records WHY (I4 — session:open reads _lastRespawnRefusal to toast a reason), so the
+  // dedupe returns from a block rather than bare. What this pin protects is unchanged: the cross-tab scan still
+  // exists, still returns FALSE, and still does so BEFORE the destructive ptys.delete.
   none('main lost its one-session-one-claude guard (the renderer dedupe is the only defence again)',
-    /function respawnPty\(tabId, session, opts\) \{[\s\S]{0,2600}?for \(const \[tid, r2\] of ptys\) if \(tid !== tabId && !liveTabs\.has\(tid\) && r2\.session === session\) return false;[\s\S]{0,8000}?ptys\.delete\(tabId\);/.test(MAIN)
+    /function respawnPty\(tabId, session, opts\) \{[\s\S]{0,2900}?for \(const \[tid, r2\] of ptys\) if \(tid !== tabId && !liveTabs\.has\(tid\) && r2\.session === session\) \{ _lastRespawnRefusal = 'open-elsewhere'; return false; \}[\s\S]{0,8000}?ptys\.delete\(tabId\);/.test(MAIN)
       ? [] : ['respawnPty has no cross-tab session dedupe before the destructive re-point']);
   none('an empty-string session strands the active tab without a sidebar row again',
     /if \(sid === ''\) return t;/.test(APP) ? [] : ['orphanTab no longer covers the \'\' shape']);
@@ -2405,6 +2408,26 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   const mr = (APP.match(/async function maybeRepair\(\) \{[\s\S]*?\n  \}/) || [''])[0];
   none('maybeRepair lost its drawer guard (the wizard scrim re-covers an open Settings drawer)',
     /if \(drawer\.classList\.contains\('open'\)\) return;/.test(mr) ? [] : ['no drawer guard in maybeRepair']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 74. I4 — A REFUSAL MUST SAY WHICH GUARD FIRED. respawnPty has four deliberate refusal branches and every one
+//   of them reached the renderer as a bare `{ ok:false }`, so "I can't open any session but the active one"
+//   was indistinguishable from a dead click. The reason travels BESIDE the boolean (a module-level token read
+//   same-tick by session:open) because respawnPty's synchronous true/false contract must not change — nine
+//   call sites use `!respawnPty(...)` as a guard and a Promise would make every one of them stop refusing.
+//   'open-elsewhere' is the load-bearing one: main's dedupe is NOT workspace-scoped while the renderer's
+//   existing-tab scan IS, so a session open in another PROJECT's tab could never be opened and never said why.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const so = (MAIN.match(/ipcMain\.handle\('session:open'[\s\S]*?\n\}\);/) || [''])[0];
+  none('session:open dropped the refusal reason (a refused click is a dead click again)',
+    /reason: _lastRespawnRefusal \|\| 'refused'/.test(so) ? [] : ['session:open returns a bare {ok:false}']);
+  none('respawnPty stopped recording WHICH guard refused',
+    ["'live'", "'busy'", "'open-elsewhere'", "'live-shared'"].filter((t) => !MAIN.includes('_lastRespawnRefusal = ' + t)));
+  none('the renderer mints a tab main will refuse for a session already open elsewhere',
+    /r\.reason === 'open-elsewhere'[\s\S]{0,600}?setActiveTab\(rec\.tabId\)/.test(APP)
+      ? [] : ['openSession does not focus the owning tab on open-elsewhere']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

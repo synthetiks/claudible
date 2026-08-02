@@ -4765,6 +4765,18 @@ async function openSession(id, label, opts) {
   catch {}
   finally { if (id !== 'new') _openingSessions.delete(id); }
   if (r && r.ok === false) {   // main refused: this pty is genuinely mid-turn → open the click in a NEW tab, leave this one running + on screen
+    // I4 — main now names WHICH guard fired, and 'open-elsewhere' needs the opposite of the busy answer.
+    // Main's one-session-one-claude dedupe is NOT workspace-scoped, but the existing-tab scan at the top of
+    // this function IS (`rec.wsId === activeWsId`). So a session already open in ANOTHER PROJECT's tab walked
+    // past that scan, got refused here, and then `newBlankTab` minted a tab that main refuses for the very
+    // same reason — a click that could never work and never explained itself. Focus the tab that has it.
+    if (r.reason === 'open-elsewhere') {
+      for (const rec of tabs.values()) {
+        if (rec.kind !== 'live' && rec.session === id) { setActiveTab(rec.tabId); toast('That session is already open — switched to its tab'); return; }
+      }
+      toast('That session is already running in another tab'); return;   // main sees it, we can't — never mint a tab main will refuse
+    }
+    if (r.reason === 'live-shared') { toast('This tab is live-shared — end the share, or open the session in another tab'); return; }
     if (!newBlankTab(activeWsId, id)) toast('That session is still running — finish it or close a tab before switching');
     return;
   }
