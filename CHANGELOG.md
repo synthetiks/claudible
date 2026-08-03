@@ -4,6 +4,34 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-08-03
+
+Ten fixes, mostly to live share. A demo to a friend surfaced three problems with sharing that were worse than
+they looked, and two more came from collaborator reports. Windows, Linux (AppImage + `.deb`) as before.
+
+Still a test release — Linux has not yet been run on real hardware, and the public release will be `1.0.0`.
+
+**Fixed**
+- Sharing a live link while another session was already shared handed out the **first** session's link — guests
+  saw a terminal the host had not chosen to share. It now refuses and says which session is already sharing.
+- "View-only" could show as on while guests could actually type. The warning now describes the mode that will
+  really be served.
+- The view-only switch looked clickable when it was locked. It now looks locked and says why.
+- The view-only switch could stay locked after a tunnel drop, with no share running.
+- Clicking a project with no sessions yet opened a new tab every time, and the duplicate sessions that caused
+  could make the spacebar stop working in the terminal.
+- A guest who clicked Disconnect could rejoin without the host approving again.
+- A guest could move the host's project while the host had paused sharing for privacy.
+- Slow startup on some machines: two path lookups ran a full login shell on the main thread before the window
+  appeared. On a machine with a heavy shell profile this was tens of seconds, every launch.
+- The Settings drawer could hang on a slow or offline network, and its dependency checks are now cached.
+- Voice setup that failed once retried its several-hundred-MB download at every launch. It now stops and waits
+  for you to retry from Settings.
+
+**Known limitations**
+- Importing a GitHub repo whose name contains `.` or `_` is still refused rather than handled.
+- Windows and macOS builds are unsigned; macOS is source-install only.
+
 ## [0.9.3] — 2026-08-03
 
 Linux, for the first time: this release ships an **AppImage** and a **`.deb`** alongside the Windows
