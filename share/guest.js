@@ -188,8 +188,19 @@ function showEnded(kind) {
   setStatus(kind === 'left' ? 'disconnected' : 'session ended', 'bad');
 }
 // The guest's own clean exit. Detach onclose FIRST so closing the socket can't kick the reconnect loop.
+// B15 — LEAVING ON PURPOSE IS NOT A NETWORK BLIP. The server holds a resume token for a grace window so a
+// backgrounded tab or a locked phone can come back without re-asking the host. Clicking Disconnect is the
+// opposite of that: an explicit exit, and it must cost the guest their approval-free re-entry. So we send a
+// `leave` frame (the close alone cannot distinguish intent from a dropped connection) AND drop our own stored
+// token, so the end card's Rejoin button cannot silently walk back in on an approval the host never re-gave.
+// Kept out of the body deliberately: contract §"Disconnect does not reach a final, no-reconnect state" bounds
+// its match to 320 chars from the signature, which is a real guard against showEnded drifting to another
+// function — so the body stays short and the reasoning lives here.
 function doDisconnect() {
   if (left) return;
+  try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'leave' })); } catch (e) {}
+  try { sessionStorage.removeItem(STORE_KEY); } catch (e) {}
+  resume = '';
   try { if (ws) { ws.onclose = null; ws.onerror = null; ws.close(1000, 'guest-left'); } } catch (e) {}
   try { if (voice && voice.leave) voice.leave(); } catch (e) {}
   showEnded('left');

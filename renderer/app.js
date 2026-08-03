@@ -1920,11 +1920,13 @@ claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(ro
 claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped mid-share → reflect it so guests aren't met with a silent refusal
   tunnelUp = false; lastShareUrl = ''; lastShareRemote = false; lastShareNote = 'the tunnel dropped';
   toast('Live link dropped — the tunnel went down. Reconnecting in the background…');   // main's armTunnelRetry keeps dialing; no manual toggle needed anymore
+  syncShareRoLock();   // B14c: tunnelUp just went false — without this the view-only switch stays dead forever
   renderLiveBar(); refreshChatPanel(); renderTunnelWarn();
 });
 if (claudible.onShareTunnelUp) claudible.onShareTunnelUp((p) => {   // a fresh share, or the background self-heal recovered the tunnel
   const wasDown = lastShareRemote === false;   // only a genuine recovery toasts — an ordinary fresh share already reported remote:true via shareStart's return
   tunnelUp = true; lastShareRemote = true; lastShareNote = null;
+  syncShareRoLock();   // B14c: and back to locked when it recovers — the pair must stay symmetric
   if (p && p.url) { lastShareUrl = p.url; if (webShare) showLink(p.url); }
   renderTunnelWarn();
   if (p && p.localDns === false) toast('Your link works for others, but THIS computer still has the old “no such host” answer cached. Send it anyway — to open it here, run ipconfig /flushdns (or just wait a bit).');   // same caveat as a manual start; the self-heal path used to drop it
@@ -2164,14 +2166,29 @@ shareBtn.addEventListener('click', async () => {
 // PR review between an untrusted person and your machine.
 function renderShareWarn() {
   const box = $('share-warn'); if (!box) return;
-  const ro = !!($('share-ro') && $('share-ro').checked);
+  const cb = $('share-ro');
+  // B14 — the warning must describe the mode that will ACTUALLY be served, not what the box says. Two ways they
+  // diverge, both routine: collab forces co-drive regardless of the checkbox (see ensureTunnel), and a share
+  // that is already running keeps its original mode because start() ignores later options. Reading `.checked`
+  // here showed the calm "they can't type" note while an approved guest could type — the box is even `checked`
+  // by default, so that was the DEFAULT collab flow, not an edge case.
+  const locked = !!(cb && cb.disabled);
+  const ro = locked ? !!lastShareReadOnly : !!(cb && cb.checked);
   box.classList.toggle('danger', !ro);
+  // Say WHY it can't be changed, so a dead control is never mistaken for a working one (the CSS below makes it
+  // LOOK dead; this says what to do about it).
+  const lab = $('ro-toggle');
+  if (lab) lab.title = locked
+    ? 'Locked — a share is already running, and its mode was fixed when it started. Stop sharing to change it.'
+    : 'On: guests can watch but cannot type';
   const txt = $('share-warn-txt'); if (!txt) return;
   if (ro) {
-    txt.textContent = 'Guests can watch this terminal — anything on screen (file contents, keys, secrets) is visible to them. They can’t type.';
+    txt.textContent = 'Guests can watch this terminal — anything on screen (file contents, keys, secrets) is visible to them. They can’t type.'
+      + (locked ? ' (Mode is locked by the share already running.)' : '');
   } else {
     txt.innerHTML = '<b>Co-drive is on — an approved guest can run commands on your computer, as you.</b> '
       + 'Only do this with someone you trust. To let someone you don’t fully trust work on the code, invite them to the repo on GitHub instead — you review what they change before it lands.';   // static copy, no interpolation → innerHTML is safe here
+    if (locked) txt.innerHTML += ' <b>The view-only switch above cannot change this</b> — the running share fixed its mode when it started.';
   }
 }
 { const ro = $('share-ro'); if (ro) ro.addEventListener('change', renderShareWarn); }
@@ -2180,6 +2197,21 @@ async function doStartSharing() {
   hostDisplayName = typed || collabName() || 'Host';
   if (typed) savePrefs({ collabName: typed });   // one identity: editing the share name updates your Claudible username
   $('namemodal').classList.remove('show');
+  // B13 — REFUSE rather than publish the wrong session. There is ONE share server and ONE pin (main's
+  // sharedTabId, set once at share start). If a share is already up for ANY reason — a session share, or an
+  // earlier web link — ensureTunnel's `want === tunnelUp` short-circuit means shareStart is never called and
+  // main never re-pins, so we would hand out the EXISTING share's link while the host believes they just
+  // shared THIS tab. That published someone else's terminal: their code, their command output, their secrets.
+  // Refusing is the honest behaviour until a second pin (or a re-pin with explicit consent) exists.
+  if (tunnelUp && sharedTabIdR != null && sharedTabIdR !== activeTabId) {
+    const pinned = tabs.get(sharedTabIdR);
+    const which = (pinned && (pinned.curSessionLabel || pinned.title)) || 'another tab';
+    webShareUI(false);
+    shareOut.textContent = 'Already sharing “' + which + '” — Claudible shares one session at a time. Stop that share first.';
+    shareOut.className = 'out';
+    toast('Already sharing “' + which + '”. Stop that share before starting a new one — otherwise your guests would keep seeing it, not this tab.');
+    return;
+  }
   shareBtn.disabled = true;
   // Name the wait. Building a quick tunnel and confirming it is genuinely a 5–10s job, and silence for that long
   // reads as a hang — which is half of why a transient failure felt like a broken feature.
@@ -3313,10 +3345,18 @@ function updateAdvertise() {
 // ---- Collaboration tunnel: keep the single share server matching what's actually wanted — a manual web link
 // (webShare) OR a synced session a peer can join (collabLive). The bottom-left indicator is driven SEPARATELY
 // (webShareUI), so collaboration never lights up as "sharing live". ----
+// B14c: the view-only lock must track reality on EVERY path. It used to be written only at the tail of
+// ensureTunnel, which three early returns skip — so a tunnel blip (main nulls shareBaseUrl without stopping the
+// share), a blip-then-unshare, or a busy re-entry left the switch dead with no live share to justify it, and
+// nothing ever re-enabled it. One helper, called from every exit and from the tunnel-down handler.
+function syncShareRoLock() {
+  try { const cb = $('share-ro'); if (cb) cb.disabled = tunnelUp; } catch (e) {}
+  try { renderShareWarn(); } catch (e) {}   // the warning text depends on the lock (it reads the real mode when locked)
+}
 async function ensureTunnel() {
   if (tunnelBusy) return;                                  // an op is in flight; it reconciles at the end
   const want = webShare || collabLive;
-  if (want === tunnelUp) { refreshChatPanel(); updateAdvertise(); return; }
+  if (want === tunnelUp) { syncShareRoLock(); refreshChatPanel(); updateAdvertise(); return; }
   tunnelBusy = true;
   try {
     if (want) {
@@ -3349,7 +3389,7 @@ async function ensureTunnel() {
     }
   } catch (e) {}
   tunnelBusy = false;
-  try { $('share-ro').disabled = tunnelUp; } catch (e) {}   // view-only can only be chosen when starting a FRESH tunnel
+  syncShareRoLock();                                        // view-only can only be chosen when starting a FRESH tunnel
   refreshChatPanel(); updateAdvertise();
   renderTunnelWarn();                                       // surface a degraded (remote:false) start on EVERY path — the collab flow used to drop it silently
   if ((webShare || collabLive) !== tunnelUp) ensureTunnel();   // desired state changed mid-flight → reconcile
@@ -5743,6 +5783,31 @@ function noteUnknownSessions(info) {
   }
   return true;
 }
+// B16/B17 — dedupe the 'new' case, which was the ONE path with no dedupe at all.
+//
+// Both switchWorkspace branches below dedupe against an existing tab only when the resolver returned a REAL
+// session id. A project with no transcripts on disk — a freshly imported empty repo, most obviously — always
+// resolves to 'new', so it could never match, and every click minted another tab. Three "empty" states hold it
+// there: a draft is never remembered (rememberLastSession refuses 'new'), Claude Code writes no .jsonl until a
+// real user turn, and the runner finds nothing to resume so it spawns a fresh uuid. Observed: 3 of 7 tabs piled
+// onto one empty project.
+//
+// It is not only untidy. The tab cap is 8, and the DUPLICATE SPAWN this produces is what triggers Claude Code's
+// "already running or being resumed" selection prompt — the modal that eats every space (see the comment in the
+// second branch below). Closing this gate is what fixes the dead spacebar.
+//
+// Safe target = an UNTOUCHED auto-draft on the same workspace: any keystroke clears autoDraft (see the onData
+// handler near the top of this file), so we can never steal a tab the user has typed into, and we skip busy and
+// live tabs outright. This is the same predicate the sync reconcilers already trust.
+function dedupeBlankDraft(wsId) {
+  for (const rec of tabs.values()) {
+    if (rec.kind !== 'live' && rec.wsId === wsId && rec.session === 'new' && rec.autoDraft && !rec.busy) {
+      setActiveTab(rec.tabId);
+      return true;
+    }
+  }
+  return false;
+}
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
 async function switchWorkspace(id, targetSession) {
@@ -5768,7 +5833,7 @@ async function switchWorkspace(id, targetSession) {
     const want = await sessionToOpenFor(id, targetSession, info);
     if (want !== 'new') {                                 // dedupe: a tab may already host it (newBlankTab never checks)
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
-    }
+    } else if (dedupeBlankDraft(id)) return;              // B16: 'new' was the ONE case with no dedupe — see the helper
     const tws = workspaces.find((w) => w.id === id);
     if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
     setWsExpanded(id, true);                                                  // expand it like the normal switch does, so its sessions are right there
@@ -5832,7 +5897,7 @@ async function switchWorkspace(id, targetSession) {
     const want = await sessionToOpenFor(id, targetSession, kinfo);
     if (want !== 'new') {   // same dedupe as the busy branch — main may have refused BECAUSE that session is live in another tab (its respawn dedupe), and duplicating it here would re-create the two-claude modal
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
-    }
+    } else if (dedupeBlankDraft(id)) { rollBack(); return; }   // B16: restore the optimistic record first — we are focusing an EXISTING tab, not creating one
     if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); noteUnknownSessions(kinfo); return; }    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft (want==='new' → auto-draft, reconcilable once sessions land)
     toast('That session is still running — close a tab to open that project beside it');
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back

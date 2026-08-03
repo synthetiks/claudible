@@ -1,21 +1,21 @@
-// runners/win.js — the native Windows backend (config 2 of OS-CONVERSION-PLAN; Part A).
+// runners/win.js â€” the native Windows backend (config 2 of OS-CONVERSION-PLAN; Part A).
 //
 // Windows-native runs the WINDOWS claude.exe directly (no WSL). Two mechanisms, each chosen for safety:
-//   • spawnClaude: a pure-Node session bootstrap (compute the session dir, write settings.json + stage
+//   â€¢ spawnClaude: a pure-Node session bootstrap (compute the session dir, write settings.json + stage
 //     the shared Node hooks, pick the resume target) then node-pty spawns claude.exe with WINDOWS-path
 //     args. This avoids handing MSYS paths to claude.exe. The bootstrap is pure + unit-tested (below).
-//   • runScript: the 16 wsl/*.sh run via git-bash (`bash.exe -lc`). Git for Windows is already an install
+//   â€¢ runScript: the 16 wsl/*.sh run via git-bash (`bash.exe -lc`). Git for Windows is already an install
 //     prerequisite (ships bash + coreutils + sed). Two ENV bridges (no script rewrite): CLAUDIBLE_PROJ (so
 //     they read claude.exe's Windows-encoded projects store, not the MSYS-encoded phantom) + MSYS_NO_PATHCONV.
 //     NOTE: the scripts' JSON transforms were ported off python3 to Node (wsl/*-tool.js, byte-parity proven
-//     by test/port-parity.sh) — so Git-for-Windows needs no python3 FOR THE SCRIPTS. Node is already present
+//     by test/port-parity.sh) â€” so Git-for-Windows needs no python3 FOR THE SCRIPTS. Node is already present
 //     (it runs the app + the hooks). The old "installer must provide Python for the scripts" gate is RESOLVED.
-//     (The optional voice/TTS stack — Kokoro — is a separate Python use, provisioned only if you want voice.)
+//     (The optional voice/TTS stack â€” Kokoro â€” is a separate Python use, provisioned only if you want voice.)
 //     App-dir -> MSYS via cygpath.
 //
-// STATUS: 🟡 the pure bootstrap (sessionDir/claudeProjectsDir/pickResumeTarget/claudeArgv/settingsJson)
+// STATUS: ðŸŸ¡ the pure bootstrap (sessionDir/claudeProjectsDir/pickResumeTarget/claudeArgv/settingsJson)
 // is verified by test/win-runner.test.js on Linux. The live glue (ConPTY claude.exe spawn, git-bash
-// runScript, the Windows voice services) needs a Windows smoke test — see docs/SMOKE.md. NOT runtime-run.
+// runScript, the Windows voice services) needs a Windows smoke test â€” see docs/SMOKE.md. NOT runtime-run.
 
 const path = require('path');
 const fs = require('fs');
@@ -26,16 +26,16 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const HOME = () => process.env.USERPROFILE || process.env.HOME || '';
 
 // ---- git-bash resolution (for runScript: reuse the wsl/*.sh fleet) ------------------------------
-// A bash.exe is only usable here if it is MSYS (Git Bash): everything downstream — appDirGuest, toGuestPath,
-// the whole wsl/*.sh fleet — needs `cygpath`, which exists in MSYS and NOT in a WSL distro. Probing for it is
+// A bash.exe is only usable here if it is MSYS (Git Bash): everything downstream â€” appDirGuest, toGuestPath,
+// the whole wsl/*.sh fleet â€” needs `cygpath`, which exists in MSYS and NOT in a WSL distro. Probing for it is
 // the difference between "this is Git Bash" and "this is a Linux shell wearing the same filename".
 function isGitBash(p) {
   // Windows' own bash.exe is the WSL launcher, and the WindowsApps one is its Store alias. Neither is ever
-  // MSYS, and both are SLOW to say so — the launcher can spin up a distro before answering, measured at 15s
+  // MSYS, and both are SLOW to say so â€” the launcher can spin up a distro before answering, measured at 15s
   // against a 15s timeout. Reject them by location, for free, before any probe runs.
   if (/\\(system32|sysnative|windowsapps)\\/i.test(String(p))) return false;
   // FAST PATH, no process at all: an MSYS tree ships cygpath.exe beside bash, so `<root>\bin\bash.exe` implies
-  // `<root>\usr\bin\cygpath.exe`. A stat is ~0.1ms and it rejects WSL's System32\bash.exe outright — which
+  // `<root>\usr\bin\cygpath.exe`. A stat is ~0.1ms and it rejects WSL's System32\bash.exe outright â€” which
   // matters, because spawning bash here is not cheap: measured on a real box, `bash -lc` took 37s and `bash -c`
   // 5s, so probing every candidate by execution would stall startup for half a minute.
   try { if (fs.existsSync(path.join(path.dirname(path.dirname(p)), 'usr', 'bin', 'cygpath.exe'))) return true; } catch {}
@@ -53,11 +53,11 @@ function gitBash() {
     if (!c || seen.has(c)) return false;
     seen.add(c);
     try { if (!fs.existsSync(c)) return false; } catch { return false; }
-    if (!isGitBash(c)) return false;   // exists but is not MSYS (WSL's launcher, a busybox shim, a gutted Git) — keep looking
+    if (!isGitBash(c)) return false;   // exists but is not MSYS (WSL's launcher, a busybox shim, a gutted Git) â€” keep looking
     _bash = c; return true;
   };
   // Canonical install locations first: cheapest, and right on the overwhelming majority of machines. Each is
-  // still PROBED, because "the file is there" is not the same as "it works" — a Git uninstall that ran while
+  // still PROBED, because "the file is there" is not the same as "it works" â€” a Git uninstall that ran while
   // Claude Code held bash.exe open leaves exactly this: a hollow Program Files\Git with a stranded binary.
   const cands = [
     process.env.CLAUDIBLE_GIT_BASH,
@@ -66,22 +66,22 @@ function gitBash() {
     path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
   ].filter(Boolean);
   for (const c of cands) if (take(c)) return _bash;
-  // EVERY `where bash.exe` hit, validated — not just the first. The old code took hit [0] blind, and on any
+  // EVERY `where bash.exe` hit, validated â€” not just the first. The old code took hit [0] blind, and on any
   // Windows box with WSL enabled that is ALWAYS C:\Windows\System32\bash.exe, the WSL launcher. cygpath does
   // not exist in a distro, so appDirGuest threw, APPDIR_WSL went falsy, and every workspace/sync/diff entry
-  // point short-circuited to ERR_NO_BACKEND — SILENTLY, while the terminal and voice kept working perfectly.
+  // point short-circuited to ERR_NO_BACKEND â€” SILENTLY, while the terminal and voice kept working perfectly.
   // A real Git Bash sitting further down the list (scoop, chocolatey, a portable install) never got a look in.
   try {
-    for (const h of cp.execFileSync('where', ['bash.exe'], { encoding: 'utf8' }).split(/\r?\n/).map((s) => s.trim())) if (take(h)) return _bash;
+    for (const h of cp.execFileSync('where', ['bash.exe'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/).map((s) => s.trim())) if (take(h)) return _bash;
   } catch {}
   // Last resort: derive it from wherever git itself lives. Git Bash ships beside git.exe, so `<git>\..\bin\
   // bash.exe` (and one level up, for the cmd\ layout) covers package managers that keep Git off the canonical
   // paths entirely. Shims are handled by the probe: a shim that cannot run bash simply fails isGitBash.
   try {
-    for (const g of cp.execFileSync('where', ['git.exe'], { encoding: 'utf8' }).split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
-      const root = path.dirname(path.dirname(g));                       // …\Git\cmd\git.exe -> …\Git
+    for (const g of cp.execFileSync('where', ['git.exe'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+      const root = path.dirname(path.dirname(g));                       // â€¦\Git\cmd\git.exe -> â€¦\Git
       if (take(path.join(root, 'bin', 'bash.exe'))) return _bash;
-      if (take(path.join(path.dirname(root), 'bin', 'bash.exe'))) return _bash;   // …\Git\mingw64\bin\git.exe -> …\Git\bin
+      if (take(path.join(path.dirname(root), 'bin', 'bash.exe'))) return _bash;   // â€¦\Git\mingw64\bin\git.exe -> â€¦\Git\bin
     }
   } catch {}
   _bash = null; return _bash;   // null -> runScript degrades (workspaces/sync/diff), but terminal+voice still work
@@ -92,23 +92,35 @@ function appDirGuest() {
   if (_appdirMsys !== undefined) return _appdirMsys;
   const bash = gitBash();
   if (!bash) { _appdirMsys = null; return _appdirMsys; }
-  try { _appdirMsys = cp.execFileSync(bash, ['-lc', `cygpath -u '${shared.shq(APP_ROOT)}'`], { encoding: 'utf8' }).trim() || null; }
+  // `-c`, NOT `-lc`, and a timeout â€” see the 37s measurement at the top of this file. This runs at MODULE LOAD
+  // (main.js's APPDIR_WSL) on a blocked main thread, before any window exists, so a slow profile is a black
+  // screen at every launch. cygpath lives in MSYS's own /usr/bin, always on bash's default PATH, so the login
+  // profile is not needed to find it â€” the same reasoning the candidate probe above already relies on.
+  try { _appdirMsys = cp.execFileSync(bash, ['-c', `cygpath -u '${shared.shq(APP_ROOT)}'`], { encoding: 'utf8', timeout: 10000, windowsHide: true }).trim() || null; }
   catch (e) { console.error('[claudible] cygpath failed:', e.message); _appdirMsys = null; }
   return _appdirMsys;
 }
-// MIXED form (C:/Users/…) — NOT the unix form (/c/Users/…). A chosen folder becomes a workspace path that is
+// MIXED form (C:/Users/â€¦) â€” NOT the unix form (/c/Users/â€¦). A chosen folder becomes a workspace path that is
 // (a) handed to git.exe/gh.exe by clone/upgrade and (b) used as the Claude pty's cwd. git.exe + node-pty are
 // WINDOWS programs: under MSYS_NO_PATHCONV they read `/c/Games/X` LITERALLY as C:\c\Games\X (a stray top-level
-// `c` folder — the reported bug). The mixed `C:/Games/X` is a real Windows path that ALSO works inside git-bash
+// `c` folder â€” the reported bug). The mixed `C:/Games/X` is a real Windows path that ALSO works inside git-bash
 // (forward slashes), so it's correct in every consumer. (toHostPath stays -w for the few Windows-native call sites.)
-function toGuestPath(p) {
-  const bash = gitBash(); if (!bash) return '';
-  try { return cp.execFileSync(bash, ['-lc', `cygpath -m '${shared.shq(String(p))}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
+// MEMOIZED + `-c` + timeout: these are pure translations of stable paths, and main.js calls toGuestPath at
+// MODULE LOAD (RT_GUEST) â€” a second blocking login shell before the window exists. Same cygpath-is-on-the-
+// default-PATH reasoning as appDirGuest. The Maps are cleared by resetCaches() with the binary memos.
+const _guestPathMemo = new Map();
+const _hostPathMemo = new Map();
+function _cygpath(flag, p, memo) {
+  const key = String(p);
+  if (memo.has(key)) return memo.get(key);
+  const bash = gitBash(); if (!bash) return '';   // not memoized: git-bash may appear after a dependency install
+  let out = '';
+  try { out = cp.execFileSync(bash, ['-c', `cygpath ${flag} '${shared.shq(key)}'`], { encoding: 'utf8', timeout: 10000, windowsHide: true }).trim(); } catch { out = ''; }
+  if (out) memo.set(key, out);   // only cache a real answer, so a transient failure can't poison the path forever
+  return out;
 }
-function toHostPath(p) {
-  const bash = gitBash(); if (!bash) return '';
-  try { return cp.execFileSync(bash, ['-lc', `cygpath -w '${shared.shq(String(p))}'`], { encoding: 'utf8' }).trim(); } catch { return ''; }
-}
+function toGuestPath(p) { return _cygpath('-m', p, _guestPathMemo); }
+function toHostPath(p) { return _cygpath('-w', p, _hostPathMemo); }
 function runtimeDir() { return process.env.CLAUDIBLE_RUNTIME || path.join(APP_ROOT, 'runtime'); }
 
 // ---- PURE session-bootstrap core (unit-tested in test/win-runner.test.js) ------------------------
@@ -121,11 +133,11 @@ function sessionDir(ws, home) {
   if (kind === 'local' && slug) sdir = path.win32.join(home, '.claudible', 'workspaces', slug);
   else if (kind === 'repo' && slug) sdir = path.win32.join(home, '.claudible', 'repos', slug);
   else sdir = path.win32.join(home, '.claudible', 'session');
-  if (ws && ws.path && typeof ws.path === 'string' && !/['"\x00-\x1f]/.test(ws.path)) sdir = ws.path;   // custom save-location — reject quotes + control bytes (workspaces.json is documented as hand-editable, so ws.path isn't always pre-validated). Backslash stays: it's the Windows path separator (this is why it's a subset of lib/pathSafe.js's PATH_UNSAFE, which also bars '\' for POSIX paths).
+  if (ws && ws.path && typeof ws.path === 'string' && !/['"\x00-\x1f]/.test(ws.path)) sdir = ws.path;   // custom save-location â€” reject quotes + control bytes (workspaces.json is documented as hand-editable, so ws.path isn't always pre-validated). Backslash stays: it's the Windows path separator (this is why it's a subset of lib/pathSafe.js's PATH_UNSAFE, which also bars '\' for POSIX paths).
   return sdir;
 }
 // Claude Code's own transcript store for a cwd: $HOME/.claude/projects/<cwd, every non-alnum -> '-'>.
-// MUST match Claude's Windows encoder (verify on smoke). (SEAMS §8 open item — claudeProjectsDir.)
+// MUST match Claude's Windows encoder (verify on smoke). (SEAMS Â§8 open item â€” claudeProjectsDir.)
 function claudeProjectsDir(sdir, home) {
   return path.win32.join(home, '.claude', 'projects', String(sdir).replace(/[^A-Za-z0-9]/g, '-'));
 }
@@ -144,15 +156,15 @@ function pickResumeTarget(sel, jsonl, foreign) {
   }
   return { mode: 'fresh' };
 }
-// claude.exe argv for a launch decision. Foreign sessions run SANDBOXED (no skip-perms, no --add-dir) —
+// claude.exe argv for a launch decision. Foreign sessions run SANDBOXED (no skip-perms, no --add-dir) â€”
 // an untrusted synced transcript must never drive tools with full $HOME (session.sh:103-111).
 function claudeArgv(launch, home, effort, permMode) {
   const lvl = effort === 'ultracode' ? 'xhigh' : effort;   // 'ultracode' is injected post-settle by main.js
   const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(lvl) ? ['--effort', lvl] : [];
-  // Trusted/fresh permission flags from the user's remembered setting. 'default' (or unset) → Claude prompts.
+  // Trusted/fresh permission flags from the user's remembered setting. 'default' (or unset) â†’ Claude prompts.
   const perm = permMode === 'bypass' ? ['--dangerously-skip-permissions', '--add-dir', home]
     : permMode === 'acceptEdits' ? ['--permission-mode', 'acceptEdits'] : [];
-  if (launch.foreign) return ['--resume', launch.id, ...eff];                                  // sandboxed — NEVER perm (RCE guard)
+  if (launch.foreign) return ['--resume', launch.id, ...eff];                                  // sandboxed â€” NEVER perm (RCE guard)
   if (launch.mode === 'fresh') return [...perm, ...eff];
   return [...perm, '--resume', launch.id, ...eff];
 }
@@ -160,33 +172,33 @@ function claudeArgv(launch, home, effort, permMode) {
 //
 // Claude Code hands a hook's command string to the user's shell, and which shell that is is not ours to
 // choose: on some boxes it is cmd.exe, on others Windows PowerShell. `"C:\Program Files\nodejs\node.exe" ...`
-// is correct cmd, but in PowerShell a leading quoted string is a STRING LITERAL, not a command — it dies with
+// is correct cmd, but in PowerShell a leading quoted string is a STRING LITERAL, not a command â€” it dies with
 // "Unexpected token ... in expression or statement" before node ever starts. Every hook then fails silently:
 // on the machine that surfaced this, hooks.ndjson sat at 0 bytes and status.json at "{}", so telemetry, the
 // identity/live-state context block and the status line had NEVER worked, while Claude Code logged only a
 // non-blocking status code. `& "path"` is not the fix either: it repairs PowerShell and BREAKS cmd.
 //
 // The portable shape is a FIRST TOKEN THAT NEEDS NO QUOTES (verified in both shells with single-level
-// parsing; arguments after it may stay quoted — both shells handle those identically):
+// parsing; arguments after it may stay quoted â€” both shells handle those identically):
 //   1. the absolute path when it needs no quoting (no spaces or shell metacharacters); else
-//   2. bare `node` — which whichNode() already returns whenever `where node` comes up empty, and which is
+//   2. bare `node` â€” which whichNode() already returns whenever `where node` comes up empty, and which is
 //      safe here precisely because nodeBin was RESOLVED BY `where node`: node is demonstrably on PATH.
 // (An 8.3 short name would keep an absolute path in the spaces case, but Windows lets a volume disable 8.3
-// creation entirely, so it cannot be relied on — and it is not worth a cmd spawn per tab to sometimes get.)
+// creation entirely, so it cannot be relied on â€” and it is not worth a cmd spawn per tab to sometimes get.)
 function exeToken(p) {
   const s = String(p || '');
   return (s && !/[\s"'%&^<>|()]/.test(s)) ? s : 'node';
 }
 // settings.json content (Node hooks invoked via the Windows node path, per-tab paths baked as argv).
 function settingsJson(claudeDir, nodeBin, statusPath, hooksPath, contextPath) {
-  const nb = exeToken(nodeBin);   // UNQUOTED on purpose — see exeToken: a quoted first token is a PowerShell parser error
+  const nb = exeToken(nodeBin);   // UNQUOTED on purpose â€” see exeToken: a quoted first token is a PowerShell parser error
   const sl = `${nb} "${path.win32.join(claudeDir, 'statusline.js')}" "${statusPath}"`;
   const hk = `${nb} "${path.win32.join(claudeDir, 'hook.js')}" "${hooksPath}"`;
   const oneHook = [{ hooks: [{ type: 'command', command: hk }] }];
   const tagHook = [{ matcher: 'Task|Agent', hooks: [{ type: 'command', command: hk }] }];
   // Identity/live-state context hook (same as the wsl backend): tells the model which machine/user/live-session
-  // it's on — the fix for a transcript synced from another machine. Runs on SessionStart + alongside telemetry on
-  // UserPromptSubmit (so it survives compaction). contextPath falsy → omitted (parity with session.sh's CX guard).
+  // it's on â€” the fix for a transcript synced from another machine. Runs on SessionStart + alongside telemetry on
+  // UserPromptSubmit (so it survives compaction). contextPath falsy â†’ omitted (parity with session.sh's CX guard).
   const hooks = { Stop: oneHook, UserPromptSubmit: oneHook, PreToolUse: tagHook, PostToolUse: tagHook };
   if (contextPath) {
     const cx = `${nb} "${path.win32.join(claudeDir, 'context-hook.js')}" "${contextPath}"`;
@@ -208,13 +220,13 @@ function installHooks(sdir, tabRuntimeId) {
   const hooksPath = path.join(rt, 'hooks.ndjson');
   const contextPath = path.join(rt, 'context.json');   // identity/live-state main writes; the context hook reads it (matches main.js's per-tab path)
   // Classify the one Windows fs failure a user can actually act on. MAX_PATH is 260; a long username plus a
-  // deep adopted folder overruns it, and the raw throw ("ENAMETOOLONG: name too long, mkdir 'C:\\Users\\…'")
+  // deep adopted folder overruns it, and the raw throw ("ENAMETOOLONG: name too long, mkdir 'C:\\Users\\â€¦'")
   // used to bubble out of spawnClaude unexplained. Match ENAMETOOLONG by CODE, not message text. (Some
-  // Windows APIs surface an overrun as EINVAL instead — deliberately NOT matched: EINVAL is a catch-all for
+  // Windows APIs surface an overrun as EINVAL instead â€” deliberately NOT matched: EINVAL is a catch-all for
   // a dozen unrelated causes, and mislabelling one of those as "path too long" would send the user chasing
   // the wrong fix.) main.js prints whatever this throws into the terminal (its spawn guard), so the message
   // must be the complete instruction.
-  const longPathMsg = (p) => 'This project’s path is too long for Windows (' + p.length + ' chars; the classic limit is 260). '
+  const longPathMsg = (p) => 'This projectâ€™s path is too long for Windows (' + p.length + ' chars; the classic limit is 260). '
     + 'Either move the project to a shorter folder, or enable long paths once (PowerShell as admin: '
     + 'Set-ItemProperty "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" -Name LongPathsEnabled -Value 1) and restart Windows.';
   const guardLongPath = (fn, p) => {
@@ -226,18 +238,18 @@ function installHooks(sdir, tabRuntimeId) {
   // Take ownership of <sdir>\.claude the same way wsl/session.sh does, and BEFORE the first overwrite below.
   // Claudible created the folder for its own workspaces, but an ADOPTED folder is the user's project: their
   // statusline.js / hook.js / settings.json (permissions, MCP servers) live under these exact names. Snapshot
-  // each one once. The sidecar records it — Claude Code warns on unknown keys inside settings.json, so no marker
+  // each one once. The sidecar records it â€” Claude Code warns on unknown keys inside settings.json, so no marker
   // goes in the JSON. Keep this list in sync with wsl/session.sh's.
   const owned = path.win32.join(cdir, '.claudible-owned');
   if (!fs.existsSync(owned)) {
-    // A .claude that predates the sidecar but is already OURS must not be "backed up" — that would litter every
+    // A .claude that predates the sidecar but is already OURS must not be "backed up" â€” that would litter every
     // existing workspace with a copy of Claudible's own settings. Two markers together, neither plausible in a
     // hand-written config: the DISABLE_AUTO_COMPACT env we set, and a statusLine command inside this .claude.
     let mine = false;
     try {
       const s = fs.readFileSync(path.win32.join(cdir, 'settings.json'), 'utf8');
       mine = s.includes('DISABLE_AUTO_COMPACT') && /\.claude[\\/]+statusline/.test(s);
-    } catch { mine = false; }   // no settings.json → nothing of theirs to lose either way
+    } catch { mine = false; }   // no settings.json â†’ nothing of theirs to lose either way
     if (!mine) {
       for (const f of ['settings.json', 'statusline.js', 'hook.js', 'context-hook.js']) {
         const p = path.win32.join(cdir, f);
@@ -263,7 +275,7 @@ function installHooks(sdir, tabRuntimeId) {
   // MUST be a real node.exe, NOT process.execPath (= electron.exe under Electron, which won't run a .js
   // without ELECTRON_RUN_AS_NODE). Claudible's installer guarantees Windows Node 22.12+ on PATH.
   const nodeBin = whichNode();
-  // settings.json was snapshotted by the ownership block above, alongside the hook scripts. Safe to overwrite —
+  // settings.json was snapshotted by the ownership block above, alongside the hook scripts. Safe to overwrite â€”
   // atomically (tmp+rename), same concurrent-tabs reasoning as the hook staging above.
   const settingsTxt = JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2);
   const sPath = path.win32.join(cdir, 'settings.json');
@@ -286,25 +298,25 @@ function ptyInfo() {
   }
   return _pty;
 }
-// Choose a Windows-RUNNABLE claude among `where claude` hits (pure → unit-tested). npm installs BOTH an
-// extensionless shell shim ('…\claude') and a Windows shim ('…\claude.cmd'/'.exe'); spawning the bare script
+// Choose a Windows-RUNNABLE claude among `where claude` hits (pure â†’ unit-tested). npm installs BOTH an
+// extensionless shell shim ('â€¦\claude') and a Windows shim ('â€¦\claude.cmd'/'.exe'); spawning the bare script
 // fails with CreateProcess 193 ("not a valid Win32 application"), so prefer a .cmd/.exe/.bat form. The .cmd
 // path is routed through cmd.exe by spawnClaude; a real .exe is spawned directly.
 function pickClaudeBin(hits) {
   const list = (hits || []).map((s) => String(s).trim()).filter(Boolean);
   return list.find((h) => /\.(cmd|exe|bat)$/i.test(h)) || list[0] || 'claude';
 }
-// MEMOIZED, like _bash above and _claudePresent below — these two sit on the hot path of EVERY pty spawn
+// MEMOIZED, like _bash above and _claudePresent below â€” these two sit on the hot path of EVERY pty spawn
 // (whichNode from installHooks, whichClaude from spawnClaude), and each `where` is a whole OS process spawned
 // and waited on synchronously, on the main thread. Measured on a real machine: ~31ms + ~34ms = ~65ms added to
 // every single session switch, during which main cannot forward pty data or answer any IPC. A resolved binary
-// path does not change under a running process, and the one thing that CAN change it — installing node or
-// claude mid-session — already calls resetCaches() below.
+// path does not change under a running process, and the one thing that CAN change it â€” installing node or
+// claude mid-session â€” already calls resetCaches() below.
 let _claudeBin = undefined, _nodeBin = undefined;
 function whichClaude() {
-  if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;   // env override wins and is free — never cache around it
+  if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;   // env override wins and is free â€” never cache around it
   if (_claudeBin !== undefined) return _claudeBin;
-  try { _claudeBin = pickClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)); }
+  try { _claudeBin = pickClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/)); }
   catch { _claudeBin = 'claude'; }
   return _claudeBin;
 }
@@ -313,7 +325,7 @@ function whichNode() {
   if (process.env.CLAUDIBLE_NODE) return process.env.CLAUDIBLE_NODE;
   if (_nodeBin !== undefined) return _nodeBin;
   _nodeBin = 'node';   // installer guarantees Windows Node on PATH; bare 'node' resolves in claude's hook shell
-  try { const w = cp.execFileSync('where', ['node'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim(); if (w) _nodeBin = w; } catch {}
+  try { const w = cp.execFileSync('where', ['node'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/)[0].trim(); if (w) _nodeBin = w; } catch {}
   return _nodeBin;
 }
 
@@ -321,11 +333,11 @@ function whichNode() {
 // process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
 // _claudeBin/_nodeBin ride along for the same reason: preflight:install calls this after installing a dep, so
 // a claude or node that arrived mid-session is picked up on the next spawn rather than staying stale.
-function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; }
+function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; _whichMemo.clear(); _guestPathMemo.clear(); _hostPathMemo.clear(); }
 
 // ---- dependency detection (pure-Node; NO git-bash) ----------------------------------------------
 // The self-bootstrapping provisioner needs to know, on a possibly-bare Windows box, which deps are present.
-// Detection MUST NOT route through runScript/git-bash (that very dependency — Git — may be missing; the
+// Detection MUST NOT route through runScript/git-bash (that very dependency â€” Git â€” may be missing; the
 // chicken-and-egg). node/git/claude/uv/gh/cloudflared are all Windows-PATH executables resolvable with
 // `where`; Claude/gh sign-in are an fs read + a `gh auth status` exit code. The pure report builder
 // (buildDepReport) takes injected IO so test/win-runner.test.js can exercise it on Linux with fakes.
@@ -336,14 +348,24 @@ function semverGte(have, min) {
   for (let i = 0; i < 3; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; }
   return true;
 }
-// Choose a runnable hit from `where <cmd>` output (prefer .exe/.cmd/.bat over an extensionless shim — same
+// Choose a runnable hit from `where <cmd>` output (prefer .exe/.cmd/.bat over an extensionless shim â€” same
 // CreateProcess-193 reasoning as pickClaudeBin), '' when none. Used by resolveTool for detection only.
 function pickRunnable(hits) {
   const list = (hits || []).map((s) => String(s).trim()).filter(Boolean);
   return list.find((h) => /\.(exe|cmd|bat)$/i.test(h)) || list[0] || '';
 }
+// MEMOIZED + timed. detectDeps() is SYNCHRONOUS and runs behind an ipcMain await, so every probe here blocks
+// the main thread â€” and it fires on each Settings-drawer open as well as at boot. `where` on a machine with a
+// long PATH (or a network drive on it) is not always fast, and an untimed execFileSync has no ceiling at all.
+// Cleared by resetCaches() after a dependency install, which is the only time an answer legitimately changes.
+const _whichMemo = new Map();
 function which(cmd) {
-  try { return pickRunnable(cp.execFileSync('where', [cmd], { encoding: 'utf8' }).split(/\r?\n/)); } catch { return ''; }
+  const key = String(cmd);
+  if (_whichMemo.has(key)) return _whichMemo.get(key);
+  let out = '';
+  try { out = pickRunnable(cp.execFileSync('where', [key], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/)); } catch { out = ''; }
+  _whichMemo.set(key, out);   // '' is a real answer here (tool absent) and is worth caching; resetCaches clears it after an install
+  return out;
 }
 // Detection-grade resolver: returns the binary path or '' (DISTINCT from whichNode/whichClaude, which fall
 // back to a bare name so a spawn can still try). Honors the same env overrides the portable fallback writes.
@@ -354,7 +376,7 @@ function resolveTool(id) {
     const w = which('git'); if (w) return w;
     const b = gitBash();                         // portable git-bash (CLAUDIBLE_GIT_BASH) implies Git is present
     if (b) {
-      const root = path.win32.dirname(path.win32.dirname(b));   // …\bin\bash.exe → install root
+      const root = path.win32.dirname(path.win32.dirname(b));   // â€¦\bin\bash.exe â†’ install root
       for (const g of [path.win32.join(root, 'cmd', 'git.exe'), path.win32.join(root, 'bin', 'git.exe')]) {
         try { if (fs.existsSync(g)) return g; } catch {}
       }
@@ -370,13 +392,13 @@ function toolVersion(bin) {
   if (!bin) return '';
   try {
     const out = /\.(cmd|bat)$/i.test(bin)
-      ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, '--version'], { encoding: 'utf8' })
-      : cp.execFileSync(bin, ['--version'], { encoding: 'utf8' });
+      ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, '--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      : cp.execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
     return String(out).trim().split(/\r?\n/)[0] || '';
   } catch { return ''; }
 }
 // claude signed-in: ~/.claude/.credentials.json has a non-empty claudeAiOauth.accessToken (the canonical OAuth
-// token — same precise check as wsl/check-onboard.sh:19, ported to Node). Absent → false here; main.js/deps.js
+// token â€” same precise check as wsl/check-onboard.sh:19, ported to Node). Absent â†’ false here; main.js/deps.js
 // treat "installed but not signed-in" as a SOFT gate (the Windows token can also live in Credential Manager).
 function claudeSignedIn() {
   try {
@@ -388,9 +410,12 @@ function claudeSignedIn() {
 function ghAuth(bin) {
   if (!bin) return { signedIn: false, account: '' };
   const isCmd = /\.(cmd|bat)$/i.test(bin);
+  // TIMED: both of these reach the NETWORK (`gh api user` always; `gh auth status` can). Untimed, an offline or
+  // captive-portal machine hangs the whole Settings drawer behind a synchronous probe. 8s is generous for an API
+  // round trip and still bounded; a timeout throws, which the callers already treat as "not signed in".
   const run = (args) => isCmd
-    ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    : cp.execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000, windowsHide: true })
+    : cp.execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000, windowsHide: true });
   try {
     run(['auth', 'status']);                     // throws (non-zero) when not signed in
     let account = '';
@@ -413,7 +438,7 @@ function buildDepReport(io) {
   }
   return out;
 }
-// Cheap "is claude on PATH?" — lets main.js gate the terminal spawn so a missing claude shows a friendly
+// Cheap "is claude on PATH?" â€” lets main.js gate the terminal spawn so a missing claude shows a friendly
 // "connect Claude" prompt instead of crashing to "session ended". Pure-Node, no git-bash. wsl/posix don't
 // expose this (their claude lives in the guest). The POSITIVE result is memoized (claude doesn't vanish
 // mid-session) so the per-spawn/per-exit gate isn't a repeated subprocess; a FALSE re-checks every call (so a
@@ -424,19 +449,19 @@ function claudePresent() {
   if (_claudePresent === true) return true;
   if (process.env.CLAUDIBLE_CLAUDE) return (_claudePresent = true);
   try {
-    const out = cp.execFileSync('where', ['claude'], { encoding: 'utf8' });
+    const out = cp.execFileSync('where', ['claude'], { encoding: 'utf8', timeout: 3000, windowsHide: true });
     return (_claudePresent = pickRunnable(out.split(/\r?\n/)) !== '');
   } catch (e) {
-    if (e && e.status === 1) return (_claudePresent = false);   // `where` ran, found nothing → genuinely absent
-    return true;                                                 // spawn glitch (not exit 1) → assume present, don't false-nag
+    if (e && e.status === 1) return (_claudePresent = false);   // `where` ran, found nothing â†’ genuinely absent
+    return true;                                                 // spawn glitch (not exit 1) â†’ assume present, don't false-nag
   }
 }
-// Focused, claude-only state for the Connect-Claude dot + popup — avoids detectDeps's full 6-tool + gh-network
+// Focused, claude-only state for the Connect-Claude dot + popup â€” avoids detectDeps's full 6-tool + gh-network
 // probe (which must NOT run on every launch / 3s poll tick). installed via claudePresent, signed-in via the
 // credentials read; no `claude --version` subprocess (the dot doesn't need it).
 function claudeState() { const installed = claudePresent(); return { installed, signedIn: installed ? claudeSignedIn() : false }; }
 
-// The runner-contract method: raw dep status for the deps.js orchestrator. Pure-Node — safe with no git-bash.
+// The runner-contract method: raw dep status for the deps.js orchestrator. Pure-Node â€” safe with no git-bash.
 function detectDeps() {
   return buildDepReport({
     resolveTool,
@@ -447,13 +472,13 @@ function detectDeps() {
   });
 }
 
-// The env for a spawned claude.exe — a PURE function (exported) so the spacebar guard can never be silently
+// The env for a spawned claude.exe â€” a PURE function (exported) so the spacebar guard can never be silently
 // dropped by a refactor. SPACEBAR / "can't type into a resumed session" fix (parity with wsl/session.sh):
 // Claude Code 2.1.x shows a BLOCKING "resume from summary?" 1/2/3 modal when resuming a session past
 // CLAUDE_CODE_RESUME_THRESHOLD_MINUTES (default 70) AND CLAUDE_CODE_RESUME_TOKEN_THRESHOLD (default 100k).
-// That modal swallows every ordinary keystroke — space included — so a big/old resumed session looks like
+// That modal swallows every ordinary keystroke â€” space included â€” so a big/old resumed session looks like
 // "typing does nothing", while a new one works. Claudible already keeps full context (autoCompactEnabled:false),
-// so push both thresholds out of reach → resumed sessions open straight into the composer. Layering: our
+// so push both thresholds out of reach â†’ resumed sessions open straight into the composer. Layering: our
 // defaults first, then base (real env) OVERRIDES them so an explicit user setting wins, then CLAUDIBLE_TAB is
 // always this tab's runtime id.
 function spawnEnv(runtimeId, base, modelStrategy) {
@@ -462,7 +487,7 @@ function spawnEnv(runtimeId, base, modelStrategy) {
     CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '2000000000',
   };
   // "Plan big, execute small" (Anthropic cookbook pattern, parity with wsl/session.sh): the main session
-  // plans/synthesizes on the user's chosen model; SUBAGENTS — the token-heavy leg — run on Sonnet 5.
+  // plans/synthesizes on the user's chosen model; SUBAGENTS â€” the token-heavy leg â€” run on Sonnet 5.
   // Defaults-first layering means an explicit user env override of either var still wins.
   if (modelStrategy === 'planBigExecSmall') {
     defaults.CLAUDE_CODE_SUBAGENT_MODEL = 'claude-sonnet-5';
@@ -471,23 +496,23 @@ function spawnEnv(runtimeId, base, modelStrategy) {
   return Object.assign(defaults, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
 }
 
-// Resume-refusal fallback — mirror of wsl/session.sh's timing guard (lines 288-318): some claude builds
+// Resume-refusal fallback â€” mirror of wsl/session.sh's timing guard (lines 288-318): some claude builds
 // REFUSE to resume a given session (e.g. one that ended mid-tool-call) and exit almost immediately instead
 // of opening the TUI, while a real resumed session blocks until quit. session.sh detects that by timing the
-// attempt (< 4s = suspicious) and by RC>=128 (POSIX "died to a signal" — i.e. OUR OWN kill on a tab
+// attempt (< 4s = suspicious) and by RC>=128 (POSIX "died to a signal" â€” i.e. OUR OWN kill on a tab
 // switch/close, which must NOT trigger a phantom fresh session). node-pty hands both `signal` AND (via the
-// wrapping facade below) a direct `wasKilled` flag, so this is stricter than the RC>=128 heuristic — either
+// wrapping facade below) a direct `wasKilled` flag, so this is stricter than the RC>=128 heuristic â€” either
 // one blocks the fallback. PURE (no Date.now() inside) so it's unit-testable: test/win-runner.test.js drives
 // the full matrix. Exported via _internals.
 function shouldFallbackToFresh(spawnedAtMs, exitedAtMs, code, signal, wasKilled, wasResume) {
-  if (!wasResume) return false;                       // only a RESUME attempt can be "refused" — nothing to fall back from for a fresh launch
-  if (wasKilled) return false;                         // we killed it ourselves (tab switch/close) — a fresh respawn here would be an orphaned phantom
-  if (signal) return false;                            // died to a signal, not a plain exit — same "not a refusal" case
+  if (!wasResume) return false;                       // only a RESUME attempt can be "refused" â€” nothing to fall back from for a fresh launch
+  if (wasKilled) return false;                         // we killed it ourselves (tab switch/close) â€” a fresh respawn here would be an orphaned phantom
+  if (signal) return false;                            // died to a signal, not a plain exit â€” same "not a refusal" case
   const elapsed = (exitedAtMs || 0) - (spawnedAtMs || 0);
   return elapsed < 4000;                               // real interactive sessions run far longer than 4s; a near-instant return is a refusal
 }
 
-// 🟡 spawnClaude — the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
+// ðŸŸ¡ spawnClaude â€” the live glue (needs a Windows smoke). Runs the pure bootstrap, then ConPTY-spawns
 // the Windows claude with WINDOWS-path args. ConPTY hosts a native console app fine (it hosts cmd/pwsh).
 //
 // Returns a STABLE facade object (not the raw node-pty handle): a refused `--resume` (shouldFallbackToFresh
@@ -495,12 +520,12 @@ function shouldFallbackToFresh(spawnedAtMs, exitedAtMs, code, signal, wasKilled,
 // inner process while main.js's onData/onExit/write/resize/kill callers keep the same reference throughout
 // (the `ptys.get(tabId)?.proc !== proc` guard in main.js's spawnPty depends on that object identity never
 // changing across a fallback). Contract-checked against main.js's spawnPty/respawnPty consumers: onData(cb),
-// onExit(cb), write(data), resize(cols,rows), kill(signal), .pid, .claudibleForeign — all present here.
+// onExit(cb), write(data), resize(cols,rows), kill(signal), .pid, .claudibleForeign â€” all present here.
 function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
   const sdir = sessionDir(ws, home);
-  const rtPaths = installHooks(sdir, runtimeId);   // keep the per-tab paths — they go into the child env below
+  const rtPaths = installHooks(sdir, runtimeId);   // keep the per-tab paths â€” they go into the child env below
   // pick resume target from claude's own projects store
   let jsonl = [], foreign = new Set();
   try {
@@ -514,15 +539,15 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const launch = pickResumeTarget(session, jsonl, foreign);
   const claude = whichClaude();
   const env = spawnEnv(runtimeId, undefined, modelStrategy);
-  // ROUTE EACH TAB'S HOOK OUTPUT BY ENV, NOT BY THE BAKED ARGV. `.claude/settings.json` is WORKSPACE-shared —
-  // installHooks says so itself — but the paths it bakes into those hook commands are PER-GENERATION. So two
+  // ROUTE EACH TAB'S HOOK OUTPUT BY ENV, NOT BY THE BAKED ARGV. `.claude/settings.json` is WORKSPACE-shared â€”
+  // installHooks says so itself â€” but the paths it bakes into those hook commands are PER-GENERATION. So two
   // tabs on one project raced it: the second tab's spawn rewrote the shared settings.json, and the first tab's
   // still-running claude.exe then wrote its hooks/status/context into the SECOND tab's runtime dir. The first
   // tab's telemetry, agent list and busy state froze forever while the second double-counted, and the context
   // hook fed the wrong tab's identity block into the prompt. Silent, and the exact shape win.js's own header
   // already documents for a different cause ("hooks.ndjson sat at 0 bytes and status.json at {}").
   // wsl/session.sh:25 solved this long ago by EXPORTING the three paths, and all three hooks already read
-  // `process.env.CLAUDIBLE_* || process.argv[2]` — env first, baked path as fallback. The win runner simply
+  // `process.env.CLAUDIBLE_* || process.argv[2]` â€” env first, baked path as fallback. The win runner simply
   // never set them: spawnEnv passed CLAUDIBLE_TAB alone. Setting them here makes each claude.exe route by its
   // OWN environment, so a shared settings.json cannot misdirect it, and the argv fallback stays as a backstop.
   if (rtPaths) {
@@ -544,7 +569,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   let inner = spawnInner(launch);
   const spawnedAtMs = Date.now();
   const wasResume = launch.mode === 'resume';
-  let killedByUs = false;      // set by facade.kill() — distinguishes "we ended this pty" from a genuine refusal
+  let killedByUs = false;      // set by facade.kill() â€” distinguishes "we ended this pty" from a genuine refusal
   let fallbackUsed = false;    // at most ONE fallback per spawn (loop guard)
   let dataCb = null, exitCb = null, innerDataSub = null, innerExitSub = null;
 
@@ -556,7 +581,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
     const exitedAtMs = Date.now();
     if (!fallbackUsed && shouldFallbackToFresh(spawnedAtMs, exitedAtMs, e.exitCode, e.signal, killedByUs, wasResume)) {
       fallbackUsed = true;
-      console.log('[claudible] win: resume refused (fast exit, not a kill) — falling back to a fresh session');
+      console.log('[claudible] win: resume refused (fast exit, not a kill) â€” falling back to a fresh session');
       try { innerDataSub && innerDataSub.dispose(); } catch {}
       try { innerExitSub && innerExitSub.dispose(); } catch {}
       inner = spawnInner({ mode: 'fresh' });
@@ -575,39 +600,39 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
     resize(c, r) { dims.cols = c; dims.rows = r; try { inner.resize(c, r); } catch {} },
     pause() { try { inner.pause(); } catch {} },
     resume() { try { inner.resume(); } catch {} },
-    // `onReaped` (optional) fires once the taskkill child has finished walking the tree — or immediately if
+    // `onReaped` (optional) fires once the taskkill child has finished walking the tree â€” or immediately if
     // there was nothing to kill / the spawn threw. X/2d: a caller that is about to spawn a REPLACEMENT claude
     // on the same transcript must not do so while the old tree is still dying, or Claude Code answers with its
     // "already running or being resumed" modal, which swallows every keystroke including space. Omitting the
     // callback keeps the exact fire-and-forget behaviour every other caller relies on.
     kill(signal, onReaped) {
       killedByUs = true;
-      // R22: ConPTY's kill can be single-process under the known Electron/node-pty failure — the
-      // claude.exe → node child tree survived every close path and piled up across restarts (the
+      // R22: ConPTY's kill can be single-process under the known Electron/node-pty failure â€” the
+      // claude.exe â†’ node child tree survived every close path and piled up across restarts (the
       // win-native twin of what killtree.sh exists for on WSL; that script never runs here). taskkill /T
       // walks ParentProcessId at the OS level; /F because the survivors have no console for a soft close.
-      // Detached + unref'd so the quit sweep's reap outlives app.quit() — the same guarantee the WSL
+      // Detached + unref'd so the quit sweep's reap outlives app.quit() â€” the same guarantee the WSL
       // reaper relies on. Captured BEFORE kill: inner.pid may be unreadable after the process dies.
       const pid = inner && inner.pid;
       const settleOnce = (() => { let done = false; return () => { if (done || !onReaped) return; done = true; try { onReaped(); } catch {} }; })();
       try { inner.kill(signal); } catch {}
-      if (!pid) { settleOnce(); return; }                       // nothing to reap — never leave a waiting caller hanging on its timeout
+      if (!pid) { settleOnce(); return; }                       // nothing to reap â€” never leave a waiting caller hanging on its timeout
       try {
         const c = cp.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, detached: true, stdio: 'ignore' });
-        c.once('exit', settleOnce); c.once('error', settleOnce);   // listen BEFORE unref — still detached, so the quit sweep's reap outlives app.quit() exactly as before
+        c.once('exit', settleOnce); c.once('error', settleOnce);   // listen BEFORE unref â€” still detached, so the quit sweep's reap outlives app.quit() exactly as before
         c.unref();
       } catch { settleOnce(); }
     },
   };
-  // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice —
+  // Surface the RCE-guard override instead of sandboxing silently (parity with session.sh's echoed notice â€”
   // main injects the same line into the terminal when it sees this flag). Never weakens the guard: argv above
-  // already excluded the perm flags for a foreign resume. Reflects the INITIAL decision only — a fallback
+  // already excluded the perm flags for a foreign resume. Reflects the INITIAL decision only â€” a fallback
   // (fresh) is never foreign, but by the time one could happen main.js has already read this synchronously.
-  if (launch.foreign) { facade.claudibleForeign = true; console.log('[claudible] win: foreign (collaborator-synced) session — sandboxed regardless of permission-mode setting'); }
+  if (launch.foreign) { facade.claudibleForeign = true; console.log('[claudible] win: foreign (collaborator-synced) session â€” sandboxed regardless of permission-mode setting'); }
   return facade;
 }
 
-// 🟡 runScript — reuse the wsl/*.sh fleet UNCHANGED via git-bash. Same shared scriptCmd; the wrapper is
+// ðŸŸ¡ runScript â€” reuse the wsl/*.sh fleet UNCHANGED via git-bash. Same shared scriptCmd; the wrapper is
 // git-bash instead of wsl.exe. Degrades cleanly (resolves an error) if git-bash isn't installed.
 function runScript(name, argStr = '', opts = {}) {
   return new Promise((resolve) => {
@@ -615,9 +640,9 @@ function runScript(name, argStr = '', opts = {}) {
     if (!bash || !appdir) return resolve({ err: new Error('git-bash unavailable (Windows runScript)'), stdout: '' });
     const cmd = shared.scriptCmd(appdir, name, argStr, opts);
     // Two env bridges for git-bash (no script rewrite, WSL/Posix unaffected since they don't set these):
-    //  CLAUDIBLE_PROJ — the scripts otherwise encode the MSYS-form SDIR (/c/..) into the projects-dir key,
+    //  CLAUDIBLE_PROJ â€” the scripts otherwise encode the MSYS-form SDIR (/c/..) into the projects-dir key,
     //   which MISMATCHES the Windows form claude.exe used; pass the Windows-form key so they read the real store.
-    //  MSYS_NO_PATHCONV — stop git-bash rewriting a leading-slash arg (e.g. `gh api '/user/repos?...'`).
+    //  MSYS_NO_PATHCONV â€” stop git-bash rewriting a leading-slash arg (e.g. `gh api '/user/repos?...'`).
     const env = Object.assign({}, process.env, {
       MSYS_NO_PATHCONV: '1',
       CLAUDIBLE_PROJ: String(sessionDir(opts.ws, HOME())).replace(/[^A-Za-z0-9]/g, '-'),
@@ -625,7 +650,7 @@ function runScript(name, argStr = '', opts = {}) {
     const o = { encoding: 'utf8', env };
     if (opts.timeout !== undefined) o.timeout = opts.timeout;
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
-    if (opts.detach) { o.detached = true; o.windowsHide = true; }   // quit-path scripts (presence-clear) must survive app.quit() — see wsl.js runScript
+    if (opts.detach) { o.detached = true; o.windowsHide = true; }   // quit-path scripts (presence-clear) must survive app.quit() â€” see wsl.js runScript
     try {
       const child = cp.execFile(bash, ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
       if (opts.detach && child && child.unref) {
@@ -639,7 +664,7 @@ function runScript(name, argStr = '', opts = {}) {
   });
 }
 
-// 🟡 voice — A0 proved whisper-server.exe runs on Windows. This runs the SAME services.sh fleet via
+// ðŸŸ¡ voice â€” A0 proved whisper-server.exe runs on Windows. This runs the SAME services.sh fleet via
 // git-bash (like posix/wsl run it via bash/wsl.exe), which resolves the prebuilt whisper-server.exe +
 // starts kokoro. Provisioned by install.ps1 -Native (A5). Binds 127.0.0.1: unlike WSL (where the app must
 // reach across the WSL netns, forcing 0.0.0.0), native Windows has no boundary, so loopback avoids the

@@ -420,7 +420,9 @@ function appDirNow() {
 // unrelated process and wedge voice permanently — every future click silently deferring to a "survivor" that
 // is actually Notepad. A provision that has not finished in this long is not going to.
 const VOICE_LOCK_MAX_MS = 45 * 60 * 1000;
-function ensureVoiceProvisioned() {
+// `force` = the user ASKED for this (Settings → voice). Only the automatic boot call honours the
+// already-failed stamp; a deliberate retry must always be allowed to try again.
+function ensureVoiceProvisioned(force) {
   // Only the packaged native-Windows path self-provisions; dev / WSL / the script install already set voice up.
   if (provisioning || !app.isPackaged || process.platform !== 'win32' || process.env.CLAUDIBLE_RUNNER !== 'win') return false;
   // Voice setup (setup-win.ps1) git-clones Kokoro + runs through git-bash, so it REQUIRES Git. On a freshly-set-up
@@ -430,6 +432,15 @@ function ensureVoiceProvisioned() {
   // cleanly on the next launch, once Git is present. No behavior change on an already-set-up machine.
   if (!appDirNow()) return false;
   if (voiceProvisioned()) return false;
+  // A previous run already failed here. Do not auto-retry a multi-hundred-MB provision on every launch on a
+  // machine that has demonstrably not managed it — that is a self-inflicted "the app is slow" on top of a
+  // feature that is already broken. A user-initiated retry (force) always proceeds, and clears the stamp so a
+  // later success leaves no trace of the failure.
+  try {
+    const s0 = readSettings();
+    if (s0.voiceProvisionFailedAt && !force) return false;
+    if (force && s0.voiceProvisionFailedAt) { delete s0.voiceProvisionFailedAt; delete s0.voiceProvisionFailedCode; writeSettings(s0); }
+  } catch {}
   const home = app.getPath('home');
   // ON-DISK lock, not just the in-memory flag: an app crash/force-kill orphans a still-running setup-win.ps1
   // (Windows children outlive their parent), and the relaunch's fresh `provisioning=false` used to spawn a
@@ -474,7 +485,13 @@ function ensureVoiceProvisioned() {
       send('done', 'Voice ready. (If you don’t hear replies, reopen Claudible.)');
       startVoiceServices();
     } else {
-      send('error', 'Voice setup didn’t finish (code ' + code + '). See %USERPROFILE%\\.claudible\\logs\\provision.out; reopen Claudible to retry.');
+      // RECORD THE FAILURE, or this retries FOREVER. voiceProvisioned() stays false after a failed run, the lock
+      // is already dropped, and nothing else remembers — so every subsequent launch re-ran the whole thing:
+      // a uv install, a Kokoro clone and several hundred MB of models, competing with the app the user is
+      // trying to use, on a machine where it has already proven it cannot finish. One stamp ends the loop; the
+      // Settings voice button still calls this path explicitly, so a deliberate retry is always available.
+      try { const s = readSettings(); s.voiceProvisionFailedAt = Date.now(); s.voiceProvisionFailedCode = code; writeSettings(s); } catch {}
+      send('error', 'Voice setup didn’t finish (code ' + code + '). See %USERPROFILE%\\.claudible\\logs\\provision.out; use Settings → voice to retry.');
     }
   });
   return true;
@@ -1211,6 +1228,13 @@ ipcMain.handle('share:start', (e, opts) => {
   // a cloudflared, orphaning the first tunnel forever (live public URL, no handle to kill).
   if (shareStartInFlight) return shareStartInFlight;
   if (share.status().running && shareBaseUrl) {           // already fully up → return the existing handle
+    // B13 BACKSTOP. Handing back the existing handle is right ONLY when the caller means the tab we are already
+    // pinned to. If the foreground has moved on, the caller is asking to share a DIFFERENT session and this
+    // return would give them a link that streams the pinned one — publishing a terminal they did not choose.
+    // The renderer guards this too; this is the authoritative refusal for any other caller.
+    if (sharedTabId != null && fgTabId != null && sharedTabId !== fgTabId) {
+      return { ok: false, error: 'already-sharing-other-tab', sharedTabId, reason: 'A share is already running and pinned to a different session. Stop it before starting a new one.' };
+    }
     const st0 = share.status();
     return { ok: true, url: `${shareBaseUrl}/?t=${st0.token}`, localUrl: `${shareBaseUrl}/?t=${st0.token}`, remote: !!cloudflaredProc, note: null, readOnly: st0.readOnly };
   }
@@ -3279,7 +3303,7 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
   // clicked it forever. Same gates, same order — now each one says which it was.
   if (id === 'voice' && runner.id === 'win') {
     if (voiceProvisioned()) return { ok: true, restartRequired: false };
-    if (ensureVoiceProvisioned()) return { ok: true, restartRequired: false };
+    if (ensureVoiceProvisioned(true)) return { ok: true, restartRequired: false };   // force: a click is an explicit retry, never blocked by the failed-before stamp
     const why = provisioning ? 'Voice setup is already running — watch the progress chip.'
       : !app.isPackaged ? 'Voice provisions from the installed build; from a source checkout run setup/setup-win.ps1.'
       : !appDirNow() ? 'Voice setup runs through Git Bash, which isn’t available yet. Install Git above, then try voice again.'

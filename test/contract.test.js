@@ -1596,9 +1596,20 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the guest has no Disconnect control',
     /id="disconnect-btn"/.test(GUEST_HTML) && /addEventListener\('click', doDisconnect\)/.test(GUEST_JS)
       ? [] : ['no Disconnect button, or it is not wired to doDisconnect']);
+  // Bound widened 320 → 560 for B15: doDisconnect now also sends the `leave` frame and clears the stored
+  // resume token before ending, which is ~90 chars of real work. The bound exists to keep the match INSIDE
+  // this function (so showEnded can't be satisfied by a later one) — not to cap the body — so widening it to
+  // just past the current length preserves the guard. Re-measure before widening again.
   none('Disconnect does not reach a final, no-reconnect state',
-    /function doDisconnect\(\)[\s\S]{0,320}?showEnded\('left'\)/.test(GUEST_JS) && /function showEnded\(kind\)/.test(GUEST_JS)
+    /function doDisconnect\(\)[\s\S]{0,560}?showEnded\('left'\)/.test(GUEST_JS) && /function showEnded\(kind\)/.test(GUEST_JS)
       ? [] : ['doDisconnect does not enter the terminal end state']);
+  // …and the explicit leave must actually revoke, on BOTH ends (B15). Server: a `leave` frame retires the
+  // resume token and marks the socket so drop() grants no grace. Guest: the stored token is cleared, so the
+  // end card's Rejoin button cannot re-enter on an approval the host never gave again.
+  none('an explicit guest Disconnect can silently rejoin within the grace window again',
+    [/msg\.type === 'leave'/.test(read('share/server.js')) ? '' : 'server has no leave-frame handler',
+     /resumeTokens\.delete\(ws\._resume\); ws\._resume = null;[\s\S]{0,120}?_kicked = true/.test(read('share/server.js')) ? '' : 'leave does not retire the token + skip the grace window',
+     /sessionStorage\.removeItem\(STORE_KEY\)/.test(GUEST_JS) ? '' : 'guest keeps its resume token after leaving'].filter(Boolean));
   none('…and a left guest can still be dragged back by the reconnect loop',
     /ws\.onclose = function \(ev\) \{\s*\n\s*if \(left\) return;/.test(GUEST_JS) && /function reconnect\(label\) \{\s*\n\s*if \(left\) return;/.test(GUEST_JS)
       ? [] : ['onclose/reconnect do not honor the left flag']);
@@ -2839,6 +2850,68 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('.gitattributes stopped pinning the contract-read files to LF (Windows clones see phantom failures)',
     [/^\*\.js\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.js not pinned',
      /^\*\.html\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.html not pinned'].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 86. THE 0.9.4 LIVE-SHARE + STARTUP BATCH. Ten fixes from a demo that went wrong in front of a guest, plus
+//   two collaborator reports. The share ones matter most: live share is the product's headline feature, and
+//   each of these turned it into a liability rather than merely breaking it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const WIN_JS = read('runners/win.js');
+  const SERVER_JS = read('share/server.js');
+  // (a) B20 — the two cygpath probes run at MODULE LOAD on a blocked main thread, before any window exists.
+  //     `-lc` sources the user's whole bash profile; this file's own header measured that at 37s on a real box.
+  //     A login shell here is a black screen at every launch, and it must never come back.
+  none('a startup cygpath probe went back to a LOGIN shell (-lc), or lost its timeout',
+    [/cygpath -u '\$\{shared\.shq\(APP_ROOT\)\}'`\], \{ encoding: 'utf8', timeout: \d+/.test(WIN_JS) ? '' : 'appDirGuest is not `-c` + timeout',
+     /cygpath \$\{flag\} '\$\{shared\.shq\(key\)\}'`\], \{ encoding: 'utf8', timeout: \d+/.test(WIN_JS) ? '' : 'toGuestPath/toHostPath is not `-c` + timeout',
+     /\['-lc',\s*`cygpath/.test(WIN_JS) ? 'a cygpath call still uses -lc' : ''].filter(Boolean));
+  // …and every synchronous probe behind detectDeps is bounded. detectDeps is sync behind an ipcMain await, so
+  // each of these blocks the main thread — on boot AND on every Settings-drawer open. `gh` reaches the network.
+  // Line-based, deliberately: every call in this file is written on one line with its own options object, and
+  // a paren-counting regex trips over the nested `shared.shq(...)` inside the cygpath commands.
+  none('a synchronous dependency probe lost its timeout (an offline box hangs the Settings drawer)',
+    WIN_JS.split('\n')
+      .filter((l) => /cp\.execFileSync\(/.test(l) && !/^\s*\/\//.test(l) && !/timeout:/.test(l))
+      .map((l) => l.trim().slice(0, 70)));
+  // (b) B13 — one server, one pin. A second Share must REFUSE, not hand back the first share's link.
+  none('a second Share can publish the FIRST share’s session again (B13)',
+    [/tunnelUp && sharedTabIdR != null && sharedTabIdR !== activeTabId/.test(APP) ? '' : 'doStartSharing lost its already-sharing refusal',
+     /sharedTabId != null && fgTabId != null && sharedTabId !== fgTabId/.test(MAIN) ? '' : 'share:start lost the main-process backstop'].filter(Boolean));
+  // (c) B14 — the warning must describe the mode that will actually be SERVED. Reading the checkbox showed
+  //     "they can't type" while co-drive was live, and the box ships `checked`, so that was the DEFAULT flow.
+  none('the share warning reads the checkbox instead of the real server mode again (B14)',
+    /const ro = locked \? !!lastShareReadOnly : !!\(cb && cb\.checked\)/.test(APP)
+      ? [] : ['renderShareWarn no longer prefers lastShareReadOnly when the toggle is locked']);
+  // …and a locked toggle must LOOK locked. The real checkbox is display:none and the switch is painted from
+  // :checked alone, so without these rules a dead control is pixel-identical to a working one.
+  none('a disabled toggle is visually indistinguishable from a working one again',
+    [/\.toggle input:disabled \+ \.sw\{/.test(HTML) ? '' : 'no :disabled style for the switch',
+     /\.toggle:has\(input:disabled\)\{cursor:not-allowed/.test(HTML) ? '' : 'a locked toggle still shows a pointer cursor'].filter(Boolean));
+  // …and the lock must be re-evaluated on EVERY ensureTunnel exit, including the early returns that used to
+  // skip it and strand the switch dead with no live share to justify it.
+  none('the view-only lock is no longer synced on the early-return paths (B14c)',
+    [/function syncShareRoLock\(\)/.test(APP) ? '' : 'syncShareRoLock is gone',
+     /if \(want === tunnelUp\) \{ syncShareRoLock\(\)/.test(APP) ? '' : 'the already-in-state early return does not sync the lock',
+     (APP.match(/syncShareRoLock\(\)/g) || []).length >= 4 ? '' : 'syncShareRoLock is not called from every exit + the tunnel-down/up handlers'].filter(Boolean));
+  // (d) B16/B17 — 'new' was the one resolution with no dedupe, so an empty project minted a tab per click and
+  //     the duplicate spawn triggered Claude Code's selection prompt, which eats every space.
+  none('an empty project can mint a fresh tab per click again (B16 → the spacebar bug)',
+    [/function dedupeBlankDraft\(wsId\)/.test(APP) ? '' : 'dedupeBlankDraft is gone',
+     /rec\.session === 'new' && rec\.autoDraft && !rec\.busy/.test(APP) ? '' : 'the blank-draft dedupe no longer requires an UNTOUCHED draft',
+     (APP.match(/dedupeBlankDraft\(id\)/g) || []).length >= 2 ? '' : 'not both switchWorkspace branches dedupe the ‘new’ case'].filter(Boolean));
+  // (e) B18 — `switch` is the only guest frame that changes host state; it must respect the privacy pause,
+  //     exactly as input and paste already do.
+  none('a guest can move the host’s workspace during the privacy pause again (B18)',
+    /msg\.type === 'switch'[\s\S]{0,120}?if \(readOnly \|\| paused\) return;/.test(SERVER_JS)
+      ? [] : ['the switch frame no longer gates on `paused`']);
+  // (f) A failed voice provision must not re-run a several-hundred-MB download at every launch. The manual
+  //     Settings retry passes force and must stay unaffected.
+  none('a failed voice provision retries on every launch again',
+    [/if \(s0\.voiceProvisionFailedAt && !force\) return false;/.test(MAIN) ? '' : 'the failed-before stamp is not honoured at boot',
+     /s\.voiceProvisionFailedAt = Date\.now\(\)/.test(MAIN) ? '' : 'a failed provision records nothing',
+     /ensureVoiceProvisioned\(true\)/.test(MAIN) ? '' : 'the manual Settings retry no longer forces past the stamp'].filter(Boolean));
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

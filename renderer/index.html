@@ -470,6 +470,11 @@
       border:1px solid var(--hairline);position:relative;transition:var(--dur-base);flex:none}
     .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
       background:linear-gradient(180deg,#9aa3ae,#5f656d);transition:var(--dur-base)}
+    /* B14: a DISABLED toggle used to be indistinguishable from a working one — the real checkbox is
+       display:none, the switch is painted purely from :checked, and cursor stayed pointer. A host clicking a
+       locked view-only switch saw a green "ON" swallow the click and concluded their machine was broken. */
+    .toggle:has(input:disabled){cursor:not-allowed;opacity:.72}
+    .toggle input:disabled + .sw{filter:grayscale(1);opacity:.55;box-shadow:none}
     .toggle input:checked + .sw{background:linear-gradient(90deg,#2f6b50,var(--ok));border-color:transparent}
     .toggle input:checked + .sw::after{transform:translateX(16px);background:linear-gradient(180deg,#eef5ef,#cfe6d8)}
     .toggle.on{color:var(--ink)}

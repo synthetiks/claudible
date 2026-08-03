@@ -417,8 +417,17 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
         roster.set(ws._name, ws._presence); notifyRoster();
         return;
       }
+      // B15: an EXPLICIT goodbye. The ws 'close' that follows cannot tell "the user clicked Disconnect" from
+      // "the tunnel dropped", and the grace window exists for the latter — so an intentional leave must retire
+      // the resume token here, before drop() can reserve it. Marking _kicked reuses the existing no-grace path.
+      if (msg.type === 'leave') {
+        try { if (ws._resume) { resumeTokens.delete(ws._resume); ws._resume = null; } } catch {}
+        ws._kicked = true;                                             // not a kick, but the same contract: no grace, no silent rejoin
+        try { ws.close(); } catch {}
+        return;
+      }
       if (msg.type === 'switch' && typeof msg.id === 'string') {       // guest navigates to another GRANTED workspace
-        if (readOnly) return;                                          // view-only guests can't drive navigation
+        if (readOnly || paused) return;                                // B18: view-only guests can't drive navigation — and NOBODY drives it while the host has paused the mirror for a private workspace (input/paste already gate on both; this one did not, so a co-drive guest could pull the host out of a private project mid-pause)
         if (!workspaces.some((w) => w.id === msg.id)) return;          // never switch to a non-granted workspace
         try { onSwitchWorkspace && onSwitchWorkspace(msg.id); } catch {}
         return;
