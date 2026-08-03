@@ -4,6 +4,31 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-08-03
+
+Linux, for the first time: this release ships an **AppImage** and a **`.deb`** alongside the Windows
+installer. It is a **pre-release** — the Linux build's first run on real hardware is happening against
+these exact artifacts, so treat it as a test build, not a stable.
+
+**Linux notes (read before installing):**
+- The AppImage needs `libfuse2` (`sudo apt install libfuse2`) — many distros no longer ship it. The `.deb`
+  needs no FUSE: `sudo apt install ./Claudible-0.9.3-amd64.deb`.
+- You need a signed-in [Claude Code](https://docs.anthropic.com/claude-code) (`npm i -g @anthropic-ai/claude-code`, then `claude`) — the app embeds it but does not install it.
+- Voice on Linux needs a one-time terminal step (`bash setup/setup.sh` from a clone) — the in-app installer
+  is Windows-only for now.
+
+**Fixed**
+- Packaged Linux/macOS builds now write their per-tab state under `~/.claudible` instead of trying to write
+  into a read-only install location.
+- Voice services bind to localhost on native Linux/macOS instead of listening on the local network.
+- Two tabs on one project no longer cross-write each other's telemetry (context %, agents, busy state).
+- A portable Git installed without admin rights survives a settings change and a restart.
+- Theme and collab-name preferences can no longer be silently lost on relaunch.
+- Closing a tab during a sync reload no longer leaves an invisible `claude` process running.
+- Stopping a share while someone is waiting to join now dismisses the approval prompt instead of stranding it.
+- Importing a GitHub repo whose name the importer can't represent (dots, underscores) now refuses with an
+  explanation instead of cloning the wrong repository.
+
 <!-- Notes style, agreed 2026-08-02: bullets and one or two short paragraphs. The 0.9.1 entry below is a wall
      of prose nobody reads — write what changed for the person using it, put the reasoning in the commit.
      KEEP EVERY EDITORIAL NOTE ABOVE THIS LINE. build.yml extracts from `## [<version>]` up to the NEXT
