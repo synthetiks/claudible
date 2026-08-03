@@ -652,7 +652,19 @@ function runScript(name, argStr = '', opts = {}) {
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
     if (opts.detach) { o.detached = true; o.windowsHide = true; }   // quit-path scripts (presence-clear) must survive app.quit() â€” see wsl.js runScript
     try {
-      const child = cp.execFile(bash, ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
+      // `-c`, NOT `-lc`. This is the HOT path — every session list, every sync, every presence probe, and the
+      // beacon fires one per synced workspace every 1.5s. A login shell sources /etc/profile + /etc/profile.d/*,
+      // which is Git-for-Windows' own shipped profile, not anything the user did: measured on a collaborator's
+      // box at 3.5–6.9s per call against 0.6–1.2s for `-c`, and his live-timing.log showed beacon probes taking
+      // 10–12s against a 1.5s interval — permanently saturated. That is what "every session loads super slow,
+      // and the names are wrong until they catch up" actually was.
+      //
+      // Verified the login PATH buys the fleet NOTHING before changing this: under `-c`, MSYS still resolves
+      // sed, grep, awk, cygpath (/usr/bin), git (/mingw64/bin), gh and node (Windows PATH) — identical to `-lc`.
+      // The profile only prepends /usr/local/bin and /bin, which no wsl/*.sh uses. (services.sh below keeps
+      // `-lc` on purpose: it runs once at startup, is not in any latency path, and uv/python resolution there
+      // is the fragile case worth the profile.)
+      const child = cp.execFile(bash, ['-c', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
       if (opts.detach && child && child.unref) {
         // Tell the caller the moment the OS has actually CREATED the process. A quit-path caller must not
         // exit before this: app.exit() is a hard kill, and a spawn that has not reached the OS yet simply

@@ -2877,6 +2877,19 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     WIN_JS.split('\n')
       .filter((l) => /cp\.execFileSync\(/.test(l) && !/^\s*\/\//.test(l) && !/timeout:/.test(l))
       .map((l) => l.trim().slice(0, 70)));
+  // (a2) B21 — runScript is the HOT path (every session list, sync and presence probe; the beacon fires one
+  //      per synced workspace every 1.5s). A login shell there sources Git-for-Windows' own /etc/profile:
+  //      measured at 3.5-6.9s per call on a collaborator's box vs 0.6-1.2s for `-c`, with beacon probes at
+  //      10-12s against a 1.5s cadence. Verified before changing it that `-c` still resolves sed/grep/awk/
+  //      cygpath/git/gh/node identically. services.sh keeps `-lc` deliberately (startup-only, uv resolution).
+  none('runScript went back to a LOGIN shell (the hot path pays Git’s /etc/profile on every call)',
+    /cp\.execFile\(bash, \['-c', cmd\]/.test(WIN_JS) ? [] : ['runScript no longer uses a non-login shell']);
+  // …and the beacon must back off on SLOW, not only on FAILED — a probe that succeeds in 10s against a 1.5s
+  // cadence saturates the chain and starves every other script call behind it.
+  none('the presence beacon can saturate a slow machine again',
+    [/_beaconCost\.set\(wsId, Date\.now\(\) - t0\)/.test(MAIN) ? '' : 'probe cost is not recorded',
+     /Math\.max\(backoff, cost \* 4\)/.test(MAIN) ? '' : 'the delay no longer floors at a multiple of the last probe cost',
+     /const t0 = Date\.now\(\);   \/\/ declared OUTSIDE the try/.test(MAIN) ? '' : 't0 is not in scope for the finally that records the cost'].filter(Boolean));
   // (b) B13 — one server, one pin. A second Share must REFUSE, not hand back the first share's link.
   none('a second Share can publish the FIRST share’s session again (B13)',
     [/tunnelUp && sharedTabIdR != null && sharedTabIdR !== activeTabId/.test(APP) ? '' : 'doStartSharing lost its already-sharing refusal',

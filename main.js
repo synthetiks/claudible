@@ -1945,11 +1945,20 @@ function _beaconArm(wsId, delay) {
   if (t.unref) t.unref();
   _beaconTimers.set(wsId, t);
 }
+const _beaconCost = new Map();   // wsId -> ms the last probe actually took
 function _beaconDelay(wsId) {
   let hidden = false; try { hidden = !(win && !win.isDestroyed() && win.isVisible()); } catch {}
   const base = hidden ? BEACON_HIDDEN_MS : BEACON_MS;
   const errs = Math.min(5, _beaconErr.get(wsId) || 0);
-  return Math.min(60000, base * Math.pow(2, errs));   // healthy: base cadence; failing: 2x per miss, capped at 60s; one success resets
+  const backoff = Math.min(60000, base * Math.pow(2, errs));   // healthy: base cadence; failing: 2x per miss, capped at 60s; one success resets
+  // …and back off on SLOW as well as FAILED. The error backoff never fired for a probe that succeeded, just
+  // slowly — so on a machine where one probe costs 10-12s the 1.5s cadence meant the chain was saturated, one
+  // git-bash spawn permanently in flight per synced workspace, starving every other script call behind it.
+  // (A collaborator's live-timing.log, verbatim: `beacon: head moved … (probe 10184ms)` on a 1500ms base.)
+  // Floor the gap at 4x the last probe's own cost: a fast machine is untouched (4 x ~200ms < base), a slow one
+  // self-limits to a ~20% duty cycle instead of running flat out. Capped with the same 60s ceiling.
+  const cost = _beaconCost.get(wsId) || 0;
+  return Math.min(60000, Math.max(backoff, cost * 4));
 }
 async function _beaconProbe(wsId) {
   let gone = true; try { gone = !win || win.isDestroyed(); } catch {}
@@ -1957,8 +1966,8 @@ async function _beaconProbe(wsId) {
   const ws = _beaconQualifies(wsId);
   if (!ws) { _beaconHeads.delete(wsId); _beaconDirty.delete(wsId); _beaconErr.delete(wsId); _lastPeers.delete(wsId); return; }   // sync toggled off / deleted -> chain ends; the roster scan re-arms if it comes back
   _beaconLive.add(wsId);
+  const t0 = Date.now();   // declared OUTSIDE the try: the finally reads it to record the probe's real cost
   try {
-    const t0 = Date.now();
     const { err, stdout } = await runner.runScript('sessions-sync.sh', 'remote-head', { ws, timeout: 12000 });
     let r = null; if (!err) { try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {} }
     if (!r || !r.ok || typeof r.head !== 'string') { _beaconErr.set(wsId, (_beaconErr.get(wsId) || 0) + 1); return; }
@@ -2008,6 +2017,10 @@ async function _beaconProbe(wsId) {
     if (res && res.ok && _beaconDirty.get(wsId) === want) _beaconDirty.delete(wsId);   // a NEWER head may have arrived mid-sync — keep it owed
   } finally {
     _beaconLive.delete(wsId);
+    // Record what this whole probe ACTUALLY cost — t0 covers the remote-head read plus any presence push and
+    // owed sync, i.e. the real occupancy of the chain — so _beaconDelay can hold the duty cycle down on a slow
+    // machine instead of re-arming 1.5s after a cycle that took thirty seconds.
+    _beaconCost.set(wsId, Date.now() - t0);
     _beaconArm(wsId, _beaconDelay(wsId));
   }
 }
