@@ -20,12 +20,16 @@ const APP_ROOT = path.resolve(__dirname, '..');
 function appDirGuest() { return APP_ROOT; }
 function toGuestPath(p) { return String(p == null ? '' : p); }
 function toHostPath(p) { return String(p == null ? '' : p); }
-// session.sh ALWAYS derives runtime from $APPDIR (the root isn't threaded into bash), so CLAUDIBLE_RUNTIME
-// is deliberately ignored — honoring it would split main's reads from the hooks' writes (see wsl.js).
-// Same contract as wsl.js: $CLAUDIBLE_RUNTIME is DELIBERATELY ignored (session.sh hardcodes $APPDIR/runtime, so
-// writer and reader must agree). Only win.js honors it. Isolating this runner means copying APP_ROOT, not setting
-// an env var — see the header of test/e2e-boot.test.js, which learned that the hard way.
-function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
+// B1: CLAUDIBLE_RUNTIME is now honored here, mirroring win.js — session.sh and killtree.sh read the SAME env
+// (absolute-path-guarded on both sides), so writer, reaper and main's pollers resolve one dir. This is what
+// lets a PACKAGED Linux/macOS build (read-only AppImage mount, root-owned /opt) write per-tab state under
+// ~/.claudible/runtime. Dev/source installs leave the env unset → APP_ROOT/runtime, exactly as before.
+// (wsl.js still deliberately ignores it: Windows env does not cross wsl.exe, so WSL's writer could never
+// follow — see its header. test/e2e-boot.test.js isolates by copying APP_ROOT, which remains valid.)
+function runtimeDir() {
+  const rt = process.env.CLAUDIBLE_RUNTIME;
+  return (rt && path.isAbsolute(rt)) ? rt : path.join(APP_ROOT, 'runtime');
+}
 
 // buildBoot via the shared pure builder (appdir = the native app root).
 function buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort, permMode, modelStrategy); }
@@ -81,11 +85,15 @@ function runScript(name, argStr = '', opts = {}) {
   });
 }
 
-// Voice services natively (services.sh runs on Linux/macOS — same script; binds loopback on a single host).
+// Voice services natively. B2: services.sh defaults CLAUDIBLE_BIND_HOST to 0.0.0.0 — correct on WSL (the app
+// reaches the services ACROSS the WSL2 NAT, which also shields them from the LAN) but on native Linux/macOS
+// there is no NAT wall: 0.0.0.0 exposes whisper (:2022) and kokoro (:8880) to the local network. Bind loopback
+// explicitly, exactly as win.js does — the app talks to localhost on a single host here, nothing else needs in.
 function startVoiceServices() {
   try {
     // via scriptCmd, not a hand-rolled string: it is the ONE builder that escapes the app dir (see _shared.js shq).
-    cp.execFile('bash', ['-lc', shared.scriptCmd(APP_ROOT, 'services.sh')],
+    const env = Object.assign({}, process.env, { CLAUDIBLE_BIND_HOST: '127.0.0.1' });
+    cp.execFile('bash', ['-lc', shared.scriptCmd(APP_ROOT, 'services.sh')], { env },
       (err, _stdout, stderr) => { if (err) console.error('[claudible] services.sh:', err.message, stderr || ''); });
   } catch (e) { console.error('[claudible] failed to start voice services:', e.message); }
 }

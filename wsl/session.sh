@@ -15,7 +15,16 @@ APPDIR="${1:?usage: session.sh <app-dir-as-wsl-path>}"
 # leaf); unset/bad falls back to 'default', so a lone session stays fully backward compatible.
 TAB="${CLAUDIBLE_TAB:-}"
 case "$TAB" in '' | *[!A-Za-z0-9-]*) TAB="default" ;; esac
-RT="$APPDIR/runtime/tabs/$TAB"
+# B1 (packaged Linux/macOS): an AppImage mounts read-only and a .deb installs to root-owned /opt, so the
+# per-tab runtime cannot live under $APPDIR there. A packaged build exports CLAUDIBLE_RUNTIME
+# (~/.claudible/runtime, set in main.js before the runner loads) and posix.js runtimeDir() reads the SAME
+# env — so the bash writer (here), the reaper (killtree.sh) and main's pollers all resolve one dir. Honored
+# only as an ABSOLUTE unix path: a Windows path leaking across interop (C:\…) must never win, and wsl.js
+# deliberately ignores this env on the JS side (see its header) so WSL stays on $APPDIR — writer and reader
+# there both derive it the old way, coherent as before. Dev/source installs leave the env unset: no change.
+RTROOT="$APPDIR/runtime"
+case "${CLAUDIBLE_RUNTIME:-}" in /*) RTROOT="$CLAUDIBLE_RUNTIME" ;; esac
+RT="$RTROOT/tabs/$TAB"
 STATUS="$RT/status.json"
 HOOKS="$RT/hooks.ndjson"
 CONTEXT="$RT/context.json"   # app→Claude identity/live-state (main writes it; the context hook reads it to tell the model which machine/user/live-session it's on)

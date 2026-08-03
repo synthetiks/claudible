@@ -14,7 +14,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/_proc-stime.sh"                             # portable start-time: /proc on Linux/WSL, `ps -o lstart=` on macOS
 TAB="${1:-}"
 case "$TAB" in '' | *[!A-Za-z0-9-]*) exit 0 ;; esac
-PIDFILE="$(cd "$(dirname "$0")/.." && pwd)/runtime/tabs/$TAB/boot.pid"
+# B1: session.sh may relocate the per-tab runtime via CLAUDIBLE_RUNTIME (packaged posix — read-only $APPDIR).
+# The reaper must look where the bootstrap wrote, or a packaged tab-close silently reaps nothing and claude
+# survives as an orphan (§9 #4's disease, reintroduced by relocation). Same absolute-unix-path guard.
+RTROOT="$(cd "$(dirname "$0")/.." && pwd)/runtime"
+case "${CLAUDIBLE_RUNTIME:-}" in /*) RTROOT="$CLAUDIBLE_RUNTIME" ;; esac
+PIDFILE="$RTROOT/tabs/$TAB/boot.pid"
 [ -f "$PIDFILE" ] || exit 0
 read -r PID STIME < "$PIDFILE" 2>/dev/null || true   # `read` exits nonzero on a newline-less file but still fills the vars — don't bail on that
 case "$PID" in '' | *[!0-9]*) exit 0 ;; esac

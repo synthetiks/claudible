@@ -18,10 +18,14 @@ ok('appDirGuest = APP_ROOT (no wslpath)', posix.appDirGuest() === APP);
 ok('toGuestPath identity (spaces preserved)', posix.toGuestPath('/x/y z') === '/x/y z');
 ok('toHostPath identity', posix.toHostPath('/a/b') === '/a/b');
 ok('runtimeDir = APP_ROOT/runtime (default, env unset)', posix.runtimeDir() === path.join(APP, 'runtime'));
-// CLAUDIBLE_RUNTIME must be IGNORED on posix: session.sh always derives runtime from $APPDIR (the root
-// isn't threaded into bash), so honoring the env var here would split main's reads from the hooks' writes.
+// B1 (contract INVERTED, deliberately): CLAUDIBLE_RUNTIME is now HONORED on posix — session.sh and
+// killtree.sh read the same env with the same absolute-path guard, so writer/reaper/reader stay coherent
+// while a packaged build (read-only AppImage mount) relocates to ~/.claudible/runtime. The old pin asserted
+// the opposite; it guarded coherence, and the coherence now lives in the shared env contract instead.
 process.env.CLAUDIBLE_RUNTIME = '/tmp/cl-rt-test';
-ok('runtimeDir ignores CLAUDIBLE_RUNTIME (writer/reader coherence with session.sh)', posix.runtimeDir() === path.join(APP, 'runtime'));
+ok('runtimeDir HONORS an absolute CLAUDIBLE_RUNTIME (B1 packaged-posix contract)', posix.runtimeDir() === '/tmp/cl-rt-test');
+process.env.CLAUDIBLE_RUNTIME = 'not-absolute';
+ok('runtimeDir rejects a NON-absolute CLAUDIBLE_RUNTIME (leaked C:\\ paths must never win)', posix.runtimeDir() === path.join(APP, 'runtime'));
 delete process.env.CLAUDIBLE_RUNTIME;
 ok('detect matches platform', posix.detect() === (process.platform === 'linux' || process.platform === 'darwin'));
 

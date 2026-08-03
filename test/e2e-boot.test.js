@@ -35,11 +35,11 @@ if (process.env.CLAUDIBLE_E2E !== '1') {
 }
 
 // ---- isolation, established BEFORE anything is spawned -----------------------------------------------------
-// The app's registry lives at `runner.runtimeDir()/workspaces.json`, and runtimeDir() is `APP_ROOT/runtime` on the
-// wsl AND posix runners — they deliberately IGNORE $CLAUDIBLE_RUNTIME, because wsl/session.sh hardcodes
-// RT="$APPDIR/runtime" and main must read where the script writes. (Only win.js honors the env var; a packaged
-// Windows install has a read-only APP_ROOT.) So $CLAUDIBLE_RUNTIME cannot isolate this on Linux/WSL — the app
-// would write straight into the developer's live runtime/. That is not a hypothetical: it is what happened.
+// The app's per-tab runtime lives under `runner.runtimeDir()`. Since B1, win.js AND posix.js honor an absolute
+// $CLAUDIBLE_RUNTIME (session.sh/killtree.sh read the same env, so bash writers follow) — only wsl.js still
+// ignores it (Windows env does not cross wsl.exe, so its bash side could never follow). Copying APP_ROOT into
+// the sandbox therefore remains the ONE isolation that holds on every runner — the env var alone would still
+// leave a WSL run writing into the developer's live runtime/. That is not a hypothetical: it is what happened.
 //
 // The only isolation that actually holds is to make APP_ROOT itself disposable. Copy the app into the sandbox and
 // run Electron from there; node_modules is symlinked (it's ~300MB and read-only for our purposes).
@@ -93,7 +93,7 @@ child = cp.spawn(electronBin, ['.', `--remote-debugging-port=${PORT}`, `--user-d
     ...process.env,
     HOME,                                   // isolated: ~/.claudible, ~/.claude
     USERPROFILE: HOME,                      // Windows equivalent
-    CLAUDIBLE_RUNTIME: path.join(APP, 'runtime'),   // only the win runner reads this; harmless (and correct) elsewhere
+    CLAUDIBLE_RUNTIME: path.join(APP, 'runtime'),   // win + posix (B1) read this; it points INSIDE the sandbox copy, so honoring it is exactly the isolation we want
     CLAUDIBLE_E2E: '1',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },

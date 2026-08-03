@@ -24,18 +24,20 @@ const BUILD = readGitSha(__dirname) || { sha: '', short: '', at: 0 };
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
 // A packaged (installed) build runs from a READ-ONLY app dir, so writable runtime state can't live there. On
-// packaged WINDOWS we set two env signals BEFORE the runner is selected/queried below:
-//  • CLAUDIBLE_RUNTIME — relocate runtime/ (settings.json, workspaces.json, per-tab status/hooks) under the user's
-//    ~/.claudible so it survives reinstall/upgrade and never EPERMs. Every runner's runtimeDir() reads this.
-//  • CLAUDIBLE_RUNNER=win — use the native runner (no WSL); it bakes hook paths from runtimeDir() and never shells
-//    bash session.sh, so writers (hooks) and readers (pollers) resolve to the SAME relocated dir — fully coherent.
-// Scoped to win32 ON PURPOSE: a packaged Linux/macOS build uses the Posix runner whose bash session.sh still
-// derives runtime/ from $APPDIR, so relocating only the JS side would desync it. Thread the runtime root into
-// session.sh BEFORE shipping those installers; until then the Posix packaged path is left exactly as-is.
+// EVERY packaged platform we set CLAUDIBLE_RUNTIME BEFORE the runner is selected/queried below:
+//  • CLAUDIBLE_RUNTIME — relocate the per-tab runtime (status/hooks/context/boot.pid) under the user's
+//    ~/.claudible so it survives reinstall/upgrade and never EPERMs. win.js and posix.js runtimeDir() read it,
+//    and on posix the SAME env is inherited by bash — session.sh (writer) and killtree.sh (reaper) resolve the
+//    identical root, so writers and readers stay coherent. (B1: this was win32-only until the Linux release;
+//    an AppImage mounts read-only and a .deb installs to root-owned /opt, so packaged posix NEEDS it too.)
+//  • CLAUDIBLE_RUNNER=win (win32 only) — use the native runner (no WSL); it bakes hook paths from runtimeDir()
+//    and never shells bash session.sh. wsl.js deliberately ignores CLAUDIBLE_RUNTIME (Windows env does not
+//    cross wsl.exe, so its bash side could never follow — see its header): a forced-WSL packaged install keeps
+//    deriving from $APPDIR on both sides, coherent as before.
 // Dev (electron .) and the git-clone/script install leave both env vars unset → WSL/Posix runner + ./runtime.
-if (app.isPackaged && process.platform === 'win32') {
+if (app.isPackaged) {
   if (!process.env.CLAUDIBLE_RUNTIME) process.env.CLAUDIBLE_RUNTIME = path.join(app.getPath('home'), '.claudible', 'runtime');
-  if (!process.env.CLAUDIBLE_RUNNER) process.env.CLAUDIBLE_RUNNER = 'win';
+  if (process.platform === 'win32' && !process.env.CLAUDIBLE_RUNNER) process.env.CLAUDIBLE_RUNNER = 'win';
 }
 const runner = require('./runners/runner').select();
 const deps = require('./runners/deps');   // self-bootstrapping dependency provisioner (detect + install + manifest)

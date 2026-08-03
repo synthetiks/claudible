@@ -2796,5 +2796,50 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['import no longer refuses names it cannot represent — it may be sanitizing them again']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 85. B1/B2/B5 — THE LINUX RELEASE CONTRACT (2026-08-03). A packaged Linux build (AppImage = read-only
+//   mount, .deb = root-owned /opt) cannot write per-tab runtime under $APPDIR. The fix is ONE env contract
+//   shared by four files: main.js exports CLAUDIBLE_RUNTIME on every packaged platform, posix.js runtimeDir()
+//   honors it, and session.sh (writer) + killtree.sh (reaper) resolve the SAME root in bash. If any ONE of
+//   the four drifts, writers and readers split silently — frozen telemetry or unreaped orphan claudes.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SESSION_SH = read('wsl/session.sh');
+  const KILLTREE_SH = read('wsl/killtree.sh');
+  const POSIX_JS = read('runners/posix.js');
+  // (a) the bash WRITER honors an absolute CLAUDIBLE_RUNTIME — with the /*-guard, so a Windows path that
+  //     leaks across interop (C:\…) can never win. RT must derive from the guarded root, not from $APPDIR.
+  none('session.sh stopped honoring CLAUDIBLE_RUNTIME (packaged posix writes into a read-only mount again)',
+    [/case "\$\{CLAUDIBLE_RUNTIME:-\}" in \/\*\) RTROOT="\$CLAUDIBLE_RUNTIME"/.test(SESSION_SH) ? '' : 'the /*-guarded RTROOT override is gone',
+     /RT="\$RTROOT\/tabs\/\$TAB"/.test(SESSION_SH) ? '' : 'RT no longer derives from RTROOT'].filter(Boolean));
+  // (b) the REAPER reads the same env with the same guard. A relocated writer with an unrelocated reaper is
+  //     §9 #4's orphan-claude disease reintroduced: tab-close finds no boot.pid and kills nothing, forever.
+  none('killtree.sh looks for boot.pid where session.sh no longer writes it (orphan claudes on packaged posix)',
+    [/case "\$\{CLAUDIBLE_RUNTIME:-\}" in \/\*\) RTROOT="\$CLAUDIBLE_RUNTIME"/.test(KILLTREE_SH) ? '' : 'killtree lost the /*-guarded RTROOT override',
+     /PIDFILE="\$RTROOT\/tabs\/\$TAB\/boot\.pid"/.test(KILLTREE_SH) ? '' : 'PIDFILE no longer derives from RTROOT'].filter(Boolean));
+  // (c) the JS READER (main's pollers go through runtimeDir) honors the same env, absolute-only — mirroring
+  //     the bash guard exactly. Non-absolute values must fall back, or a leaked relative path splits the pair.
+  none('posix.runtimeDir() no longer honors an absolute CLAUDIBLE_RUNTIME (readers split from the bash writer)',
+    /path\.isAbsolute\(rt\)\) \? rt : path\.join\(APP_ROOT, 'runtime'\)/.test(POSIX_JS)
+      ? [] : ['runtimeDir() lost the absolute-guarded env override']);
+  // (d) main.js sets the env on EVERY packaged platform (B1 un-gated it from win32) while CLAUDIBLE_RUNNER=win
+  //     stays win32-only — posix must keep auto-selecting the posix runner.
+  none('the packaged-runtime relocation regressed to win32-only (B1 re-broken)',
+    [/if \(app\.isPackaged\) \{\s*\n\s*if \(!process\.env\.CLAUDIBLE_RUNTIME\)/.test(MAIN) ? '' : 'CLAUDIBLE_RUNTIME is gated on win32 again',
+     /if \(process\.platform === 'win32' && !process\.env\.CLAUDIBLE_RUNNER\) process\.env\.CLAUDIBLE_RUNNER = 'win';/.test(MAIN) ? '' : 'the win-runner force-select lost its win32 gate'].filter(Boolean));
+  // (e) B2 — native posix binds voice to LOOPBACK. services.sh defaults to 0.0.0.0, which is load-bearing on
+  //     WSL (the app reaches across the NAT, and the NAT shields the LAN) but is a LAN exposure on native
+  //     Linux/macOS. posix must override like win.js does; wsl.js must NOT (that would break WSL voice).
+  none('native posix voice services bind 0.0.0.0 again (whisper/kokoro reachable from the LAN)',
+    [/CLAUDIBLE_BIND_HOST: '127\.0\.0\.1'/.test(POSIX_JS) ? '' : 'posix.js no longer sets loopback',
+     /CLAUDIBLE_BIND_HOST: '127\.0\.0\.1'/.test(read('runners/win.js')) ? '' : 'win.js no longer sets loopback',
+     /CLAUDIBLE_BIND_HOST/.test(read('runners/wsl.js').replace(/^\s*\/\/[^\n]*$/gm, '')) ? 'wsl.js now sets CLAUDIBLE_BIND_HOST — 0.0.0.0 is load-bearing there' : ''].filter(Boolean));
+  // (f) B5 — every file this suite regexes is pinned to LF. Without this, a core.autocrlf=true clone reports
+  //     phantom failures naming plausible regressions (467/6 observed at ecb0424, incl. pin 84a itself).
+  none('.gitattributes stopped pinning the contract-read files to LF (Windows clones see phantom failures)',
+    [/^\*\.js\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.js not pinned',
+     /^\*\.html\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.html not pinned'].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
