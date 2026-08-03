@@ -5897,7 +5897,7 @@ async function switchWorkspace(id, targetSession) {
     const want = await sessionToOpenFor(id, targetSession, kinfo);
     if (want !== 'new') {   // same dedupe as the busy branch — main may have refused BECAUSE that session is live in another tab (its respawn dedupe), and duplicating it here would re-create the two-claude modal
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
-    } else if (dedupeBlankDraft(id)) { rollBack(); return; }   // B16: restore the optimistic record first — we are focusing an EXISTING tab, not creating one
+    } else if (dedupeBlankDraft(id)) return;   // B16 — no rollBack, exactly like the real-id dedupe above: we are FOCUSING a tab that already lives in the target ws, so setActiveTab has already moved the globals there. rollBack would drag activeWsId + the sidebar back to the OLD ws while the focused tab sits in the new one — the very desync it exists to prevent. (The record restore it also does is redundant here; `Object.assign(t, prev)` already ran above.)
     if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); noteUnknownSessions(kinfo); return; }    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft (want==='new' → auto-draft, reconcilable once sessions land)
     toast('That session is still running — close a tab to open that project beside it');
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back

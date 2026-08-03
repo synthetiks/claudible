@@ -23,6 +23,15 @@ const SAVED = { CLAUDIBLE_CLOUDFLARED: process.env.CLAUDIBLE_CLOUDFLARED, LOCALA
 function restore() { for (const k of Object.keys(SAVED)) { if (SAVED[k] == null) delete process.env[k]; else process.env[k] = SAVED[k]; } }
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'claudible-cf-'));
+// …except candidates() ALSO probes the .msi locations, two of which are HARDCODED
+// ('C:\Program Files[ (x86)]\cloudflared\cloudflared.exe') and gated on fs.existsSync — no env var can
+// neutralize those. The hermeticity the block above is reaching for stops one path short: on a Windows box
+// with cloudflared genuinely installed, a real absolute path appears in EVERY list and four exact-match
+// assertions failed. They passed in CI only because ubuntu runners have no such file — a test that held only
+// on the OS this code does not target. `cands()` drops a real installation (never one the test itself made
+// under `scratch`), so the assertions test the LOGIC on every machine.
+const REAL_MSI = /[\\/]cloudflared[\\/]cloudflared\.exe$/i;
+const cands = (o) => candidates(o || {}).filter((c) => !(REAL_MSI.test(c) && !String(c).startsWith(scratch)));
 function fakeBin(rel, out) {   // a launchable stand-in: prints what a real `cloudflared --version` would
   const p = path.join(scratch, rel);
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -33,11 +42,21 @@ function fakeBin(rel, out) {   // a launchable stand-in: prints what a real `clo
 // ---- candidates(): order and membership ----
 {
   delete process.env.CLAUDIBLE_CLOUDFLARED; delete process.env.LOCALAPPDATA;
-  eq('bare fallbacks only, PATH names last', candidates({}), ['cloudflared.exe', 'cloudflared']);
+  // NOT `eq(…, ['cloudflared.exe','cloudflared'])`. candidates() also probes the .msi locations, including
+  // HARDCODED 'C:\Program Files[ (x86)]\cloudflared\cloudflared.exe' that no env var can neutralize — so on a
+  // Windows box with cloudflared actually installed this asserted a falsehood and failed. It passed in CI only
+  // because ubuntu runners have no such path: a test that only holds on the OS the code does not target.
+  // The invariant that matters is the ORDER — bare PATH names are the last resort, after every absolute hit.
+  {
+    const list = cands();
+    eq('PATH names are the last two candidates', list.slice(-2), ['cloudflared.exe', 'cloudflared']);
+    ok('…and every earlier candidate is an absolute path that exists',
+      list.slice(0, -2).every((c) => path.isAbsolute(c) && fs.existsSync(c)));
+  }
   process.env.CLAUDIBLE_CLOUDFLARED = '/env/cf';
-  eq('env candidate leads when set', candidates({})[0], '/env/cf');
-  eq('opts.bin REPLACES env (explicit override, not a longer list)', candidates({ bin: '/opt/cf' })[0], '/opt/cf');
-  ok('…and the env value is then absent entirely', !candidates({ bin: '/opt/cf' }).includes('/env/cf'));
+  eq('env candidate leads when set', cands()[0], '/env/cf');
+  eq('opts.bin REPLACES env (explicit override, not a longer list)', cands({ bin: '/opt/cf' })[0], '/opt/cf');
+  ok('…and the env value is then absent entirely', !cands({ bin: '/opt/cf' }).includes('/env/cf'));
   restore();
 }
 {
@@ -45,12 +64,12 @@ function fakeBin(rel, out) {   // a launchable stand-in: prints what a real `clo
   // ordered after the env override and before the bare PATH names.
   delete process.env.CLAUDIBLE_CLOUDFLARED;
   process.env.LOCALAPPDATA = path.join(scratch, 'lad-empty');
-  eq('winget path absent from list when the exe does not exist', candidates({}), ['cloudflared.exe', 'cloudflared']);
+  eq('winget path absent from list when the exe does not exist', cands(), ['cloudflared.exe', 'cloudflared']);
   const wingetExe = fakeBin(path.join('lad', WINGET_REL), 'cloudflared version 9.9.9');
   process.env.LOCALAPPDATA = path.join(scratch, 'lad');
-  eq('winget path present when the exe exists', candidates({}), [wingetExe, 'cloudflared.exe', 'cloudflared']);
+  eq('winget path present when the exe exists', cands(), [wingetExe, 'cloudflared.exe', 'cloudflared']);
   process.env.CLAUDIBLE_CLOUDFLARED = '/env/cf';
-  eq('env still outranks the winget path', candidates({}), ['/env/cf', wingetExe, 'cloudflared.exe', 'cloudflared']);
+  eq('env still outranks the winget path', cands(), ['/env/cf', wingetExe, 'cloudflared.exe', 'cloudflared']);
   restore();
 }
 

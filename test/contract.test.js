@@ -1608,7 +1608,9 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // end card's Rejoin button cannot re-enter on an approval the host never gave again.
   none('an explicit guest Disconnect can silently rejoin within the grace window again',
     [/msg\.type === 'leave'/.test(read('share/server.js')) ? '' : 'server has no leave-frame handler',
-     /resumeTokens\.delete\(ws\._resume\); ws\._resume = null;[\s\S]{0,120}?_kicked = true/.test(read('share/server.js')) ? '' : 'leave does not retire the token + skip the grace window',
+     /resumeTokens\.delete\(ws\._resume\); ws\._resume = null;[\s\S]{0,120}?_left = true/.test(read('share/server.js')) ? '' : 'leave does not retire the token + skip the grace window',
+     /if \(tok && !ws\._kicked && !ws\._left\)/.test(read('share/server.js')) ? '' : 'an explicit leave no longer skips the grace window',
+     /systemChat\(who \+ \(ws\._kicked \?/.test(read('share/server.js')) ? '' : 'the "removed by the host" line is no longer gated on a REAL kick — a voluntary Disconnect must not claim the host removed them',
      /sessionStorage\.removeItem\(STORE_KEY\)/.test(GUEST_JS) ? '' : 'guest keeps its resume token after leaving'].filter(Boolean));
   none('…and a left guest can still be dragged back by the reconnect loop',
     /ws\.onclose = function \(ev\) \{\s*\n\s*if \(left\) return;/.test(GUEST_JS) && /function reconnect\(label\) \{\s*\n\s*if \(left\) return;/.test(GUEST_JS)

@@ -422,7 +422,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
       // the resume token here, before drop() can reserve it. Marking _kicked reuses the existing no-grace path.
       if (msg.type === 'leave') {
         try { if (ws._resume) { resumeTokens.delete(ws._resume); ws._resume = null; } } catch {}
-        ws._kicked = true;                                             // not a kick, but the same contract: no grace, no silent rejoin
+        ws._left = true;                                               // same contract as a kick (no grace, no silent rejoin) — but NOT a kick, so drop() must not announce "removed by the host"
         try { ws.close(); } catch {}
         return;
       }
@@ -481,7 +481,10 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
       const wasVoice = voiceGuests.delete(ws._pid);
       notifyGuests();
       const tok = ws._resume, who = ws._name;
-      if (tok && !ws._kicked) {
+      // `_left` = the guest clicked Disconnect. It shares the KICK contract (no grace window, token already
+      // retired) but NOT the wording below — announcing "removed by the host" for someone who chose to leave
+      // is a lie told to every other guest, and to the host, about something the host did not do.
+      if (tok && !ws._kicked && !ws._left) {
         // Don't cry "left" the instant the socket closes — a backgrounded tab / locked phone reconnects with this
         // token. Show them amber ("away") and wait out the grace window; only a real, lasting departure announces.
         // (A host-KICKED guest skips this entirely — handled in the else: token killed, gone immediately.)
@@ -497,9 +500,9 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
         if (timer && timer.unref) timer.unref();
         pendingDrops.set(tok, { timer, wasVoice, name: who, pid: ws._pid });   // pid too: a resume inside the grace window is the same person, and must come back as the same voice peer
       } else {
-        if (ws._kicked && tok) resumeTokens.delete(tok);   // kick → kill the resume token so they can't silently rejoin
+        if ((ws._kicked || ws._left) && tok) resumeTokens.delete(tok);   // kick OR an explicit leave → kill the resume token so they can't silently rejoin
         markGone(who); notifyRoster();
-        systemChat(who + (ws._kicked ? ' was removed by the host' : ' disconnected'));
+        systemChat(who + (ws._kicked ? ' was removed by the host' : ' disconnected'));   // only a real kick says "removed"
         if (wasVoice) broadcastVoice();
       }
     };
