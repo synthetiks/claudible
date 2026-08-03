@@ -32,9 +32,10 @@ jobs:
 
       # Guard: a v* tag MUST match package.json version, so the published asset (named from package.json's
       # version via artifactName) can never diverge from the Release (named from the tag). Fails fast, before
-      # the expensive build. Windows leg only — it's the one that publishes.
+      # the expensive build. ALL legs (B-roadmap 4.3): since the publish job below ships Linux assets too, a
+      # mismatched tag must kill every leg, not just the one that used to publish.
       - name: Check tag matches package.json version
-        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           pkg=$(node -p "require('./package.json').version")
@@ -73,54 +74,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run dist:mac
 
-      # PUBLISH BEFORE UPLOAD. The release asset is the thing users actually download; the CI artifact is a
-      # convenience copy. They draw on DIFFERENT quotas — release assets are effectively unbounded, Actions
-      # artifact storage is 500 MB on a private repo. v0.8.0's first tag run proved the old order was wrong:
-      # all three installers BUILT fine, `Upload installers` hit the artifact quota, the job died there, and
-      # this publish step was skipped as collateral — no release, no .exe, for a pure storage problem.
-      #
-      # On a v* tag, publish the Windows installer to a GitHub Release so users download one .exe (no clone,
-      # no npm, no PowerShell). Only the Windows leg publishes for now; Linux/macOS remain artifact-only until
-      # validated. softprops/action-gh-release upserts the release for the pushed tag; the default GITHUB_TOKEN
-      # with contents:write is sufficient on our own repo — no PAT needed. Unsigned: SmartScreen will
-      # warn on first run ("More info → Run anyway") — expected until a code-signing cert exists.
-      # Release notes. Every release so far published with an EMPTY body — a downloader got a bare .exe and not one
-      # word about what changed. CHANGELOG.md already HAS the text; it just never reached the release page. Cut this
-      # version's section out of it (from `## [x.y.z]` up to the next `## [`) and use that as the body. Dumping the
-      # whole file would bury the current version under its own history, so it's an excerpt. Degrades to a link
-      # rather than failing, so a CHANGELOG heading typo can never block a release that already built.
-      - name: Extract this version's CHANGELOG section
-        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          ver="${GITHUB_REF_NAME#v}"
-          # `|| true`: GHA runs steps under `bash -eo pipefail`, so an unreadable CHANGELOG.md would make awk exit
-          # non-zero, ABORT this step, and skip the publish step below it — turning a cosmetic notes problem into
-          # "the installer never got attached to the release". Notes may degrade; the release may not fail.
-          awk -v v="$ver" '
-            $0 ~ "^## \\[" v "\\]" { inside = 1; print; next }
-            inside && /^## \[/     { exit }
-            inside                 { print }
-          ' CHANGELOG.md > RELEASE_NOTES.md || true
-          if [ ! -s RELEASE_NOTES.md ]; then
-            printf '%s\n' "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)." > RELEASE_NOTES.md
-          fi
-          echo "--- release body ---"; cat RELEASE_NOTES.md
-
-      - name: Publish Windows installer to GitHub Release
-        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.exe
-          body_path: RELEASE_NOTES.md
-          fail_on_unmatched_files: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Convenience copies for the legs that don't publish (and for workflow_dispatch runs). A full artifact
-      # store must never fail a build whose installers are already produced — and, on a tag, already released.
+      # The publish job below draws its assets from THESE artifacts, so on a tag this upload is load-bearing,
+      # not a convenience: a failed upload surfaces later as fail_on_unmatched_files in publish. It stays
+      # continue-on-error so a workflow_dispatch run (no publish) never dies to a storage hiccup — the old
+      # v0.8.0 quota lesson no longer applies for tags (the repo is public; artifact storage is not the old
+      # 500 MB private-repo pool), and the publish job is where a genuinely missing asset gets loud.
       - name: Upload installers
         continue-on-error: true
         uses: actions/upload-artifact@v4
@@ -133,3 +91,59 @@ jobs:
             dist/*.dmg
           if-no-files-found: warn
           retention-days: 14
+
+  # ONE publish job, not three legs racing softprops/action-gh-release over one release (the roadmap's 4.3
+  # hazard note). `always()` + needs: a flaky macOS leg must not block a release whose Windows and Linux
+  # assets built fine — fail_on_unmatched_files is the real gate: if an asset we PROMISE is missing, no
+  # release. What we promise as of 0.9.3: the Windows .exe, the Linux AppImage and .deb. The macOS .dmg is
+  # DELIBERATELY not in `files` — unsigned, unnotarized, never run on hardware (roadmap B3 / decision 1);
+  # it stays an artifact until that decision is made. Unsigned Windows: SmartScreen will warn on first run
+  # ("More info → Run anyway") — expected until a code-signing cert exists (roadmap B11).
+  publish:
+    name: publish (tag only)
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4   # for CHANGELOG.md
+
+      - name: Download built installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: claudible-*
+          path: dist
+          merge-multiple: true
+
+      # Release notes. Every release up to 0.9.0 published with an EMPTY body — a downloader got a bare .exe
+      # and not one word about what changed. CHANGELOG.md already HAS the text; cut this version's section out
+      # of it (from `## [x.y.z]` up to the next `## [`) and use that as the body. `|| true`: GHA runs under
+      # `bash -eo pipefail`, and a cosmetic notes problem must never block a release that already built —
+      # degrade to a link instead.
+      - name: Extract this version's CHANGELOG section
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v v="$ver" '
+            $0 ~ "^## \\[" v "\\]" { inside = 1; print; next }
+            inside && /^## \[/     { exit }
+            inside                 { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md || true
+          if [ ! -s RELEASE_NOTES.md ]; then
+            printf '%s\n' "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)." > RELEASE_NOTES.md
+          fi
+          echo "--- release body ---"; cat RELEASE_NOTES.md
+          echo "--- assets ---"; ls -la dist/
+
+      - name: Publish installers to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
