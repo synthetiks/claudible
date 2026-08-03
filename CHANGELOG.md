@@ -4,6 +4,16 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-08-03
+
+Three corrections to 0.9.4, found by verifying that release. Install this one rather than 0.9.4.
+
+**Fixed**
+- Switching to a project with no sessions could leave the sidebar showing a different project than the tab you
+  were actually in — introduced in 0.9.4.
+- A guest who clicked Disconnect was announced as "removed by the host", which the host had not done.
+- A test that could only pass on Linux now passes everywhere (no effect on the app itself).
+
 ## [0.9.4] — 2026-08-03
 
 Ten fixes, mostly to live share. A demo to a friend surfaced three problems with sharing that were worse than
