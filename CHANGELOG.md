@@ -4,6 +4,18 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-08-03
+
+Speed fix for native Windows. If sessions, names, sync or live-session status took many seconds to appear,
+this is the one to install.
+
+**Fixed**
+- Every session read, sync and live-session check started a shell the slow way, loading your whole shell
+  profile each time. On some machines that cost 3–7 seconds *per call*; on others it was unnoticeable, which
+  is why it went unspotted. It now starts the shell the fast way.
+- The live-session check ran every 1.5 seconds even when each one was taking 10+ seconds, so it never caught
+  up. It now waits in proportion to how long the last one actually took.
+
 ## [0.9.5] — 2026-08-03
 
 Three corrections to 0.9.4, found by verifying that release. Install this one rather than 0.9.4.
