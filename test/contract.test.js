@@ -3919,5 +3919,26 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['WINDOWS_UNSAFE_JS no longer names the known env-failing files']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 109. C-1.3 — the posix runner gets the same hot-path fix wsl.js got (pin #87) and win.js before it:
+//   runScript off the login shell. This is the last of the three runners to carry a login shell on the hot
+//   path — win.js and wsl.js both already moved to `bash -c` with measured justification; posix.js's
+//   runScript still shelled out `bash -lc`, the exact pattern C-1.3 forbids. spawnClaude KEEPS `-lc` — same
+//   reasoning as wsl.js: session.sh (reused unchanged from wsl/*.sh on this backend) execs `claude` bare
+//   with no node-path.sh-style PATH fixup in front of it, and claude may be nvm-installed on this machine.
+//   startVoiceServices/services.sh KEEPS its login shell too — C-12's "the -lc in services.sh: LEAVE IT"
+//   row, untouched on purpose, so its pin only proves it's still there. toGuestPath/toHostPath are identity
+//   functions on this backend (no wslpath, no per-call process spawn) — nothing there to memoize.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const POSIX_JS = read('runners/posix.js');
+  none('posix runScript went back to a LOGIN shell (the hot path pays a profile source on every call)',
+    /cp\.execFile\('bash', \['-c', cmd\]/.test(POSIX_JS) ? [] : ['runScript no longer uses a non-login shell']);
+  none('posix spawnClaude lost its login shell (claude may be nvm-installed with no PATH fixup ahead of it)',
+    /pty\.mod\.spawn\('bash', \['-lc', buildBoot/.test(POSIX_JS) ? [] : ['spawnClaude no longer uses a login shell']);
+  none('posix startVoiceServices lost its login shell (uv/kokoro needs the profile)',
+    /cp\.execFile\('bash', \['-lc', shared\.scriptCmd\(APP_ROOT, 'services\.sh'\)\]/.test(POSIX_JS) ? [] : ['startVoiceServices no longer uses a login shell']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

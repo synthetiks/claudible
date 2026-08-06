@@ -55,6 +55,12 @@ function ptyInfo() {
 }
 
 // Spawn the Claude TUI directly under bash (no wsl.exe). cwd = $HOME (Posix), env inherited.
+// `-lc`, KEPT (same call as wsl.js's spawnClaude, same reasoning in full): session.sh execs `claude` bare
+// (wsl/session.sh:295/297/349, reused unchanged on this backend), with no node-path.sh-style PATH fixup in
+// front of it. claude may be nvm-installed on this machine; the login PATH is genuinely needed there — a
+// non-login `-c` shell risks "claude: command not found" for exactly the users this matters most to. This
+// is also a single spawn per session launch, not the per-call hot path runScript is, so the login-shell
+// cost isn't the problem here.
 function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
   const pty = ptyInfo();
   if (!pty.mod) return null;
@@ -65,6 +71,14 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
 
 // Run wsl/<name> directly under bash — the scripts are bash and run natively on Linux/macOS. The command
 // string is the shared, OS-agnostic scriptCmd; this backend just drops the wsl.exe wrapper.
+// `-c`, NOT `-lc` — C-1.3, the same fix and same reasoning as wsl.js's runScript (commit 45c7518) and
+// win.js before it. This is the HOT path: every session list, sync, presence probe, and the 1.5s-interval
+// beacon per synced workspace goes through here. A login shell sources the whole profile chain on every
+// call for no benefit the wsl/*.sh fleet actually needs on this backend either: git/gh/sed/awk/curl/jq all
+// resolve on the default non-login PATH, and node comes via node-path.sh — sourced by every wsl/*.sh that
+// calls `node` directly, which resolves nvm/fnm/volta/asdf/n itself and needed no login shell before this
+// change (see wsl.js's runScript comment and wsl/node-path.sh's own header for the full argument; it does
+// not depend on wsl.exe being in the picture, so it applies unchanged here).
 function runScript(name, argStr = '', opts = {}) {
   return new Promise((resolve) => {
     const cmd = shared.scriptCmd(APP_ROOT, name, argStr, opts);
@@ -73,7 +87,7 @@ function runScript(name, argStr = '', opts = {}) {
     if (opts.maxBuffer !== undefined) o.maxBuffer = opts.maxBuffer;
     if (opts.detach) o.detached = true;   // quit-path scripts must survive app.quit() — see wsl.js runScript
     try {
-      const child = cp.execFile('bash', ['-lc', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
+      const child = cp.execFile('bash', ['-c', cmd], o, (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
       if (opts.detach && child && child.unref) {
         // Tell the caller the moment the OS has actually CREATED the process. A quit-path caller must not
         // exit before this: app.exit() is a hard kill, and a spawn that has not reached the OS yet simply
@@ -89,6 +103,8 @@ function runScript(name, argStr = '', opts = {}) {
 // reaches the services ACROSS the WSL2 NAT, which also shields them from the LAN) but on native Linux/macOS
 // there is no NAT wall: 0.0.0.0 exposes whisper (:2022) and kokoro (:8880) to the local network. Bind loopback
 // explicitly, exactly as win.js does — the app talks to localhost on a single host here, nothing else needs in.
+// `-lc` KEPT here — C-12's "the -lc in services.sh" row: LEAVE IT. Startup-only, not on the C-1.3 hot path,
+// and uv/kokoro provisioning genuinely needs the profile to find its tools. Same call as wsl.js/win.js.
 function startVoiceServices() {
   try {
     // via scriptCmd, not a hand-rolled string: it is the ONE builder that escapes the app dir (see _shared.js shq).
