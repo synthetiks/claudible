@@ -30,14 +30,33 @@ function appDirGuest() {
 }
 
 // Host<->guest path translation (was inline at main.js:814/861). Identity on native runners; wslpath here.
+// MEMOIZED, parity with win.js's _guestPathMemo/_hostPathMemo: wslpath is a whole wsl.exe process spawned and
+// waited on synchronously for every call, and these sit on the same hot path (workspace listing, sync, diff)
+// that made the -lc login-shell switch below worth doing. A resolved translation of a stable path does not
+// change under a running process; the Maps are cleared by resetCaches() below, same trigger win.js documents
+// (a dependency install / WSL reconfigure that could change wslpath's answer).
+const _guestPathMemo = new Map();
+const _hostPathMemo = new Map();
 function toGuestPath(hostPath) {
-  try { return cp.execFileSync('wsl.exe', ['wslpath', '-u', String(hostPath).replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); }
-  catch { return ''; }
+  const key = String(hostPath);
+  if (_guestPathMemo.has(key)) return _guestPathMemo.get(key);
+  let out = '';
+  try { out = cp.execFileSync('wsl.exe', ['wslpath', '-u', key.replace(/\\/g, '/')], { encoding: 'utf8' }).trim(); } catch { out = ''; }
+  if (out) _guestPathMemo.set(key, out);   // only cache a real answer — a transient failure must not poison the path forever
+  return out;
 }
 function toHostPath(guestPath) {
-  try { return cp.execFileSync('wsl.exe', ['wslpath', '-w', String(guestPath)], { encoding: 'utf8' }).trim(); }
-  catch { return ''; }
+  const key = String(guestPath);
+  if (_hostPathMemo.has(key)) return _hostPathMemo.get(key);
+  let out = '';
+  try { out = cp.execFileSync('wsl.exe', ['wslpath', '-w', key], { encoding: 'utf8' }).trim(); } catch { out = ''; }
+  if (out) _hostPathMemo.set(key, out);
+  return out;
 }
+// Drop every memoized WSL-path resolution (app dir + the two translation Maps) so a later WSL/distro change is
+// picked up without a process restart — same purpose as win.js's resetCaches, called from the same main.js site
+// (appDirNow, after a dependency install) when APPDIR_WSL's boot snapshot was falsy.
+function resetCaches() { _appdir = undefined; _guestPathMemo.clear(); _hostPathMemo.clear(); }
 
 // Host-FS runtime root the pollers read (was main.js:81). On WSL the scripts ALWAYS write
 // $APPDIR/runtime (session.sh derives it from the app dir — the runtime root is not threaded into
@@ -79,6 +98,11 @@ function ptyInfo() {
 function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
   const pty = ptyInfo();
   if (!pty.mod) return null;
+  // `-lc`, KEPT (unlike runScript below): session.sh execs `claude` bare (wsl/session.sh:295/297/349), with
+  // no node-path.sh-style PATH fixup in front of it. claude may be nvm-installed inside the distro; the login
+  // PATH is genuinely needed there — a non-login `-c` shell risks "claude: command not found" for exactly the
+  // users this matters most to. This is also a single spawn per session launch, not the per-call hot path
+  // runScript is, so the login-shell cost isn't the problem here.
   return pty.mod.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy)], {
     name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
   });
@@ -104,7 +128,20 @@ function runScript(name, argStr = '', opts = {}) {
     // detached+unref makes it a guarantee; results still resolve normally while the app is alive.
     if (opts.detach) { o.detached = true; o.windowsHide = true; }
     try {
-      const child = cp.execFile('wsl.exe', ['-e', 'bash', '-lc', cmd], o,
+      // `-c`, NOT `-lc` — the win.js twin's fix (runners/win.js, same comment in full), ported here. This is
+      // the HOT path: every session list, sync, presence probe, and the 1.5s-interval beacon per synced
+      // workspace goes through here. A login shell sources /etc/profile + /etc/profile.d/* on every call for
+      // no benefit the wsl/*.sh fleet actually needs: git/gh/sed/awk/curl/jq all resolve on the default
+      // non-login PATH (/usr/bin, /usr/local/bin — apt's layout), and the one thing a login shell WOULD add
+      // that the scripts might reach for — an nvm-managed `node` — is unaffected by -lc vs -c either way,
+      // because nvm's own init lives in ~/.bashrc, which even a login shell does not source unless a
+      // ~/.bash_profile explicitly does so, and ~/.bashrc itself returns early for non-interactive shells
+      // regardless (see wsl/node-path.sh's own header comment). That's why node-path.sh exists and is sourced
+      // by every wsl/*.sh that calls `node` directly (agent-tokens.sh, checkpoint.sh, diff.sh, plugins.sh,
+      // session.sh, sessions.sh, sessions-sync.sh, skills.sh, transcript.sh, workflows.sh, install-claude.sh,
+      // claude-latest.sh, preflight.sh, provision.sh) — it manually resolves nvm/fnm/volta/asdf/n node paths
+      // itself, so it needed no login shell before this change and needs none now.
+      const child = cp.execFile('wsl.exe', ['-e', 'bash', '-c', cmd], o,
         (err, stdout) => resolve({ err: err || null, stdout: stdout || '' }));
       if (opts.detach && child && child.unref) {
         // Tell the caller the moment the OS has actually CREATED the process. A quit-path caller must not
@@ -159,7 +196,7 @@ async function detectDeps() {
 
 module.exports = {
   id: 'wsl',
-  detect, detectDeps,
+  detect, detectDeps, resetCaches,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices,

@@ -2929,5 +2929,31 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /ensureVoiceProvisioned\(true\)/.test(MAIN) ? '' : 'the manual Settings retry no longer forces past the stamp'].filter(Boolean));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 87. C-1.2/1.3 — the wsl runner gets the same speed fix win.js got in 0.9.6: memoized wslpath translation
+//   (toGuestPath/toHostPath were a fresh wsl.exe spawn per call) + runScript off the login shell (same hot
+//   path win.js's own pin #86(a2) documents: every session list, sync, presence probe, and the 1.5s-interval
+//   beacon). spawnClaude KEEPS `-lc` — session.sh execs `claude` bare with no node-path.sh-style PATH fixup
+//   in front of it, and claude may be nvm-installed in the distro. services.sh KEEPS its own login shell too
+//   (uv/kokoro provisioning needs the profile) — untouched on purpose, so its pin only proves it's still there.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const WSL_JS = read('runners/wsl.js');
+  none('wsl runScript went back to a LOGIN shell (the hot path pays a profile source on every call)',
+    /cp\.execFile\('wsl\.exe', \['-e', 'bash', '-c', cmd\]/.test(WSL_JS) ? [] : ['runScript no longer uses a non-login shell']);
+  none('wsl spawnClaude lost its login shell (claude may be nvm-installed with no PATH fixup ahead of it)',
+    /pty\.mod\.spawn\('wsl\.exe', \['-e', 'bash', '-lc', buildBoot/.test(WSL_JS) ? [] : ['spawnClaude no longer uses a login shell']);
+  none('wsl startVoiceServices lost its login shell (uv/kokoro needs the profile)',
+    /\['-e', 'bash', '-lc', shared\.scriptCmd\(appdir, 'services\.sh'\)\]/.test(WSL_JS) ? [] : ['startVoiceServices no longer uses a login shell']);
+  none('wsl toGuestPath/toHostPath lost their memo (wslpath spawns a fresh wsl.exe per call again)',
+    [/const _guestPathMemo = new Map\(\)/.test(WSL_JS) ? '' : '_guestPathMemo is gone',
+     /const _hostPathMemo = new Map\(\)/.test(WSL_JS) ? '' : '_hostPathMemo is gone',
+     /_guestPathMemo\.has\(key\)/.test(WSL_JS) ? '' : 'toGuestPath does not consult the memo',
+     /_hostPathMemo\.has\(key\)/.test(WSL_JS) ? '' : 'toHostPath does not consult the memo'].filter(Boolean));
+  none('wsl resetCaches is missing, unexported, or does not clear the memoized state',
+    [/function resetCaches\(\) \{[^}]*_guestPathMemo\.clear\(\)[^}]*_hostPathMemo\.clear\(\)/.test(WSL_JS) ? '' : 'resetCaches does not clear both memo Maps',
+     /resetCaches,/.test(WSL_JS.slice(WSL_JS.indexOf('module.exports'))) ? '' : 'resetCaches is not exported'].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
