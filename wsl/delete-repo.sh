@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Claudible — permanently delete a repo workspace's GitHub repo (C-3.6's "Delete from GitHub"). OWNER-only,
 # and needs the gh CLI's delete_repo scope, which most tokens don't carry by default.
-# Args: $1 = owner, $2 = repo name. Both strict [A-Za-z0-9-] (Claudible slug charset — same restriction
-# rename-repo.sh/repo-invite.sh already apply; C-3.4's dot/underscore gap is a separate, known, open issue).
+# Args: $1 = owner, strict [A-Za-z0-9-] (a GitHub login's own charset). $2 = repo name, GitHub's own repo-name
+# charset (letters, digits, dot, underscore, dash — C-3.4: ws.repoName can legitimately hold `my_repo` or
+# `next.js` after the two-value naming fix, so this must accept exactly what rename-repo.sh already does).
 #
 # Deliberately does NOT touch the local clone — main.js runs this FIRST and only falls through to the existing
 # delete-workspace.sh trash-move (workspaceDeleteCore) once this reports {"ok":true}, so a failed GitHub delete
@@ -11,8 +12,8 @@ set -u
 
 owner="${1:-}"
 name="${2:-}"
-case "$owner" in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad owner"}'; exit 0 ;; esac
-case "$name"  in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad name"}';  exit 0 ;; esac
+case "$owner" in '' | *[!A-Za-z0-9-]*)      printf '{"ok":false,"error":"bad owner"}'; exit 0 ;; esac
+case "$name"  in '' | . | .. | *[!A-Za-z0-9._-]*) printf '{"ok":false,"error":"bad name"}';  exit 0 ;; esac
 
 command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed"}'; exit 0; }
 case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$(command -v gh 2>/dev/null)" in *.exe|/mnt/*) { printf '{"ok":false,"error":"gh resolves to a Windows gh.exe via interop — install the Linux gh inside WSL"}'; exit 0; } ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths

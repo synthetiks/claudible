@@ -4459,7 +4459,11 @@ function modalChoice({ title, body, choices }) {
   });
 }
 // Single text-input modal (mirrors modalChoice). Resolves the trimmed value (may be ''), or null on Cancel/Esc/backdrop.
-function modalPrompt({ title, body, placeholder, value, ok }) {
+// `validateNames` (C-3.4): opts in to the live "which characters aren't allowed" popover against the SESSION
+// charset (promptNewSession / createSessionFromOverlay's "Name this session" prompt). Off by default —
+// confirmDeleteFromGithub reuses this same modal to type back an EXISTING repo name verbatim, which must
+// never be blocked by a charset it didn't choose.
+function modalPrompt({ title, body, placeholder, value, ok, validateNames }) {
   if (pttCapturing) stopCapture();                                   // a modal cancels any in-progress PTT rebind — else the capture-phase keydown eats the modal's Escape/keys
   return new Promise((resolve) => {
     const back = document.createElement('div');
@@ -4479,9 +4483,13 @@ function modalPrompt({ title, body, placeholder, value, ok }) {
     const okb = document.createElement('button'); okb.type = 'button'; okb.textContent = ok || 'OK';
     okb.style.cssText = 'font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #3a6b52;border-radius:9px;cursor:pointer;color:#dff3e8;background:rgba(95,180,135,.18)';
     row.appendChild(cancel); row.appendChild(okb); box.appendChild(row);
-    const close = (v) => { try { back.remove(); } catch {} document.removeEventListener('keydown', onDocKey, true); resolve(v); try { if (term) term.focus(); } catch {} };
+    if (validateNames) wireNameValidator(inp, () => okb, { charRe: SESSION_NAME_CHAR_RE, note: SESSION_NAME_NOTE });
+    const close = (v) => { if (nameCharPopInput === inp) closeNameCharPop(); try { back.remove(); } catch {} document.removeEventListener('keydown', onDocKey, true); resolve(v); try { if (term) term.focus(); } catch {} };
     const onDocKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
-    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); close(inp.value.trim()); } else if (e.key === 'Escape') { e.preventDefault(); close(null); } });
+    // okb.disabled (set by wireNameValidator above while a disallowed char is present) already blocks a CLICK —
+    // browsers never fire click on a disabled button — but the Enter key here bypasses that, exactly like
+    // createWorkspace's "$('ws-create').disabled) return" guard, so it needs its own explicit check.
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); if (!okb.disabled) close(inp.value.trim()); } else if (e.key === 'Escape') { e.preventDefault(); close(null); } });
     // Self-heal a stolen keyboard: if focus lands in the TERMINAL while this prompt is still open (a stray
     // deferred term.focus() from an earlier action — the "the field won't let me type" bug), take it back. Only
     // reclaims from the terminal, so clicking the prompt's own buttons (or anything else) is never fought.
@@ -5290,9 +5298,20 @@ function placeInfoPop(pop, anchor) {
 // exactly which ones, and submitting is blocked. ws-name-in and the inline rename field (.ws-rename) share
 // this verbatim — see wireNameValidator below.
 const NAME_CHAR_RE = /[A-Za-z0-9._-]/;
-function disallowedNameChars(s) {
+const NAME_CHAR_NOTE = 'Names can only use letters, numbers, dots, dashes and underscores — same as GitHub.';
+// SESSION names are a DELIBERATELY WIDER charset, not the project/GitHub one above — a session name never
+// becomes a GitHub repo name, and the only place it crosses a shell boundary is wsl/sessions-sync.sh's
+// title-set, which takes it base64-encoded specifically so "quotes, spaces, unicode — can never break the
+// shell" (see that file's comment; title-write in sessions-sync-tool.js stores it as plain JSON after that).
+// Nothing downstream needs the GitHub charset, so this only blocks what's genuinely unsafe: a raw control
+// character, which corrupts the single-line sidebar/tab display it's shown in. Spaces are explicitly fine —
+// the placeholder text ("auth refactor, bug #214…") already assumes them.
+const SESSION_NAME_CHAR_RE = /[^\x00-\x1F\x7F]/;
+const SESSION_NAME_NOTE = 'Session names can use anything except control characters.';
+function disallowedNameChars(s, allowedRe) {
+  const re = allowedRe || NAME_CHAR_RE;
   const seen = [];
-  for (const ch of String(s || '')) { if (!NAME_CHAR_RE.test(ch) && !seen.includes(ch)) seen.push(ch); }
+  for (const ch of String(s || '')) { if (!re.test(ch) && !seen.includes(ch)) seen.push(ch); }
   return seen;
 }
 let nameCharPop = null, nameCharPopInput = null;
@@ -5301,10 +5320,14 @@ function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt
 // Wires ONE input to the live validator. `getBtn` (optional) resolves the submit control to disable while
 // invalid — a function, since e.g. the create modal's button may not be the same element across opens (it
 // isn't here, but the rename field has no button at all: Enter/blur gate on validity themselves instead, see
-// startWsEdit). Returns the check function so a caller can force a re-check (e.g. on kind-switch).
-function wireNameValidator(input, getBtn) {
+// startWsEdit). `opts.charRe`/`opts.note` swap in a different allowed charset (SESSION_NAME_CHAR_RE for
+// session-name fields) — omitted, both default to the project/GitHub charset above. Returns the check
+// function so a caller can force a re-check (e.g. on kind-switch).
+function wireNameValidator(input, getBtn, opts) {
+  const charRe = (opts && opts.charRe) || NAME_CHAR_RE;
+  const note = (opts && opts.note) || NAME_CHAR_NOTE;
   const check = () => {
-    const bad = disallowedNameChars(input.value);
+    const bad = disallowedNameChars(input.value, charRe);
     const btn = typeof getBtn === 'function' ? getBtn() : getBtn;
     if (btn) btn.disabled = bad.length > 0;
     if (!bad.length) { if (nameCharPopInput === input) closeNameCharPop(); return bad; }
@@ -5314,7 +5337,7 @@ function wireNameValidator(input, getBtn) {
       document.body.appendChild(nameCharPop); nameCharPopInput = input;
     }
     nameCharPop.innerHTML = '<span class="wt"><b>Not allowed:</b> ' + bad.map((c) => '“' + escHtml(c) + '”').join(', ') + '</span>'
-      + '<p>Names can only use letters, numbers, dots, dashes and underscores — same as GitHub.</p>';
+      + '<p>' + note + '</p>';
     placeInfoPop(nameCharPop, input);
     return bad;
   };
@@ -5549,7 +5572,7 @@ async function promptNewSession(wsId) {
   if (newSessionPrompting) return;                                                  // already asking — swallow the double-click
   newSessionPrompting = true;
   try {
-    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
+    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session', validateNames: true });
     if (name === null) return;                                                       // Cancel / Esc → don't create
     if (!newBlankTab(wsId || activeWsId, 'new', name || '')) toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');   // empty (just hit Create) → unnamed, like before
   } finally { newSessionPrompting = false; }
@@ -6083,7 +6106,7 @@ async function createSessionFromOverlay(t) {
   if (_creatingFromOverlay || !t || !t.parked) return;
   _creatingFromOverlay = true;
   try {
-    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
+    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session', validateNames: true });
     if (name === null) return;                       // Cancel/Esc → stays parked, overlay stays up
     const t2 = tabs.get(t.tabId);
     if (!t2 || t2 !== AT() || !t2.parked) return;     // the view moved on while the modal was open — don't resurrect a stale tab

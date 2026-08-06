@@ -3521,5 +3521,46 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['guest.js\'s chat handler no longer wraps a host message\'s name in HOST()']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 100. C-3.4 — NAMING COMPLETION: the three gaps the round-3a verifier found in the b7da892 unified-naming
+//   work. (1) SESSION names get the same live "which characters aren't allowed" popover project names have,
+//   but against a WIDER charset — session names only ever cross a shell as base64 (sessions-sync.sh's
+//   title-set), so spaces/punctuation are safe and only control characters are blocked. (2) delete-repo.sh
+//   still refused a GitHub-legal dotted/underscored ws.repoName. (3) repo:invite still sanitized repoName
+//   down to the folder-slug charset before inviting, so `my_repo` silently targeted `myrepo`.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (1a) the session charset is genuinely WIDER than the project one — spaces/punctuation allowed, only C0
+  //   control chars + DEL blocked — and disallowedNameChars/wireNameValidator can be handed it.
+  none('the session-name charset is missing, or no longer wider than the project/GitHub one (C-3.4)',
+    [/const SESSION_NAME_CHAR_RE = \/\[\^\\x00-\\x1F\\x7F\]\//.test(APP) ? '' : 'SESSION_NAME_CHAR_RE missing or no longer just blocks control characters',
+     /function disallowedNameChars\(s, allowedRe\)/.test(APP) ? '' : 'disallowedNameChars no longer takes an allowedRe param',
+     /function wireNameValidator\(input, getBtn, opts\)/.test(APP) ? '' : 'wireNameValidator no longer takes an opts param (charRe/note)'].filter(Boolean));
+  // (1b) modalPrompt (the "Name this session" dialog) can opt into that validator, and both real session-naming
+  //   call sites (promptNewSession, createSessionFromOverlay) actually opt in — confirmDeleteFromGithub, the
+  //   modal's OTHER caller, must NOT (it types back an existing repo name verbatim), so this checks the wiring
+  //   exists rather than making it unconditional.
+  none('modalPrompt lost its session-name validation opt-in, or stopped wiring it through (C-3.4)',
+    [/function modalPrompt\(\{ title, body, placeholder, value, ok, validateNames \}\)/.test(APP) ? '' : 'modalPrompt no longer accepts a validateNames option',
+     /if \(validateNames\) wireNameValidator\(inp, \(\) => okb, \{ charRe: SESSION_NAME_CHAR_RE, note: SESSION_NAME_NOTE \}\);/.test(APP) ? '' : 'modalPrompt does not wire SESSION_NAME_CHAR_RE to its input when validateNames is set'].filter(Boolean));
+  none('promptNewSession / createSessionFromOverlay stopped asking their "Name this session" modalPrompt to validate (C-3.4)',
+    (APP.match(/title: 'Name this session'[\s\S]{0,180}?validateNames: true/g) || []).length >= 2
+      ? [] : ['fewer than 2 "Name this session" modalPrompt calls pass validateNames: true']);
+  // (2) delete-repo.sh: ws.repoName can legitimately hold dots/underscores after b7da892 — the $2 check must
+  //   accept GitHub's own repo-name charset, same as rename-repo.sh/repo-invite.sh, not just [A-Za-z0-9-].
+  none('delete-repo.sh went back to refusing GitHub-legal dotted/underscored repo names (C-3.4)',
+    /case "\$name"\s+in ''\s*\|\s*\.\s*\|\s*\.\.\s*\|\s*\*\[!A-Za-z0-9\._-\]\*\)/.test(read('wsl/delete-repo.sh'))
+      ? [] : ['delete-repo.sh\'s $name check is not widened to GitHub\'s repo-name charset']);
+  // (3) repo:invite: the two-value treatment (exact repoName to GitHub, sanitized slug only for local use)
+  //   that b7da892 already gave clone/discovery/rename, now applied here too — and repo-invite.sh's own
+  //   shell-side guard widened to match, so a script called directly can't reintroduce the mangle either.
+  none('repo:invite sanitizes repoName down to the folder-slug charset again (an invite to my_repo would target myrepo) (C-3.4)',
+    /const repo = isGithubRepoName\(ws\.repoName \|\| ws\.slug \|\| ''\) \? String\(ws\.repoName \|\| ws\.slug\) : '';/.test(MAIN)
+      ? [] : ['ipcMain repo:invite no longer derives repo via isGithubRepoName']);
+  none('repo-invite.sh went back to refusing GitHub-legal dotted/underscored repo names (C-3.4)',
+    /case "\$slug"\s+in ''\s*\|\s*\.\s*\|\s*\.\.\s*\|\s*\*\[!A-Za-z0-9\._-\]\*\)/.test(read('wsl/repo-invite.sh'))
+      ? [] : ['repo-invite.sh\'s $slug check is not widened to GitHub\'s repo-name charset']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -2861,7 +2861,10 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   if (!login) return resolve({ ok: false, error: 'enter a GitHub username' });
   // The repo's CURRENT GitHub name (repoName), NOT the frozen slug: after a rename the two diverge, and the
   // collaborators API path must target the live name. repoName falls back to slug for never-renamed workspaces.
-  const repo = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');   // honor the bash-interpolation invariant (re-sanitise)
+  // C-3.4 — the exact GitHub charset (dots/underscores allowed), not the folder-slug charset: this used to
+  // sanitize down to [A-Za-z0-9-] first, so an invite to my_repo silently targeted myrepo — a DIFFERENT repo,
+  // with no error. isGithubRepoName is still the shell-safety boundary (single-quoted arg, nothing to escape).
+  const repo = isGithubRepoName(ws.repoName || ws.slug || '') ? String(ws.repoName || ws.slug) : '';
   if (!repo) return resolve({ ok: false, error: 'bad workspace' });
   // R12: the OWNER is the workspace's recorded owner, passed explicitly — the script used to resolve `gh api
   // user` (whoever clicked), so a collaborator's invite targeted their OWN namespace: a same-named repo of

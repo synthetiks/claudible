@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Claudible — invite a GitHub user as a PUSH collaborator on a repo workspace's repo (Stage 2 collab).
-# Args: $1 = repo name, $2 = github login, $3 = the repo's OWNER. All strict [A-Za-z0-9-].
+# Args: $1 = repo name (GitHub's own charset — letters, digits, dot, underscore, dash; C-3.4), $2 = github
+# login, $3 = the repo's OWNER (both strict [A-Za-z0-9-] — GitHub logins can't hold a dot/underscore).
 # R12: the owner used to be resolved as `gh api user` — the person CLICKING, not the repo's owner. A
 # collaborator inviting a third person therefore PUT against their OWN namespace: a same-named repo of
 # theirs got the invite, or it 404'd while the UI said "invited". The caller now passes ws.owner; if the
@@ -12,7 +13,10 @@ set -u
 slug="${1:-}"
 login="${2:-}"
 owner="${3:-}"
-case "$slug"  in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad slug"}';     exit 0 ;; esac
+# C-3.4 — widened from [A-Za-z0-9-] to GitHub's own repo-name charset: an invite to my_repo/next.js used to be
+# refused here (or worse, silently re-sanitized upstream to myrepo/nextjs — a DIFFERENT repo). $slug is used
+# ONLY inside a double-quoted `gh api` path segment below, so a dot/underscore needs no extra escaping.
+case "$slug"  in '' | . | .. | *[!A-Za-z0-9._-]*) printf '{"ok":false,"error":"bad repo name"}'; exit 0 ;; esac
 case "$login" in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad username"}'; exit 0 ;; esac
 case "$owner" in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad owner"}';    exit 0 ;; esac
 
