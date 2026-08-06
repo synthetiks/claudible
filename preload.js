@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('claudible', {
   historyLoad: (wsId) => ipcRenderer.invoke('history:load', { wsId }),
   checkpointRevert: (id, wsId) => ipcRenderer.invoke('checkpoint:revert', { id, wsId }),   // roll the workspace repo back to a prompt's code snapshot
   checkpointUndo: (wsId) => ipcRenderer.invoke('checkpoint:undo', { wsId }),                // undo the last revert (restores the pre-revert tree)
+  checkpointUndoExists: (wsId) => ipcRenderer.invoke('checkpoint:undoExists', { wsId }),    // C-8.2: does an undo point already exist for this workspace's repo, right now (truth, not an in-memory flag)?
   // workspaces (the library a session lives in: legacy / local folder / private repo)
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   workspaceFirstRunDone: () => ipcRenderer.invoke('workspace:firstRunDone'),

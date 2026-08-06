@@ -3993,6 +3993,17 @@ ipcMain.handle('checkpoint:undo', (e, { wsId } = {}) => new Promise((resolve) =>
   if (!_ckptAllowed(ws)) return resolve({ ok: false, error: 'checkpoints are only kept for repo projects' });
   _ckptRun(ws, 'restore undo').then((r) => resolve(r || { ok: false, error: 'undo failed' }));
 }));
+// C-8.2: does refs/claudible/ckpt/undo already exist in THIS workspace's repo, right now? Read-only (no restore,
+// no write lock) — lets the renderer's revert-confirm dialog warn "reverting again replaces your undo point"
+// from TRUTH instead of an in-memory flag that resets when the drawer closes or the app restarts. A repo whose
+// slug/kind resolves to the SAME on-disk directory as another workspace (see wsl/_ws-dir.sh) shares this ref, so
+// this also catches the cross-project clobber the in-memory flag could never see.
+ipcMain.handle('checkpoint:undoExists', (e, { wsId } = {}) => new Promise((resolve) => {
+  if (!_histEnabled()) return resolve({ ok: false, error: 'disabled' });
+  const ws = _wsById(wsId) || activeWorkspace;
+  if (!_ckptAllowed(ws)) return resolve({ ok: false, error: 'checkpoints are only kept for repo projects' });
+  _ckptRun(ws, 'exists undo').then((r) => resolve(r || { ok: false, error: 'exists check failed' }));
+}));
 ipcMain.handle('history:append', (e, payload) => {
   try {
     if (!_histEnabled()) return { ok: false, disabled: true };

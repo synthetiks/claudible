@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Claudible — per-prompt worktree checkpoints behind the Session History "Revert" button. Resolves the SAME
 # per-workspace repo as diff.sh / sessions.sh, then runs the tested lib/checkpoint.js (via checkpoint-tool.js) to
-# snapshot / restore / prune. Subcommands: snapshot <id> | restore <id> | prune <keepId...>. Emits ONE JSON line.
+# snapshot / restore / prune / exists. Subcommands: snapshot <id> | restore <id> | prune <keepId...> | numstat <from> <to>
+# | exists <id>. Emits ONE JSON line.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # resolve the script dir as an ABSOLUTE path BEFORE we cd into the repo (else the tool path below resolves against the repo)
 . "$HERE/node-path.sh" 2>/dev/null || true             # nvm's node isn't on PATH for non-interactive shells → resolve it

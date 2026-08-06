@@ -120,6 +120,29 @@ ok('restore of unknown id → ok:false', tool('restore', 'nope').ok === false);
   ok('numstat unresolvable ref → ok with files:[]', (() => { const r = tool('numstat', 'nope', 'ns2'); return r.ok === true && r.files.length === 0; })());
 }
 
+// ===== exists subcommand: C-8.2's truth check (does the ref exist RIGHT NOW, read-only) =====
+// Fresh repo (not the shared `repo` above, which already minted an 'undo' ref earlier in this file) so
+// "no undo ref before any restore" is a clean, meaningful assertion.
+{
+  const R4 = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ckexists-'));
+  const g4 = (...a) => cp.execFileSync('git', a, { cwd: R4, stdio: ['ignore', 'ignore', 'ignore'] });
+  const t4 = (...a) => { const rr = cp.spawnSync(process.execPath, [TOOL, ...a], { cwd: R4, encoding: 'utf8' }); try { return JSON.parse((rr.stdout || '').trim()); } catch { return { ok: false, _raw: rr.stdout, _err: rr.stderr }; } };
+  g4('init', '-q'); g4('config', 'user.email', 't@t.t'); g4('config', 'user.name', 'T');
+  fs.writeFileSync(path.join(R4, 'x.txt'), 'X1'); g4('add', 'x.txt'); g4('commit', '-qm', 'base');
+
+  t4('snapshot', 'e1');
+  const before = t4('exists', 'undo');
+  ok('exists ok + no undo ref before any restore', before.ok === true && before.exists === false);
+  ok('exists reflects a real checkpoint id too', t4('exists', 'e1').ok === true && t4('exists', 'e1').exists === true);
+  ok('exists on an unknown id -> false, not an error', t4('exists', 'never-was').ok === true && t4('exists', 'never-was').exists === false);
+  ok('exists bad id rejected (no injection)', t4('exists', '../evil').ok === false);
+
+  t4('restore', 'e1');   // a restore of a REAL checkpoint mints the undo ref
+  const after = t4('exists', 'undo');
+  ok('exists ok + undo ref now present after a restore', after.ok === true && after.exists === true);
+  fs.rmSync(R4, { recursive: true, force: true });
+}
+
 fs.rmSync(repo, { recursive: true, force: true });
 console.log(`\ncheckpoint-tool (real temp repo): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

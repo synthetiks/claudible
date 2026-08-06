@@ -2755,11 +2755,22 @@ async function revertToCheckpoint(en, wsId) {
   const targetWs = wsId !== undefined ? wsId : (_histFeedWsId || activeWsId);   // the wsId the CARD this row renders under actually learned (r.wsId) — NOT activeWsId, which can lag main after a guest-driven or auto-close switch, and not _histFeedWsId, which is one shared global that a second expanded card overwrites
   const name = histSessionName(en.session);
   const busy = wsBusy(targetWs);
+  // C-8.2: the confirm's "replaces your undo point" warning must reflect TRUTH — refs/claudible/ckpt/undo
+  // actually existing in this workspace's repo RIGHT NOW — not just this module's in-memory _revertUndoWs, which
+  // resets on drawer close / app restart and so goes silently wrong across sessions (and can't see the
+  // cross-project case where two workspaces share one on-disk repo, see _ws-dir.sh). _revertUndoWs === targetWs
+  // is still checked first as a free shortcut: if THIS session just reverted THIS workspace, we already know the
+  // answer without a round trip.
+  let hasUndo = _revertUndoWs === targetWs;
+  if (!hasUndo) {
+    let ue = null; try { ue = await claudible.checkpointUndoExists(targetWs); } catch {}
+    hasUndo = !!(ue && ue.ok && ue.exists);
+  }
   const choice = await modalChoice({
     title: 'Revert code to this prompt?',
     body: (busy ? '⚠ Claude is still working in this project — reverting now can clobber its in-flight edits and leave a half-written tree. It’s safest to wait for the turn to finish.\n\n' : '')
       + 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.'
-      + (_revertUndoWs ? '\n\n⚠ There’s already an undo point from a previous revert — it’s a single slot, so reverting now replaces it, and that earlier state will no longer be recoverable.' : ''),
+      + (hasUndo ? '\n\n⚠ There’s already an undo point from a previous revert — it’s a single slot, so reverting now replaces it, and that earlier state will no longer be recoverable.' : ''),
     choices: [
       { key: 'revert', label: busy ? 'Revert anyway' : 'Revert working files', sub: 'Roll the code back to this point. An "Undo last revert" appears after.', danger: true },
       { key: 'cancel', label: 'Cancel' },

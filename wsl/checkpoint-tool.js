@@ -7,6 +7,7 @@
 //   restore  <id>          -> { ok, id, undo, removed[] }   (snapshots the CURRENT tree to the 'undo' ref FIRST)
 //   prune    <keepId...>   -> { ok, pruned[] }              (drop every ckpt ref not in the keep list, never 'undo')
 //   numstat  <from> <to>   -> { ok, files:[{path,add,del}] } (what changed between two checkpoints; unresolvable -> [])
+//   exists   <id>          -> { ok, id, exists }             (does that checkpoint ref exist RIGHT NOW, in THIS repo? read-only, non-destructive)
 const cp = require('child_process');
 const os = require('os');
 const path = require('path');
@@ -70,6 +71,13 @@ function main() {
     const to = process.argv[4];
     if (!validId(id) || !validId(to)) return emit({ ok: false, error: 'bad id' });
     return emit({ ok: true, files: ck.numstat(git, id, to) });   // either ref unresolvable → files:[] (stats are best-effort, never an error)
+  }
+  if (sub === 'exists') {
+    // C-8.2: lets a caller ask TRUTH — does this ref exist in THIS repo right now — without restoring anything.
+    // Used before a revert to decide whether to warn that the single 'undo' slot is about to be replaced,
+    // regardless of what any in-memory renderer flag remembers (that resets on drawer close / app restart).
+    if (!validId(id)) return emit({ ok: false, error: 'bad id' });
+    return emit({ ok: true, id, exists: !!ck.resolve(git, id) });
   }
   return emit({ ok: false, error: 'bad subcommand' });
 }

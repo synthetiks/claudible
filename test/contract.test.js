@@ -3170,12 +3170,27 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 // ---------------------------------------------------------------------------------------------------------
 // 93. C-8.2 — the undo snapshot is ONE overwritable slot (refs/claudible/ckpt/undo), not per-workspace. A
 //   second revert — even on a different project than the first — silently clobbers the still-usable undo
-//   point from an earlier revert. The confirm must say so before the user commits to it.
+//   point from an earlier revert. The confirm must say so before the user commits to it, and that warning must
+//   be derived from TRUTH (does refs/claudible/ckpt/undo actually exist in that workspace's repo right now?),
+//   not solely from the in-memory _revertUndoWs flag — which resets on drawer close / app restart and so goes
+//   silently wrong across sessions. _revertUndoWs is still allowed as a fast-path shortcut when it already
+//   names the SAME workspace (no round trip needed), but the truth check must be the fallback, not vice versa.
 // ---------------------------------------------------------------------------------------------------------
 {
   none('revertToCheckpoint no longer warns that an existing undo point gets replaced (C-8.2)',
-    /_revertUndoWs \? '\\n\\n.*replaces it.*no longer be recoverable/.test(APP)
+    /hasUndo \? '\\n\\n.*replaces it.*no longer be recoverable/.test(APP)
       ? [] : ['the confirm body lost its stacked-revert / single-slot-undo warning']);
+  none('revertToCheckpoint no longer asks main for the TRUTH of an existing undo point (C-8.2)',
+    /let hasUndo = _revertUndoWs === targetWs;[\s\S]{0,200}claudible\.checkpointUndoExists\(targetWs\)/.test(APP)
+      ? [] : ['the warning fell back to the in-memory _revertUndoWs flag alone, or dropped the checkpointUndoExists round trip']);
+  none('wsl/checkpoint-tool.js lost the read-only "exists" subcommand backing the truth check (C-8.2)',
+    /sub === 'exists'[\s\S]{0,500}ck\.resolve\(git, id\)/.test(read('wsl/checkpoint-tool.js'))
+      ? [] : ['no exists <id> -> { ok, exists } subcommand in checkpoint-tool.js']);
+  none('main.js lost the checkpoint:undoExists IPC handler (C-8.2)',
+    /ipcMain\.handle\('checkpoint:undoExists'/.test(MAIN) ? [] : ["no ipcMain.handle('checkpoint:undoExists', ...) in main.js"]);
+  none('preload.js lost the checkpointUndoExists bridge (C-8.2)',
+    /checkpointUndoExists:\s*\(wsId\)\s*=>\s*ipcRenderer\.invoke\('checkpoint:undoExists'/.test(PRELOAD)
+      ? [] : ['no checkpointUndoExists bridge in preload.js']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
