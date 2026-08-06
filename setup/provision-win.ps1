@@ -20,7 +20,7 @@
 # refactored away, voice-on-Windows dies here on a PowerShell parameter-binding error naming $Dep, instead of
 # silently doing nothing. Adding 'voice' without also adding a real implementation below would trade a loud
 # failure for a silent success - exactly backwards. If voice ever DOES belong here, add the switch case first.
-param([Parameter(Mandatory = $true)][ValidateSet('node', 'git', 'claude', 'uv', 'cloudflared', 'gh')][string]$Dep)
+param([Parameter(Mandatory = $true)][ValidateSet('node', 'git', 'claude', 'uv', 'cloudflared', 'gh', 'ffmpeg')][string]$Dep)
 $ErrorActionPreference = 'Stop'
 
 function Emit($phase, $msg) { Write-Host "$phase|$msg"; try { [Console]::Out.Flush() } catch {} }
@@ -157,6 +157,17 @@ try {
       if (-not (Tool 'gh')) { Try-Winget 'GitHub.cli' }
       if (-not (Tool 'gh')) { Emit 'error' 'winget unavailable - install the GitHub CLI from https://cli.github.com and reopen.'; exit 1 }
       Emit 'done' 'GitHub CLI ready - sign in with: gh auth login'
+    }
+
+    'ffmpeg' {
+      # Same winget id setup-win.ps1's own (bundled-into-Voice) install already uses — keep the two in sync.
+      # Idempotent by construction: if the row is clicked after Voice already installed ffmpeg, Tool 'ffmpeg'
+      # is true and this is a no-op done immediately; setup-win.ps1's own `Get-Command ffmpeg` guard is the
+      # other half of that same idempotency, so installing this row first makes ITS ffmpeg step a no-op too.
+      Emit 'start' 'Installing ffmpeg...'
+      if (-not (Tool 'ffmpeg')) { Try-Winget 'Gyan.FFmpeg' }
+      if (-not (Tool 'ffmpeg')) { Emit 'error' 'winget unavailable - install ffmpeg from https://www.gyan.dev/ffmpeg/builds/ (or winget install -e --id Gyan.FFmpeg) and reopen.'; exit 1 }
+      Emit 'done' 'ffmpeg ready.'
     }
   }
   exit 0

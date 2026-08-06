@@ -53,6 +53,7 @@ case "$dep" in
     nok && ok || err "node is still older than 22.12 — upgrade from https://nodejs.org"
     ;;
   git)         have git && ok;  pkg git; rc=$?; have git && ok;  pkg_err git "$rc" ;;
+  ffmpeg)      have ffmpeg && ok; pkg ffmpeg; rc=$?; have ffmpeg && ok; pkg_err ffmpeg "$rc" ;;
   gh)          have gh && ok;   pkg gh;  rc=$?; have gh && ok
                [ "$rc" = 2 ] && err "installing gh needs admin rights, and this installer can't prompt for your password — open your WSL/Linux terminal and run:  sudo apt-get install -y gh  (or see https://cli.github.com)"
                err "could not install gh automatically — see https://cli.github.com" ;;

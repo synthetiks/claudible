@@ -21,6 +21,9 @@ has() { command -v "$1" >/dev/null 2>&1 && printf true || printf false; }
 ver() { command -v "$1" >/dev/null 2>&1 || return 0; "$1" --version 2>/dev/null | head -1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
 
 node_v="$(ver node)"; git_v="$(ver git)"; claude_v="$(ver claude)"; uv_v="$(ver uv)"; cf_v="$(ver cloudflared)"; gh_v="$(ver gh)"
+# ffmpeg's own version flag is single-dash `-version` (unlike every other tool here) — ver()'s generic
+# `--version` would go through ffmpeg's own arg parser instead of a recognized flag, so give it its own line.
+ffmpeg_v="$(command -v ffmpeg >/dev/null 2>&1 && ffmpeg -version 2>/dev/null | head -1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)"
 
 # Node >= 22.12.0 ? (sort -V; coreutils ships with git-bash too)
 node_ok=false
@@ -58,11 +61,12 @@ fi
 # setup.sh treats an existing ~/.voicemode install as already done and never builds its own — match that.
 if [ -d "$HOME/.voicemode/services/kokoro" ] && [ -d "$HOME/.voicemode/services/whisper" ]; then voice_ready=true; fi
 
-printf '{"node":{"installed":%s,"version":"%s","ok":%s},"git":{"installed":%s,"version":"%s"},"claude":{"installed":%s,"version":"%s","signedIn":%s},"uv":{"installed":%s,"version":"%s"},"voice":{"ready":%s},"cloudflared":{"installed":%s,"version":"%s"},"gh":{"installed":%s,"version":"%s","signedIn":%s,"account":"%s"}}\n' \
+printf '{"node":{"installed":%s,"version":"%s","ok":%s},"git":{"installed":%s,"version":"%s"},"claude":{"installed":%s,"version":"%s","signedIn":%s},"uv":{"installed":%s,"version":"%s"},"voice":{"ready":%s},"cloudflared":{"installed":%s,"version":"%s"},"gh":{"installed":%s,"version":"%s","signedIn":%s,"account":"%s"},"ffmpeg":{"installed":%s,"version":"%s"}}\n' \
   "$(has node)" "$node_v" "$node_ok" \
   "$(has git)" "$git_v" \
   "$(has claude)" "$claude_v" "$claude_signed" \
   "$(has uv)" "$uv_v" \
   "$voice_ready" \
   "$(has cloudflared)" "$cf_v" \
-  "$(has gh)" "$gh_v" "$gh_signed" "$gh_account"
+  "$(has gh)" "$gh_v" "$gh_signed" "$gh_account" \
+  "$(has ffmpeg)" "$ffmpeg_v"

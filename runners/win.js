@@ -388,12 +388,15 @@ function resolveTool(id) {
 }
 // Run `<bin> --version`, first line. A .cmd/.bat shim (npm/winget) throws CreateProcess 193 under execFile,
 // so route those through cmd /c (mirrors spawnClaude's isCmd handling); a real .exe runs directly.
-function toolVersion(bin) {
+// ffmpeg is the one binary here with no `--version` flag at all — its own flag is single-dash `-version`
+// (`ffmpeg -version`, first line "ffmpeg version ...").
+function toolVersion(bin, id) {
   if (!bin) return '';
+  const flag = id === 'ffmpeg' ? '-version' : '--version';
   try {
     const out = /\.(cmd|bat)$/i.test(bin)
-      ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, '--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
-      : cp.execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      ? cp.execFileSync(process.env.COMSPEC || 'cmd.exe', ['/c', bin, flag], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      : cp.execFileSync(bin, [flag], { encoding: 'utf8', timeout: 5000, windowsHide: true });
     return String(out).trim().split(/\r?\n/)[0] || '';
   } catch { return ''; }
 }
@@ -423,7 +426,7 @@ function ghAuth(bin) {
     return { signedIn: true, account };
   } catch { return { signedIn: false, account: '' }; }
 }
-const DETECT_TOOLS = ['node', 'git', 'claude', 'uv', 'gh', 'cloudflared'];
+const DETECT_TOOLS = ['node', 'git', 'claude', 'uv', 'gh', 'cloudflared', 'ffmpeg'];
 // PURE: given injected IO, build the raw per-dep status map. deps.js merges this with the install manifest.
 function buildDepReport(io) {
   const out = { gitBash: !!io.gitBashPresent() };
@@ -465,7 +468,7 @@ function claudeState() { const installed = claudePresent(); return { installed, 
 function detectDeps() {
   return buildDepReport({
     resolveTool,
-    toolVersion: (_id, bin) => toolVersion(bin),
+    toolVersion: (id, bin) => toolVersion(bin, id),
     claudeSignedIn,
     ghAuth,
     gitBashPresent: () => gitBash() != null,

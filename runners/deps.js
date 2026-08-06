@@ -27,6 +27,13 @@ const MANIFEST = [
   { id: 'git',         label: 'Git', winLabel: 'Git for Windows', hint: 'Drives projects, sync & checkpoints', winHint: 'Provides the bash the scripts run on', category: 'core', required: true, auth: false, requires: [], restartOnInstall: true, win: { winget: 'Git.Git' },               posix: true },
   { id: 'claude',      label: 'Claude Code CLI', hint: 'The engine Claudible embeds',            category: 'core',     required: true,  auth: true,  authSoft: true, requires: ['node'], restartOnInstall: false, win: { npm: '@anthropic-ai/claude-code' }, posix: 'install-claude.sh' },
   { id: 'uv',          label: 'uv (Python)',     hint: 'Builds the local voice stack',           category: 'voice',    required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'astral-sh.uv' },          posix: true },
+  // C-2.1: ffmpeg gets its OWN row instead of being silently bundled inside the Voice install. NON-blocking —
+  // it's a voice-only dependency (Whisper decodes incoming audio with it) and Next must not require it. Same
+  // winget id setup-win.ps1 already uses for its own (still-present, unchanged) bundled install; on posix it
+  // installs via provision.sh's apt/brew `pkg()` helper, same convention as git/gh. `installDep` (the generic
+  // install path) + resetCaches already re-run detection after any install, so the row turns green on its own —
+  // no special-case wiring needed beyond this manifest entry.
+  { id: 'ffmpeg',      label: 'ffmpeg',          hint: 'Lets Whisper decode audio for voice input', category: 'voice', required: false, auth: false, requires: [],        restartOnInstall: false, win: { winget: 'Gyan.FFmpeg' },           posix: true },
   // WSL/posix: a real install, routed through provision.sh's `voice` case (which wraps setup.sh) like every
   // other posix dep — no `win` entry, so `installable()` still correctly reports false on the win runner,
   // which keeps its own proven path (main.js's ensureVoiceProvisioned, silent on first boot).

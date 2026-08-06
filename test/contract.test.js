@@ -22,6 +22,7 @@ const PRELOAD = read('preload.js');
 const MAIN = read('main.js');
 const SETUPWIN = read('setup/setup-win.ps1');
 const SETUPSH = read('setup/setup.sh');
+const deps = require('../runners/deps.js');
 
 let pass = 0, fail = 0;
 // list of offenders, capped so a wholesale breakage doesn't scroll forever
@@ -2619,7 +2620,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /for \(const id of ids\) await installDep\(id\);/.test(iam) && !/\bbreak;/.test(iam)
       ? [] : ['installAllMissing still breaks out of its loop']);
   none('provision-win.ps1 quietly grew a voice case with no implementation',
-    /ValidateSet\('node', 'git', 'claude', 'uv', 'cloudflared', 'gh'\)/.test(read('setup/provision-win.ps1'))
+    /ValidateSet\('node', 'git', 'claude', 'uv', 'cloudflared', 'gh', 'ffmpeg'\)/.test(read('setup/provision-win.ps1'))
       ? [] : ['the ValidateSet changed — voice must not be accepted without a real switch case']);
 }
 
@@ -3763,6 +3764,56 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     [/git rev-parse --is-inside-work-tree/.test(COAUTHOR_SH) ? '' : 'coauthor-hook.sh no longer checks it is inside a real git repo',
      /'rev-parse', '--git-dir'/.test(read('wsl/coauthor-tool.js')) ? '' : 'coauthor-tool.js no longer resolves the git dir via `git rev-parse --git-dir`',
      /'rev-parse', '--git-path', 'hooks'/.test(read('wsl/coauthor-tool.js')) ? '' : "coauthor-tool.js no longer resolves hooks dir via `git rev-parse --git-path hooks`"].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 105. C-2.1 — FFMPEG GETS ITS OWN SYSTEM-CHECK ROW. It used to be silently bundled inside the Voice install
+//   with no row of its own. Three things this pin holds: (a) the manifest row exists with the winget id
+//   setup-win.ps1's own (still-bundled, unchanged) ffmpeg install already uses — a drift between the two
+//   would leave the row installing a DIFFERENT ffmpeg than the one Voice already checks for; (b) it is
+//   NON-blocking (voice-only dependency — required:false, so Next never waits on it, and it sits in the
+//   `voice` category alongside uv/voice rather than `core`); (c) the win/posix installers both carry a real
+//   case for it — deps.js's installRoute would otherwise report "installable" for a dep with nothing behind
+//   the button.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const ffm = deps.MANIFEST.find((m) => m.id === 'ffmpeg');
+  none('the ffmpeg manifest row disappeared (C-2.1)', ffm ? [] : ['no id:\'ffmpeg\' entry in runners/deps.js MANIFEST']);
+  if (ffm) {
+    none('the ffmpeg row became blocking (Next must not require a voice-only dependency)',
+      ffm.required === false ? [] : ['ffmpeg.required is not false']);
+    none('the ffmpeg row\'s winget id drifted from setup-win.ps1\'s own bundled install',
+      ffm.win && ffm.win.winget === 'Gyan.FFmpeg' ? [] : [`ffmpeg.win.winget is ${ffm.win && ffm.win.winget}`]);
+    none('setup-win.ps1\'s own (still-bundled) ffmpeg install uses a different winget id than the new row',
+      /winget install -e --id Gyan\.FFmpeg/.test(SETUPWIN) ? [] : ['setup-win.ps1 no longer installs Gyan.FFmpeg']);
+    none('the ffmpeg row is not actually installable on the win runner',
+      deps.installRoute(ffm, 'win') === 'win' ? [] : [`installRoute(ffmpeg, 'win') = ${deps.installRoute(ffm, 'win')}`]);
+    none('the ffmpeg row is not actually installable on the posix runner',
+      deps.installRoute(ffm, 'posix') === 'posix' ? [] : [`installRoute(ffmpeg, 'posix') = ${deps.installRoute(ffm, 'posix')}`]);
+  }
+  // the win-native per-dep installer has a REAL switch case for ffmpeg (not just an accepted-but-unhandled
+  // ValidateSet entry — pin #78 above already guards the reverse: a ValidateSet member with no case).
+  const PROVWIN = read('setup/provision-win.ps1');
+  none('provision-win.ps1 lost its ffmpeg install case',
+    /'ffmpeg' \{[\s\S]{0,700}?Try-Winget 'Gyan\.FFmpeg'/.test(PROVWIN) ? [] : ['no working ffmpeg case in provision-win.ps1']);
+  // the posix installer (wsl/provision.sh) has a real case too, following the same apt/brew pkg() convention
+  // git/gh already use — not a bare "unknown dependency" fallthrough.
+  const PROVSH = read('wsl/provision.sh');
+  none('wsl/provision.sh lost its ffmpeg install case',
+    /ffmpeg\)\s+have ffmpeg && ok; pkg ffmpeg;/.test(PROVSH) ? [] : ['no working ffmpeg case in wsl/provision.sh']);
+  // detection: the win runner's pure-Node probe actually asks for ffmpeg (not just installs it blind), and
+  // uses ffmpeg's real single-dash -version flag rather than the --version every other tool here takes.
+  const WIN = read('runners/win.js');
+  none('the win runner stopped probing for ffmpeg in detectDeps',
+    /DETECT_TOOLS = \[[^\]]*'ffmpeg'[^\]]*\]/.test(WIN) ? [] : ["DETECT_TOOLS no longer lists 'ffmpeg'"]);
+  none('the win runner reads ffmpeg\'s version with the wrong flag (ffmpeg has no --version; needs -version)',
+    /id === 'ffmpeg' \? '-version' : '--version'/.test(WIN) ? [] : ['toolVersion no longer special-cases ffmpeg\'s -version flag']);
+  // wsl/posix detection (preflight.sh) also asks for ffmpeg, with the same -version flag, and reports it in
+  // the JSON line deps.js parses.
+  const PREFLIGHT = read('wsl/preflight.sh');
+  none('wsl/preflight.sh stopped probing for ffmpeg',
+    /ffmpeg -version/.test(PREFLIGHT) && /"ffmpeg":\{"installed":%s,"version":"%s"\}/.test(PREFLIGHT)
+      ? [] : ['preflight.sh no longer detects or reports ffmpeg']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
