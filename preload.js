@@ -45,8 +45,12 @@ contextBridge.exposeInMainWorld('claudible', {
   preflightRestart: () => ipcRenderer.invoke('preflight:restart'),
   // C-7.3 manual path: the failure chip's "see how to fix it" panel + the settings voice row's Rescan button
   voiceManualInfo: () => ipcRenderer.invoke('voice:manualInfo'),   // { voiceDir, logPath, items:[{name,path,url}] } — same paths voiceProvisioned() actually checks
-  voiceRescan: () => ipcRenderer.invoke('voice:rescan'),           // → { ok, voiceReady } — re-checks fresh; clears the failed-stamp with no download if a hand-install is now found
-  voiceStatus: () => ipcRenderer.invoke('voice:status'),           // { voiceReady, voiceProvisioning, failed, failedCode } — cheap fs-only read, safe on drawer open (C-9.1)
+  voiceRescan: () => ipcRenderer.invoke('voice:rescan'),           // → { ok, voiceReady } — re-checks fresh; clears the failed-stamp (and a stale decline) with no download if a hand-install is now found
+  voiceStatus: () => ipcRenderer.invoke('voice:status'),           // { voiceReady, voiceProvisioning, failed, failedCode, consentDeclined } — cheap fs-only read, safe on drawer open (C-9.1)
+  // C-7.4 — first-run voice consent: main fires this ONCE (boot, or once the wizard closes) before it would
+  // otherwise auto-download; the renderer shows a one-time modal and reports the choice back.
+  onVoiceConsentAsk: (cb) => ipcRenderer.on('voice:consent-ask', () => cb()),
+  voiceConsentDecision: (granted) => ipcRenderer.invoke('voice:consent-decision', !!granted),
   // Connect-Claude button/popup: main fires 'claude:needed' when a spawn finds no claude; renderer pops the dialog
   onClaudeNeeded: (cb) => ipcRenderer.on('claude:needed', () => cb()),
   claudeConnected: () => ipcRenderer.invoke('claude:connected'),   // bring the terminal up after connecting

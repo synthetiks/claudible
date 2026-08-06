@@ -442,8 +442,31 @@ function appDirNow() {
 // unrelated process and wedge voice permanently — every future click silently deferring to a "survivor" that
 // is actually Notepad. A provision that has not finished in this long is not going to.
 const VOICE_LOCK_MAX_MS = 45 * 60 * 1000;
-// `force` = the user ASKED for this (Settings → voice). Only the automatic boot call honours the
-// already-failed stamp; a deliberate retry must always be allowed to try again.
+// C-7.4 — first run must ASK before the automatic path downloads ~500MB and runs third-party installers.
+// One prompt in flight, ever (per launch): the renderer's modal round-trips through voice:consent-decision,
+// which clears this so a stray double-fire (boot + focus catch-up landing close together) can't stack two.
+let voiceConsentAsking = false;
+function askVoiceConsent() {
+  if (voiceConsentAsking) return;
+  voiceConsentAsking = true;
+  try { win && win.webContents.send('voice:consent-ask'); } catch { voiceConsentAsking = false; }
+}
+// Catch-up call for the deferred case (wizard still on screen at boot — see ensureVoiceProvisioned below):
+// same decision gates as the real thing, but NEVER starts anything itself, so it's safe to call repeatedly
+// (window focus) without risking a shell spawn on every alt-tab. Cheap: fs checks only.
+function maybeAskVoiceConsent() {
+  if (provisioning || voiceConsentAsking || !app.isPackaged || process.platform !== 'win32' || process.env.CLAUDIBLE_RUNNER !== 'win') return;
+  if (!appDirNow() || voiceProvisioned()) return;
+  try {
+    const s0 = readSettings();
+    if (s0.voiceConsentDeclinedAt || s0.voiceConsentGrantedAt || s0.voiceProvisionFailedAt) return;   // already decided, or a prior auto attempt already failed — Settings owns retry from there, not a fresh ask
+    if (!s0.onboardingDone) return;                          // wizard still hasn't finished — wait for it
+    askVoiceConsent();
+  } catch {}
+}
+// `force` = the user ASKED for this (Settings → voice, Rescan, or this exact consent prompt's own "Download
+// now"). Only the automatic boot call honours the already-failed stamp and the consent gate; a deliberate
+// retry must always be allowed to try again.
 function ensureVoiceProvisioned(force) {
   // Only the packaged native-Windows path self-provisions; dev / WSL / the script install already set voice up.
   if (provisioning || !app.isPackaged || process.platform !== 'win32' || process.env.CLAUDIBLE_RUNNER !== 'win') return false;
@@ -454,6 +477,23 @@ function ensureVoiceProvisioned(force) {
   // cleanly on the next launch, once Git is present. No behavior change on an already-set-up machine.
   if (!appDirNow()) return false;
   if (voiceProvisioned()) return false;
+  // C-7.4 owners' decision — the automatic (non-force) path must ASK first, not download+install silently.
+  // A decline ('Later') is remembered and this never auto-fires again; consent granted once is remembered and
+  // never re-asked. force always proceeds (an explicit click IS the consent) and clears any earlier decline —
+  // the manual Install button and Rescan stay available and clear the decline, exactly like C-7.3's failed-stamp
+  // clear just below, which this mirrors.
+  try {
+    const s0 = readSettings();
+    if (!force) {
+      if (s0.voiceConsentDeclinedAt) return false;
+      if (!s0.voiceConsentGrantedAt) {
+        if (s0.onboardingDone) askVoiceConsent();   // wizard already done → ask now; else the wizard-finish/focus catch-up (maybeAskVoiceConsent) asks once it closes
+        return false;
+      }
+    } else if (s0.voiceConsentDeclinedAt || !s0.voiceConsentGrantedAt) {
+      s0.voiceConsentGrantedAt = Date.now(); delete s0.voiceConsentDeclinedAt; writeSettings(s0);
+    }
+  } catch {}
   // A previous run already failed here. Do not auto-retry a multi-hundred-MB provision on every launch on a
   // machine that has demonstrably not managed it — that is a self-inflicted "the app is slow" on top of a
   // feature that is already broken. A user-initiated retry (force) always proceeds, and clears the stamp so a
@@ -551,6 +591,7 @@ function createWindow() {
   // drag a full re-sync of every workspace with it; the adaptive poll already handles syncing).
   win.on('focus', maybeDiscoverOnFocus);
   win.on('focus', checkBuildDrift);   // cheap event-driven catch — same idiom as discovery above (drift most often lands while you were away)
+  win.on('focus', maybeAskVoiceConsent);   // C-7.4 — catches the "wizard was still open at boot" deferral once the window is back in view; cheap fs-only, no-op once decided/asked/provisioned
   // Optional diagnostics (opt-in): launch with CLAUDIBLE_DEBUG=1 to capture the renderer console + crashes
   // to .claudible-debug.log and auto-open DevTools. OFF by default, so nothing pops up in normal use.
   const DEBUG = !!process.env.CLAUDIBLE_DEBUG;
@@ -2355,7 +2396,7 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
 // ---- workspaces (the library a session belongs to: legacy / local folder / private repo) ----
 ipcMain.handle('workspace:list', () => ({ activeId: registry.activeId, workspaces: registry.workspaces, firstRun: !!registry.firstRun }));
 // One-time first-run flag (set when the default Local workspace was materialized) → cleared once the renderer has shown its setup prompt.
-ipcMain.handle('workspace:firstRunDone', () => { if (registry.firstRun) { delete registry.firstRun; saveRegistry(); } return { ok: true }; });
+ipcMain.handle('workspace:firstRunDone', () => { if (registry.firstRun) { delete registry.firstRun; saveRegistry(); } maybeAskVoiceConsent(); return { ok: true }; });   // C-7.4 — the wizard's own finish/skip; onboardingDone is already written (savePrefs runs before this call) so the deferred consent ask can fire now
 // Switch the active workspace: subsequent session list/open/delete scope to its cwd; resume its latest convo.
 ipcMain.handle('workspace:open', async (e, id, session) => {
   const ws = registry.workspaces.find((w) => w.id === id);
@@ -3341,15 +3382,34 @@ ipcMain.handle('voice:manualInfo', () => voiceManualInfo());
 // C-7.3's own no-auto-retry rule) so the row stays red instead of quietly forgetting a real failure.
 ipcMain.handle('voice:rescan', () => {
   const ready = voiceProvisioned();
+  // C-7.4: a hand-install found here is proof the user already dealt with voice by hand — clear a stale decline
+  // too, same reasoning as the failed-stamp clear right below, so the manual path fully closes the loop.
+  if (ready) { try { const s = readSettings(); if (s.voiceConsentDeclinedAt) { delete s.voiceConsentDeclinedAt; writeSettings(s); } } catch {} }
   if (ready) { try { const s = readSettings(); if (s.voiceProvisionFailedAt) { delete s.voiceProvisionFailedAt; delete s.voiceProvisionFailedCode; writeSettings(s); } } catch {} }
   return { ok: true, voiceReady: ready };
+});
+// C-7.4 — the renderer's one-time consent modal ('Voice needs a ~500 MB one-time download... Download now /
+// Later') replies here. granted → persist consent and re-enter through ensureVoiceProvisioned(true): this exact
+// click IS the explicit ask, so it proceeds immediately and also clears any earlier decline. declined → persist
+// the decline; the automatic path never asks again, but the manual Install button and Rescan (both `force`)
+// clear it, per C-7.3's manual-path pattern this reuses (voiceProvisionFailedAt → voiceConsentDeclinedAt).
+ipcMain.handle('voice:consent-decision', (_e, granted) => {
+  voiceConsentAsking = false;
+  try {
+    const s = readSettings();
+    if (granted) { s.voiceConsentGrantedAt = Date.now(); delete s.voiceConsentDeclinedAt; }
+    else { s.voiceConsentDeclinedAt = Date.now(); delete s.voiceConsentGrantedAt; }
+    writeSettings(s);
+  } catch {}
+  if (granted) ensureVoiceProvisioned(true);
+  return { ok: true };
 });
 // Cheap read for the settings voice row: pure fs checks + one settings read, no subprocess — safe to call
 // whenever the drawer opens (C-9.1's "never wait on the network" bar), unlike the full deps.detect probe.
 ipcMain.handle('voice:status', () => {
-  let failed = false, failedCode = null;
-  try { const s = readSettings(); failed = !!s.voiceProvisionFailedAt; failedCode = s.voiceProvisionFailedCode || null; } catch {}
-  return Object.assign({ failed, failedCode }, voiceState());
+  let failed = false, failedCode = null, consentDeclined = false;
+  try { const s = readSettings(); failed = !!s.voiceProvisionFailedAt; failedCode = s.voiceProvisionFailedCode || null; consentDeclined = !!s.voiceConsentDeclinedAt; } catch {}   // C-7.4: lets a settings row explain "why isn't this installing itself" without re-probing
+  return Object.assign({ failed, failedCode, consentDeclined }, voiceState());
 });
 ipcMain.handle('onboard:status', async () => {
   let s = { claudeInstalled: false, claudeSignedIn: false, claudeVersion: '', ghInstalled: false, ghSignedIn: false, ghAccount: '' };

@@ -20,6 +20,8 @@ const GUEST_JS = read('share/guest.js');
 const GUEST_HTML = read('share/guest.html');
 const PRELOAD = read('preload.js');
 const MAIN = read('main.js');
+const SETUPWIN = read('setup/setup-win.ps1');
+const SETUPSH = read('setup/setup.sh');
 
 let pass = 0, fail = 0;
 // list of offenders, capped so a wholesale breakage doesn't scroll forever
@@ -3641,6 +3643,75 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /failed = !!s\.voiceProvisionFailedAt;/.test(MAIN) ? '' : 'voice:status no longer reads the persisted failed stamp',
      /try \{ refreshVoiceSetupRow\(\); \} catch \(e\) \{\}/.test(APP) ? '' : 'openDrawer no longer calls refreshVoiceSetupRow() on open',
      /s && s\.failed && !s\.voiceReady\) showVoiceSetupNote\(\); else hideVoiceSetupNote\(\);/.test(APP) ? '' : 'refreshVoiceSetupRow no longer gates the notice on failed && !voiceReady'].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 103. C-7.4 — CONSENT BEFORE THE AUTOMATIC ~500MB DOWNLOAD, AND CHECKSUM-PINNED FETCHES. First run must ASK
+//   before ensureVoiceProvisioned's automatic fire downloads models + runs third-party installers; a decline
+//   must be persisted and respected forever (never auto-fires again); and the two large model downloads
+//   (setup-win.ps1, setup.sh) must be SHA-256 verified after fetch, failing loudly on a mismatch.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) the automatic (non-force) path is gated on consent: a decline short-circuits to false with NO spawn,
+  //   and never-yet-decided asks (via askVoiceConsent) instead of silently downloading — it does not fall
+  //   through to the failed-stamp/lock/spawn code below in either case.
+  none('ensureVoiceProvisioned no longer gates the automatic path on consent (C-7.4)',
+    [/if \(s0\.voiceConsentDeclinedAt\) return false;/.test(MAIN) ? '' : 'a decline no longer short-circuits the automatic call',
+     /if \(!s0\.voiceConsentGrantedAt\) \{/.test(MAIN) ? '' : 'never-decided no longer branches before granting',
+     /askVoiceConsent\(\);   \/\/ wizard already done/.test(MAIN) ? '' : 'the never-decided branch no longer calls askVoiceConsent()',
+     /function askVoiceConsent\(\) \{/.test(MAIN) ? '' : 'askVoiceConsent() is gone from main.js',
+     /win && win\.webContents\.send\('voice:consent-ask'\);/.test(MAIN) ? '' : 'askVoiceConsent no longer sends voice:consent-ask to the renderer'].filter(Boolean));
+  // (b) force always proceeds (an explicit click IS consent) — the SAME force flag also clears a stale decline,
+  //   mirroring C-7.3's failed-stamp clear right next to it.
+  none('force no longer bypasses the consent gate or clears a stale decline (C-7.4)',
+    /\} else if \(s0\.voiceConsentDeclinedAt \|\| !s0\.voiceConsentGrantedAt\) \{\s*\n\s*s0\.voiceConsentGrantedAt = Date\.now\(\); delete s0\.voiceConsentDeclinedAt; writeSettings\(s0\);/.test(MAIN)
+      ? [] : ['the force branch no longer grants consent + clears the decline']);
+  // (c) the decline is PERSISTED: the renderer's modal round-trips through voice:consent-decision, which writes
+  //   voiceConsentDeclinedAt on decline (and voiceConsentGrantedAt on accept, re-entering with force), and both
+  //   ends of the IPC bridge exist.
+  none('voice:consent-decision no longer persists the decision (C-7.4)',
+    [/ipcMain\.handle\('voice:consent-decision', \(_e, granted\) => \{/.test(MAIN) ? '' : "no ipcMain.handle('voice:consent-decision', ...) in main.js",
+     /s\.voiceConsentDeclinedAt = Date\.now\(\); delete s\.voiceConsentGrantedAt;/.test(MAIN) ? '' : 'a decline no longer stamps voiceConsentDeclinedAt',
+     /s\.voiceConsentGrantedAt = Date\.now\(\); delete s\.voiceConsentDeclinedAt;/.test(MAIN) ? '' : 'a grant no longer stamps voiceConsentGrantedAt',
+     /if \(granted\) ensureVoiceProvisioned\(true\);/.test(MAIN) ? '' : 'a granted decision no longer re-enters ensureVoiceProvisioned(true)',
+     /onVoiceConsentAsk: \(cb\) => ipcRenderer\.on\('voice:consent-ask', \(\) => cb\(\)\)/.test(PRELOAD) ? '' : 'no onVoiceConsentAsk bridge in preload.js',
+     /voiceConsentDecision: \(granted\) => ipcRenderer\.invoke\('voice:consent-decision', !!granted\)/.test(PRELOAD) ? '' : 'no voiceConsentDecision bridge in preload.js',
+     /claudible\.onVoiceConsentAsk\(async \(\) => \{/.test(APP) ? '' : 'the renderer no longer listens for voice:consent-ask',
+     /claudible\.voiceConsentDecision\(choice === 'download'\)/.test(APP) ? '' : 'the renderer no longer reports the consent choice back to main'].filter(Boolean));
+  // (d) the manual Install button and Rescan (both `force`-driven) clear a stale decline, so a decline never
+  //   strands a user who then fixes voice by hand or clicks Install themselves.
+  none('the manual voice paths no longer clear a stale decline (C-7.4)',
+    [/if \(id === 'voice' && runner\.id === 'win'\) \{\s*\n\s*if \(voiceProvisioned\(\)\) return \{ ok: true, restartRequired: false \};\s*\n\s*if \(ensureVoiceProvisioned\(true\)\)/.test(MAIN)
+       ? '' : 'preflight:install voice no longer calls ensureVoiceProvisioned(true) (which is what clears the decline on force)',
+     /if \(ready\) \{ try \{ const s = readSettings\(\); if \(s\.voiceConsentDeclinedAt\) \{ delete s\.voiceConsentDeclinedAt; writeSettings\(s\); \} \} catch \{\} \}/.test(MAIN)
+       ? '' : 'voice:rescan no longer clears a stale decline on a successful rescan'].filter(Boolean));
+  // (e) both setup scripts pin known-good SHA-256 hashes for the whisper model + kokoro .pth, verify AFTER
+  //   download, and fail loudly (expected vs actual) on a mismatch — never silently trust a corrupted/tampered
+  //   fetch. Both constant blocks are clearly marked so a placeholder can't be mistaken for a real pin.
+  none('setup-win.ps1 lost its checksum-verification plumbing (C-7.4)',
+    [/\$KNOWN_HASHES = @\{/.test(SETUPWIN) ? '' : 'no $KNOWN_HASHES block in setup-win.ps1',
+     /function Test-Checksum\(\$path, \$key\)/.test(SETUPWIN) ? '' : 'Test-Checksum function is gone from setup-win.ps1',
+     /Warn "CHECKSUM MISMATCH for \$key/.test(SETUPWIN) ? '' : 'Test-Checksum no longer warns loudly on a mismatch',
+     /if \(-not \(Test-Checksum \$model 'ggml-base\.bin'\)\)/.test(SETUPWIN) ? '' : 'the whisper model download is no longer checksum-verified',
+     /if \(-not \(Test-Checksum \$kModel 'kokoro-v1_0\.pth'\)\)/.test(SETUPWIN) ? '' : 'the kokoro model download is no longer checksum-verified',
+     /\$KOKORO_PIN_TAG = 'v0\.1\.4'/.test(SETUPWIN) ? '' : 'the Kokoro-FastAPI clone tag pin is gone from setup-win.ps1',
+     /git clone --depth 1 --branch \$KOKORO_PIN_TAG https:\/\/github\.com\/remsky\/Kokoro-FastAPI/.test(SETUPWIN) ? '' : 'the Kokoro-FastAPI clone no longer pins a tag (clones HEAD again)'].filter(Boolean));
+  none('setup.sh lost its checksum-verification plumbing (C-7.4)',
+    [/^WHISPER_MODEL_SHA256=/m.test(SETUPSH) ? '' : 'no WHISPER_MODEL_SHA256 constant in setup.sh',
+     /^KOKORO_MODEL_SHA256=/m.test(SETUPSH) ? '' : 'no KOKORO_MODEL_SHA256 constant in setup.sh',
+     /verify_checksum\(\) \{/.test(SETUPSH) ? '' : 'verify_checksum() function is gone from setup.sh',
+     /say "CHECKSUM MISMATCH for \$label/.test(SETUPSH) ? '' : 'verify_checksum no longer warns loudly on a mismatch',
+     /verify_checksum "\$whisper_model" "\$WHISPER_MODEL_SHA256" "ggml-base\.bin"/.test(SETUPSH) ? '' : 'the whisper model download is no longer checksum-verified',
+     /verify_checksum "\$kokoro_model" "\$KOKORO_MODEL_SHA256" "kokoro-v1_0\.pth"/.test(SETUPSH) ? '' : 'the kokoro model download is no longer checksum-verified',
+     /^KOKORO_PIN_TAG="v0\.1\.4"/m.test(SETUPSH) ? '' : 'the Kokoro-FastAPI clone tag pin is gone from setup.sh',
+     /git clone --depth 1 --branch "\$KOKORO_PIN_TAG" https:\/\/github\.com\/remsky\/Kokoro-FastAPI/.test(SETUPSH) ? '' : 'the Kokoro-FastAPI clone no longer pins a tag (clones HEAD again)'].filter(Boolean));
+  // (f) neither pinned hash is a leftover 'TBD-' placeholder — both were actually verified (downloaded + hashed),
+  //   not guessed. If this ever legitimately needs to regress to a placeholder, update this pin deliberately.
+  none('a real checksum regressed to an unverified TBD- placeholder (C-7.4)',
+    [/'ggml-base\.bin'\s*= 'TBD-/.test(SETUPWIN) ? "setup-win.ps1's ggml-base.bin hash is a TBD- placeholder" : '',
+     /'kokoro-v1_0\.pth'\s*= 'TBD-/.test(SETUPWIN) ? "setup-win.ps1's kokoro-v1_0.pth hash is a TBD- placeholder" : '',
+     /WHISPER_MODEL_SHA256="TBD-/.test(SETUPSH) ? "setup.sh's WHISPER_MODEL_SHA256 is a TBD- placeholder" : '',
+     /KOKORO_MODEL_SHA256="TBD-/.test(SETUPSH) ? "setup.sh's KOKORO_MODEL_SHA256 is a TBD- placeholder" : ''].filter(Boolean));
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

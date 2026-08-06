@@ -639,6 +639,22 @@ if (claudible.onProvision) claudible.onProvision((m) => {
     }
   } catch {}
 });
+// C-7.4 — first-run voice consent. Main fires this at most once per launch, only right before it would
+// otherwise have auto-downloaded — never on a machine that already has voice, already decided, or is mid-wizard
+// (main defers until the wizard closes). Same modalChoice convention as every other Claudible popup (C-3.6).
+// Anything other than clicking "Download now" (Later, Escape, backdrop click) reports declined — a stray
+// dismissal must never silently start a ~500 MB download.
+if (claudible.onVoiceConsentAsk) claudible.onVoiceConsentAsk(async () => {
+  const choice = await modalChoice({
+    title: 'Set up voice?',
+    body: 'Voice needs a one-time ~500 MB download of local speech models (Whisper + Kokoro) and will run their installers. Everything runs on this computer only — nothing is sent anywhere. You can do this later from Settings instead.',
+    choices: [
+      { key: 'download', label: 'Download now', sub: 'Downloads in the background — can take several minutes.' },
+      { key: 'later', label: 'Later', sub: 'Turn voice on any time from Settings — nothing downloads until then.' },
+    ],
+  });
+  try { await claudible.voiceConsentDecision(choice === 'download'); } catch {}
+});
 claudible.onStatus((s) => {
   const t = tabs.get(s.tabId); if (!t) return;   // route the status to the tab it belongs to
   if (s.model) t.model = s.model;   // the tab's CURRENT model (statusline display name) — inherited by hook agents spawned without an explicit model override

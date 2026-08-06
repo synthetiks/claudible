@@ -13,6 +13,35 @@ $ErrorActionPreference = 'Stop'
 function Say($m) { Write-Host "`n[claudible setup-win] $m" -ForegroundColor Cyan }
 function Warn($m) { Write-Host "  $m" -ForegroundColor Yellow }
 
+# ---- C-7.4 known-good checksums (SHA-256), verified against the ACTUAL files fetched below --------
+# Computed 2026-08-06 by downloading each URL directly and hashing the bytes (Get-FileHash -Algorithm
+# SHA256) -- not guessed, not copied from an upstream page. If either artifact is ever replaced at the
+# same URL (a model re-upload, a corrected release asset) this check will legitimately start failing;
+# re-verify by hand and update BOTH this block and setup.sh's matching block before trusting a new value.
+# A value starting with 'TBD-' means nobody has verified it yet: the check WARNS instead of failing, loudly,
+# so a placeholder can never be mistaken for a real pin.
+$KNOWN_HASHES = @{
+  # ggml-base.bin -- https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin (~148MB)
+  'ggml-base.bin'   = '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe'
+  # kokoro-v1_0.pth -- https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4/kokoro-v1_0.pth (~327MB)
+  'kokoro-v1_0.pth' = '496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4'
+}
+# Kokoro-FastAPI is git-cloned below -- pin the SAME tag the model weights above come from, not HEAD.
+# Git itself integrity-tracks a pinned tag (its commit hash), unlike a bare branch clone.
+$KOKORO_PIN_TAG = 'v0.1.4'
+function Test-Checksum($path, $key) {
+  $expected = $KNOWN_HASHES[$key]
+  if ((-not $expected) -or ($expected.StartsWith('TBD-'))) { Warn "No verified checksum pinned for $key yet -- skipping integrity check (see setup-win.ps1's KNOWN_HASHES block)."; return $true }
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLower()
+  if ($actual -ne $expected) {
+    Warn "CHECKSUM MISMATCH for $key -- the download does not match the pinned SHA-256."
+    Warn "  expected: $expected"
+    Warn "  actual:   $actual"
+    return $false
+  }
+  return $true
+}
+
 $VOICE = if ($env:CLAUDIBLE_VOICE) { $env:CLAUDIBLE_VOICE } else { Join-Path $env:USERPROFILE '.claudible\voice' }
 New-Item -ItemType Directory -Force -Path $VOICE, (Join-Path $env:USERPROFILE '.claudible\logs') | Out-Null
 
@@ -118,6 +147,7 @@ if (-not (Test-Whisper)) {
   New-Item -ItemType Directory -Force -Path (Split-Path $model) | Out-Null
   Invoke-WebRequest -UseBasicParsing -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin' -OutFile $model
   if (-not (Test-Whisper)) { Remove-Item -Force $model -ErrorAction SilentlyContinue; Warn 'Whisper model download failed or was truncated - check your network, then re-run setup-win.ps1.'; exit 1 }
+  if (-not (Test-Checksum $model 'ggml-base.bin')) { Remove-Item -Force $model -ErrorAction SilentlyContinue; Warn 'Whisper model failed its integrity check - a corrupted or tampered download must never be used. Check your network, then re-run setup-win.ps1.'; exit 1 }
 } else { Say 'Whisper model already present.' }
 
 # --- 3. Kokoro - FastAPI TTS (CPU torch via uv) -----------------------------------------------------
@@ -135,7 +165,7 @@ if (-not (Test-Path (Join-Path $kokoro '.git'))) {
     Warn 'Close anything using that folder (a terminal sitting in it, an editor, an antivirus scan), then re-run setup-win.ps1.'
     exit 1
   }
-  git clone --depth 1 https://github.com/remsky/Kokoro-FastAPI $kokoro
+  git clone --depth 1 --branch $KOKORO_PIN_TAG https://github.com/remsky/Kokoro-FastAPI $kokoro
   # $ErrorActionPreference='Stop' does NOT catch a native-exe non-zero exit, so check it explicitly and clean up
   # the partial clone - else the Test-Path guard above treats a half-clone as "already installed" on the next run.
   if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $kokoro -ErrorAction SilentlyContinue; Warn 'Kokoro clone failed (network?). Re-run setup-win.ps1.'; exit 1 }
@@ -193,6 +223,11 @@ if (-not (Test-Kokoro)) {
     Warn "    $kRel/kokoro-v1_0.pth"
     Warn "    $kRel/config.json"
     Warn "  -> $kDir"
+    exit 1
+  }
+  if (-not (Test-Checksum $kModel 'kokoro-v1_0.pth')) {
+    Remove-Item -Recurse -Force $kDir -ErrorAction SilentlyContinue
+    Warn 'Kokoro model failed its integrity check - a corrupted or tampered download must never be used. Re-run setup-win.ps1.'
     exit 1
   }
   Say 'Kokoro model ready.'
