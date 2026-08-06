@@ -6679,6 +6679,7 @@ window.addEventListener('keydown', (e) => {
   const wiz = $('wizard'); if (!wiz || !claudible.onboardStatus) return;
   let step = 1, poll = null, pollSince = 0, signingIn = false, done = false, ticking = false;
   let ghWaiting = false, ghFlight = false;   // gh device-flow: waiting on the browser approval · in-flight guard shared by BOTH gh buttons (a double-click must not spawn two winget/gh children)
+  let ghSkipped = false;   // C-2.5: explicit "Skip for now" on the GitHub step — the ONLY other way (besides ghSignedIn) wiz-finish is allowed to enable
   const status = async () => { try { return await claudible.onboardStatus(); } catch { return null; } };
   function show(n) {
     step = n;
@@ -6779,23 +6780,35 @@ window.addEventListener('keydown', (e) => {
   // installed-not-connected → a REAL one-click Connect (device code shown here, browser opened by main,
   // ✓ lands via the status poll — the old text told users to go run `gh auth login` in a terminal
   // themselves, which on a packaged install meant nobody connected); connected → ✓.
+  // C-2.5: wiz-finish is disabled by default in the HTML. This function is the ONLY place that re-enables
+  // it for step 3 — either s.ghSignedIn is true (already connected: existing users, or a first-run user who
+  // just connected — sails through with no click) or ghSkipped was explicitly set by skipGh(). Every other
+  // branch leaves Finish disabled, so drifting past this step silently is not possible.
   function applyGh(s) {
     const msg = $('wiz-gh-msg'), rc = $('wiz-gh-recheck'), act = $('wiz-gh-action'), b = $('wiz-gh-busy');
+    const skip = $('wiz-gh-skip'), fin = $('wiz-finish');
     if (s.ghSignedIn) {
       msg.textContent = '✓ GitHub connected' + (s.ghAccount ? ' (@' + s.ghAccount + ')' : '');
-      rc.style.display = 'none'; act.style.display = 'none';
+      rc.style.display = 'none'; act.style.display = 'none'; if (skip) skip.style.display = 'none';
+      if (fin) fin.disabled = false;
       ghWaiting = false; pollStop();   // the device-flow (if any) landed — the poll has nothing left to watch
       if (b) { b.classList.remove('err'); b.textContent = ''; }
     } else if (!s.ghInstalled) {
-      msg.textContent = 'The GitHub CLI isn’t installed — it powers project sync, invites and live badges. Install it here, then connect.';
+      msg.textContent = 'The GitHub CLI isn’t installed — it powers project sync, invites and live badges. Install it here, then connect, or skip for now.';
       act.style.display = ''; act.textContent = 'Install GitHub CLI'; act.onclick = installGh;
-      rc.style.display = '';
+      rc.style.display = ''; if (skip) skip.style.display = '';
+      if (fin) fin.disabled = !ghSkipped;
     } else {
-      msg.textContent = 'Connect GitHub to sync projects across devices, invite collaborators, and see who’s live. One click — you approve it in your browser.';
+      msg.textContent = 'Connect GitHub to sync projects across devices, invite collaborators, and see who’s live. One click — you approve it in your browser. Or skip for now and connect later in Settings.';
       act.style.display = ''; act.textContent = 'Connect GitHub'; act.onclick = connectGh;
-      rc.style.display = '';
+      rc.style.display = ''; if (skip) skip.style.display = '';
+      if (fin) fin.disabled = !ghSkipped;
     }
   }
+  // The step's own explicit Skip — distinct from wiz-skip (which abandons the WHOLE wizard from any step).
+  // Clicking this is the "user explicitly chooses to skip" escape hatch C-2.5 requires: it does not dismiss
+  // the wizard, it just answers the ask, so Finish unlocks and the user still lands on a normal Finish click.
+  function skipGh() { ghSkipped = true; const fin = $('wiz-finish'); if (fin) fin.disabled = false; }
   async function installGh() {
     if (ghFlight) return;
     ghFlight = true;
@@ -6945,6 +6958,7 @@ window.addEventListener('keydown', (e) => {
   $('wiz-sys-install').addEventListener('click', installAllMissing);
   $('wiz-claude-next').addEventListener('click', afterClaude);
   $('wiz-gh-recheck').addEventListener('click', goGh);
+  $('wiz-gh-skip').addEventListener('click', skipGh);
   $('wiz-finish').addEventListener('click', finish);
   $('wiz-skip').addEventListener('click', dismiss);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && wiz.classList.contains('show')) { e.preventDefault(); dismiss(); } });

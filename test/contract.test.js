@@ -3562,5 +3562,40 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['repo-invite.sh\'s $slug check is not widened to GitHub\'s repo-name charset']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 101. C-2.5 — WIZARD GITHUB GATING (owners' decision, 2026-08-06): the wizard must actively ASK whether to
+//   connect GitHub and must not continue past that step until GitHub is connected OR the user explicitly
+//   skips. wiz-finish starts disabled in the markup; applyGh() is the only place that re-enables it, either
+//   because s.ghSignedIn came back true (already-connected users sail through with no click) or because
+//   skipGh() was explicitly clicked (the labeled Skip control, distinct from the whole-wizard wiz-skip link).
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) Finish is gated: the button starts disabled in the HTML, not left implicitly enabled.
+  none('wiz-finish is no longer disabled by default in index.html (C-2.5 — Finish must not complete the step unconditionally)',
+    /<button id="wiz-finish" class="primary" disabled>Finish<\/button>/.test(HTML)
+      ? [] : ['wiz-finish button no longer has the disabled attribute in its markup']);
+  // (b) the step's own explicit Skip control exists (separate from wiz-skip, which abandons the whole wizard)
+  //   and clicking it is what is allowed to unlock Finish.
+  none('the GitHub step\'s explicit Skip control is missing from index.html (C-2.5)',
+    /<button id="wiz-gh-skip" class="ghost" type="button" style="display:none">Skip for now — you can connect later in Settings<\/button>/.test(HTML)
+      ? [] : ['wiz-gh-skip button missing or its label/markup changed']);
+  none('skipGh() no longer sets ghSkipped and enables wiz-finish (C-2.5)',
+    /function skipGh\(\) \{ ghSkipped = true; const fin = \$\('wiz-finish'\); if \(fin\) fin\.disabled = false; \}/.test(APP)
+      ? [] : ['skipGh() missing or no longer flips ghSkipped / enables wiz-finish']);
+  none('wiz-gh-skip lost its click listener wired to skipGh (C-2.5)',
+    /\$\('wiz-gh-skip'\)\.addEventListener\('click', skipGh\);/.test(APP)
+      ? [] : ['wiz-gh-skip has no click listener calling skipGh']);
+  // (c) already-signed-in short-circuits: applyGh enables Finish (and hides the skip control) when
+  //   s.ghSignedIn is true, with no click required — existing users, or a user who just connected, sail through.
+  none('applyGh no longer auto-enables wiz-finish when s.ghSignedIn is true (C-2.5 — already-connected users must sail through)',
+    /if \(fin\) fin\.disabled = false;\s*\n\s*ghWaiting = false; pollStop\(\);/.test(APP)
+      ? [] : ['the s.ghSignedIn branch of applyGh no longer clears wiz-finish.disabled']);
+  // (d) the not-yet-connected branches gate Finish on ghSkipped specifically — not left permanently enabled,
+  //   and not left permanently disabled with no way to skip.
+  none('applyGh\'s not-signed-in branches stopped gating wiz-finish on ghSkipped (C-2.5)',
+    (APP.match(/if \(fin\) fin\.disabled = !ghSkipped;/g) || []).length >= 2
+      ? [] : ['fewer than 2 applyGh branches gate wiz-finish.disabled on !ghSkipped']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
