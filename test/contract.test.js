@@ -3498,6 +3498,10 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /<span class="chat-title">Group Chat<\/span>/.test(HTML)
       ? ['index.html still has the old "Group Chat" label']
       : /<span class="chat-title">Chat<\/span>/.test(HTML) ? [] : ['no <span class="chat-title">Chat</span> in index.html']);
+  none('guest.html still says "Group Chat" instead of "Chat" (C-5.9 — the browser guest page must match the host label)',
+    /<span>Group Chat<\/span>/.test(GUEST_HTML)
+      ? ['guest.html still has the old "Group Chat" label']
+      : /<span>Chat<\/span>/.test(GUEST_HTML) ? [] : ['no <span>Chat</span> in guest.html']);
   // the HOST() label function: defined once per file (renderer + browser guest page each need their own copy),
   // and actually used by BOTH the roster (renderRoster's "you" chip + the host's roster pill) and chat (the
   // host's own outgoing "who", and every received host chat line) — a partial wire-up would still leave the
