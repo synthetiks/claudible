@@ -33,6 +33,26 @@ jobs:
       - name: Runner + hooks + port parity suite
         run: npm test
 
+  # C-11.6 / roadmap §7 decision 5: the shipped Windows runner's own code had zero automated coverage before
+  # this job — only the Linux `test` job above ran the suite. This does NOT run the full suite: gh-auth and
+  # every shell test still need things a plain windows-latest runner can't promise, so it runs the explicit
+  # --windows-safe subset (test/run-all.js decides that list, not this YAML — one place, not a duplicate).
+  # windows-latest DOES ship Git Bash (test/_bash-resolve.js's C-1.4 discovery would find it), but that isn't
+  # enough on its own for network/gh-auth-dependent tests, so those stay out regardless.
+  # .gitattributes' eol pins (C-10.3) mean this checkout is byte-identical to the Linux one — no CRLF-vs-LF
+  # phantom failures here.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+      - name: Install runtime deps the suite actually needs (ws)
+        run: npm ci --omit=dev --ignore-scripts
+      - name: Windows-safe subset (contract + pure-node tests, no bash/WSL/python3/gh)
+        run: npm run test:windows-safe
+
   lint:
     runs-on: ubuntu-latest
     steps:

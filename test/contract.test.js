@@ -3884,5 +3884,39 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 108. C-11.6 / roadmap §7 decision 5 — THE SHIPPED WINDOWS RUNNER GETS ITS FIRST AUTOMATED COVERAGE. Before
+//   this, only the ubuntu `test` job ran the suite; the Windows runner's own code ran in NO CI job at all.
+//   test.yml gets a `test-windows` job on windows-latest running the conservative --windows-safe subset
+//   (test/run-all.js owns what that subset means — one decision point, not duplicated as a file list in
+//   YAML). Every file in the subset was run and confirmed green on real Windows hardware before this
+//   landed; *.sh and the three known env-failing .test.js files are deliberately left out so the job can be
+//   green on its first run — see run-all.js's own comment for exactly why each is excluded.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const CI = read('.github/workflows/test.yml');
+  const RUN = read('test/run-all.js');
+  const PKG = JSON.parse(read('package.json'));
+  none('the windows CI job is gone (C-11.6 — the Windows runner has no automated coverage again)',
+    /test-windows:\s*\n\s*runs-on: windows-latest/.test(CI) ? [] : ['test.yml has no test-windows job on windows-latest']);
+  none('…and it stopped checking out + installing deps like every other leg',
+    /test-windows:[\s\S]{0,400}?actions\/checkout@v4[\s\S]{0,400}?actions\/setup-node@v4/.test(CI)
+      ? [] : ['test-windows no longer checks out and sets up node']);
+  none('…and it stopped running the windows-safe subset script',
+    /test-windows:[\s\S]{0,700}?run: npm run test:windows-safe/.test(CI) ? [] : ['test-windows no longer runs npm run test:windows-safe']);
+  none('…and it started running the FULL suite (network/gh-auth/.sh tests can\'t pass on a plain runner)',
+    /test-windows:[\s\S]{0,700}?run: npm test\b/.test(CI) ? ['test-windows now runs the full suite, not the windows-safe subset'] : []);
+  none('the windows-safe npm script is gone or no longer points at run-all.js --windows-safe',
+    PKG.scripts && PKG.scripts['test:windows-safe'] === 'node test/run-all.js --windows-safe'
+      ? [] : ['package.json test:windows-safe script missing or changed']);
+  none('run-all.js no longer supports the --windows-safe flag',
+    /windowsSafe = process\.argv\.includes\('--windows-safe'\)/.test(RUN) ? [] : ['--windows-safe flag detection is gone']);
+  none('--windows-safe stopped cutting out every *.sh step',
+    /const sh = windowsSafe \? \[\] : all\.filter/.test(RUN) ? [] : ['windows-safe mode no longer excludes all *.sh files']);
+  none('--windows-safe stopped excluding the known env-failing .test.js files',
+    /WINDOWS_UNSAFE_JS = new Set\(\['adopt-workspace\.test\.js', 'build-identity\.test\.js', 'appdir-quoting\.test\.js'\]\)/.test(RUN)
+      ? [] : ['WINDOWS_UNSAFE_JS no longer names the known env-failing files']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

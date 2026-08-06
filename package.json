@@ -48,6 +48,7 @@
     "rebuild": "electron-rebuild -f -w node-pty",
     "postinstall": "patch-package",
     "test": "node test/run-all.js",
+    "test:windows-safe": "node test/run-all.js --windows-safe",
     "dist": "node scripts/ensure-build-sha.js && electron-builder",
     "dist:win": "node scripts/ensure-build-sha.js && electron-builder --win",
     "dist:linux": "node scripts/ensure-build-sha.js && npm install --no-save node-pty-prebuilt-multiarch@^0.10.1-pre.5 && electron-builder --linux",
