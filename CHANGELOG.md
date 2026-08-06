@@ -4,6 +4,62 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-08-07
+
+A hardware-validation pre-release: 34 changes verified in code and by 691 automated checks (up from 491),
+**none of them yet proven by a human on a real machine.** This build exists so the owners can run the
+hardware smoke checklist against it. Treat every item below as "implemented and tested in CI" — not
+"proven working" — until that pass lands.
+
+**New**
+- Sessions are never auto-created anymore. An empty project shows a "Create a new session" overlay and a
+  session exists only when you click it and name it — the structural end of the phantom "New session" bug
+  family, patched five times before this.
+- Deleting is a designed flow: an in-app dialog with options per project kind (shared projects can be
+  deleted from GitHub, deleted only locally, or archived), a trash icon next to Settings' close button,
+  and Open/Delete trash buttons in Settings. "Discard" on a brand-new file in Diff Review now moves it to
+  the trash instead of permanently deleting it.
+- First run now asks before downloading the ~500 MB voice models, remembers a "Later", and verifies both
+  model downloads against pinned SHA-256 hashes. Voice setup failure now offers a manual path and a
+  Rescan button that detects a hand-fixed install.
+- The wizard actively asks about connecting GitHub and won't finish until you connect or explicitly skip.
+  ffmpeg has its own System-check row.
+- Settings shows your version and build, a persistent chip appears when a newer release exists, and
+  "you're on X · latest is Y" replaces guesswork. Crashes now write an always-on log under
+  ~/.claudible/logs and a dialog names the file to attach to a bug report.
+- Live-session roster redesigned: larger rectangular name badges, an always-visible kick button, a
+  scrollable guest strip, "Chat" instead of "Group Chat", and the host is always labeled HOST. A red
+  CO-DRIVE marker stays visible the whole time a co-drive share is running.
+- Optional (off by default): commits made during a live session can credit everyone present as
+  co-authors, via a hook that never overwrites an existing one.
+
+**Fixed**
+- The 0.9.6 speed fix now covers the WSL and Linux/macOS backends too — all three runners start their
+  background shells the fast way, and WSL path lookups are cached instead of spawning a process per call.
+- Repo names with dots or underscores (my_repo, next.js) now clone the exact repo named, on every path —
+  invites and renames silently mangled them before. Name fields validate as you type and list exactly
+  which characters aren't allowed.
+- The browser guest page now checks it is being shown the session it was promised and warns on a
+  mismatch — this check was believed shipped in 0.9.5 but had never actually been built.
+- Reverting in Repo Review with two project cards open could check the wrong project's safety state;
+  each card now acts on its own project. Reverting a second time warns that it replaces your one undo
+  point — and that warning now survives an app restart.
+- A broken script backend shows a persistent banner with a Retry button instead of failing silently or
+  flashing a 2-second toast. Session names never show a stale guess — a changed session shows a neutral
+  loading row until the confirmed name arrives.
+- Hand-edits to an adopted project's .claude/settings.json get a fresh dated backup before Claudible
+  overwrites them, instead of being silently lost. The settings drawer answers instantly from cache and
+  never waits on the network; a failed skills/plugins scan keeps the last good list instead of showing a
+  false "none found".
+- Voice reinstall on Linux/macOS/WSL now stops running voice servers first (Windows already did), and
+  the setup shell scripts joined the ASCII gate that protects the PowerShell ones.
+
+**Known limitations**
+- Everything above is CI-verified only. The hardware checklist (both-machine share tests, timing budgets,
+  the new UI flows, a real my_repo invite) has not run yet — that is the point of this pre-release.
+- The installer remains unsigned: SmartScreen will warn ("More info → Run anyway").
+- macOS remains source-install only and has never been exercised on Apple hardware.
+
 ## [0.9.6] — 2026-08-03
 
 Speed fix for native Windows. If sessions, names, sync or live-session status took many seconds to appear,

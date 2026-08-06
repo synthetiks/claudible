@@ -154,6 +154,12 @@ jobs:
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
           draft: false
-          prerelease: false
+          # 0.9.7 ships as a PRE-RELEASE by owners' decision (2026-08-07): it is the hardware-validation
+          # build for the constitution work — /releases/latest must keep pointing at the last stable so the
+          # in-app update chip stays silent for everyone else. FLIP BACK TO false FOR THE NEXT STABLE CUT.
+          # (Deliberately a hardcode, not tag-parsing: if someone forgets, the failure mode is a stable
+          # release wearing a pre-release flag — visible and fixable with one `gh release edit` — instead
+          # of a pre-release silently publishing as stable, which is the dangerous direction.)
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
