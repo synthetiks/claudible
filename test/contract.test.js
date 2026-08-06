@@ -3940,5 +3940,68 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /cp\.execFile\('bash', \['-lc', shared\.scriptCmd\(APP_ROOT, 'services\.sh'\)\]/.test(POSIX_JS) ? [] : ['startVoiceServices no longer uses a login shell']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 110. C-5.2 — THE LOUD CO-DRIVE WARNING MUST NOT VANISH ONCE SHARING STARTS. Before this, "Co-drive is on —
+//   an approved guest can run commands on your computer, as you" only ever painted in the pre-share dialog
+//   (renderShareWarn) and disappeared the instant a share actually went live — exactly when it matters most.
+//   Now the live bar (#livebar, the same strip that shows who's here) carries a persistent #codrive-badge
+//   whenever the RUNNING share's real served mode is co-drive: lastShareReadOnly for a share we're hosting
+//   (same truth source renderShareWarn reads once locked — B14's whole point, the #share-ro checkbox can lie
+//   about what's actually being served) or the joined tab's own liveReadOnly (stamped from the host's
+//   onLiveHello) for a session we joined. Never the checkbox. Gone the instant either flips to view-only,
+//   the tunnel drops, or the share ends.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) the badge element exists, starts hidden, and carries the exact warning sentence as its tooltip.
+  none('index.html lost the #codrive-badge element (C-5.2)',
+    [/id="livebar"/.test(HTML) ? '' : 'no #livebar element to anchor it in',
+     /class="codrive-badge" id="codrive-badge" style="display:none"/.test(HTML) ? '' : '#codrive-badge missing, or no longer starts hidden',
+     /id="codrive-badge"[^>]*title="Co-drive is on — an approved guest can run commands on your computer, as you\./.test(HTML) ? '' : '#codrive-badge tooltip no longer carries the full warning sentence'].filter(Boolean));
+  none('#codrive-badge lives outside #live-members (would get wiped by every roster repaint)',
+    (() => {
+      const bar = (HTML.match(/<div class="livebar" id="livebar"[\s\S]*?<\/div>/) || [''])[0];
+      const badgeIdx = bar.indexOf('id="codrive-badge"');
+      const membersIdx = bar.indexOf('id="live-members"');
+      return (badgeIdx !== -1 && membersIdx !== -1 && badgeIdx < membersIdx) ? [] : ['#codrive-badge is not a sibling of #live-members inside #livebar, ahead of it'];
+    })());
+  // (b) the paint helper exists, and toggles the element's display — the only thing renderLiveBar is allowed
+  //   to drive it with.
+  none('paintCoDriveBadge is gone from app.js (C-5.2)',
+    /function paintCoDriveBadge\(show\) \{\s*\n\s*const b = \$\('codrive-badge'\); if \(b\) b\.style\.display = show \? '' : 'none';/.test(APP)
+      ? [] : ['paintCoDriveBadge missing, or no longer toggles #codrive-badge.style.display']);
+  // (c) the HOST path reads lastShareReadOnly (the running share's real mode), gated on tunnelUp so a dropped
+  //   tunnel can't keep flashing a warning for a share nobody can actually reach — and never reads the
+  //   #share-ro checkbox.
+  none('renderLiveBar\'s host branch stopped keying the badge off lastShareReadOnly (C-5.2)',
+    (APP.match(/tunnelUp && lastShareReadOnly === false/g) || []).length >= 2
+      ? [] : ['fewer than 2 sites gate the badge on tunnelUp && lastShareReadOnly === false (the shared-tab view + the "browsing elsewhere" reminder)']);
+  none('the co-drive badge reads the #share-ro checkbox instead of the real served mode (C-5.2 regressed)',
+    /paintCoDriveBadge\([^)]*share-ro[^)]*\)/.test(APP)
+      ? ["a paintCoDriveBadge(...) call reads #share-ro directly"] : []);
+  // (d) the GUEST path reads the joined tab's own liveReadOnly (stamped from the host's hello), not any local
+  //   assumption, and excludes a paused/dead tab (C-5.6: nothing a guest sends changes anything while paused).
+  none('renderLiveBar\'s joined-tab branch stopped keying the badge off the real liveReadOnly (C-5.2)',
+    /paintCoDriveBadge\(liveTab \? \(t\.liveReadOnly === false && t\.liveState !== 'paused' && !LIVE_DEAD\.has\(t\.liveState \|\| ''\)\) : \(tunnelUp && lastShareReadOnly === false\)\)/.test(APP)
+      ? [] : ['the visible-bar branch no longer branches liveTab vs. host with the exact real-mode conditions']);
+  // (e) the bar-hidden early return explicitly clears the badge too — otherwise a tab switch away from any
+  //   live context could leave a stale badge lit with no bar around it.
+  none('the livebar-hidden early return stopped clearing the badge (C-5.2)',
+    /if \(!\(collabLive && onSharedTab\) && !liveTab\) \{ paintCoDriveBadge\(false\); bar\.style\.display = 'none'; return; \}/.test(APP)
+      ? [] : ['the hidden-bar branch no longer calls paintCoDriveBadge(false) before returning']);
+  // (f) a host who steps away mid-share still sees it: the "elsewhere" reminder bar paints the badge too, not
+  //   just the calm "still running" note — browsing away doesn't pause co-drive.
+  none('the "browsing elsewhere" reminder bar stopped painting the badge (C-5.2)',
+    /if \(!liveTab && collabLive && !onSharedTab && sharedSessionId\) \{\s*\n\s*bar\.style\.display = 'flex'; bar\.classList\.add\('elsewhere'\);\s*\n\s*[\s\S]{0,220}?paintCoDriveBadge\(tunnelUp && lastShareReadOnly === false\);/.test(APP)
+      ? [] : ['the elsewhere-branch no longer paints the badge right after showing the reminder bar']);
+  // (g) a host-side pause repaints the bar too, so the badge can't outlive a pause taking effect while the
+  //   shared tab is the one on screen.
+  none('onLivePaused stopped repainting the live bar for the active tab (C-5.2)',
+    /claudible\.onLivePaused\(\(p\) => \{ const rec = tabs\.get\(p\.tabId\); if \(rec && rec\.kind === 'live'\) \{ setLiveState\(rec, p\.paused \? 'paused' : 'live'\); if \(p\.tabId === activeTabId\) renderLiveBar\(\); \} \}\);/.test(APP)
+      ? [] : ['onLivePaused no longer calls renderLiveBar() for the active tab']);
+  // (h) styling: red, matching the existing danger vocabulary (var(--live)) rather than an ad-hoc color.
+  none('.codrive-badge lost its red (var(--live)) styling (C-5.2)',
+    /\.codrive-badge\{[^}]*background:var\(--live\)/.test(HTML) ? [] : ['.codrive-badge no longer uses var(--live) as its background']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

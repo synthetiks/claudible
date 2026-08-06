@@ -1922,6 +1922,14 @@ function endLiveNow(msg) {
 if (claudible.onShareForceEnd) claudible.onShareForceEnd((p) => endLiveNow((p && p.reason === 'tab-closed')
   ? 'That tab was live-shared — the live session ended with it'
   : 'That project was deleted — the live session ended with it'));
+// C-5.2: the loud "Co-drive is on" warning used to vanish the moment sharing actually started — it only ever
+// showed in the pre-share dialog. This paints the SAME truth into the live bar for as long as a co-drive share
+// is genuinely running: lastShareReadOnly for a share we're hosting (the exact source renderShareWarn reads
+// when locked — B14's point stands here too, the #share-ro checkbox can lie about what's actually being served),
+// or the joined tab's liveReadOnly (set from the host's onLiveHello) for a session we joined. Never the checkbox.
+function paintCoDriveBadge(show) {
+  const b = $('codrive-badge'); if (b) b.style.display = show ? '' : 'none';
+}
 // The cockpit LIVE bar: visible whenever this session is live (synced collab) — shows you + everyone who's joined.
 let lastRoster = [];
 function renderLiveBar() {
@@ -1938,6 +1946,9 @@ function renderLiveBar() {
   // jumps back to it. (Only for a session share — a manual web link has no session tab to return to.)
   if (!liveTab && collabLive && !onSharedTab && sharedSessionId) {
     bar.style.display = 'flex'; bar.classList.add('elsewhere');
+    // Browsing elsewhere doesn't pause the share — a co-drive guest can still run commands on this machine
+    // right now, so the reminder must carry the same badge, not just the quiet "still running" note.
+    paintCoDriveBadge(tunnelUp && lastShareReadOnly === false);
     const mem0 = $('live-members'); if (!mem0) return;
     mem0.innerHTML = '';
     const n = activeRosterMembers().filter((g) => g.state !== 'gone').length;
@@ -1949,8 +1960,13 @@ function renderLiveBar() {
     mem0.appendChild(jump);
     return;
   }
-  if (!(collabLive && onSharedTab) && !liveTab) { bar.style.display = 'none'; return; }   // show while viewing the session I host, OR a joined one
+  if (!(collabLive && onSharedTab) && !liveTab) { paintCoDriveBadge(false); bar.style.display = 'none'; return; }   // show while viewing the session I host, OR a joined one
   bar.style.display = 'flex';
+  // liveTab (guest): the host's onLiveHello stamped the REAL served mode onto the tab (rec.liveReadOnly) —
+  // read that, not any local assumption. Hosting (onSharedTab): lastShareReadOnly is the running share's
+  // actual mode, gated on tunnelUp so a dropped tunnel doesn't keep flashing a warning for a share that isn't
+  // actually being served to anyone right now.
+  paintCoDriveBadge(liveTab ? (t.liveReadOnly === false && t.liveState !== 'paused' && !LIVE_DEAD.has(t.liveState || '')) : (tunnelUp && lastShareReadOnly === false));
   const mem = $('live-members'); if (!mem) return;
   mem.innerHTML = '';
   const you = document.createElement('span'); you.className = 'live-member you';
@@ -4141,7 +4157,7 @@ claudible.onLiveRoster((p) => {
   if (activeTabId === p.tabId) { renderRoster(); renderLiveBar(); }
 });
 claudible.onLiveSize((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') { rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows; if (p.tabId === activeTabId) fitLiveTab(rec); } });
-claudible.onLivePaused((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') setLiveState(rec, p.paused ? 'paused' : 'live'); });
+claudible.onLivePaused((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') { setLiveState(rec, p.paused ? 'paused' : 'live'); if (p.tabId === activeTabId) renderLiveBar(); } });   // C-5.2: paused suspends co-drive too (C-5.6) — the badge must drop with it, not just on hello/roster ticks
 claudible.onLiveState((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') setLiveState(rec, p.state, p.reason); });
 claudible.onLiveStatus((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;

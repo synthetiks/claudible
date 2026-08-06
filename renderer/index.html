@@ -1074,6 +1074,12 @@
     /* the host is browsing another session while their live one keeps running — a quiet reminder + a way back */
     .livebar.elsewhere{background:rgba(95,180,135,.045);border-bottom-color:rgba(95,180,135,.12)}
     .livebar.elsewhere .live-dot{animation:none;opacity:.75}
+    /* C-5.2: unmissable while the RUNNING share's real served mode is co-drive (not the checkbox) — paints
+       whenever an approved guest can actually type on this machine, and disappears the instant that stops
+       being true (view-only, or the share ends). Compact so it never crowds the roster pills next to it. */
+    .codrive-badge{flex:none;font-size:var(--fs-xs);font-weight:800;letter-spacing:.08em;color:#fff;
+      background:var(--live);border-radius:5px;padding:2px 7px;cursor:default;
+      box-shadow:0 0 10px -3px var(--live)}
     .live-jump{background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:var(--fs-xs);color:var(--ink-dim,#8b929c);text-align:left}
     .live-jump:hover{color:var(--ok);text-decoration:underline}
     .live-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--ink-dim);min-width:0}
@@ -1520,6 +1526,9 @@
       <!-- LIVE bar: shown when this session is live (synced collab) — who's in it -->
       <div class="livebar" id="livebar" style="display:none">
         <span class="live-dot"></span><span class="live-txt">Live</span>
+        <!-- C-5.2: real served mode only — app.js's renderLiveBar keys this off lastShareReadOnly / the
+             joined tab's liveReadOnly (the server's actual mode), never the #share-ro checkbox -->
+        <span class="codrive-badge" id="codrive-badge" style="display:none" title="Co-drive is on — an approved guest can run commands on your computer, as you.">CO-DRIVE</span>
         <span class="live-members" id="live-members"></span>
       </div>
       <div class="termrow">
