@@ -686,7 +686,8 @@ ok('main.js: an adopted project\'s GitHub link is re-derived from the folder\'s 
 ok('app.js: both delete affordances share ONE dialog (they can never disagree about the folder)',
   // C-3.6 replaced the native confirm(deleteWsPrompt(w)) pair with the in-app modal — the invariant
   // (one shared source of truth for what deleting this workspace means) now lives in confirmDeleteWorkspace.
-  (APP.match(/confirmDeleteWorkspace\(w\)/g) || []).length === 2
+  // Lookbehind excludes the definition itself, so this counts CALL SITES only (must stay exactly 2).
+  (APP.match(/(?<!function )confirmDeleteWorkspace\(w\)/g) || []).length === 2
   && /async function confirmDeleteWorkspace\(w\)/.test(APP));
 ok('diff.sh: reports the folder\'s own origin so a stale cached link can self-heal',
   /origin="\$\(git remote get-url origin/.test(DIFF_SH));
