@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "claudible",
   "version": "0.9.7",
   "description": "Multiplayer cockpit for Claude Code: invite anyone into your live session to watch, talk, and co-drive. Fully-local push-to-talk voice, live telemetry, an agents cockpit, session history with one-click revert. Windows (WSL2 or native) \u00b7 Linux \u00b7 macOS.",
