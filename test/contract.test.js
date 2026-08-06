@@ -3058,5 +3058,25 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.sess-prev\.sess-title-pending\{color:var\(--ink-faint\)/.test(HTML) ? [] : ['no .sess-prev.sess-title-pending rule']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 92. C-9.3 — port the 6600f95 permission-override naming to the WSL/posix path. main.js:657-666 already
+//   names the overridden setting for the win.js runner (claudibleForeign flag → injected terminal line); the
+//   wsl/session.sh bootstrap prints its own foreign notice directly (no main.js injection in that path), so
+//   the same naming has to live in resume_one's is_foreign branch, reading the already-parsed
+//   CLAUDIBLE_PERMISSION_MODE instead of the generic "opening a collaborator's session" line for every mode.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SESH92 = read('wsl/session.sh');
+  const resumeOneBody = (SESH92.match(/resume_one\(\) \{[\s\S]*?\n\}/) || [''])[0];
+  none('session.sh no longer names the overridden Bypass/Accept-edits setting on a foreign resume (C-9.3)',
+    [/is_foreign "\$1"/.test(resumeOneBody) ? '' : 'resume_one no longer branches on is_foreign',
+     /case "\$\{CLAUDIBLE_PERMISSION_MODE:-\}" in/.test(resumeOneBody) ? '' : 'the foreign branch does not read CLAUDIBLE_PERMISSION_MODE',
+     /bypass\)\s*echo "\[claudible\] Bypass permissions is set, but this is a collaborator's session/.test(resumeOneBody) ? '' : 'no named Bypass-permissions override line',
+     /acceptEdits\)\s*echo "\[claudible\] Accept edits is set, but this is a collaborator's session/.test(resumeOneBody) ? '' : 'no named Accept-edits override line'].filter(Boolean));
+  none('the foreign branch still falls back to a generic notice when no override is remembered (C-9.3)',
+    /\*\)\s*echo "\[claudible\] opening a collaborator's session - Claude will ask before running tools\."/.test(resumeOneBody)
+      ? [] : ['the default (no remembered mode) case lost its fallback line']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -291,7 +291,14 @@ mark_used() {   # stamp "this session was ACTIVATED now" — sessions-tool folds
 resume_one() {   # $1 = session id — trusted (own) launches in PERM mode; foreign ALWAYS sandboxed (prompts)
   mark_used "$1"
   if is_foreign "$1"; then
-    echo "[claudible] opening a collaborator's session — Claude will ask before running tools."
+    # NAME THE OVERRIDE - parity with main.js:657-664 / win.js's claudibleForeign line. A session synced in
+    # from the user's OWN other machine, with Bypass/Accept edits set, still prompts here (the RCE guard is
+    # untouched). Saying so beats letting it read as "the setting is broken" to the person it confuses most.
+    case "${CLAUDIBLE_PERMISSION_MODE:-}" in
+      bypass)      echo "[claudible] Bypass permissions is set, but this is a collaborator's session - Claude will ask before running tools." ;;
+      acceptEdits) echo "[claudible] Accept edits is set, but this is a collaborator's session - Claude will ask before running tools." ;;
+      *)           echo "[claudible] opening a collaborator's session - Claude will ask before running tools." ;;
+    esac
     claude --resume "$1" "${EFF[@]}"
   else
     claude "${PERM[@]}" --resume "$1" "${EFF[@]}"
