@@ -3107,5 +3107,16 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /cp\.execFileSync\('bash', \['-c', 'true'\]/.test(APPDIR) ? ["the HAS_BASH probe still hardcodes 'bash'"] : []);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 93. C-8.2 — the undo snapshot is ONE overwritable slot (refs/claudible/ckpt/undo), not per-workspace. A
+//   second revert — even on a different project than the first — silently clobbers the still-usable undo
+//   point from an earlier revert. The confirm must say so before the user commits to it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('revertToCheckpoint no longer warns that an existing undo point gets replaced (C-8.2)',
+    /_revertUndoWs \? '\\n\\n.*replaces it.*no longer be recoverable/.test(APP)
+      ? [] : ['the confirm body lost its stacked-revert / single-slot-undo warning']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -2596,7 +2596,8 @@ async function revertToCheckpoint(en, wsId) {
   const choice = await modalChoice({
     title: 'Revert code to this prompt?',
     body: (busy ? '⚠ Claude is still working in this project — reverting now can clobber its in-flight edits and leave a half-written tree. It’s safest to wait for the turn to finish.\n\n' : '')
-      + 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.',
+      + 'Rolls your working files back to how they were going into this prompt' + (name && name !== '—' ? ' (“' + name + '”)' : '') + '. Working tree only — it does NOT undo any commits made since, and files added after this point are removed. You can undo it right after.'
+      + (_revertUndoWs ? '\n\n⚠ There’s already an undo point from a previous revert — it’s a single slot, so reverting now replaces it, and that earlier state will no longer be recoverable.' : ''),
     choices: [
       { key: 'revert', label: busy ? 'Revert anyway' : 'Revert working files', sub: 'Roll the code back to this point. An "Undo last revert" appears after.', danger: true },
       { key: 'cancel', label: 'Cancel' },
