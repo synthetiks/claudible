@@ -683,8 +683,11 @@ ok('main.js: checkpoint restore is refused at the DESTRUCTIVE call site, not by 
   && /_ckptAllowed\(ws\)\) return resolve\(\{ ok: false[\s\S]{0,200}?_ckptRun\(ws, 'restore undo'\)/.test(MAIN));
 ok('main.js: an adopted project\'s GitHub link is re-derived from the folder\'s live origin',
   /ws\.adopted && typeof r\.origin === 'string'/.test(MAIN));
-ok('app.js: both delete affordances share ONE prompt (they can never disagree about the folder)',
-  (APP.match(/confirm\(deleteWsPrompt\(w\)\)/g) || []).length === 2);
+ok('app.js: both delete affordances share ONE dialog (they can never disagree about the folder)',
+  // C-3.6 replaced the native confirm(deleteWsPrompt(w)) pair with the in-app modal — the invariant
+  // (one shared source of truth for what deleting this workspace means) now lives in confirmDeleteWorkspace.
+  (APP.match(/confirmDeleteWorkspace\(w\)/g) || []).length === 2
+  && /async function confirmDeleteWorkspace\(w\)/.test(APP));
 ok('diff.sh: reports the folder\'s own origin so a stale cached link can self-heal',
   /origin="\$\(git remote get-url origin/.test(DIFF_SH));
 ok('app.js: Project History lists every workspace (no kind filter)',
