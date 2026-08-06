@@ -687,6 +687,10 @@
        and the timestamp/author/out-of-sync cluster can never be squished. Same pattern as .ws-chip's .ws-name. */
     .sess-prev{flex:1;min-width:0;font-size:var(--fs-sm);color:var(--ink);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .sess.sess-draft .sess-prev{color:var(--warn)}   /* draft keeps an AT-REST signal now that the meta line is hover-only */
+    /* C-4.5: a diverged session with no confirmed name yet (sessTitle returned null) — muted + italic, same
+       --ink-faint the skeleton rows and .sess-empty already use for "not a real answer yet", so it reads as
+       "still loading" and never as a genuine (possibly wrong) title. */
+    .sess-prev.sess-title-pending{color:var(--ink-faint);font-style:italic}
     /* ONE-LINE ROWS: title (flex:1, ellipsis) then a flex:none cluster [timestamp · chips · live pill]. The
        cluster reserves its real width; the title yields to it, so the two never collide on any combination of
        author + out-of-sync + live badge. Absolute positioning + fixed reserves (the old squish) are gone. */

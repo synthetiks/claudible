@@ -3208,6 +3208,12 @@ function sessTitle(s, wsId) {   // wsId: the row's workspace when it ISN'T the a
   if (local && (!shared || localTs >= sharedTs)) return local;
   if (shared) return shared;
   if (local) return local;
+  // C-4.5: a session flagged diverged has no CONFIRMED name yet — the warm cache can be exactly the
+  // name that was true before the fork (renamed on the OTHER machine since). Painting it risks the
+  // owners' rule (never show a name that isn't confirmed for a session known to have changed), so skip
+  // the cache and return null instead — renderSessionRow shows a neutral loading state until the live
+  // poll above (remoteTitles) lands the real, reconciled name.
+  if (s.diverged) return null;
   // WARM CACHE: pollTitles persists the last-known shared names per workspace. remoteTitles is empty for the first
   // ~2s after open (the branch read is async), so without this a collaborator/cross-machine rename flashes its
   // auto-preview then snaps to the real name. The cache lets that name paint instantly; the live poll reconciles it.
@@ -4037,7 +4043,9 @@ function renderSessionRow(s) {
   row.className = 'sess' + (s.id === activeSession ? ' active' : '')
     + (sessionBusyInTab(s.id) ? ' busy' : '') + (sessionNeedsAttention(s.id) ? ' sess-done' : '');   // busy dot + done-pulse survive a full rebuild (they live on the tab record)
   row.dataset.id = s.id; row.setAttribute('role', 'button'); row.tabIndex = 0;
-  const p = document.createElement('div'); p.className = 'sess-prev'; p.textContent = sessTitle(s);
+  const p = document.createElement('div'); p.className = 'sess-prev'; const _st = sessTitle(s);
+  if (_st == null) { p.classList.add('sess-title-pending'); p.textContent = 'loading…'; }   // C-4.5: diverged, no confirmed name yet — a muted placeholder (sess-skel's shimmer color) beats painting the stale cache
+  else p.textContent = _st;
   const m = document.createElement('div'); m.className = 'sess-meta';
   const mt = document.createElement('span'); mt.className = 'sess-meta-t';
   mt.textContent = relTime(s.used || s.mtime);   // last-USED time (newest content ts / activation stamp) — raw file mtime lies for collaborator imports (security-aged to 2000) and never moves when a session is merely opened to read

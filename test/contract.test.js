@@ -3032,5 +3032,31 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /const APPDIR_WSL = runner\.appDirGuest\(\);/.test(MAIN) ? ['APPDIR_WSL is declared const'] : []);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 91. C-4.5 — OWNERS' RULE: NEVER PAINT A NAME THAT ISN'T CONFIRMED FOR A SESSION KNOWN TO HAVE CHANGED.
+//   sessTitle's warm-cache fallback (for the ~2s before pollTitles lands) held the last-known shared name — but
+//   for a session already flagged s.diverged, that cached name can be exactly the one true BEFORE the fork on
+//   the other machine. sessTitle must check s.diverged before consulting the cache and return null instead, so
+//   renderSessionRow paints a neutral "loading…" state (not a possibly-wrong name) until the live poll (remote-
+//   Titles) reconciles it. Undiverged sessions must keep painting the cache instantly — the common path must not
+//   pay for this.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const sessTitleBody = (APP.match(/function sessTitle\(s, wsId\) \{[\s\S]*?\n\}/) || [''])[0];
+  none('sessTitle no longer checks s.diverged before falling back to remoteTitlesCache (C-4.5)',
+    [sessTitleBody ? '' : 'sessTitle(s, wsId) not found',
+     /if \(s\.diverged\) return null;/.test(sessTitleBody) ? '' : 'sessTitle does not return null for a diverged session',
+     (() => {
+       const divIdx = sessTitleBody.indexOf('if (s.diverged) return null;');
+       const cacheIdx = sessTitleBody.indexOf('remoteTitlesCache');
+       return (divIdx !== -1 && cacheIdx !== -1 && divIdx < cacheIdx) ? '' : 'the diverged check no longer runs BEFORE the remoteTitlesCache fallback';
+     })()].filter(Boolean));
+  none('renderSessionRow paints straight through a null (diverged, unconfirmed) title again (C-4.5)',
+    [/const _st = sessTitle\(s\);/.test(APP) ? '' : 'renderSessionRow no longer captures sessTitle(s) before deciding how to paint it',
+     /if \(_st == null\) \{ p\.classList\.add\('sess-title-pending'\); p\.textContent = 'loading…'; \}/.test(APP) ? '' : 'renderSessionRow no longer shows a muted loading placeholder for a null title'].filter(Boolean));
+  none('index.html lost the muted styling for a pending (unconfirmed) session title (C-4.5)',
+    /\.sess-prev\.sess-title-pending\{color:var\(--ink-faint\)/.test(HTML) ? [] : ['no .sess-prev.sess-title-pending rule']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
