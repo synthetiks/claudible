@@ -2911,11 +2911,14 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /if \(want === tunnelUp\) \{ syncShareRoLock\(\)/.test(APP) ? '' : 'the already-in-state early return does not sync the lock',
      (APP.match(/syncShareRoLock\(\)/g) || []).length >= 4 ? '' : 'syncShareRoLock is not called from every exit + the tunnel-down/up handlers'].filter(Boolean));
   // (d) B16/B17 — 'new' was the one resolution with no dedupe, so an empty project minted a tab per click and
-  //     the duplicate spawn triggered Claude Code's selection prompt, which eats every space.
-  none('an empty project can mint a fresh tab per click again (B16 → the spacebar bug)',
-    [/function dedupeBlankDraft\(wsId\)/.test(APP) ? '' : 'dedupeBlankDraft is gone',
-     /rec\.session === 'new' && rec\.autoDraft && !rec\.busy/.test(APP) ? '' : 'the blank-draft dedupe no longer requires an UNTOUCHED draft',
-     (APP.match(/dedupeBlankDraft\(id\)/g) || []).length >= 2 ? '' : 'not both switchWorkspace branches dedupe the ‘new’ case'].filter(Boolean));
+  //     the duplicate spawn triggered Claude Code's selection prompt, which eats every space. C-4.4 (owners'
+  //     decision, 2026-08-06) retired the auto-spawn itself — dedupeBlankDraft/autoDraft are gone, replaced by
+  //     parkedTabFor, which mints a tab that never gets a pty at all until an explicit Create/Retry click. The
+  //     same repeated-click pile-up risk still applies to PARKED tabs, so the dedupe discipline survives intact.
+  none('an empty project can mint a fresh tab per click again (B16 → the spacebar bug; C-4.4 retired the auto-spawn it guarded)',
+    [/function parkedTabFor\(wsId, reason\)/.test(APP) ? '' : 'parkedTabFor is gone',
+     /rec\.wsId === wsId && rec\.parked && !rec\.busy/.test(APP) ? '' : 'the parked-tab dedupe no longer requires an untouched, non-busy parked tab',
+     (APP.match(/parkedTabFor\(id,/g) || []).length >= 3 ? '' : 'not all three switchWorkspace branches dedupe the ‘new’ case through parkedTabFor'].filter(Boolean));
   // (e) B18 — `switch` is the only guest frame that changes host state; it must respect the privacy pause,
   //     exactly as input and paste already do.
   none('a guest can move the host’s workspace during the privacy pause again (B18)',
@@ -3167,6 +3170,67 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('openWsSessionInTab\'s cross-project already-open branch no longer toasts (C-4.6)',
     /if \(rec\.kind !== 'live' && rec\.wsId === w\.id && rec\.session === s\.id\) \{ setActiveTab\(rec\.tabId\); toast\('That session is already open — switched to its tab'\); return; \}/.test(APP)
       ? [] : ['openWsSessionInTab focuses the existing tab silently again']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 96. C-4.4 — THE STRUCTURAL FIX (owners' decision, 2026-08-06): auto-creating sessions is removed entirely.
+//   The five-times-patched phantom-draft family (dedupeBlankDraft/autoDraft + the onSyncChanged/boot "reconcile
+//   a phantom draft once sessions land" dance) is retired outright rather than patched again. In its place: a
+//   tab whose target project resolves to 'new' is PARKED (session:'new', parked:true) and shows a create
+//   overlay — never a spawned pty — until an explicit Create click (which prompts for a name first, reusing
+//   promptNewSession's modalPrompt conventions). A session list fetch failure (info.unknown) parks the SAME
+//   way but shows a distinct retry overlay that must never read as "this project is empty".
+// ---------------------------------------------------------------------------------------------------------
+{
+  const bodyOf = (name) => (APP.match(new RegExp('function ' + name + '\\([\\s\\S]*?(?=\\nfunction |\\nlet |\\nconst )')) || [''])[0];
+  const swBody = bodyOf('switchWorkspace');
+  // (a) THE PIN: no automatic newBlankTab('new') remains reachable from switchWorkspace. The real kill-switch
+  //     is structural — sync() never starts a pty for a parked tab, no matter which caller reaches it — plus
+  //     every branch that used to resolve 'new' now explicitly routes it through parkedTabFor before any
+  //     newBlankTab call, so newBlankTab is only ever reached with a CONFIRMED real session id.
+  none('sync() can auto-spawn a parked tab again (C-4.4\'s real kill-switch)',
+    /if \(!t\.started && !t\.parked\) \{ t\.started = true; claudible\.tabOpen/.test(APP)
+      ? [] : ['sync() no longer gates the first pty spawn on !t.parked']);
+  none('a switchWorkspace branch stopped gating the empty/unreachable resolution before spawning (C-4.4)',
+    [swBody ? '' : 'switchWorkspace(id, targetSession) not found',
+     (swBody.match(/=== 'new'\) \{/g) || []).length >= 3 ? '' : 'fewer than 3 explicit empty-case gates in switchWorkspace (busy / normal / kept)',
+     (swBody.match(/parkedTabFor\(id,/g) || []).length >= 3 ? '' : 'switchWorkspace does not route every empty-case branch through parkedTabFor'].filter(Boolean));
+  // The normal (idle-tab) branch is the one that used to commit STRAIGHT to a respawn regardless of `sess` —
+  // its `if (sess === 'new')` early-return must sit BEFORE the `await claudible.workspaceOpen(id, sess)` call,
+  // or an empty project reached through this branch still auto-spawns exactly as it did pre-C-4.4.
+  none('the normal switchWorkspace branch can reach workspaceOpen with sess===\'new\' again (C-4.4 auto-create)',
+    (() => {
+      const gateIdx = swBody.indexOf("if (sess === 'new') {");
+      const openIdx = swBody.indexOf('await claudible.workspaceOpen(id, sess)');
+      return (gateIdx !== -1 && openIdx !== -1 && gateIdx < openIdx) ? [] : ['the sess===\'new\' gate is missing, or does not run before workspaceOpen(id, sess)'];
+    })());
+  // (b) THE OVERLAY ELEMENT EXISTS: styled in index.html, built (as a per-tab sibling of the xterm mount —
+  //     never a replacement for it) by paintCreateOverlay in app.js.
+  none('the .create-ov overlay is gone from index.html (C-4.4)',
+    [/\.create-ov\{/.test(HTML) ? '' : 'no .create-ov base rule',
+     /\.create-ov\.show\{display:flex\}/.test(HTML) ? '' : 'no .create-ov.show rule',
+     /\.create-ov-btn\{/.test(HTML) ? '' : 'no .create-ov-btn rule'].filter(Boolean));
+  none('paintCreateOverlay stopped building/toggling the .create-ov element (C-4.4)',
+    [/function paintCreateOverlay\(t\)/.test(APP) ? '' : 'paintCreateOverlay is gone',
+     /ov\.className = 'create-ov'/.test(APP) ? '' : 'paintCreateOverlay no longer creates a .create-ov element',
+     /if \(!t\.parked\) \{ if \(ov\) ov\.classList\.remove\('show'\); return; \}/.test(APP) ? '' : 'paintCreateOverlay no longer hides the overlay for a non-parked tab'].filter(Boolean));
+  // (c) THE CREATE BUTTON PROMPTS FOR A NAME, before anything is created — reusing the same modalPrompt
+  //     "Name this session" convention as the manage-menu's "+ New Session" (promptNewSession).
+  none('createSessionFromOverlay stopped prompting for a session name before creating (C-4.4)',
+    /async function createSessionFromOverlay\(t\)[\s\S]{0,400}?modalPrompt\(\{ title: 'Name this session'/.test(APP)
+      ? [] : ['createSessionFromOverlay no longer calls modalPrompt before commitParkedTab']);
+  none('createSessionFromOverlay can create on a Cancel/Esc (name === null) again (C-4.4)',
+    /if \(name === null\) return;[\s\S]{0,300}?commitParkedTab\(t2, 'new', name \|\| ''\)/.test(APP)
+      ? [] : ['createSessionFromOverlay no longer bails out before commitParkedTab on a null (cancelled) name']);
+  // (d) THE ERROR PATH STAYS DISTINCT: an unreachable session list must never render as — or offer — "Create".
+  none('the unknown-sessions overlay can render as (or act like) the create overlay again (C-4.4)',
+    [/const unknown = \(t\.parkReason === 'unknown'\);/.test(APP) ? '' : 'paintCreateOverlay no longer branches on parkReason',
+     /if \(cur\.parkReason === 'unknown'\) retryParkedTab\(cur\); else createSessionFromOverlay\(cur\);/.test(APP) ? '' : 'the overlay button no longer routes unknown → Retry / empty → Create separately',
+     /async function retryParkedTab\(t\)/.test(APP) ? '' : 'retryParkedTab is gone'].filter(Boolean));
+  // (e) CLEANUP: the retired mechanism is actually gone, not just unreferenced from switchWorkspace.
+  none('the retired autoDraft/dedupeBlankDraft mechanism crept back in (C-4.4 said it could become dead)',
+    /\bautoDraft\b/.test(APP.replace(/\/\/[^\n]*/g, '')) || /function dedupeBlankDraft/.test(APP)
+      ? ['autoDraft or dedupeBlankDraft is referenced again outside comments'] : []);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

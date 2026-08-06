@@ -358,7 +358,10 @@ ok('app.js: switchWorkspace rolls the tab record back when main keeps the tab',
   && /if \(kept\) \{[\s\S]{0,700}?Object\.assign\(t, prev\);[\s\S]{0,600}?newBlankTab\(id,/.test(APP_NC));   // comment-stripped + widened: the kept branch gained a dedupe (and its WHY) between the restore and the open — the ORDER this check pins is unchanged
 ok('app.js: …and only resets the terminal for a switch that actually re-pointed the pty (a failed switch rolls the GLOBALS back too)',
   /if \(failed\) \{ rollBack\(\);[\s\S]{0,120}?return; \}/.test(APP)
-  && APP.indexOf('const r = await claudible.workspaceOpen(id, sess);') < APP.indexOf('t.term.reset(); resetStats(t);')
+  // scoped from the workspaceOpen call, not a blind first-occurrence indexOf: C-4.4's commitParkedTab (defined
+  // earlier in the file, for the unrelated create-overlay path) reuses the identical 'term.reset(); resetStats(t)'
+  // text, which would otherwise win a bare indexOf() and falsely fail this check.
+  && (() => { const i0 = APP.indexOf('const r = await claudible.workspaceOpen(id, sess);'); return i0 > -1 && i0 < APP.indexOf('t.term.reset(); resetStats(t);', i0); })()
   && /const rollBack = \(\) => \{[\s\S]{0,400}?activeWsId = prev\.wsId;/.test(APP));
 ok('main.js: resolveDiverged refuses to overwrite a LIVE session\'s transcript',
   /if \(sid === liveSessionId\(\)\) return resolve\(\{ ok: false, error: 'live' \}\);/.test(MAIN));

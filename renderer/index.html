@@ -346,6 +346,24 @@
       backdrop-filter:blur(2px);z-index:5;pointer-events:none}
     .live-ov.show{display:flex}
     .live-ov.bad{color:#e0a0a0}
+    /* C-4.4 — create-a-session overlay: a sibling of the xterm mount inside the SAME .term-host (the terminal
+       element is never unmounted/recreated — see paintCreateOverlay). Shown whenever this tab is `parked`: the
+       project it's pointed at has no sessions to open (or, .err, its list couldn't even be fetched — a DISTINCT
+       message + Retry, never dressed up as "empty"). Blurred/dimmed like the boot .live-ov above it, but this
+       one takes clicks — the single button IS the create action. */
+    .create-ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;
+      padding:0 28px;z-index:6;background:rgba(7,8,9,.86);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+    .create-ov.show{display:flex}
+    .create-ov-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
+    .create-ov-msg{margin:0;max-width:320px;font-size:var(--fs-sm);line-height:1.55;color:var(--ink-faint,#9097a1)}
+    .create-ov.err .create-ov-msg{color:#e0a0a0}
+    .create-ov-btn{padding:13px 22px;border-radius:11px;font-size:var(--fs-md);letter-spacing:.01em;
+      border:1px solid var(--hairline);color:var(--ink);cursor:pointer;
+      background:linear-gradient(180deg,#1c2028,#12151a);box-shadow:inset 0 1px 0 var(--sheen),0 10px 30px -12px #000;
+      transition:all var(--dur-base) ease}
+    .create-ov-btn:hover{border-color:rgba(255,255,255,.26);box-shadow:inset 0 1px 0 var(--sheen),0 12px 34px -10px rgba(150,180,220,.30)}
+    .create-ov-btn:active{transform:translateY(1px)}
+    .create-ov.err .create-ov-btn{border-color:rgba(229,86,75,.4);color:#e9b3ad}
     /* "who's typing" — floats on a live-shared terminal's corner so the HOST can see which guest is driving.
        Same shape as the guest page's banner (share/guest.html): a readable sentence on a soft scrim, NOT a pill
        badge, so the two surfaces read as one product. Identity stays BLUE across the app (matches

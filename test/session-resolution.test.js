@@ -75,28 +75,29 @@ function mk(remembered, warmList, fetchImpl) {
     eq('the TOP OF THE ORDER wins, not raw list position (same helper as every render path)', await fn('W'), 'B'); }
 
   // ---- the phantom-draft ROOT fix + safety net (grep pins over the shipped renderer) ----
-  // Fix A lives in main.js; the renderer half is the auto-draft marker + the onSyncChanged reconcile that can
-  // NEVER hijack a deliberate + New or a typed draft.
-  ok('tab records default autoDraft:false', /session: session \|\| '', altFrac: 0, autoDraft: false,/.test(APP));
-  ok('any real keystroke clears autoDraft (a typed draft becomes the user\'s, un-reconcilable)',
-    /if \(r && r\.autoDraft\) r\.autoDraft = false; claudible\.ptyInput/.test(APP));
-  ok('adopting a real session id clears autoDraft', /t\.session = s\.sessionId;[\s\S]{0,120}?t\.autoDraft = false;/.test(APP));
-  ok('auto-draft is marked ONLY when the resolver returned \'new\' (a real id is never an auto-draft)',
-    (APP.match(/autoDraft = \(want === 'new'\)/g) || []).length >= 2 && /t\.autoDraft = \(sess === 'new'\)/.test(APP));
-  ok('onSyncChanged reconciles ONLY an active, autoDraft, still-\'new\', non-busy tab, and re-checks after the async resolve',
-    /at\.session === 'new' && at\.autoDraft && !at\.busy/.test(APP)
-    && /want && want !== 'new' && t2 && t2 === AT\(\) && t2\.session === 'new' && t2\.autoDraft && !t2\.busy/.test(APP)
-    && /openSession\(want, sessIndex\[want\]/.test(APP));
+  // Fix A lives in main.js. C-4.4 (owners' decision, 2026-08-06) retired the renderer half's auto-draft-and-
+  // reconcile dance entirely: a project that resolves 'new' is PARKED — no pty ever starts for it — and shows
+  // a create/retry overlay until an explicit Create/Retry click (or a session CONFIRMED to already exist).
+  // These pins now check that mechanism instead of the retired autoDraft one.
+  ok('tab records default parked:false', /session: session \|\| '', altFrac: 0, parked: false, parkReason: '',/.test(APP));
+  ok('commitParkedTab is the only place a parked tab turns real (id===\'new\' spawns fresh, any other id opens in place)',
+    /function commitParkedTab\(t, id, name\)/.test(APP) && /t\.parked = false; t\.parkReason = '';/.test(APP));
+  ok('onStatus stopped clearing a retired autoDraft flag when a real session id lands (nothing to clear anymore)',
+    !/t\.autoDraft = false;/.test(APP));
+  ok('onSyncChanged reconciles ONLY an active, parked, still-\'new\', non-busy tab, and re-checks after the async resolve',
+    /at\.session === 'new' && at\.parked && !at\.busy/.test(APP)
+    && /t2\.session === 'new' && t2\.parked && !t2\.busy/.test(APP)
+    && /commitParkedTab\(t2, want, sessIndex\[want\]/.test(APP));
 
-  // ---- the BOOT phantom-draft fix: the launch tab ('' placeholder, never resolved) is marked auto-draft and
-  // reconciled ONCE after the workspace binds — mirroring onSyncChanged but gated on session==='' (only ever the
-  // boot tab), since no sync:changed event fires for an already-synced project on restart.
-  ok('the boot tab is marked auto-draft so a restored, already-synced project is reconcilable (no boot phantom draft)',
-    /tabs\.get\('main'\)\.autoDraft = true;/.test(APP));
-  ok('boot resolves the restored project\'s real session in place instead of leaving a blank \'\' draft',
-    /await refreshWorkspaces\(\);[\s\S]{0,600}?want = await sessionToOpenFor\(at\.wsId\)/.test(APP)
-    && /want && want !== 'new' && t2 && t2 === AT\(\) && t2\.session === '' && t2\.autoDraft && !t2\.busy/.test(APP)
-    && /await openSession\(want, sessIndex\[want\] \? sessTitle\(sessIndex\[want\]\) : '', \{ inPlace: true \}\)/.test(APP));
+  // ---- the BOOT fix: the launch tab is parked — no pty starts — until the restored workspace's real session
+  // (or its confirmed absence) is known, resolved ONCE right after the workspace binds. Mirrors onSyncChanged's
+  // discipline (re-check after the async resolve, never hijack a tab the user has since acted on).
+  ok('the boot tab is parked so a restored, already-synced project never guesses a session before it is known',
+    /mt\.session = 'new'; mt\.parked = true; mt\.parkReason = 'empty';/.test(APP));
+  ok('boot resolves the restored project\'s real session in place instead of leaving a blank draft',
+    /await refreshWorkspaces\(\);[\s\S]{0,600}?want = await sessionToOpenFor\(at\.wsId, null, info\)/.test(APP)
+    && /t2\.session === 'new' && t2\.parked && !t2\.busy/.test(APP)
+    && /commitParkedTab\(t2, want, sessIndex\[want\] \? sessTitle\(sessIndex\[want\]\) : ''\)/.test(APP));
 
   console.log(`session-resolution: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

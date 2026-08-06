@@ -210,9 +210,14 @@ function makeTab(tabId, wsId, session, opts) {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
       if (d) claudible.liveInput(tabId, d);             // co-drive: keystrokes AND scroll bytes → the peer's terminal (shared view, shared scroll)
     });
-  } else t.onData((d) => { const r = tabs.get(tabId); if (r && r.autoDraft) r.autoDraft = false; claudible.ptyInput(tabId, d); });   // keystrokes → THIS tab's pty. Any real input makes an auto-opened draft the USER's — onSyncChanged must never reconcile it out from under them.
+  } else t.onData((d) => { claudible.ptyInput(tabId, d); });   // keystrokes → THIS tab's pty. A PARKED tab (see C-4.4) has none yet — main's pty:input no-ops on an unknown tabId, so a stray keystroke here is silently swallowed, never a phantom spawn.
   t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
-  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0, autoDraft: false,
+  // parked: true for a tab sitting on an empty (or unreachable-list) project, showing the create/retry overlay
+  // instead of a pty. C-4.4's structural fix — set ONLY by parkedTabFor/boot, cleared ONLY by commitParkedTab,
+  // and never by anything auto-triggering: sync()'s first-start guard reads it, so a parked tab spawns nothing
+  // until an explicit Create/Retry click flips it off. parkReason ('empty' | 'unknown') decides which overlay
+  // renders — 'unknown' (the session list couldn't be fetched) must never read as "this project is empty".
+  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0, parked: false, parkReason: '',
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, curCtxPct: null, curSessionLabel: '',
     agents: new Map(), workflows: [], agentTok: 0,
     liveReadOnly: false, hostCols: 120, hostRows: 32, liveState: '', liveCost: null, liveTokens: null, hostName: '' };
@@ -253,8 +258,8 @@ function sync() {
     const rows = d.rows > 6 ? d.rows - 1 : d.rows;
     const changed = (t.term.cols !== cols || t.term.rows !== rows);
     if (changed) t.term.resize(cols, rows);
-    if (!t.started) { t.started = true; claudible.tabOpen(t.tabId, t.wsId, t.session); claudible.ptyStart(t.tabId, cols, rows); } // spawn at the EXACT fitted size
-    else if (changed) claudible.ptyResize(t.tabId, cols, rows);   // a pure tab-switch (no size change) is now a no-op resize → one clean repaint, no redundant pty:resize IPC
+    if (!t.started && !t.parked) { t.started = true; claudible.tabOpen(t.tabId, t.wsId, t.session); claudible.ptyStart(t.tabId, cols, rows); } // spawn at the EXACT fitted size — NEVER for a parked tab (C-4.4): commitParkedTab clears `parked` and calls sync() again to do this exact first spawn once the user actually asks for one
+    else if (changed && !t.parked) claudible.ptyResize(t.tabId, cols, rows);   // a pure tab-switch (no size change) is now a no-op resize → one clean repaint, no redundant pty:resize IPC. A parked tab has no pty to resize either — this just fits the (started:false) xterm sitting behind the overlay.
     updateScrollbar();
   } catch {}
 }
@@ -375,6 +380,7 @@ function setActiveTab(tabId) {
   try { if (!typingElsewhere()) rec.term.focus(); } catch {}   // focus the terminal SYNCHRONOUSLY (guarded: never steal from an open modal/text field). The deferred focus below alone leaves a window where the just-clicked sidebar row (role=button, tabIndex=0) still holds DOM focus; xterm 5.5.0 delivers Space ONLY via the native keypress event, which never fires if that keydown landed on the row instead of the textarea — so a stray Space silently scrolls the sidebar rather than typing. Focusing here closes that window; the focusTermSoon stays as a layout-timing fallback.
   if (rec.kind !== 'live') { try { claudible.tabForeground(tabId); } catch {} }   // guests + main's active-workspace follow the foreground tab — a live tab must NOT (it would hijack your own outgoing mirror)
   sync();                                          // fit the now-visible tab + (re)start/resize its pty (or fit the live mirror)
+  paintCreateOverlay(rec);                          // C-4.4: show/hide the create-a-session overlay for THIS tab — a no-op unless rec.parked
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
   try { rec.term.refresh(0, rec.term.rows - 1); } catch {}   // force a repaint of the freshly-shown (was-hidden) buffer
   if (rec.kind === 'live') repaintLiveTracker(rec); else repaintTracker(rec);    // project this tab's tracker into #trk-*
@@ -632,7 +638,6 @@ claudible.onStatus((s) => {
     const wasNew = (t.session === 'new');   // adopting a real id FROM an explicit 'new' = a genuine user-created session (keep its live·unsaved row until it saves). Adopting one from ''/another id = a switch/resume → NOT born-new, so it can never flash a phantom row.
     t.session = s.sessionId;
     t.bornNew = wasNew;
-    t.autoDraft = false;                    // it has a real session now — never a reconcile target
     if (t.tabId === activeTabId) activeSession = s.sessionId;
     if (t.pendingTitle) {                                       // a name chosen at "+ New Session" → make it stick now that the session has a real id (mirrors the rename flow)
       const nm = t.pendingTitle; t.pendingTitle = null;
@@ -5785,46 +5790,127 @@ async function sessionToOpenFor(wsId, targetSession, out) {
   const top = saved.length ? orderedSessionsFor(wsId, saved)[0] : null;                                                        // same ordering helper as every render path
   return (top && top.id) || 'new';
 }
-// A draft minted because we could not LOOK is not the same as a draft minted because the project is empty, and
-// until now they were indistinguishable on screen — which is why a phantom "New session" over a project full of
-// work reads as data loss. Two things make it honest: mark the tab autoDraft so the existing reconcilers
-// (onSyncChanged, the boot restore) re-point it the moment real sessions land, and say so, once per run.
-// Per the plan's own honest limitation: a LOCAL, non-shared project with the backend down has no in-session
-// recovery path — onSyncChanged only fires for repo-backed sync-enabled projects — so for that case the message
-// IS the fix, not a consolation.
+// noteUnknownSessions says (once per run) that we could NOT confirm this project is empty — the fetch itself
+// failed, so 'new' here is a guess, not a fact. parkedTabFor/paintCreateOverlay below key off the SAME
+// distinction (info.unknown) to pick the retry overlay instead of the create overlay — never the reverse.
 let _unknownSessionsToasted = false;
 function noteUnknownSessions(info) {
   if (!info || !info.unknown) return false;
   if (!_unknownSessionsToasted) {
     _unknownSessionsToasted = true;
-    try { toast('Couldn’t read this project’s sessions — opened a new draft instead. Your existing sessions are still there.'); } catch (e) {}
+    try { toast('Couldn’t read this project’s sessions — showing a retry screen instead. Your existing sessions are still there.'); } catch (e) {}
   }
   return true;
 }
-// B16/B17 — dedupe the 'new' case, which was the ONE path with no dedupe at all.
-//
-// Both switchWorkspace branches below dedupe against an existing tab only when the resolver returned a REAL
-// session id. A project with no transcripts on disk — a freshly imported empty repo, most obviously — always
-// resolves to 'new', so it could never match, and every click minted another tab. Three "empty" states hold it
-// there: a draft is never remembered (rememberLastSession refuses 'new'), Claude Code writes no .jsonl until a
-// real user turn, and the runner finds nothing to resume so it spawns a fresh uuid. Observed: 3 of 7 tabs piled
-// onto one empty project.
-//
-// It is not only untidy. The tab cap is 8, and the DUPLICATE SPAWN this produces is what triggers Claude Code's
-// "already running or being resumed" selection prompt — the modal that eats every space (see the comment in the
-// second branch below). Closing this gate is what fixes the dead spacebar.
-//
-// Safe target = an UNTOUCHED auto-draft on the same workspace: any keystroke clears autoDraft (see the onData
-// handler near the top of this file), so we can never steal a tab the user has typed into, and we skip busy and
-// live tabs outright. This is the same predicate the sync reconcilers already trust.
-function dedupeBlankDraft(wsId) {
+// ---------------------------------------------------------------------------------------------------------
+// C-4.4 — THE STRUCTURAL FIX. Every path below used to resolve 'new' and silently open a blank draft pty
+// (B16/B17 patched the WORST symptom — duplicate spawns — without removing the auto-spawn itself). Now
+// nothing ever spawns a pty for an unresolved project: the tab is PARKED (session:'new', parked:true — see
+// makeTab/sync) and shows the create overlay, or — when the session list genuinely could not be fetched
+// (info.unknown) — the retry overlay, which must never read as "this project is empty" (C-4.4's own rule). A
+// session is born only from commitParkedTab, reached only by an explicit Create/Retry click or by a session
+// CONFIRMED to already exist (boot restore, onSyncChanged) — never automatically. This retires the whole
+// phantom-draft family: dedupeBlankDraft/autoDraft and the "reconcile a phantom draft once sessions land"
+// dance are gone — there is no pty running yet to reconcile.
+// ---------------------------------------------------------------------------------------------------------
+// Dedupe + mint a PARKED tab for wsId. Same C-4.3 discipline dedupeBlankDraft used to provide — repeated
+// clicks on the same empty/unreachable project reuse the ONE parked tab instead of piling up tabs — except
+// there is no pty to duplicate anymore, so this is tab-slot hygiene now, not the spacebar-bug guard it was.
+function parkedTabFor(wsId, reason) {
   for (const rec of tabs.values()) {
-    if (rec.kind !== 'live' && rec.wsId === wsId && rec.session === 'new' && rec.autoDraft && !rec.busy) {
-      setActiveTab(rec.tabId);
-      return true;
-    }
+    if (rec.kind !== 'live' && rec.wsId === wsId && rec.parked && !rec.busy) { rec.parkReason = reason; setActiveTab(rec.tabId); return true; }
   }
-  return false;
+  if (tabs.size >= MAX_TABS && !reclaimTabSlot()) return false;
+  const id = newTabId();
+  const rec = makeTab(id, wsId, 'new');
+  rec.parked = true; rec.parkReason = reason;
+  setActiveTab(id);                                 // sync() sees rec.parked and only fits the (blank) terminal — no tabOpen/ptyStart
+  return true;
+}
+// Per-tab "nothing to open here" overlay — a sibling of the xterm mount inside the SAME container, exactly
+// like setPtyBootOverlay's .live-ov (the terminal element is never unmounted/recreated). Repainted from
+// setActiveTab, so it always reflects whichever tab is on screen; a no-op unless that tab is parked.
+function paintCreateOverlay(t) {
+  if (!t || !t.container) return;
+  let ov = t.container.querySelector('.create-ov');
+  if (!t.parked) { if (ov) ov.classList.remove('show'); return; }
+  if (!ov) {
+    ov = document.createElement('div'); ov.className = 'create-ov';
+    const wrap = document.createElement('div'); wrap.className = 'create-ov-wrap';
+    const msg = document.createElement('p'); msg.className = 'create-ov-msg';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'create-ov-btn';
+    wrap.appendChild(msg); wrap.appendChild(btn); ov.appendChild(wrap);
+    t.container.appendChild(ov);
+    btn.addEventListener('click', () => {
+      const cur = AT(); if (!cur || !cur.parked) return;   // stale click — the view moved on since this overlay was painted
+      if (cur.parkReason === 'unknown') retryParkedTab(cur); else createSessionFromOverlay(cur);
+    });
+  }
+  const msg = ov.querySelector('.create-ov-msg'), btn = ov.querySelector('.create-ov-btn');
+  const unknown = (t.parkReason === 'unknown');
+  ov.classList.toggle('err', unknown);
+  if (unknown) {   // C-4.4: a fetch failure is NOT a confirmed-empty project — distinct message, distinct action, never "Create"
+    msg.style.display = ''; msg.textContent = 'Couldn’t read this project’s sessions — this may not actually be empty.';
+    btn.textContent = 'Retry';
+  } else {
+    msg.style.display = 'none';
+    const w = workspaces.find((x) => x.id === t.wsId);
+    const first = workspaces.length <= 1;
+    btn.textContent = first ? 'Create your first session' : ('Create a new session in ' + ((w && w.label) || 'this project'));
+  }
+  ov.classList.add('show');
+}
+// Turn a PARKED tab into a real one. id==='new' starts a brand-new session (the create-overlay button — name
+// becomes pendingTitle exactly like promptNewSession's "+ New Session"); any other id opens an EXISTING
+// session in place (boot restore / onSyncChanged / retryParkedTab, once a real session is confirmed for a
+// parked project). Either way this is the ONE place `parked` ever turns false.
+function commitParkedTab(t, id, name) {
+  t.pendingTitle = null;
+  if (id === 'new') {
+    t.session = 'new'; t.label = name || 'New session'; t.curSessionLabel = name || 'New session';
+    if (name) t.pendingTitle = name;
+    activeSession = null;
+  } else {
+    t.session = id; t.label = name || 'Session'; t.curSessionLabel = name || '';
+    activeSession = id;
+    rememberLastSession(t.wsId, id);
+  }
+  t.parked = false; t.parkReason = '';
+  paintCreateOverlay(t);
+  t.term.reset(); resetStats(t);
+  t.bootOv = true; setPtyBootOverlay(t, 'Opening ' + (t.label || t.curSessionLabel || 'session') + '…');
+  sync();                                           // t.started is still false → this IS the tab's first spawn, at its already-fitted size (same path every other fresh tab takes)
+  refreshSessions();
+  focusTermSoon(150);
+}
+let _creatingFromOverlay = false;   // modalPrompt has no singleton — mirrors newSessionPrompting's guard against a double-click stacking two dialogs
+async function createSessionFromOverlay(t) {
+  if (_creatingFromOverlay || !t || !t.parked) return;
+  _creatingFromOverlay = true;
+  try {
+    const name = await modalPrompt({ title: 'Name this session', body: 'Give it a clear name so it’s easy to find later — you can rename it anytime.', placeholder: 'e.g. auth refactor, bug #214…', ok: 'Create session' });
+    if (name === null) return;                       // Cancel/Esc → stays parked, overlay stays up
+    const t2 = tabs.get(t.tabId);
+    if (!t2 || t2 !== AT() || !t2.parked) return;     // the view moved on while the modal was open — don't resurrect a stale tab
+    commitParkedTab(t2, 'new', name || '');
+  } finally { _creatingFromOverlay = false; }
+}
+// Retry button on the "couldn't read this project's sessions" overlay: re-resolve, and either open the
+// now-confirmed real session in place or repaint as a genuinely empty project — never spawns on its own.
+async function retryParkedTab(t) {
+  if (!t || !t.parked) return;
+  const info = {};
+  let want = 'new'; try { want = await sessionToOpenFor(t.wsId, null, info); } catch (e) {}
+  const t2 = tabs.get(t.tabId);
+  if (!t2 || t2 !== AT() || !t2.parked) return;       // the view moved on while we awaited
+  if (want !== 'new') {
+    const dup = [...tabs.values()].find((r) => r.kind !== 'live' && r.tabId !== t2.tabId && r.wsId === t2.wsId && r.session === want);
+    if (dup) { setActiveTab(dup.tabId); return; }
+    commitParkedTab(t2, want, sessIndex[want] ? sessTitle(sessIndex[want]) : '');
+  } else {
+    t2.parkReason = info.unknown ? 'unknown' : 'empty';
+    paintCreateOverlay(t2);
+  }
 }
 // Switching the workspace re-points the FOREGROUND tab to that ws (main respawns its pty in the new cwd).
 // Background tabs in other workspaces keep running. (New session / + opens a fresh tab instead.)
@@ -5837,6 +5923,7 @@ async function switchWorkspace(id, targetSession) {
     setActiveTab(local.tabId); t = local;
   }
   if (!t) return;
+  const tws0 = workspaces.find((w) => w.id === id);
   // Two tabs must never be recycled by a project switch, for the same reason: main's workspace:open respawns the
   // foreground pty, and a respawn KILLS what was running in it.
   //   * BUSY — that would kill a mid-turn Claude.
@@ -5851,11 +5938,16 @@ async function switchWorkspace(id, targetSession) {
     const want = await sessionToOpenFor(id, targetSession, info);
     if (want !== 'new') {                                 // dedupe: a tab may already host it (newBlankTab never checks)
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
-    } else if (dedupeBlankDraft(id)) return;              // B16: 'new' was the ONE case with no dedupe — see the helper
-    const tws = workspaces.find((w) => w.id === id);
-    if (tws && tws.kind === 'repo' && tws.needsClone) { openAcceptInviteModal(tws); return; }   // no clone gate on the tab:open path — clone first
+    }
+    if (tws0 && tws0.kind === 'repo' && tws0.needsClone) { openAcceptInviteModal(tws0); return; }   // no clone gate on the tab:open path — clone first
     setWsExpanded(id, true);                                                  // expand it like the normal switch does, so its sessions are right there
-    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); noteUnknownSessions(info); }   // want==='new' → auto-draft (onSyncChanged may reconcile once sessions land); a real id is not
+    if (want === 'new') {                                                     // C-4.4: never auto-spawn — park a dedicated tab and show the overlay instead
+      if (parkedTabFor(id, info.unknown ? 'unknown' : 'empty')) noteUnknownSessions(info);
+      else if (t.busy) toast('That session is still running — finish it or close a tab before switching');
+      else toast('This tab is live-shared — close a tab to open that project beside it');
+      return;
+    }
+    if (newBlankTab(id, want)) noteUnknownSessions(info);
     else if (t.busy) toast('That session is still running — finish it or close a tab before switching');
     else toast('This tab is live-shared — close a tab to open that project beside it');
     return;
@@ -5876,16 +5968,21 @@ async function switchWorkspace(id, targetSession) {
   if (sess !== 'new') {   // always a real id or 'new' now — the '' that used to skip this gate cannot occur
     for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === sess) { setActiveTab(rec.tabId); return; }
   }
+  // C-4.4: an empty (or unreachable-list) project never auto-spawns on the CURRENT tab either — park a
+  // dedicated tab and leave this one exactly as it was, same treatment the busy/live-shared branch gives it.
+  if (sess === 'new') {
+    if (tws0 && tws0.kind === 'repo' && tws0.needsClone) { openAcceptInviteModal(tws0); return; }
+    setWsExpanded(id, true);
+    if (parkedTabFor(id, nfo.unknown ? 'unknown' : 'empty')) noteUnknownSessions(nfo);
+    else toast('Tab limit reached (' + MAX_TABS + ') — close a tab first');
+    return;
+  }
   // The sidebar is repainted OPTIMISTICALLY (that's what keeps the switch flicker-free), so remember what this tab
   // actually held: main's rec.busy is authoritative and can refuse the re-point in a race the guards above can't see.
   const prev = { wsId: t.wsId, session: t.session, label: t.label, curSessionLabel: t.curSessionLabel, pendingTitle: t.pendingTitle };
-  activeWsId = id; t.wsId = id; t.session = sess; t.pendingTitle = null; t.label = (sess === 'new') ? 'New session' : '';   // switching ws drops a stale pending name (typed for a new session in the OLD ws) so it can't be published onto a session in the NEW ws
+  activeWsId = id; t.wsId = id; t.session = sess; t.pendingTitle = null; t.label = '';   // switching ws drops a stale pending name (typed for a new session in the OLD ws) so it can't be published onto a session in the NEW ws
   setWsExpanded(id, true);                          // switching to a workspace auto-expands it (you can collapse it again with its chevron)
-  activeSession = (sess && sess !== 'new') ? sess : null; t.curSessionLabel = (sess === 'new') ? 'New session' : '';
-  // We are committing this tab to 'new' WITHOUT having been able to look. Mark it reconcilable (the normal path
-  // never set autoDraft, so such a draft was permanent until restart) and say so once. Only on the unknown
-  // branch — a genuinely empty project keeps its existing, correct behaviour.
-  if (noteUnknownSessions(nfo) && sess === 'new') t.autoDraft = true;
+  activeSession = sess; t.curSessionLabel = '';     // sess is always a real id here — the 'new' case returned above
   lastTitlePoll = 0; titlesSig = '';               // force a fresh shared-names fetch for the new workspace
   primeSessionListForWs(id);                       // paint the new ws's rows from warm cache in the AUTHORITATIVE order (no blank gap, no reorder jump) before the live fetch lands
   renderWsChips();
@@ -5915,8 +6012,10 @@ async function switchWorkspace(id, targetSession) {
     const want = await sessionToOpenFor(id, targetSession, kinfo);
     if (want !== 'new') {   // same dedupe as the busy branch — main may have refused BECAUSE that session is live in another tab (its respawn dedupe), and duplicating it here would re-create the two-claude modal
       for (const rec of tabs.values()) if (rec.kind !== 'live' && rec.wsId === id && rec.session === want) { setActiveTab(rec.tabId); return; }
-    } else if (dedupeBlankDraft(id)) return;   // B16 — no rollBack, exactly like the real-id dedupe above: we are FOCUSING a tab that already lives in the target ws, so setActiveTab has already moved the globals there. rollBack would drag activeWsId + the sidebar back to the OLD ws while the focused tab sits in the new one — the very desync it exists to prevent. (The record restore it also does is redundant here; `Object.assign(t, prev)` already ran above.)
-    if (newBlankTab(id, want)) { const nt = AT(); if (nt) nt.autoDraft = (want === 'new'); noteUnknownSessions(kinfo); return; }    // new tab in the target ws is now active → globals correctly point there. Same resolution as the busy branch: a project with sessions must not open as a blank draft (want==='new' → auto-draft, reconcilable once sessions land)
+    }
+    if (want === 'new') {                          // C-4.4: park + overlay, never an automatic newBlankTab('new')
+      if (parkedTabFor(id, kinfo.unknown ? 'unknown' : 'empty')) { noteUnknownSessions(kinfo); return; }
+    } else if (newBlankTab(id, want)) { noteUnknownSessions(kinfo); return; }    // new tab in the target ws is now active → globals correctly point there
     toast('That session is still running — close a tab to open that project beside it');
     rollBack();                                    // no new tab either → the ACTIVE tab is still `t`, so the globals must follow it back
     return;
@@ -5924,7 +6023,6 @@ async function switchWorkspace(id, targetSession) {
   if (failed) { rollBack(); focusTermSoon(150); return; }
   t.term.reset(); resetStats(t);                   // clear the view only for a switch that ACTUALLY re-pointed this tab's pty
   t.bootOv = true; setPtyBootOverlay(t, 'Opening ' + (t.label || t.curSessionLabel || 'session') + '…');   // same blank window as a session switch — a project switch respawns the pty too
-  t.autoDraft = (sess === 'new');                // opened blank ONLY because the resolver found no session (e.g. sessions not synced to disk yet) → onSyncChanged may reconcile it once they land; a real id is never an auto-draft. Set on SUCCESS only (a rolled-back switch never marks).
   refreshSessions();
   focusTermSoon(150);
 }
@@ -6105,27 +6203,32 @@ claudible.onSyncChanged((s) => {
   // Repo Review (diff + history feed) was never wired to sync: a pulled commit/revert only showed after switching
   // away and back. Refresh it now (no-op when the drawer is closed / the card is collapsed).
   try { refreshDiff({ quiet: true }); } catch (e) {}
-  // PHANTOM-DRAFT SAFETY NET: you're sitting on an AUTO-opened "New session" draft for the project that just
-  // synced — it opened blank only because its sessions weren't on disk yet — and real sessions have now landed.
-  // Re-point that draft to the newest real session. STRICTLY gated so it can never hijack a deliberate + New or
-  // a draft you've typed into: only an `autoDraft` tab still on 'new' qualifies (any keystroke clears autoDraft,
-  // any real session id clears it), and it must still be the active, non-busy tab AFTER the async resolve.
-  // Fix A (awaiting the import in acceptInvite) makes this rare; this covers a lagged import or a collaborator's
-  // first session arriving while you wait on an empty project.
+  // PARKED-TAB SAFETY NET (C-4.4): you're sitting on the create/retry overlay for the project that just synced
+  // — parked because its sessions weren't confirmed on disk yet — and real sessions have now landed. Re-resolve
+  // and open the newest one IN PLACE (never a fresh spawn — this is opening something that already exists, not
+  // creating). STRICTLY gated so it can never hijack a tab the user has since acted on: only a still-parked tab
+  // on 'new' qualifies, and it must still be the active, non-busy tab AFTER the async resolve. Fix A (awaiting
+  // the import in acceptInvite) makes this rare; this covers a lagged import or a collaborator's first session
+  // arriving while you're looking at an empty project's overlay.
   if (s.id === activeWsId) {
     const at = AT();
-    if (at && at.kind !== 'live' && at.wsId === s.id && at.session === 'new' && at.autoDraft && !at.busy) {
+    if (at && at.kind !== 'live' && at.wsId === s.id && at.session === 'new' && at.parked && !at.busy) {
       const tabId = at.tabId;
       (async () => {
-        let want = 'new'; try { want = await sessionToOpenFor(s.id); } catch (e) {}
+        const info = {};
+        let want = 'new'; try { want = await sessionToOpenFor(s.id, null, info); } catch (e) {}
         const t2 = tabs.get(tabId);
-        if (!(want && want !== 'new' && t2 && t2 === AT() && t2.session === 'new' && t2.autoDraft && !t2.busy)) return;
-        // NEVER re-point onto a session already open in another tab — two claudes on one transcript is the
-        // dead-spacebar modal. If it's already open, leave the draft alone (the user still has a usable New tab).
-        const dup = [...tabs.values()].some((r) => r.kind !== 'live' && r.tabId !== tabId && r.wsId === s.id && r.session === want);
-        if (dup) return;
-        t2.autoDraft = false;
-        openSession(want, sessIndex[want] ? sessTitle(sessIndex[want]) : '', { inPlace: true });
+        if (!(t2 && t2 === AT() && t2.session === 'new' && t2.parked && !t2.busy)) return;
+        if (want && want !== 'new') {
+          // NEVER re-point onto a session already open in another tab — two claudes on one transcript is the
+          // dead-spacebar modal. If it's already open, leave the overlay alone (still one click away in the sidebar).
+          const dup = [...tabs.values()].some((r) => r.kind !== 'live' && r.tabId !== tabId && r.wsId === s.id && r.session === want);
+          if (dup) return;
+          commitParkedTab(t2, want, sessIndex[want] ? sessTitle(sessIndex[want]) : '');
+        } else {
+          t2.parkReason = info.unknown ? 'unknown' : 'empty';   // still nothing to open — repaint in case the reason changed
+          paintCreateOverlay(t2);
+        }
       })();
     }
   }
@@ -6230,29 +6333,33 @@ $('sidebar-close').addEventListener('click', () => openSidebar(false));
 // it touches is defined. sidebarReady is still false here, so setActiveTab skips the sidebar refresh; the
 // async loader below does workspaces + sessions once. (term resolves; the foreground pty starts fitted.)
 makeTab('main', null, '');
-// BOOT PHANTOM-DRAFT FIX: the launch tab is created with session:'' BEFORE the restored workspace is even known,
-// and — unlike switchWorkspace / acceptInvite — it NEVER runs the resolver, so a restored project full of synced-in
-// (collaborator-authored) sessions opened as a blank "New session" row. It never self-corrected because main's own
-// boot spawn deliberately refuses to auto-resume a FOREIGN session (session.sh), and no sync:changed event fires for
-// an already-synced project, so the onSyncChanged safety net can't reach it either. Mark the tab auto-draft — like
-// switchWorkspace's want==='new' tabs — then resolve once, here, after the workspace is bound.
-tabs.get('main').autoDraft = true;
+// C-4.4: the launch tab's workspace isn't even known yet — NEVER guess a session before it is. PARK it (no pty
+// starts — sync()'s `!t.parked` gate) and resolve once, below, after the workspace is bound; the create/retry
+// overlay covers the gap instead of a guessed draft. (Formerly "BOOT PHANTOM-DRAFT FIX": the launch tab spawned
+// session:'' immediately and only reconciled after the fact once real sessions were found — a restored project
+// full of synced-in collaborator sessions opened as a blank "New session" row in the meantime. Parking removes
+// the guess instead of repairing it post hoc.)
+{ const mt = tabs.get('main'); mt.session = 'new'; mt.parked = true; mt.parkReason = 'empty'; }
 setActiveTab('main');
 sidebarReady = true;   // the sessions/workspace section is now fully initialized — tab switches may refresh the sidebar
 (async () => {
   await refreshWorkspaces();                                          // binds the 'main' tab's wsId to the restored project
   const at = AT();
-  if (at && at.session === '' && at.autoDraft && at.wsId && !at.busy) {
-    let want = 'new'; try { want = await sessionToOpenFor(at.wsId); } catch (e) {}
+  if (at && at.wsId && at.session === 'new' && at.parked && !at.busy) {
+    const info = {};
+    let want = 'new'; try { want = await sessionToOpenFor(at.wsId, null, info); } catch (e) {}
     const t2 = tabs.get(at.tabId);
-    // Re-check AFTER the async resolve (a keystroke may have cleared autoDraft, making the draft the user's) and
-    // never re-point onto a session already open elsewhere (the two-claude / dead-spacebar guard) — the exact
-    // discipline of the onSyncChanged reconcile. Gated on session==='' (only ever the boot tab; every deliberate
-    // + New uses 'new'), so it can never hijack a real draft.
-    if (want && want !== 'new' && t2 && t2 === AT() && t2.session === '' && t2.autoDraft && !t2.busy
-        && ![...tabs.values()].some((r) => r.kind !== 'live' && r.tabId !== t2.tabId && r.wsId === t2.wsId && r.session === want)) {
-      t2.autoDraft = false;
-      await openSession(want, sessIndex[want] ? sessTitle(sessIndex[want]) : '', { inPlace: true });
+    // Re-check AFTER the async resolve (the view may have moved on while we awaited) and never re-point onto a
+    // session already open elsewhere (the two-claude / dead-spacebar guard) — the exact discipline the
+    // onSyncChanged reconcile above uses.
+    if (t2 && t2 === AT() && t2.session === 'new' && t2.parked && !t2.busy) {
+      if (want && want !== 'new'
+          && ![...tabs.values()].some((r) => r.kind !== 'live' && r.tabId !== t2.tabId && r.wsId === t2.wsId && r.session === want)) {
+        commitParkedTab(t2, want, sessIndex[want] ? sessTitle(sessIndex[want]) : '');
+      } else {
+        t2.parkReason = info.unknown ? 'unknown' : 'empty';
+        paintCreateOverlay(t2);
+      }
     }
   }
   refreshSessions();                                                  // load this workspace's conversations
