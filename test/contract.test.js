@@ -4064,5 +4064,60 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     })());
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 112. C-9.4 — an error must not paint an empty list over the cache. skills:list / plugins:list used to
+//   resolve() a bare [] on both a genuine "no backend" / exec-error / bad-JSON failure AND on a real,
+//   successful, empty scan — the renderer's loadSkills/loadPlugins couldn't tell those apart, so a transient
+//   IPC failure or timeout flashed "No skills/plugins found" over whatever was already listed. The fix: the
+//   main-process handlers now resolve null on every failure path (no backend, exec error, bad JSON) and a
+//   real array — including an empty one — only on an actual successful scan. The renderer keeps the last
+//   successful array in a module-level cache (_skillsCache / _pluginsCache) and, on a null result, repaints
+//   that cache instead of clobbering it; a genuinely empty successful scan still renders the empty state.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) main.js: both handlers resolve(null) — not resolve([]) — on the no-backend guard, the exec error, and
+  //   a bad-JSON parse. A partial revert (fixing one branch but not all three) still fails this.
+  none('skills:list stopped resolving null on failure (C-9.4)',
+    [/ipcMain\.handle\('skills:list', \(\) => new Promise\(\(resolve\) => \{\s*\n\s*if \(!APPDIR_WSL\) return resolve\(null\);/.test(MAIN)
+       ? '' : 'skills:list no longer resolves null when APPDIR_WSL is unset',
+     /\[claudible\] skills:list', err\.message\); return resolve\(null\); \}/.test(MAIN)
+       ? '' : 'skills:list no longer resolves null on a runScript error',
+     /skills:list[\s\S]{0,260}?catch \{ resolve\(null\); \}/.test(MAIN)
+       ? '' : 'skills:list no longer resolves null on a JSON.parse failure'].filter(Boolean));
+  none('plugins:list stopped resolving null on failure (C-9.4)',
+    [/ipcMain\.handle\('plugins:list', \(\) => new Promise\(\(resolve\) => \{\s*\n\s*if \(!APPDIR_WSL\) return resolve\(null\);/.test(MAIN)
+       ? '' : 'plugins:list no longer resolves null when APPDIR_WSL is unset',
+     /\[claudible\] plugins:list', err\.message\); return resolve\(null\); \}/.test(MAIN)
+       ? '' : 'plugins:list no longer resolves null on a runScript error',
+     /plugins:list[\s\S]{0,260}?catch \{ resolve\(null\); \}/.test(MAIN)
+       ? '' : 'plugins:list no longer resolves null on a JSON.parse failure'].filter(Boolean));
+  // (b) main.js: a real (successful) empty scan is still a bare [] — it must stay indistinguishable from any
+  //   other successful empty array, not get wrapped into some {ok:false}-shaped sentinel.
+  none('skills:list/plugins:list stopped defaulting a successful empty stdout to [] (C-9.4)',
+    (MAIN.match(/resolve\(JSON\.parse\(String\(stdout\)\.trim\(\) \|\| '\[\]'\)\);/g) || []).length >= 2
+      ? [] : ['fewer than 2 resolve(JSON.parse(...) || \'[]\') sites left in main.js for skills:list/plugins:list']);
+
+  // (c) renderer/app.js: module-level caches exist, and loadSkills/loadPlugins branch on null vs a real array
+  //   — null repaints the cache (or leaves the DOM alone if there's no cache yet); a real array (even []) both
+  //   updates the cache AND is what gets painted, so a genuine empty scan still shows the empty state.
+  none('the renderer lost its last-known-good skills/plugins caches (C-9.4)',
+    [/let _skillsCache = null;/.test(APP) ? '' : 'no module-level _skillsCache in app.js',
+     /let _pluginsCache = null;/.test(APP) ? '' : 'no module-level _pluginsCache in app.js'].filter(Boolean));
+  none('loadSkills stopped branching on a null (error) result before touching the cache (C-9.4)',
+    /async function loadSkills\(\) \{[\s\S]{0,260}?if \(list === null \|\| list === undefined\) \{[\s\S]{0,400}?if \(_skillsCache\) renderSkillsList\(_skillsCache\);[\s\S]{0,40}?return;\s*\n\s*\}/.test(APP)
+      ? [] : ['loadSkills no longer keeps painting _skillsCache when skillsList() resolves null']);
+  none('loadPlugins stopped branching on a null (error) result before touching the cache (C-9.4)',
+    /async function loadPlugins\(\) \{[\s\S]{0,260}?if \(list === null \|\| list === undefined\) \{[\s\S]{0,400}?if \(_pluginsCache\) renderPluginsList\(_pluginsCache\);[\s\S]{0,40}?return;\s*\n\s*\}/.test(APP)
+      ? [] : ['loadPlugins no longer keeps painting _pluginsCache when pluginsList() resolves null']);
+  none('loadSkills/loadPlugins stopped updating the cache on a successful (even empty) scan (C-9.4)',
+    [/_skillsCache = Array\.isArray\(list\) \? list : \[\];/.test(APP) ? '' : 'loadSkills no longer writes a successful result into _skillsCache',
+     /_pluginsCache = Array\.isArray\(list\) \? list : \[\];/.test(APP) ? '' : 'loadPlugins no longer writes a successful result into _pluginsCache'].filter(Boolean));
+  // (d) the actual painting (the old empty-state check) moved into standalone render functions, so a cache
+  //   repaint on error uses the exact same empty-vs-populated logic as a fresh successful load.
+  none('renderSkillsList/renderPluginsList (the shared paint path) are gone (C-9.4)',
+    [/function renderSkillsList\(list\) \{/.test(APP) ? '' : 'no renderSkillsList(list) function in app.js',
+     /function renderPluginsList\(list\) \{/.test(APP) ? '' : 'no renderPluginsList(list) function in app.js'].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

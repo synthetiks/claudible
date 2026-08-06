@@ -2397,9 +2397,25 @@ function openDrawer(open) {
   if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
+// C-9.4: the IPC handlers resolve null on error/timeout and a real array (possibly empty) on success — an
+// empty result from a SUCCESSFUL scan is truth and paints the empty state; null is "couldn't scan" and must
+// not clobber whatever the last successful scan showed. These caches hold that last-known-good array.
+let _skillsCache = null;
+let _pluginsCache = null;
 async function loadSkills() {
   const el = $('skills-list'); if (!el) return;
-  let list = []; try { list = await claudible.skillsList(); } catch {}
+  let list = null; try { list = await claudible.skillsList(); } catch {}
+  if (list === null || list === undefined) {
+    // error/timeout: keep painting the cache instead of the empty state — if there's no cache yet (first
+    // load failed), leave whatever's already in the DOM (typically the initial "loading" placeholder).
+    if (_skillsCache) renderSkillsList(_skillsCache);
+    return;
+  }
+  _skillsCache = Array.isArray(list) ? list : [];
+  renderSkillsList(_skillsCache);
+}
+function renderSkillsList(list) {
+  const el = $('skills-list'); if (!el) return;
   if (!Array.isArray(list) || !list.length) {
     el.innerHTML = '<div class="ext-empty">No user/project skills found. Add one at <b>~/.claude/skills/&lt;name&gt;/SKILL.md</b> or this project’s <b>.claude/skills/</b>. (Bundled &amp; plugin skills aren’t listed here.)</div>';
     return;
@@ -2426,7 +2442,16 @@ async function loadSkills() {
 }
 async function loadPlugins() {
   const el = $('plugins-list'); if (!el) return;
-  let list = []; try { list = await claudible.pluginsList(); } catch {}
+  let list = null; try { list = await claudible.pluginsList(); } catch {}
+  if (list === null || list === undefined) {
+    if (_pluginsCache) renderPluginsList(_pluginsCache);
+    return;
+  }
+  _pluginsCache = Array.isArray(list) ? list : [];
+  renderPluginsList(_pluginsCache);
+}
+function renderPluginsList(list) {
+  const el = $('plugins-list'); if (!el) return;
   if (!Array.isArray(list) || !list.length) {
     el.innerHTML = '<div class="ext-empty">No plugins installed. Add them with <b>/plugin</b> in the terminal.</div>';
     return;

@@ -2968,11 +2968,14 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
     });
 }));
 // ---- skills + plugins (manage Claude Code extensions from the cockpit) ----
+// C-9.4: null (not []) means "couldn't scan" — the renderer must keep painting its cached list rather than
+// clobber it with a false empty state. A real array — including a genuinely empty one — means the scan
+// succeeded and IS the truth.
 ipcMain.handle('skills:list', () => new Promise((resolve) => {
-  if (!APPDIR_WSL) return resolve([]);
+  if (!APPDIR_WSL) return resolve(null);
   runner.runScript('skills.sh', `list`, { ws: activeWorkspace, maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
-      if (err) { console.error('[claudible] skills:list', err.message); return resolve([]); }
-      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+      if (err) { console.error('[claudible] skills:list', err.message); return resolve(null); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve(null); }
     });
 }));
 ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
@@ -2985,11 +2988,12 @@ ipcMain.handle('skills:set', (e, payload) => new Promise((resolve) => {
       try { resolve(JSON.parse(String(stdout).trim() || '{}')); } catch { resolve({ ok: false }); }
     });
 }));
+// C-9.4: same null-vs-empty-array contract as skills:list above.
 ipcMain.handle('plugins:list', () => new Promise((resolve) => {
-  if (!APPDIR_WSL) return resolve([]);
+  if (!APPDIR_WSL) return resolve(null);
   runner.runScript('plugins.sh', `list`, { maxBuffer: 8 * 1024 * 1024, timeout: 12000 }).then(({ err, stdout }) => {
-      if (err) { console.error('[claudible] plugins:list', err.message); return resolve([]); }
-      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve([]); }
+      if (err) { console.error('[claudible] plugins:list', err.message); return resolve(null); }
+      try { resolve(JSON.parse(String(stdout).trim() || '[]')); } catch { resolve(null); }
     });
 }));
 ipcMain.handle('plugins:available', () => new Promise((resolve) => {
