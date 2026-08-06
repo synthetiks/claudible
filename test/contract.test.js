@@ -3154,5 +3154,20 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the update-check timer is not scheduled at 9000ms']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 95. C-4.6 — the two SILENT already-open jump paths get the same toast the refusal-recovery branch (main
+//   refuses the re-point with reason 'open-elsewhere') already shows. openSession's same-workspace scan and
+//   openWsSessionInTab's cross-project scan both just focused the existing tab with no feedback at all — a
+//   click that visibly did nothing if the tab you landed on wasn't obviously different from the one you left.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('openSession\'s same-workspace already-open branch no longer toasts (C-4.6)',
+    /if \(rec\.wsId === activeWsId && rec\.session === id\) \{ setActiveTab\(rec\.tabId\); toast\('That session is already open — switched to its tab'\); return; \}/.test(APP)
+      ? [] : ['openSession focuses the existing tab silently again']);
+  none('openWsSessionInTab\'s cross-project already-open branch no longer toasts (C-4.6)',
+    /if \(rec\.kind !== 'live' && rec\.wsId === w\.id && rec\.session === s\.id\) \{ setActiveTab\(rec\.tabId\); toast\('That session is already open — switched to its tab'\); return; \}/.test(APP)
+      ? [] : ['openWsSessionInTab focuses the existing tab silently again']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

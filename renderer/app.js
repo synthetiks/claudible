@@ -4812,7 +4812,7 @@ async function openSession(id, label, opts) {
   // running" abort). Callers guarantee `id` isn't already open elsewhere.
   if (id !== 'new' && !inPlace) {
     for (const rec of tabs.values()) {                // focus an existing tab for this (ws, session)
-      if (rec.wsId === activeWsId && rec.session === id) { setActiveTab(rec.tabId); return; }
+      if (rec.wsId === activeWsId && rec.session === id) { setActiveTab(rec.tabId); toast('That session is already open — switched to its tab'); return; }
     }
     if (_openingSessions.has(id)) return;             // an open for this id is mid-flight — the second click is a no-op, not a second claude
   }
@@ -4927,7 +4927,7 @@ const _wsSessFetching = new Set();   // wsIds with a fetch in flight — dedupe 
 function openWsSessionInTab(w, s) {
   if (!w || !s) return;
   for (const rec of tabs.values()) {                       // already open somewhere → just focus it
-    if (rec.kind !== 'live' && rec.wsId === w.id && rec.session === s.id) { setActiveTab(rec.tabId); return; }
+    if (rec.kind !== 'live' && rec.wsId === w.id && rec.session === s.id) { setActiveTab(rec.tabId); toast('That session is already open — switched to its tab'); return; }
   }
   if (w.kind === 'repo' && w.needsClone) { openAcceptInviteModal(w); return; }   // clone it before any pty is spawned
   if (!openSessionInNewTab(w.id, s.id, sessTitle(s, w.id))) {
