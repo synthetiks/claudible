@@ -109,6 +109,35 @@ if [ ! -e "$SDIR/.claude/.claudible-owned" ]; then
   : > "$SDIR/.claude/.claudible-owned" 2>/dev/null || true
 fi
 
+# --- C-3.7: preserve a hand edit made SINCE Claudible's own last write --------------------------------
+# The block above protects a file only the FIRST time Claudible ever writes it. Every LATER respawn used to
+# overwrite unconditionally, so a hand edit made between launches (a permission tweak, a new MCP server) was
+# silently lost the next time any tab opened this workspace. Fix: remember exactly what Claudible itself last
+# wrote, per file, in a hidden sidecar ($f.claudible-last). On the next respawn:
+#   on-disk == sidecar        -> nothing changed since our last write; plain overwrite, refresh the sidecar
+#   on-disk == about-to-write -> already correct; nothing to do
+#   on-disk == NEITHER        -> a human changed it since our last write -> a fresh DATED backup first
+#   no sidecar yet            -> can't prove either way (a pre-feature adopted install) -> baseline silently,
+#                                 no backup — same false-positive bias the ownership block above documents:
+#                                 a false "not edited" costs nothing, a false "edited" litters a backup file.
+# The notice rides the SAME channel session.sh already uses for the foreign-session line: plain text echoed
+# into this pty. main.js pattern-matches it and turns it into an actual toast (win.js's twin has the same
+# fact as a JS-level return value instead, handled directly at its spawn site — see main.js's spawnPty).
+preserve_hand_edit() {   # $1 = path to the file about to be overwritten   $2 = path to the NEW content (already on disk, e.g. a tmp file)
+  local dest="$1" newf="$2" snap ts
+  snap="$dest.claudible-last"
+  if [ ! -f "$dest" ]; then cp "$newf" "$snap" 2>/dev/null; return 0; fi          # nothing on disk yet — nothing to protect
+  if cmp -s "$dest" "$newf" 2>/dev/null; then cp "$newf" "$snap" 2>/dev/null; return 0; fi   # already what we'd write — no-op
+  if [ -f "$snap" ] && ! cmp -s "$dest" "$snap" 2>/dev/null; then
+    ts="$(date +%Y%m%d-%H%M%S)"
+    if cp "$dest" "$dest.pre-claudible-$ts" 2>/dev/null; then
+      echo "[claudible] saved your edited .claude/$(basename "$dest") to a dated backup before updating it"
+    fi
+  fi
+  cp "$newf" "$snap" 2>/dev/null
+  return 0
+}
+
 # --- statusLine + hooks ----------------------------------------------------------------------------
 # Prefer the SHARED Node hooks ($APPDIR/hooks/*.js — ONE implementation reused by WSL / Windows-native /
 # Posix, and no python3). Fall back to inline bash hooks if node can't be found: a minimal native-claude
@@ -133,7 +162,8 @@ if [ -n "$NODE_BIN" ] && [ -f "$APPDIR/hooks/statusline.js" ] && [ -f "$APPDIR/h
   # tmp+mv on the same fs is atomic; identical content skips the write entirely (the common case).
   stage_hook() {   # $1=src  $2=dest — atomic install, no-op when already identical
     [ -f "$1" ] || return 1
-    cmp -s "$1" "$2" 2>/dev/null && return 0
+    cmp -s "$1" "$2" 2>/dev/null && { cp "$1" "$2.claudible-last" 2>/dev/null; return 0; }
+    preserve_hand_edit "$2" "$1"   # BEFORE the overwrite — $1 (src) is already the exact new content
     cp "$1" "$2.cltmp.$$" 2>/dev/null && mv -f "$2.cltmp.$$" "$2" 2>/dev/null
   }
   stage_hook "$APPDIR/hooks/context-hook.js" "$SDIR/.claude/context-hook.js" || true
@@ -222,9 +252,11 @@ else
   UPS_HOOKS="[{\"type\":\"command\",\"command\":\"$HK_CMD\"}]"
   SESSIONSTART_LINE=""
 fi
-# settings.json is one of the names the ownership snapshot above already backed up. This overwrite is safe.
-# Written via tmp+mv (atomic): concurrent tabs on this workspace all rewrite this file at spawn, and a
-# sibling's Claude parsing it mid-truncate would silently drop ALL hooks/statusLine for that launch.
+# settings.json is one of the names the ownership snapshot above already backed up ONCE. Every later respawn
+# is protected on its own by preserve_hand_edit (a hand edit made SINCE Claudible's last write gets a fresh
+# dated backup first — see its header comment above). Written via tmp+mv (atomic): concurrent tabs on this
+# workspace all rewrite this file at spawn, and a sibling's Claude parsing it mid-truncate would silently
+# drop ALL hooks/statusLine for that launch.
 cat > "$SDIR/.claude/settings.json.cltmp.$$" <<EOF
 {
   "autoCompactEnabled": false,
@@ -239,6 +271,7 @@ cat > "$SDIR/.claude/settings.json.cltmp.$$" <<EOF
   }
 }
 EOF
+preserve_hand_edit "$SDIR/.claude/settings.json" "$SDIR/.claude/settings.json.cltmp.$$"   # BEFORE the swap below
 mv -f "$SDIR/.claude/settings.json.cltmp.$$" "$SDIR/.claude/settings.json" 2>/dev/null || true   # atomic swap — see comment above
 
 cd "$SDIR" || { echo "[claudible] FATAL: could not enter the session dir ($SDIR) — refusing to launch Claude (with --dangerously-skip-permissions) in the wrong directory." >&2; exit 1; }

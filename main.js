@@ -754,6 +754,16 @@ function spawnPty(tabId, cols, rows, ws, session) {
           + "' setting does NOT apply here (anyone with repo access can write a transcript). Sessions started on this machine use your setting.\r\n"
         : "[claudible] opening a collaborator's session — Claude will ask before running tools.\r\n" });
     }
+    // C-3.7: win.js's installHooks took a dated backup of a hand-edited .claude file THIS spawn (a human
+    // changed settings.json/statusline.js/hook.js/context-hook.js since Claudible's own last write, and the
+    // rewrite below would otherwise have clobbered it silently). Print the same fact into the terminal (parity
+    // with the WSL runner, which echoes its own version of this line directly into the pty — see session.sh's
+    // preserve_hand_edit) and fire the dedicated toast channel the renderer listens for.
+    if (proc.claudibleSettingsBackup && proc.claudibleSettingsBackup.length) {
+      const files = proc.claudibleSettingsBackup;
+      winSend('pty:data', { tabId, data: '[claudible] saved your edited .claude/' + files.join(', .claude/') + ' to a dated backup before updating it\r\n' });
+      winSend('settings:backup-notice', { tabId, files });
+    }
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
       runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
@@ -783,6 +793,15 @@ function spawnPty(tabId, cols, rows, ws, session) {
       const r = ptys.get(tabId);
       if (r) { r.lastData = Date.now(); r.sawData = true; }   // feed the ultracode settle-detector (and prove claude rendered)
       if (r && !r.trustDone && /trust this folder/i.test(d)) { r.trustDone = true; setTimeout(() => { try { proc.write('\r'); } catch {} }, 250); }
+      // C-3.7, WSL side: session.sh's preserve_hand_edit backs up a hand-edited .claude file and echoes a plain
+      // text line into ITS OWN stdout — which, unlike win.js (no wrapping shell, so a JS-level flag does this
+      // job instead, handled at spawn time above), is already flowing through this exact pty stream. Detect the
+      // line, dedupe per-pty (a respawn gets a fresh `r`), and turn it into the same toast channel win.js uses.
+      if (r && !r.settingsBackupSeen) {
+        const re = /\[claudible\] saved your edited \.claude\/(\S+) to a dated backup before updating it/g;
+        const files = []; let mm; while ((mm = re.exec(String(d)))) files.push(mm[1]);
+        if (files.length) { r.settingsBackupSeen = true; winSend('settings:backup-notice', { tabId, files }); }
+      }
       // I3 — MAKE AN UNANSWERED PROMPT VISIBLE. The line above is Claudible's ENTIRE coverage for auto-answering
       // claude.exe's startup questions: one regex, matching the trust-folder text only. Any other confirmation
       // (notably the one a permission-mode change can introduce, via --dangerously-skip-permissions at

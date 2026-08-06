@@ -418,6 +418,221 @@ const isLastLocal = (w, workspaces) => {
 }
 
 // ===========================================================================================================
+// 4e. C-3.7 — EVERY RESPAWN, NOT JUST THE FIRST. Section 4c pinned the ownership block's ONE-TIME snapshot.
+// This pins its follow-up: session.sh's preserve_hand_edit, which runs on every later respawn and must tell
+// "a human changed this since Claudible's own last write" (dated backup) apart from "Claudible's own
+// generation changed" (e.g. a different tab's baked-in runtime paths — no backup, that was never an edit).
+// Driven for real against real files, not just grepped.
+// ===========================================================================================================
+if (HAS_BASH) {
+  const lines2 = SESSION_SH.split('\n');
+  const pStart = lines2.findIndex((l) => l.trim().startsWith('preserve_hand_edit() {'));
+  const pEnd = pStart > -1 ? lines2.findIndex((l, i) => i > pStart && l === '}') : -1;
+  ok('session.sh: preserve_hand_edit is findable', pStart > -1 && pEnd > pStart);
+  const PBLOCK = lines2.slice(pStart, pEnd + 1).join('\n');
+  const runPreserve = (dest, newf) => cp.execFileSync(bashBin(),
+    bashArgs(['-c', `${PBLOCK}\npreserve_hand_edit "$1" "$2"`, '_', bashPath(dest), bashPath(newf)]), { encoding: 'utf8' });
+  const mk2 = () => fs.mkdtempSync(path.join(os.tmpdir(), 'preserve-'));
+  const backupsIn = (d) => fs.readdirSync(d).filter((f) => /\.pre-claudible-/.test(f));
+
+  // (a) nothing on disk yet — baseline silently, no backup
+  {
+    const d = mk2();
+    const dest = path.join(d, 'settings.json'), newf = path.join(d, 'new.txt');
+    fs.writeFileSync(newf, 'CONTENT-1');
+    const out = runPreserve(dest, newf);
+    eq('preserve: no dest yet -> no output (nothing to protect)', out, '');
+    eq('preserve: …the snapshot is baselined to the new content', fs.readFileSync(dest + '.claudible-last', 'utf8'), 'CONTENT-1');
+    eq('preserve: …no backup file appeared', backupsIn(d).length, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  // (b) on-disk already equals the new content — pure no-op
+  {
+    const d = mk2();
+    const dest = path.join(d, 'settings.json'), newf = path.join(d, 'new.txt');
+    fs.writeFileSync(dest, 'SAME'); fs.writeFileSync(newf, 'SAME');
+    const out = runPreserve(dest, newf);
+    eq('preserve: on-disk already matches what we\'d write -> no output', out, '');
+    eq('preserve: …snapshot refreshed anyway', fs.readFileSync(dest + '.claudible-last', 'utf8'), 'SAME');
+    eq('preserve: …no backup', backupsIn(d).length, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  // (c) on-disk differs, but there is NO snapshot yet (a pre-feature adopted install) — can't prove an edit
+  //     happened, so baseline silently rather than falsely accuse the file
+  {
+    const d = mk2();
+    const dest = path.join(d, 'settings.json'), newf = path.join(d, 'new.txt');
+    fs.writeFileSync(dest, 'UNKNOWN-EXISTING-CONTENT'); fs.writeFileSync(newf, 'NEW-CONTENT');
+    const out = runPreserve(dest, newf);
+    eq('preserve: differs but no prior snapshot -> no output (never spam an unprovable accusation)', out, '');
+    eq('preserve: …no backup', backupsIn(d).length, 0);
+    eq('preserve: …snapshot now established for next time', fs.readFileSync(dest + '.claudible-last', 'utf8'), 'NEW-CONTENT');
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  // (d) on-disk differs from the new content, but MATCHES the snapshot (Claudible's own last write) — that's
+  //     Claudible's own generation moving on (a new tab's baked-in runtime paths), never a human edit
+  {
+    const d = mk2();
+    const dest = path.join(d, 'settings.json'), newf = path.join(d, 'new.txt');
+    fs.writeFileSync(dest, 'CLAUDIBLE-WROTE-THIS-LAST-TIME');
+    fs.writeFileSync(dest + '.claudible-last', 'CLAUDIBLE-WROTE-THIS-LAST-TIME');
+    fs.writeFileSync(newf, 'CLAUDIBLE-WOULD-WRITE-THIS-NOW');
+    const out = runPreserve(dest, newf);
+    eq('preserve: on-disk matches OUR OWN last write -> no output (this was never a human edit)', out, '');
+    eq('preserve: …no backup', backupsIn(d).length, 0);
+    eq('preserve: …snapshot advances to the new content', fs.readFileSync(dest + '.claudible-last', 'utf8'), 'CLAUDIBLE-WOULD-WRITE-THIS-NOW');
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  // (e) on-disk differs from BOTH the snapshot and the new content — a genuine hand edit since our last
+  //     write. A fresh DATED backup, the exact pre-edit bytes preserved, and the toast marker line.
+  {
+    const d = mk2();
+    const dest = path.join(d, 'settings.json'), newf = path.join(d, 'new.txt');
+    fs.writeFileSync(dest, 'MY HAND-EDITED PERMISSIONS');
+    fs.writeFileSync(dest + '.claudible-last', 'WHAT CLAUDIBLE WROTE LAST TIME');
+    fs.writeFileSync(newf, 'WHAT CLAUDIBLE WOULD WRITE NOW');
+    const out = runPreserve(dest, newf);
+    ok('preserve: a genuine hand edit -> the toast marker line is echoed',
+      /\[claudible\] saved your edited \.claude\/settings\.json to a dated backup before updating it/.test(out));
+    const backups = fs.readdirSync(d).filter((f) => /^settings\.json\.pre-claudible-\d{8}-\d{6}$/.test(f));
+    eq('preserve: exactly one dated backup, named settings.json.pre-claudible-YYYYMMDD-HHMMSS', backups.length, 1);
+    eq('preserve: …holding the user\'s PRE-EDIT bytes, untouched', fs.readFileSync(path.join(d, backups[0]), 'utf8'), 'MY HAND-EDITED PERMISSIONS');
+    eq('preserve: …snapshot advances (a third launch with no further edit must not re-backup)',
+      fs.readFileSync(dest + '.claudible-last', 'utf8'), 'WHAT CLAUDIBLE WOULD WRITE NOW');
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  // (f) NEVER SPAM: two respawns over the SAME hand-edited file (the caller overwrites $dest with $newf's
+  //     content right after preserve_hand_edit returns, exactly as stage_hook/the settings heredoc do) backs
+  //     up only ONCE — the second respawn's on-disk content is Claudible's own from the first respawn.
+  {
+    const d = mk2();
+    const dest = path.join(d, 'settings.json'), newf = path.join(d, 'new.txt');
+    fs.writeFileSync(dest, 'HUMAN EDIT');
+    fs.writeFileSync(dest + '.claudible-last', 'OLD CLAUDIBLE CONTENT');
+    fs.writeFileSync(newf, 'CLAUDIBLE CONTENT A');
+    runPreserve(dest, newf);
+    fs.writeFileSync(dest, 'CLAUDIBLE CONTENT A');   // the overwrite that follows preserve_hand_edit in real session.sh
+    fs.writeFileSync(newf, 'CLAUDIBLE CONTENT B');   // a second respawn — Claudible's own content moved on again
+    const out2 = runPreserve(dest, newf);
+    eq('preserve: a second respawn over an already-resolved edit does not back up again', out2, '');
+    eq('preserve: exactly one backup total across both respawns', backupsIn(d).length, 1);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
+// ===========================================================================================================
+// 4f. C-3.7 — the win.js twin: installHooks()'s own dated-backup protection, driven for real (byte-for-byte,
+// not just a grep pin). Windows-specific path handling (path.win32) makes this reliable only on a real
+// Windows host, so it's gated the same way the bash-driven sections above are gated on HAS_BASH.
+// ===========================================================================================================
+if (process.platform === 'win32') {
+  const winRunner = require(path.join(ROOT, 'runners/win.js'));
+  const { installHooks } = winRunner._internals;
+  ok('win.js: installHooks is exported for this test', typeof installHooks === 'function');
+  const prevRuntime = process.env.CLAUDIBLE_RUNTIME;
+  const rtBase = fs.mkdtempSync(path.join(os.tmpdir(), 'winrt-'));
+  process.env.CLAUDIBLE_RUNTIME = rtBase;
+  try {
+    const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winhooks-'));
+    const claudeDir = path.join(wsDir, '.claude');
+    const settingsPath = path.join(claudeDir, 'settings.json');
+
+    // (a) a brand-new workspace: the first call writes settings.json and baselines the snapshot — no backup
+    const r1 = installHooks(wsDir, 'tabA');
+    ok('win installHooks: settings.json is written on the first call', fs.existsSync(settingsPath));
+    ok('win installHooks: …no backup on a brand-new file', !r1.backedUp || r1.backedUp.length === 0);
+
+    // (b) an untouched second respawn, same tab: byte-identical write, still no backup
+    const r2 = installHooks(wsDir, 'tabA');
+    ok('win installHooks: a second respawn with no hand edit reports no backup', !r2.backedUp || r2.backedUp.length === 0);
+
+    // (c) the user hand-edits settings.json between launches
+    fs.writeFileSync(settingsPath, '{"permissions":{"allow":["Bash"]}}');
+    const r3 = installHooks(wsDir, 'tabA');
+    ok('win installHooks: a hand edit since Claudible\'s own last write IS reported', !!(r3.backedUp && r3.backedUp.includes('settings.json')));
+    const backups = fs.readdirSync(claudeDir).filter((f) => /^settings\.json\.pre-claudible-\d{8}-\d{6}$/.test(f));
+    eq('win installHooks: exactly one dated backup exists', backups.length, 1);
+    eq('win installHooks: …holding the user\'s PRE-EDIT bytes', fs.readFileSync(path.join(claudeDir, backups[0]), 'utf8'), '{"permissions":{"allow":["Bash"]}}');
+    ok('win installHooks: settings.json itself is back to Claudible\'s own content (the overwrite still happened)',
+      fs.readFileSync(settingsPath, 'utf8') !== '{"permissions":{"allow":["Bash"]}}');
+
+    // (d) a fourth call on a DIFFERENT tab: settings.json's baked-in per-tab paths legitimately change, but
+    //     that's Claudible's own drift, not a human edit — must not re-backup
+    const r4 = installHooks(wsDir, 'tabB');
+    ok('win installHooks: Claudible\'s own content changing (a different tab) is never mistaken for a hand edit', !r4.backedUp || r4.backedUp.length === 0);
+    eq('win installHooks: still exactly one backup total across all four calls',
+      fs.readdirSync(claudeDir).filter((f) => /\.pre-claudible-/.test(f)).length, 1);
+
+    fs.rmSync(wsDir, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(rtBase, { recursive: true, force: true });
+    if (prevRuntime === undefined) delete process.env.CLAUDIBLE_RUNTIME; else process.env.CLAUDIBLE_RUNTIME = prevRuntime;
+  }
+}
+
+// ===========================================================================================================
+// 4g. C-3.7 — the in-app notice, round-tripped. main.js detects session.sh's WSL marker line with a regex and
+// forwards win.js's own flag through the SAME channel; both must actually agree on the wording/shape, or the
+// notice silently never fires on one platform while looking implemented on the other.
+// ===========================================================================================================
+{
+  // win.js: the backup check must run BEFORE the overwrite, for both the hook files and settings.json —
+  // same ordering invariant section 4c already pins for the one-time ownership snapshot.
+  const iPreserveDef = WIN.indexOf('const preserveHandEdit = (dest, newBuf) => {');
+  const iStageCall = WIN.indexOf('preserveHandEdit(dest, a);');
+  const iStageCopy = WIN.indexOf("fs.copyFileSync(src, tmp); fs.renameSync(tmp, dest);");
+  ok('win.js: preserveHandEdit is defined and used inside stage() BEFORE the copy',
+    iPreserveDef > -1 && iStageCall > iPreserveDef && iStageCopy > iStageCall);
+  const iSettingsCall = WIN.indexOf('preserveHandEdit(sPath, settingsBuf);');
+  const iSettingsWrite = WIN.indexOf("const tmp = sPath + '.cltmp.' + process.pid; guardLongPath(() => { fs.writeFileSync(tmp, settingsTxt);");
+  ok('win.js: …and before the settings.json overwrite too', iSettingsCall > -1 && iSettingsWrite > iSettingsCall);
+  ok('win.js: installHooks returns backedUp so spawnClaude can surface it', /return \{ cdir, statusPath, hooksPath, contextPath, backedUp \}/.test(WIN));
+  ok('win.js: spawnClaude reflects it onto the facade for main.js to read',
+    /facade\.claudibleSettingsBackup = rtPaths\.backedUp/.test(WIN));
+
+  // session.sh: preserve_hand_edit must run BEFORE both overwrite sites (mirrors the ordering check above).
+  const iPreserveDefSh = SESSION_SH.indexOf('preserve_hand_edit() {');
+  const iStageCallSh = SESSION_SH.indexOf('preserve_hand_edit "$2" "$1"');
+  const iStageMv = SESSION_SH.indexOf('cp "$1" "$2.cltmp.$$" 2>/dev/null && mv -f "$2.cltmp.$$" "$2"');
+  ok('session.sh: preserve_hand_edit is defined and used inside stage_hook BEFORE the mv',
+    iPreserveDefSh > -1 && iStageCallSh > iPreserveDefSh && iStageMv > iStageCallSh);
+  const iSettingsCallSh = SESSION_SH.indexOf('preserve_hand_edit "$SDIR/.claude/settings.json" "$SDIR/.claude/settings.json.cltmp.$$"');
+  const iSettingsMvSh = SESSION_SH.indexOf('mv -f "$SDIR/.claude/settings.json.cltmp.$$" "$SDIR/.claude/settings.json"');
+  ok('session.sh: …and before the settings.json swap too', iSettingsCallSh > -1 && iSettingsMvSh > iSettingsCallSh);
+
+  // main.js: the exact regex it uses to detect the WSL marker line, lifted from the real source (not
+  // reconstructed by hand, which could silently drift from what's actually shipped) — and proven against a
+  // REAL echoed line. Sliced by known prefix/suffix rather than eval'd off a hand-built extraction regex: the
+  // pattern text itself contains escaped slashes (\.claude\/), which a naive /…/ extraction regex trips over.
+  const reLine = MAIN.split('\n').find((l) => l.includes("const re = /\\[claudible\\]"));
+  ok('main.js: the WSL marker-detection regex is findable', !!reLine);
+  let DETECT_RE = null;
+  if (reLine) {
+    const start = reLine.indexOf('/') + 1;
+    const end = reLine.lastIndexOf('/g;');
+    if (end > start) { try { DETECT_RE = new RegExp(reLine.slice(start, end), 'g'); } catch {} }
+  }
+  ok('main.js: …and it parses as a real regex', DETECT_RE instanceof RegExp);
+  const sampleLine = '[claudible] saved your edited .claude/settings.json to a dated backup before updating it\r\n';
+  ok('main.js: its regex actually matches session.sh\'s real echoed line', !!(DETECT_RE && DETECT_RE.test(sampleLine)));
+  if (DETECT_RE) DETECT_RE.lastIndex = 0;   // .test() above advanced it (global flag) — reset before reusing for the capture check
+  const m = DETECT_RE ? DETECT_RE.exec(sampleLine) : null;
+  eq('main.js: …and captures the exact filename', m && m[1], 'settings.json');
+
+  // Both producers land on the SAME IPC channel the renderer listens for.
+  ok('main.js: the WSL detector fires settings:backup-notice', /settingsBackupSeen[\s\S]{0,400}?winSend\('settings:backup-notice', \{ tabId, files \}\)/.test(MAIN));
+  ok('main.js: the win.js flag also fires settings:backup-notice', /claudibleSettingsBackup[\s\S]{0,400}?winSend\('settings:backup-notice', \{ tabId, files \}\)/.test(MAIN));
+  const PRELOAD = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+  ok('preload.js: bridges settings:backup-notice to the renderer', /onSettingsBackupNotice[\s\S]{0,120}?'settings:backup-notice'/.test(PRELOAD));
+  ok('app.js: the renderer actually toasts it', /onSettingsBackupNotice[\s\S]{0,300}?toast\(`Saved your edited/.test(APP));
+}
+
+// ===========================================================================================================
 // 5. GREP GUARDS — pin each invariant to the real source, so a refactor fails here instead of drifting.
 // ===========================================================================================================
 ok('main.js: workspace:delete skips the folder-trashing script for an adopted ws',

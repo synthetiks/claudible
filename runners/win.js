@@ -258,11 +258,42 @@ function installHooks(sdir, tabRuntimeId) {
     }
     try { fs.writeFileSync(owned, ''); } catch {}
   }
+  // C-3.7 (dated backup on hand-edit): the block above protects a file only the FIRST time Claudible ever
+  // writes it. Every LATER respawn used to overwrite unconditionally, so a hand edit made between launches
+  // (a permission tweak, a new MCP server) was silently lost the next time any tab opened this workspace.
+  // Fix: remember exactly what Claudible itself last wrote, per file, in a hidden sidecar (`<file>.claudible-last`).
+  // On the next respawn: on-disk == sidecar -> nothing changed since our write, plain overwrite; on-disk ==
+  // the content we're about to write -> nothing to do; on-disk == NEITHER -> a human changed it since our
+  // last write -> a fresh DATED backup first. No sidecar yet (a pre-feature adopted workspace, or the very
+  // first write) -> baseline silently, no backup: we have no proof of an edit, and guessing would litter a
+  // "pre-claudible" copy into every existing install (the same false-positive bias the ownership block above
+  // documents). backedUp collects the basenames actually protected this call, for the in-app notice below.
+  const backedUp = [];
+  const backupTimestamp = (d) => {
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  };
+  const preserveHandEdit = (dest, newBuf) => {
+    const snap = dest + '.claudible-last';
+    let onDisk = null; try { onDisk = fs.readFileSync(dest); } catch {}
+    if (onDisk === null) { try { fs.writeFileSync(snap, newBuf); } catch {} return; }   // nothing on disk yet
+    if (!onDisk.equals(newBuf)) {
+      let lastWritten = null; try { lastWritten = fs.readFileSync(snap); } catch {}
+      if (lastWritten !== null && !onDisk.equals(lastWritten)) {
+        try { fs.copyFileSync(dest, dest + '.pre-claudible-' + backupTimestamp(new Date())); backedUp.push(path.basename(dest)); } catch {}
+      }
+    }
+    try { fs.writeFileSync(snap, newBuf); } catch {}
+  };
   // ATOMIC + skip-if-identical staging (mirrors wsl/session.sh's stage_hook): .claude is WORKSPACE-shared and
   // every tab on this project respawns through here concurrently. A plain copy/write truncates-then-fills, so
   // a sibling's Claude parsing a half-written hook/settings silently loses telemetry for its whole session.
   const stage = (src, dest) => {
-    try { const a = fs.readFileSync(src), b = fs.readFileSync(dest); if (a.equals(b)) return true; } catch {}
+    let a; try { a = fs.readFileSync(src); } catch { return false; }
+    let alreadySame = false;
+    try { alreadySame = a.equals(fs.readFileSync(dest)); } catch {}
+    preserveHandEdit(dest, a);   // no-ops when nothing on disk or already identical; backs up + refreshes the snapshot otherwise
+    if (alreadySame) return true;
     const tmp = dest + '.cltmp.' + process.pid;
     fs.copyFileSync(src, tmp); fs.renameSync(tmp, dest);
     return true;
@@ -279,9 +310,11 @@ function installHooks(sdir, tabRuntimeId) {
   // atomically (tmp+rename), same concurrent-tabs reasoning as the hook staging above.
   const settingsTxt = JSON.stringify(settingsJson(cdir, nodeBin, statusPath, hooksPath, hasContext ? contextPath : ''), null, 2);
   const sPath = path.win32.join(cdir, 'settings.json');
+  const settingsBuf = Buffer.from(settingsTxt, 'utf8');
   let same = false; try { same = fs.readFileSync(sPath, 'utf8') === settingsTxt; } catch {}
+  preserveHandEdit(sPath, settingsBuf);   // must run BEFORE the overwrite below, same reasoning as stage()
   if (!same) { const tmp = sPath + '.cltmp.' + process.pid; guardLongPath(() => { fs.writeFileSync(tmp, settingsTxt); fs.renameSync(tmp, sPath); }, sPath); }
-  return { cdir, statusPath, hooksPath, contextPath };
+  return { cdir, statusPath, hooksPath, contextPath, backedUp };
 }
 
 // ---- node-pty backend (same loader) -------------------------------------------------------------
@@ -632,6 +665,10 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   // already excluded the perm flags for a foreign resume. Reflects the INITIAL decision only â€” a fallback
   // (fresh) is never foreign, but by the time one could happen main.js has already read this synchronously.
   if (launch.foreign) { facade.claudibleForeign = true; console.log('[claudible] win: foreign (collaborator-synced) session â€” sandboxed regardless of permission-mode setting'); }
+  // C-3.7: installHooks took a dated backup of one or more hand-edited .claude files this call. Surface it the
+  // same way claudibleForeign does — a flag main.js's spawnPty reads synchronously and turns into a terminal
+  // line + toast (see main.js). Reflects only THIS installHooks() call; a later respawn re-evaluates fresh.
+  if (rtPaths && rtPaths.backedUp && rtPaths.backedUp.length) facade.claudibleSettingsBackup = rtPaths.backedUp;
   return facade;
 }
 
@@ -703,5 +740,5 @@ module.exports = {
   ptyInfo, spawnClaude, runScript,
   startVoiceServices,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks },
 };
