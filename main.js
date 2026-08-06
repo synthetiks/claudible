@@ -257,7 +257,10 @@ ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); cons
 // live mechanism is settings.depEnv above, which the no-UAC provisioner fallback actually populates.)
 // Resolve THIS app's own folder as a WSL path (C:\Users\X\claudible -> /mnt/c/Users/X/claudible) so the
 // bootstrap script + runtime files work for ANY user/location — no hardcoded home. wslpath does it robustly.
-const APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
+// `let`, not `const`: C-1.5's backend:retry handler (below, near preflight:restart) re-derives this live via
+// appDirNow() and reassigns it on success, so a retry that actually finds git-bash/WSL now un-gates the ~35
+// handlers below that read APPDIR_WSL directly — not just the banner that reports it.
+let APPDIR_WSL = runner.appDirGuest();   // guest-side app dir (runner-owned; was wslpath of __dirname)
 // The ONE sentence for "the script backend cannot run here" (`!APPDIR_WSL`). This identical condition used to
 // reach the user as three different strings — 'WSL unavailable', 'WSL is not available', and 'WSL/GitHub backend
 // is not available' — because humanError() passes any sentence through verbatim, so whichever code path you hit
@@ -3352,6 +3355,16 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
 });
 // Relaunch — the cleanest way to pick up a freshly-installed Git (main.js resolves the app-dir at require-time).
 ipcMain.handle('preflight:restart', () => { try { app.relaunch(); app.exit(0); } catch {} return { ok: true }; });
+// C-1.5 — the backend-unavailable banner's Retry button. Reuses the SAME live re-derivation the voice path
+// already trusts (appDirNow(), ~413: runner.resetCaches() + a fresh appDirGuest() read) instead of forcing a
+// full restart for what may now be transient (WSL still starting, git-bash PATH landed after boot). On success
+// the fresh value is written back to APPDIR_WSL itself, so every one of the ~35 handlers gated on it — not just
+// this banner — comes back without a relaunch.
+ipcMain.handle('backend:retry', () => {
+  const dir = appDirNow();
+  if (dir) { APPDIR_WSL = dir; return { ok: true }; }
+  return { ok: false, error: ERR_NO_BACKEND };
+});
 // After the Connect-Claude flow succeeds: if the spawn-gate suppressed the terminal (or it died on a missing
 // claude), bring it up now that claude resolves. No-op if a foreground pty is already live (don't disturb it).
 // Bring the terminal up once onboarding says Claude is ready. spawnPty NEVER throws for the case that actually

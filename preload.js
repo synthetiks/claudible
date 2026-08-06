@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onSessionReloaded: (cb) => ipcRenderer.on('session:reloaded', (_e, s) => cb(s)),   // main respawned an open tab whose transcript a sync just replaced
   onWorkspaceAdded: (cb) => ipcRenderer.on('workspace:added', (_e, list) => cb(list)),
   onBackendUnavailable: (cb) => ipcRenderer.on('backend:unavailable', (_e, s) => cb(s)),   // I3/S-root: the script backend could not resolve at boot — say so instead of letting ~35 handlers fail in silence
+  backendRetry: () => ipcRenderer.invoke('backend:retry'),   // C-1.5: the persistent banner's Retry button — re-resolve the backend without a restart
   discoverWorkspaces: () => ipcRenderer.invoke('workspace:discover'),   // manual "check for invited projects"
   workspaceImport: (repo) => ipcRenderer.invoke('workspace:import', { repo }),   // 3b: clone an EXISTING GitHub repo by owner/repo or URL (no invite gate)
   openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser

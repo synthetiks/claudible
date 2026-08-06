@@ -6146,16 +6146,37 @@ claudible.onWorkspaceAdded((list) => {
 // S-root/I3 — the ONE message that would have saved hours. With no script backend every project, sync and Repo
 // Review call short-circuits, but the terminal keeps working (it runs through node-pty, never this shell), so
 // the app looks healthy and the failure reads as "GitHub is broken". Fires once, at boot, only when main
-// actually found no backend. Delayed so it lands after the first paint rather than under it.
+// actually found no backend. C-1.5: a PERSISTENT banner, not the old 2.2s toast — the condition outlives any
+// toast's window, so a missed toast is exactly how this went unnoticed for hours on real hardware. Delayed so
+// it lands after the first paint rather than under it.
+let _backendWarnReason = '';
+function renderBackendWarn(text) {
+  const el = $('backend-warn'), tx = $('backend-warn-txt');
+  if (!el || !tx) return;
+  tx.textContent = text;
+  el.style.display = '';
+}
 if (claudible.onBackendUnavailable) claudible.onBackendUnavailable((s) => {
-  setTimeout(() => {
-    try {
-      toast((s && s.runner === 'wsl')
-        ? 'WSL isn’t available — projects, sync and Repo Review can’t run. The terminal still works.'
-        : 'Git Bash isn’t available — projects, sync and Repo Review can’t run. Install Git for Windows (System check), then restart.');
-    } catch (e) {}
-  }, 2200);
+  _backendWarnReason = (s && s.runner === 'wsl')
+    ? 'WSL isn’t available — projects, sync and Repo Review can’t run. The terminal still works.'
+    : 'Git Bash isn’t available — projects, sync and Repo Review can’t run. Install Git for Windows (System check), then restart.';
+  setTimeout(() => { try { renderBackendWarn(_backendWarnReason); } catch (e) {} }, 2200);
 });
+{
+  const b = $('backend-warn-retry');
+  if (b) b.addEventListener('click', async () => {
+    b.disabled = true; const prevTxt = b.textContent; b.textContent = 'Retrying…';
+    let r = null;
+    try { r = await claudible.backendRetry(); } catch (e) { r = { ok: false }; }
+    b.disabled = false; b.textContent = prevTxt;
+    if (r && r.ok) {
+      const el = $('backend-warn'); if (el) el.style.display = 'none';
+      refreshWorkspaces();
+    } else {
+      renderBackendWarn('Still unavailable — ' + _backendWarnReason);
+    }
+  });
+}
 $('invite-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); doInvite(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeInviteModal(); }

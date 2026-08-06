@@ -2999,5 +2999,38 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /sessionMismatch \? 'different session!'/.test(GUEST_JS) ? '' : 'the chip label falls back to the normal session name instead of staying a warning'].filter(Boolean));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 90. C-1.5 — THE BACKEND-UNAVAILABLE BANNER. The old signal was a toast that showed once, 2.2s after boot,
+//   and was gone: the whole point of "no script backend" (~35 handlers short-circuit while the terminal keeps
+//   working) is that it is otherwise invisible, and a MISSED toast recreated that exact silence. Now a
+//   persistent chip (build-drift's vocabulary) with a Retry button that re-derives the backend live (the same
+//   appDirNow()/resetCaches pattern the voice path already trusts) instead of forcing a restart. Pins: the
+//   banner markup exists, the renderer shows it (not just a toast) and wires Retry to a real IPC round-trip,
+//   and main's handler both answers the retry AND writes the fresh value back so the ~35 gated handlers — not
+//   just the chip — come back without a relaunch.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('index.html lost the backend-unavailable banner (or it is not the tunnel-warn chip vocabulary)',
+    [/id="backend-warn"/.test(HTML) ? '' : 'no #backend-warn element',
+     /class="tunnel-warn tw-err" id="backend-warn"/.test(HTML) ? '' : '#backend-warn does not reuse the tunnel-warn/tw-err chip classes',
+     /id="backend-warn-txt"/.test(HTML) ? '' : 'no #backend-warn-txt text span',
+     /id="backend-warn-retry"/.test(HTML) ? '' : 'no #backend-warn-retry button'].filter(Boolean));
+  none('app.js still toasts backend-unavailable instead of showing the persistent banner',
+    [/function renderBackendWarn\(text\)/.test(APP) ? '' : 'no renderBackendWarn()',
+     /claudible\.onBackendUnavailable\(\(s\) => \{/.test(APP) ? '' : 'onBackendUnavailable listener is gone',
+     /renderBackendWarn\(_backendWarnReason\)/.test(APP) ? '' : 'onBackendUnavailable no longer calls renderBackendWarn'].filter(Boolean));
+  none('the banner Retry button lost its click handler (or stopped calling backendRetry/refreshWorkspaces on success)',
+    [/\$\('backend-warn-retry'\)/.test(APP) ? '' : 'no #backend-warn-retry lookup',
+     /claudible\.backendRetry\(\)/.test(APP) ? '' : 'Retry no longer calls claudible.backendRetry()',
+     /refreshWorkspaces\(\)/.test(APP) ? '' : 'app.js no longer calls refreshWorkspaces() anywhere'].filter(Boolean));
+  none('preload: backendRetry is not bridged to backend:retry',
+    /backendRetry: \(\) => ipcRenderer\.invoke\('backend:retry'\)/.test(PRELOAD) ? [] : ['no backendRetry bridge']);
+  none('main.js lost the backend:retry handler, or it no longer re-derives + writes back APPDIR_WSL',
+    [/ipcMain\.handle\('backend:retry', \(\) => \{/.test(MAIN) ? '' : 'no backend:retry handler',
+     /const dir = appDirNow\(\);\s*\n\s*if \(dir\) \{ APPDIR_WSL = dir; return \{ ok: true \}; \}/.test(MAIN) ? '' : 'handler no longer re-derives via appDirNow() and writes APPDIR_WSL back on success'].filter(Boolean));
+  none('APPDIR_WSL is const again (a successful retry could not un-gate the ~35 handlers that read it)',
+    /const APPDIR_WSL = runner\.appDirGuest\(\);/.test(MAIN) ? ['APPDIR_WSL is declared const'] : []);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
