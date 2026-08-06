@@ -3819,10 +3819,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 // ---------------------------------------------------------------------------------------------------------
 // 106. C-8.3 — DISCARD GOES TO TRASH, NOT rm -f. "Discard" on a brand-new (untracked) file used to be a
 //   silent, permanent `rm -f` — a real deletion dressed up as a one-click button. It now routes through the
-//   same recoverable Claudible trash every other delete uses (C-3.6's flow): moved under
-//   ~/.claudible/trash/discarded-files/<timestamp>-<pid>-<basename>, left for trash-prune.sh's existing
-//   30-day/2GB sweep to bound. Tracked-file behavior (apply-reverse restores the old version) is untouched —
-//   this pin only touches the discard branch.
+//   same recoverable Claudible trash every other delete uses (C-3.6's flow): a FLAT top-level entry,
+//   ~/.claudible/trash/discarded-<timestamp>-<pid>-<basename>, so trash-prune.sh's -maxdepth 1 sweep ages
+//   each discard by its OWN mtime (a shared subfolder would refresh its mtime on every discard and dodge
+//   both the 30-day and 2GB passes). Tracked-file behavior (apply-reverse restores the old version) is
+//   untouched — this pin only touches the discard branch.
 // ---------------------------------------------------------------------------------------------------------
 {
   const DIFFAPPLY = read('wsl/diff-apply.sh');
@@ -3830,12 +3831,12 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /rm -f -- "\$target"/.test(DIFFAPPLY)
       ? ['discard still calls rm -f -- "$target" instead of moving it to trash'] : []);
   none('diff-apply.sh\'s discard case no longer moves the file into the Claudible trash (C-8.3)',
-    /trashdir="\$HOME\/\.claudible\/trash\/discarded-files"/.test(DIFFAPPLY) &&
+    /trashdir="\$HOME\/\.claudible\/trash"/.test(DIFFAPPLY) &&
     /mv -f -- "\$target" "\$dest"/.test(DIFFAPPLY)
-      ? [] : ['discard no longer mkdirs ~/.claudible/trash/discarded-files and mv -f\'s the target into it']);
-  none('diff-apply.sh\'s discard case dropped the pid-suffixed recoverable name (C-8.3)',
-    /dest="\$trashdir\/\$ts-\$\$-\$base"/.test(DIFFAPPLY)
-      ? [] : ['dest is no longer built as $trashdir/$ts-$$-$base — same-named same-second discards could clobber each other in trash']);
+      ? [] : ['discard no longer moves the target into ~/.claudible/trash']);
+  none('diff-apply.sh\'s discard case dropped the FLAT pid-suffixed top-level trash name (C-8.3)',
+    /dest="\$trashdir\/discarded-\$ts-\$\$-\$base"/.test(DIFFAPPLY)
+      ? [] : ['dest is no longer $trashdir/discarded-$ts-$$-$base — a shared subfolder would defeat trash-prune\'s per-entry aging (its mtime refreshes on every discard), and same-second discards could clobber each other']);
   none('diff-apply.sh\'s apply-reverse (tracked-file revert) branch was touched by the C-8.3 fix',
     /git apply -R --recount "\$tmp"/.test(DIFFAPPLY)
       ? [] : ['apply-reverse no longer reverse-applies via git apply -R — tracked-file restore should be untouched']);

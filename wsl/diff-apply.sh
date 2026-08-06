@@ -26,12 +26,13 @@ case "$mode" in
     if git ls-files --others --exclude-standard -z 2>/dev/null | grep -qzxF -- "$target"; then
       # C-8.3: a "brand-new" file is still real work — route it through the same recoverable Claudible
       # trash every other delete uses (delete-workspace.sh/delete-session.sh's own convention) instead of
-      # rm -f'ing it into oblivion. trash-prune.sh's 30-day/2GB sweep bounds it from here on, same as
-      # everything else in the trash.
-      trashdir="$HOME/.claudible/trash/discarded-files"; mkdir -p "$trashdir" 2>/dev/null
+      # rm -f'ing it into oblivion. FLAT top-level entry, one per discard, like every other producer:
+      # trash-prune.sh ages/sizes DIRECT children of the trash root by their own mtime (-maxdepth 1), so a
+      # shared subfolder would refresh its mtime on every discard and dodge both the 30-day and 2GB passes.
+      trashdir="$HOME/.claudible/trash"; mkdir -p "$trashdir" 2>/dev/null
       base="$(basename -- "$target")"
       ts="$(date +%Y%m%d-%H%M%S)"
-      dest="$trashdir/$ts-$$-$base"   # pid-suffixed: two discards of same-named files in the same second must not clobber each other in trash
+      dest="$trashdir/discarded-$ts-$$-$base"   # pid-suffixed: two discards of same-named files in the same second must not clobber each other in trash
       if mv -f -- "$target" "$dest" 2>/dev/null; then emit '{"ok":true}'; else emit '{"ok":false,"error":"could not move to trash"}'; fi
     else
       emit '{"ok":false,"error":"not an untracked file"}'
