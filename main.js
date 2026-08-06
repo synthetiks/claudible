@@ -578,7 +578,7 @@ function createWindow() {
     // Bound ~/.claudible/trash. Deleting a session moves a transcript there; deleting a PROJECT moves the whole
     // folder there (an adopted repo, node_modules and all). Nothing ever emptied it, so it grew without limit.
     // Well after boot, off the critical path, and failure is logged rather than swallowed.
-    appTimers.trash = setTimeout(() => pruneTrash(), 12000);   // tracked so window-all-closed's sweep cancels it — a quit inside the first 12s must not spawn trash-prune.sh post-shutdown
+    appTimers.trash = setTimeout(() => pruneTrash(), 7000);   // tracked so window-all-closed's sweep cancels it — a quit inside the first 7s must not spawn trash-prune.sh post-shutdown
   });
 }
 // Age- + size-bounded sweep of the soft-delete trash. Fire-and-forget: a failure must never block the app, but it
@@ -3805,7 +3805,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => { try { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } } catch {} });
-  app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 15000); });
+  app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 9000); });
 }
 // THE full exit teardown, shared by the normal quit path and the self-update restart. Every block is
 // independently idempotent; app.exit()/app.relaunch() bypass window-all-closed entirely (Electron emits no

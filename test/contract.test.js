@@ -3139,5 +3139,20 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      (MAIN.match(/refreshGhStateCache\(\);/g) || []).length >= 3 ? '' : 'refreshGhStateCache() is not called from both the connectGh-success and post-install paths'].filter(Boolean));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 94. C-1.6 — the post-boot background timers fire sooner. pruneTrash was 12000ms after createWindow and
+//   checkForUpdate was 15000ms after app.whenReady — both pushed well past a session most users have already
+//   started typing into. Trimmed to 7000ms and 9000ms respectively; the 3000ms workspace-discovery timer is
+//   untouched (it was never the slow one).
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('pruneTrash no longer fires 7000ms after boot (C-1.6)',
+    /appTimers\.trash = setTimeout\(\(\) => pruneTrash\(\), 7000\);/.test(MAIN)
+      ? [] : ['the trash-prune timer is not scheduled at 7000ms']);
+  none('checkForUpdate no longer fires 9000ms after boot (C-1.6)',
+    /setTimeout\(checkForUpdate, 9000\)/.test(MAIN)
+      ? [] : ['the update-check timer is not scheduled at 9000ms']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
