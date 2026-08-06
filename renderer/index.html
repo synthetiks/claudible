@@ -909,6 +909,12 @@
     .ws-info-pop .wt{display:block;font-size:var(--fs-sm);color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
     .ws-info-pop p:last-child{margin-bottom:0}
+    /* C-3.4 — the "which characters aren't allowed" popover for ws-name-in and the inline rename field. Same
+       ⓘ popover shell (placeInfoPop positions it identically), but it must sit ABOVE #ws-modal (z-index 10000 —
+       .approve) since ws-name-in lives inside it, and the amber border/heading mark it as a validation warning
+       rather than the neutral "what's a workspace?" explainer. */
+    .name-char-pop{z-index:10001;border-color:var(--warn)}
+    .name-char-pop .wt{color:var(--warn)}
     /* SHARE info popover: the same four facts, but ranked instead of run together as three equal paragraphs —
        what it is → the two controls you hold → the cheaper alternative. Slightly wider/larger than the generic
        popover because this one carries the security explanation and is the first thing a new user reads. */
@@ -1804,7 +1810,7 @@
           <div><div class="ct">Import a GitHub project</div><div class="cd">Clone a repo you already have on GitHub and work in it here. Sessions stay private until you turn sharing on from its ▾ menu.</div></div>
         </div>
       </div>
-      <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dashes)" />
+      <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dots, dashes, underscores)" />
       <input type="text" id="ws-repo-in" maxlength="140" placeholder="owner/repo — or paste the GitHub URL" style="display:none" />
       <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose where its folder goes (else it goes in ~/.claudible)</span></label>
       <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>

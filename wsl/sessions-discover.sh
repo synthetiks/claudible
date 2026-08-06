@@ -34,7 +34,11 @@ all="$(gh api --paginate '/user/repos?affiliation=owner,collaborator,organizatio
 repos=""; checks=0
 while IFS="$(printf '\t')" read -r o n id tagged; do
   case "$o" in '' | *[!A-Za-z0-9-]*) continue ;; esac
-  case "$n" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+  # C-3.4 — GitHub's own repo-name charset, not Claudible's local-folder slug charset. This used to drop
+  # my_repo/next.js from discovery ENTIRELY (silently — worse than the clone-time mangling elsewhere): an
+  # invite to a dotted/underscored repo never even appeared as "needs setup". main.js derives the separate
+  # sanitized LOCAL folder name from this; this script only ever reports the repo's real name.
+  case "$n" in '' | . | .. | *[!A-Za-z0-9._-]*) continue ;; esac
   case "$id" in *[!0-9]*) id="" ;; esac                       # numeric id only; empty is fine (main.js falls back to name matching)
   if [ "$tagged" = "1" ]; then
     repos="$repos$o	$n	$id
@@ -56,7 +60,7 @@ first=1
 printf '['
 while IFS="$(printf '\t')" read -r owner name gid; do
   case "$owner" in '' | *[!A-Za-z0-9-]*) continue ;; esac
-  case "$name"  in '' | *[!A-Za-z0-9-]*) continue ;; esac     # only repos whose name is a valid slug
+  case "$name"  in '' | . | .. | *[!A-Za-z0-9._-]*) continue ;; esac   # GitHub's own repo-name charset (C-3.4) — NOT the local-folder slug charset
   case "$gid"   in *[!0-9]*) gid="" ;; esac
   [ "$first" = 1 ] || printf ','
   first=0

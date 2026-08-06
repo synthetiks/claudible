@@ -5243,6 +5243,44 @@ function placeInfoPop(pop, anchor) {
   const above = r.top - h - 6;
   pop.style.top = Math.max(8, above >= 8 ? above : Math.min(r.bottom + 6, window.innerHeight - h - 8)) + 'px';
 }
+// C-3.4 — UNIFIED NAMING RULE. One allowed charset for a project name or a rename, everywhere: whatever
+// GitHub restricts on a repo name (letters, digits, dot, dash, underscore) is what Claudible restricts too —
+// "if a character isn't allowed somewhere, it isn't allowed anywhere". Enforced the moment it's typed, not as
+// a failure after Create/Enter: while ANY disallowed character is present, a popover beside the field names
+// exactly which ones, and submitting is blocked. ws-name-in and the inline rename field (.ws-rename) share
+// this verbatim — see wireNameValidator below.
+const NAME_CHAR_RE = /[A-Za-z0-9._-]/;
+function disallowedNameChars(s) {
+  const seen = [];
+  for (const ch of String(s || '')) { if (!NAME_CHAR_RE.test(ch) && !seen.includes(ch)) seen.push(ch); }
+  return seen;
+}
+let nameCharPop = null, nameCharPopInput = null;
+function closeNameCharPop() { if (!nameCharPop) return; nameCharPop.remove(); nameCharPop = null; nameCharPopInput = null; }
+function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Wires ONE input to the live validator. `getBtn` (optional) resolves the submit control to disable while
+// invalid — a function, since e.g. the create modal's button may not be the same element across opens (it
+// isn't here, but the rename field has no button at all: Enter/blur gate on validity themselves instead, see
+// startWsEdit). Returns the check function so a caller can force a re-check (e.g. on kind-switch).
+function wireNameValidator(input, getBtn) {
+  const check = () => {
+    const bad = disallowedNameChars(input.value);
+    const btn = typeof getBtn === 'function' ? getBtn() : getBtn;
+    if (btn) btn.disabled = bad.length > 0;
+    if (!bad.length) { if (nameCharPopInput === input) closeNameCharPop(); return bad; }
+    if (nameCharPopInput !== input) closeNameCharPop();
+    if (!nameCharPop) {
+      nameCharPop = document.createElement('div'); nameCharPop.className = 'ws-info-pop name-char-pop';
+      document.body.appendChild(nameCharPop); nameCharPopInput = input;
+    }
+    nameCharPop.innerHTML = '<span class="wt"><b>Not allowed:</b> ' + bad.map((c) => '“' + escHtml(c) + '”').join(', ') + '</span>'
+      + '<p>Names can only use letters, numbers, dots, dashes and underscores — same as GitHub.</p>';
+    placeInfoPop(nameCharPop, input);
+    return bad;
+  };
+  input.addEventListener('input', check);
+  return check;
+}
 function openWsInfo() {
   if (wsInfoPop) { closeWsInfo(); return; }
   const anchor = $('ws-info'); if (!anchor) return;
@@ -5625,10 +5663,16 @@ function startWsEdit(chip, nm, w) {
     }
     try { inp.remove(); } catch {} nm.style.display = '';
     nm.textContent = w.label; chip.title = (w.kind === 'repo' && w.repoUrl) ? w.repoUrl : w.label;
+    if (nameCharPopInput === inp) closeNameCharPop();       // C-3.4: the field this popover was anchored to is gone
   };
-  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
-  inp.addEventListener('blur', () => commit(true));
+  // C-3.4: blocked while a disallowed character is present (the popover beside the field says which). Enter
+  // just keeps editing rather than saving; blur/Escape both fall back to save=false so clicking away can
+  // never silently commit a name that couldn't be submitted a moment ago.
+  const valid = () => !disallowedNameChars(inp.value).length;
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); if (valid()) commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
+  inp.addEventListener('blur', () => commit(valid()));
   inp.addEventListener('click', (e) => e.stopPropagation());
+  wireNameValidator(inp, null);
 }
 async function toggleShared(w) {
   const next = !w.shared;
@@ -6139,6 +6183,10 @@ async function switchWorkspace(id, targetSession) {
 }
 // new-workspace chooser modal
 let wsChoiceKind = 'local';
+// C-3.4 — the live "which characters aren't allowed" validator for ws-name-in, wired once the field exists
+// below (wireNameValidator's own listener does the real work; wsNameCheck lets selectWsKind/openWsModal force
+// a re-check on kind-switch / reset). See wireNameValidator + disallowedNameChars, defined with the ⓘ popovers.
+let wsNameCheck = null;
 // The New-project radiogroup, in DOM order. All three kinds are creation-time choices again (owner decision,
 // 2026-07-19, restoring what 476630e removed): Local / Shared GitHub project / Add existing folder. The shared
 // tile carries the SAME consent gate as the ▾-menu share flows (see createWorkspace below — the old tile had
@@ -6161,18 +6209,23 @@ function selectWsKind(kind) {
   const rp = $('ws-repo-in');
   if (nm) nm.style.display = (kind === 'import') ? 'none' : '';
   if (rp) rp.style.display = (kind === 'import') ? '' : 'none';
-  if (nm) nm.placeholder = (kind === 'adopt') ? 'Project name (optional — defaults to the folder’s name)' : 'Project name (letters, numbers, dashes)';
+  if (nm) nm.placeholder = (kind === 'adopt') ? 'Project name (optional — defaults to the folder’s name)' : 'Project name (letters, numbers, dots, dashes, underscores)';
   const btn = $('ws-create'); if (btn) btn.textContent = (kind === 'adopt') ? 'Choose folder…' : (kind === 'import') ? 'Clone' : 'Create';
+  // Import doesn't use ws-name-in at all (own field, own parsing) — re-run the validator so switching TO import
+  // can't leave ws-create stuck disabled by leftover bad characters in a field that's now hidden and irrelevant,
+  // and switching AWAY from it re-validates whatever's actually there.
+  if (kind === 'import') { if (btn) btn.disabled = false; closeNameCharPop(); } else if (wsNameCheck) wsNameCheck();
 }
 function openWsModal() {
   selectWsKind('local');
   $('ws-name-in').value = ''; $('ws-busy').textContent = ''; $('ws-busy').classList.remove('err');
   if ($('ws-repo-in')) $('ws-repo-in').value = '';
   if ($('ws-pick')) $('ws-pick').checked = false;
+  if (wsNameCheck) wsNameCheck();                            // fresh value → clears any stale disabled/popup state
   $('ws-modal').classList.add('show');
   setTimeout(() => $('ws-name-in').focus(), 60);
 }
-function closeWsModal() { $('ws-modal').classList.remove('show'); firstRunActive = false; }
+function closeWsModal() { $('ws-modal').classList.remove('show'); firstRunActive = false; closeNameCharPop(); }
 async function createWorkspace() {
   if ($('ws-create').disabled) return;                      // in-flight guard (the Enter key can bypass the disabled button)
   const name = $('ws-name-in').value.trim();
@@ -6286,6 +6339,9 @@ $('ws-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); createWorkspace(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeWsModal(); }
 });
+// C-3.4 — createWorkspace() itself already refuses while $('ws-create').disabled (the in-flight guard above),
+// so wiring the validator to disable that SAME button also blocks the Enter-key path above, not just a click.
+wsNameCheck = wireNameValidator($('ws-name-in'), () => $('ws-create'));
 // The import field gets the same keys — a paste-and-Enter is the whole interaction for that kind, and a field
 // where Enter does nothing while its sibling submits is the sort of inconsistency nobody reports but everyone feels.
 if ($('ws-repo-in')) $('ws-repo-in').addEventListener('keydown', (e) => {

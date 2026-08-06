@@ -2808,11 +2808,59 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /onApprovalCancel && onApprovalCancel\(id\); \} catch \{\} \}\s*\n\s*for \(const \[, p\] of pending\) \{ try \{ p\.ws\.close/.test(read('share/server.js'))
       ? [] : ['stop() clears pending without cancelling the host prompt']);
   // (f) workspace:import sanitized the repo NAME and then cloned the sanitized result — `vercel/next.js`
-  //     fetched `vercel/nextjs`, a different repository. Refusing is the honest behaviour until the folder
-  //     name and the clone target are carried separately end to end.
-  none('workspace:import silently mangles a repo name into a different repo again',
-    /const repoName = m\[2\];[\s\S]{0,200}?if \(!\/\^\[A-Za-z0-9-\]\+\$\/\.test\(repoName\)\)/.test(MAIN)
-      ? [] : ['import no longer refuses names it cannot represent — it may be sanitizing them again']);
+  //     fetched `vercel/nextjs`, a different repository. SUPERSEDED by C-3.4 (test 86 below): the refusal
+  //     this note describes is now GONE on purpose — the folder name and the clone target are carried as
+  //     separate values end to end, so `my_repo`/`next.js` clone correctly instead of being refused.
+  none('the retired import refusal message is back (the C-3.4 two-value fix should have replaced it)',
+    /Claudible can.t import repositories whose name contains/.test(MAIN)
+      ? ['the dots/underscores refusal message is still in main.js'] : []);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 86. C-3.4 — UNIFIED NAMING: the repo Claudible asks GitHub to clone and the local folder it clones into are
+//   two SEPARATE values across all three name-mangling callers (import, discovery/invite, rename), and the
+//   project-name / rename fields validate the allowed charset live instead of silently stripping characters.
+//   Before this: an invite to `my_repo` cloned `myrepo` (a DIFFERENT repo) with no error — the audit's §9 #6
+//   defect, alive on the one path that involves a second person and no error message.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the shared repoName/folderSlug helpers are missing (every caller below depends on them)',
+    [/const REPO_NAME_RE = \/\^\[A-Za-z0-9\._-\]\{1,100\}\$\//.test(MAIN) ? '' : 'REPO_NAME_RE missing',
+     /function isGithubRepoName\(/.test(MAIN) ? '' : 'isGithubRepoName missing',
+     /function folderSlugFor\(/.test(MAIN) ? '' : 'folderSlugFor missing'].filter(Boolean));
+  none('ensureClone stopped passing the exact repoName to clone-workspace.sh (back to cloning the sanitized slug)',
+    /const repoName = isGithubRepoName\(ws\.repoName\) \? ws\.repoName : slug;/.test(MAIN)
+      && /runScript\('clone-workspace\.sh', `'\$\{owner\}' '\$\{repoName\}' '\$\{slug\}'\$\{dirArg\}`/.test(MAIN)
+      ? [] : ['ensureClone no longer threads a separate exact repoName through to the clone script']);
+  none('clone-workspace.sh no longer takes owner/repo/slug as three separate positional args',
+    [/repo="\$\{2:-\}"/.test(read('wsl/clone-workspace.sh')) ? '' : 'no $2 repo arg',
+     /slug="\$\{3:-\}"/.test(read('wsl/clone-workspace.sh')) ? '' : 'no $3 slug arg',
+     /gh repo clone "\$owner\/\$repo" "\$dir"/.test(read('wsl/clone-workspace.sh')) ? '' : 'clone no longer targets $owner/$repo'].filter(Boolean));
+  none('discovery went back to sanitizing the repo name before matching/cloning it',
+    /const slug = String\(item && item\.slug \|\| ''\);/.test(MAIN)
+      && /if \(!isGithubRepoName\(slug\) \|\| !owner\) continue;/.test(MAIN)
+      && /const folderSlug = folderSlugFor\(slug\);/.test(MAIN)
+      ? [] : ['discoverWorkspaces no longer keeps the exact name (slug) and the folder name (folderSlug) separate']);
+  none('sessions-discover.sh silently drops repos with a dot/underscore in the name again',
+    (read('wsl/sessions-discover.sh').match(/case "\$n(ame)?"\s+in '' \| \. \| \.\. \| \*\[!A-Za-z0-9\._-\]\*\) continue/g) || []).length === 2
+      ? [] : ['sessions-discover.sh no longer widens BOTH name filters to GitHub\'s repo-name charset']);
+  none('workspace:import\'s repoName/slug split regressed',
+    /const repoName = m\[2\];/.test(MAIN) && /if \(!isGithubRepoName\(repoName\)\)/.test(MAIN) && /const slug = folderSlugFor\(repoName\);/.test(MAIN)
+      ? [] : ['workspace:import no longer keeps the exact repoName and the sanitized folder slug separate']);
+  none('workspace:rename collapses the label into dashes before sending it to GitHub again',
+    /newName = label\.replace\(\/\[\^A-Za-z0-9-\]\+\/g, '-'\)/.test(MAIN)
+      ? ['the dash-collapsing rename mangler is back'] : []);
+  none('workspace:rename no longer sends the label to GitHub verbatim when it is already legal',
+    /const newName = label;/.test(MAIN) ? [] : ['rename-repo.sh is no longer called with the untouched label']);
+  none('the renderer lost the live naming-charset validator (ws-name-in / .ws-rename)',
+    [/function disallowedNameChars\(/.test(APP) ? '' : 'disallowedNameChars missing',
+     /function wireNameValidator\(/.test(APP) ? '' : 'wireNameValidator missing',
+     /wsNameCheck = wireNameValidator\(\$\('ws-name-in'\)/.test(APP) ? '' : 'ws-name-in is not wired to the validator',
+     /wireNameValidator\(inp, null\);/.test(APP) ? '' : 'the inline rename input (.ws-rename) is not wired to the validator'].filter(Boolean));
+  none('the rename input can commit while a disallowed character is still present',
+    /const valid = \(\) => !disallowedNameChars\(inp\.value\)\.length;/.test(APP)
+      && /if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); if \(valid\(\)\) commit\(true\); \}/.test(APP)
+      ? [] : ['startWsEdit no longer gates Enter/blur on validity']);
 }
 
 // ---------------------------------------------------------------------------------------------------------

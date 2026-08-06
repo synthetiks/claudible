@@ -57,9 +57,11 @@ for n in "${NAMES[@]}"; do
   refuses_with "create-workspace ($n)" "bad dir" bash "$WSL/create-workspace.sh" local proj "$d1"
   absent       "create-workspace ($n)" "$d1"
 
-  # clone-workspace.sh <owner> <slug> <dir>     — guard was missing backslash + control bytes.
+  # clone-workspace.sh <owner> <repo> <slug> <dir>   — guard was missing backslash + control bytes. C-3.4 added
+  # <repo> (the exact GitHub name) as a separate arg from <slug> (the local folder name); repo==slug here since
+  # this test only exercises the dir guard, not the name split (see test/contract.test.js #86 for that).
   # "bad dir" also proves it never reached `gh repo clone`.
-  refuses_with "clone-workspace ($n)" "bad dir" bash "$WSL/clone-workspace.sh" someowner someslug "$d2"
+  refuses_with "clone-workspace ($n)" "bad dir" bash "$WSL/clone-workspace.sh" someowner someslug someslug "$d2"
   absent       "clone-workspace ($n)" "$d2"
 
   # upgrade-workspace.sh <slug> <dir>           — same guard. "bad dir", not "workspace folder not found".
@@ -89,7 +91,7 @@ if [ -d "$TMP/home/.claudible/workspaces/defproj/.claude" ]; then ok; else bad "
 
 echo "== a bad SLUG must still be rejected as a bad slug, not swallowed by the new dir guard =="
 refuses_with "create-workspace (bad slug)" "bad slug" bash "$WSL/create-workspace.sh" local 'a/b' "$TMP"
-refuses_with "clone-workspace (bad owner)" "bad owner" bash "$WSL/clone-workspace.sh" 'a/b' someslug "$TMP"
+refuses_with "clone-workspace (bad owner)" "bad owner" bash "$WSL/clone-workspace.sh" 'a/b' someslug someslug "$TMP"
 
 echo "== clone-workspace must NEVER rm -rf a folder it did not create =="
 # The rollback exists to drop a half-done clone. Before the guard, a pre-existing NON-git folder sailed past the
@@ -98,11 +100,11 @@ echo "== clone-workspace must NEVER rm -rf a folder it did not create =="
 # AND that the bytes survive. Both directions matter: revert the guard and the second assertion fails.
 EXISTS_MSG='that folder already exists and is not empty — pick another location'
 PRE="$TMP/precious"; mkdir -p "$PRE"; printf 'uncommitted work\n' > "$PRE/work.txt"
-refuses_with "clone-workspace (pre-existing non-empty dir)" "$EXISTS_MSG" bash "$WSL/clone-workspace.sh" someowner someslug "$PRE"
+refuses_with "clone-workspace (pre-existing non-empty dir)" "$EXISTS_MSG" bash "$WSL/clone-workspace.sh" someowner someslug someslug "$PRE"
 if [ -f "$PRE/work.txt" ]; then ok; else bad "clone-workspace DELETED a pre-existing folder" "$PRE/work.txt is gone"; fi
 
 PREF="$TMP/afile"; printf 'x' > "$PREF"
-refuses_with "clone-workspace (target is a plain file)" "$EXISTS_MSG" bash "$WSL/clone-workspace.sh" someowner someslug "$PREF"
+refuses_with "clone-workspace (target is a plain file)" "$EXISTS_MSG" bash "$WSL/clone-workspace.sh" someowner someslug someslug "$PREF"
 if [ -f "$PREF" ]; then ok; else bad "clone-workspace DELETED a pre-existing file" "$PREF is gone"; fi
 
 # …and an EMPTY pre-existing dir is still a legal clone target — don't over-tighten into refusing it. A stub `gh`
@@ -110,7 +112,7 @@ if [ -f "$PREF" ]; then ok; else bad "clone-workspace DELETED a pre-existing fil
 # must survive the failure.
 STUB="$TMP/bin"; mkdir -p "$STUB"; printf '#!/bin/sh\nexit 1\n' > "$STUB/gh"; chmod +x "$STUB/gh"
 PREE="$TMP/emptydir"; mkdir -p "$PREE"
-out="$(PATH="$STUB:$PATH" bash "$WSL/clone-workspace.sh" someowner someslug "$PREE" 2>/dev/null)"
+out="$(PATH="$STUB:$PATH" bash "$WSL/clone-workspace.sh" someowner someslug someslug "$PREE" 2>/dev/null)"
 got="$(json_err "$out")"
 if [ "$got" = "clone failed (check access to someowner/someslug)" ]; then ok; else bad "clone-workspace mishandles an EMPTY pre-existing dir" "error was [$got]"; fi
 if [ -d "$PREE" ]; then ok; else bad "clone-workspace deleted an EMPTY dir it did not create" "$PREE is gone"; fi

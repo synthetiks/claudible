@@ -67,6 +67,11 @@ ok "$(run testws crazy 'old/../x' new)" '{"ok":false,"error":"bad name"}'     "a
 ok "$(run testws crazy old 'new name')" '{"ok":false,"error":"bad new name"}' "a spaced new name is refused"
 ok "$(run testws '' old new)"           '{"ok":false,"error":"bad owner"}'    "an empty owner is refused"
 ok "$(cat "$GH_CALLS" | wc -l | tr -d ' ')" "0" "validation failures never invoke gh"
+# C-3.4: dots/underscores are GitHub's own repo-name charset, not a validation failure — 'bad name'/'bad new
+# name' must NOT fire for these (they still hit "not authenticated" next, same as any other valid name, since
+# GH_LOGIN isn't set yet here).
+out="$(run testws crazy old.name new_name)"
+case "$out" in '{"ok":false,"error":"bad'*) fail=$((fail+1)); echo "  FAIL a dotted/underscored name is refused as invalid (got: $out)";; *) pass=$((pass+1));; esac
 
 # ---- 2. gh missing entirely (PATH without the stub) ----
 out="$(HOME="$TMP" CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws PATH="$BIN" bash "$SCRIPT" crazy old new 2>/dev/null)"
@@ -92,6 +97,15 @@ ok "$out" '{"ok":true,"repoName":"newname","repoUrl":"https://github.com/crazy/n
 ok "$(origin_of)" "https://github.com/crazy/newname.git" "origin is repointed to the canonical new URL (no redirect reliance)"
 grep -q '^repo rename newname --repo crazy/oldname -y$' "$GH_CALLS"; ok "$?" "0" "gh was invoked with exactly the rename it was asked for"
 grep -q '^api repos/crazy/newname --jq .id$' "$GH_CALLS";            ok "$?" "0" "the id is read from the NEW name (the old one is gone)"
+
+# ---- 5b. C-3.4: a GitHub-legal name with dots/underscores reaches gh VERBATIM, never collapsed into dashes ----
+#      (this is the regression test for the second silent mangler the audit found — the caller used to turn
+#      the rename LABEL into dashes before it ever reached this script; now it's the caller's job to send the
+#      exact name through, and this script's only job is to accept GitHub's own charset unchanged.)
+mkfixture; : > "$GH_CALLS"
+out="$(GH_LOGIN=crazy GH_ID=777 run testws crazy old.name new_name)"
+ok "$out" '{"ok":true,"repoName":"new_name","repoUrl":"https://github.com/crazy/new_name","ghId":777}' "a dotted current name + an underscored new name both succeed, verbatim"
+grep -q '^repo rename new_name --repo crazy/old.name -y$' "$GH_CALLS"; ok "$?" "0" "gh sees the exact dotted/underscored names — neither was collapsed into dashes"
 
 # ---- 6. a missing/garbage id degrades to ok WITHOUT ghId (discovery falls back to name matching) ----
 mkfixture

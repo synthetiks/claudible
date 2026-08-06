@@ -2097,6 +2097,19 @@ function handleHook(tabId, line) {
     const r = ptys.get(tabId); if (r) r.agentTokSettled = false;
   } else if (ev === 'Stop') { setGenBusy(tabId, false); const r = ptys.get(tabId); schedulePush(r && r.ws); _snapshotOnStop(tabId); }
 }
+// C-3.4 — the repo Claudible asks GitHub to clone and the LOCAL folder it clones into are two SEPARATE values
+// from here down through clone-workspace.sh. `repoName` is the exact name GitHub has on file for the repo
+// (its own charset: letters, digits, dot, underscore, dash — my_repo, next.js); `slug` stays the plain
+// [A-Za-z0-9-] form every folder + Claude transcript path is keyed on. The old bug sanitized the name down to
+// slug FIRST and cloned the sanitized result — `my_repo` silently cloned `myrepo`, a different repository.
+// isGithubRepoName is the shell-safety boundary too: it is the only charset that can reach a single-quoted
+// bash argument and a printf'd JSON string with no escaping needed (no `'`, `"`, `\` or control byte is ever
+// in it), so anything that passes it is safe to interpolate as-is.
+const REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+function isGithubRepoName(s) { return typeof s === 'string' && REPO_NAME_RE.test(s) && s !== '.' && s !== '..'; }
+// The LOCAL-only derived folder name — same removal-only sanitize this file already applied to every "slug"
+// value before this fix; only the SOURCE changed (the exact name, not something already cloned under it).
+function folderSlugFor(name) { return String(name || '').replace(/[^A-Za-z0-9-]/g, ''); }
 // Clone an existing (invited) repo workspace into ~/.claudible/repos/<slug> if it isn't local yet.
 function ensureClone(ws) {
   if (cloneInFlight.has(ws.id)) return cloneInFlight.get(ws.id);   // a clone for this ws is already running → share it (no double gh clone into the same dir)
@@ -2104,10 +2117,13 @@ function ensureClone(ws) {
     if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
     const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
     const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
-    if (!slug || !owner) return resolve({ ok: false, error: 'bad workspace' });
+    // The exact GitHub name to clone. Falls back to slug for registry entries written before this field existed
+    // (their repoName IS their slug — Claudible minted those repos itself, so the two were always identical).
+    const repoName = isGithubRepoName(ws.repoName) ? ws.repoName : slug;
+    if (!slug || !owner || !repoName) return resolve({ ok: false, error: 'bad workspace' });
     const wsp = safePath(ws.path);   // the invitee's chosen clone dir (else the script's default). A path that can't round-trip was never storable — but workspaces.json is hand-editable
     const dirArg = wsp ? ` '${wsp}'` : '';
-    runner.runScript('clone-workspace.sh', `'${owner}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
+    runner.runScript('clone-workspace.sh', `'${owner}' '${repoName}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
         // Surface the REAL reason so a Windows-specific failure isn't swallowed as a silent re-prompt — but log the
         // full stderr and show the user only a trimmed line (raw multi-KB git stderr shouldn't flood a toast).
         if (err) { console.error('[claudible] clone-workspace failed:', (err && err.message) || err); return resolve({ ok: false, error: 'clone could not run: ' + String((err && err.message) || err).slice(0, 200) }); }
@@ -2125,8 +2141,8 @@ function ensureClone(ws) {
 function backfillRepoIdentity(ws) {
   return new Promise((resolve) => {
     const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
-    const name = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
-    if (!owner || !name) return resolve(false);
+    const name = String(ws.repoName || ws.slug || '');   // exact GitHub name — dots/underscores allowed (C-3.4)
+    if (!owner || !isGithubRepoName(name)) return resolve(false);
     runner.runScript('repo-identity.sh', `'${owner}' '${name}'`, { timeout: 30000 }).then(({ err, stdout }) => {
       if (err) return resolve(false);                                    // offline / gh missing → try again next pass
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
@@ -2193,11 +2209,16 @@ async function discoverWorkspaces() {
         const added = [];
         let changed = false;   // registry mutated by a backfill/reconcile even when nothing new was added
         for (const item of (Array.isArray(list) ? list : [])) {
-          const slug = String(item && item.slug || '').replace(/[^A-Za-z0-9-]/g, '');   // the repo's CURRENT name
+          // `slug` here means what it always has in this function and in lib/discovery.js: the repo's CURRENT
+          // EXACT GitHub name (dots/underscores allowed — C-3.4). It is what gets cloned. `folderSlug` is the
+          // separate, LOCAL-only value — never the clone target, never sent to GitHub.
+          const slug = String(item && item.slug || '');
           const owner = String(item && item.owner || '').replace(/[^A-Za-z0-9-]/g, '');
-          if (!slug || !owner) continue;
+          if (!isGithubRepoName(slug) || !owner) continue;
+          const folderSlug = folderSlugFor(slug);
+          if (!folderSlug) continue;
           const ghId = (item && Number.isFinite(item.id)) ? item.id : (/^\d+$/.test(String(item && item.id || '')) ? Number(item.id) : null);   // stable GitHub repo id (survives a rename)
-          const wid = `repo-${slug}`;
+          const wid = `repo-${folderSlug}`;
           const repoUrl = (item && item.repoUrl) || ('https://github.com/' + owner + '/' + slug);
           // Find the workspace this repo already IS (rename-safe: renamed repos match ONLY by stable ghId — see
           // lib/discovery.js). Also skips a repo the user ADOPTED a working copy of (re-offering "clone me" is noise).
@@ -2211,7 +2232,7 @@ async function discoverWorkspaces() {
             continue;
           }
           if (isRepoDismissed(registry, owner, slug, ghId)) continue;   // the user DELETED this repo workspace here — discovery must not resurrect it as a fresh invite every launch. Matched by stable ghId as well as by name, so a RENAMED repo stays deleted too (deliberately re-adding it clears the tombstone).
-          const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoName: slug, repoUrl, ghId: ghId != null ? ghId : undefined, createdAt: Date.now(), needsClone: true };
+          const ws = { id: wid, label: slug, kind: 'repo', slug: folderSlug, owner, repoName: slug, repoUrl, ghId: ghId != null ? ghId : undefined, createdAt: Date.now(), needsClone: true };
           registry.workspaces.push(ws); added.push(ws);
         }
         if (added.length || changed) { saveRegistry(); try { win && win.webContents.send('workspace:added', added.map((w) => ({ id: w.id, label: w.label }))); } catch {} }
@@ -2429,26 +2450,22 @@ ipcMain.handle('workspace:import', async (e, payload) => {
     .match(/^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/);
   if (!m) return { ok: false, error: 'Use owner/repo, or paste the repository URL' };
   const owner = m[1];
-  // REFUSE rather than silently clone something else. This used to sanitize the repo name down to
-  // [A-Za-z0-9-] and then use the RESULT as the clone target, so `vercel/next.js` cloned `vercel/nextjs`
-  // and `myorg/my_repo` cloned `myorg/myrepo` — a different repository, or none, reported as
-  // "clone failed (check access to …)" naming a repo the user never typed. Worse, if that other repo
-  // happened to exist and be theirs, it was cloned and registered as the one they asked for.
-  // The charset is not arbitrary: the slug names the on-disk folder AND keys every transcript path, and
-  // clone-workspace.sh applies the same [A-Za-z0-9-] guard to its own argument. Widening it safely means
-  // carrying the folder name and the clone target as SEPARATE values end to end (main → ensureClone →
-  // clone-workspace.sh), which is a real change with a shell-quoting surface — not something to slip in
-  // untested. Until then this says so plainly instead of guessing.
+  // C-3.4 — clone the EXACT repo the user typed, never a sanitized stand-in. This used to sanitize the repo
+  // name down to [A-Za-z0-9-] and then use the RESULT as the clone target, so `vercel/next.js` cloned
+  // `vercel/nextjs` and `myorg/my_repo` cloned `myorg/myrepo` — a different repository, or none, reported as
+  // "clone failed (check access to …)" naming a repo the user never typed. An interim fix refused these names
+  // outright rather than mangle them; that refusal is gone now that the folder name and the clone target are
+  // carried as SEPARATE values end to end (main → ensureClone → clone-workspace.sh — see the C-3.4 comment
+  // above ensureClone). The regex above already restricts m[2] to GitHub's own repo-name charset.
   const repoName = m[2];
-  if (!/^[A-Za-z0-9-]+$/.test(repoName)) {
-    return { ok: false, error: 'Claudible can’t import repositories whose name contains “.” or “_” yet — clone it manually, then use “Add a folder I already have”.' };
-  }
-  const slug = repoName;
+  if (!isGithubRepoName(repoName)) return { ok: false, error: 'That doesn’t look like a valid GitHub repository name.' };
+  const slug = folderSlugFor(repoName);        // LOCAL folder name only — never the clone target
+  if (!slug) return { ok: false, error: 'Claudible needs at least one letter, digit or dash in the repo name to name the local folder.' };
   const wid = `repo-${slug}`;
   const existing = registry.workspaces.find((w) => w.id === wid || (w.kind === 'repo' && w.slug === slug && w.owner === owner));
   if (existing) return { ok: false, error: 'already', id: existing.id };   // typed, so the renderer can just switch to it rather than dead-ending
-  const ws = { id: wid, label: slug, kind: 'repo', slug, owner, repoName: slug,
-    repoUrl: `https://github.com/${owner}/${slug}`, createdAt: Date.now(), needsClone: true };
+  const ws = { id: wid, label: repoName, kind: 'repo', slug, owner, repoName,
+    repoUrl: `https://github.com/${owner}/${repoName}`, createdAt: Date.now(), needsClone: true };
   registry.workspaces.push(ws); saveRegistry();
   const c = await ensureClone(ws);                                  // minutes, over the network; clears needsClone on success
   if (!c.ok) {
@@ -2628,10 +2645,17 @@ ipcMain.handle('workspace:rename', async (e, payload) => {
   // Only a Claudible-managed repo workspace (created/cloned here, not merely ADOPTED — an adopted repo points at
   // the user's own external folder whose remote we must not touch) has a GitHub repo we should rename.
   if (ws.kind === 'repo' && !ws.needsClone && !ws.adopted && ws.owner && APPDIR_WSL) {
-    const curName = String(ws.repoName || ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
-    const newName = label.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90);   // GitHub-safe name from the label (Claudible slug charset: letters/digits/dashes)
+    // C-3.4 — the label reaches GitHub VERBATIM when it's already GitHub-legal, never collapsed into dashes.
+    // The old collapse (`my.repo` -> `my-repo`) was the second silent name-mangler the audit found (the first
+    // was import, above): typing a legal GitHub name and getting a DIFFERENT one on GitHub, no error shown.
+    // The renderer's live validator (ws-rename) blocks a disallowed character before this ever runs; this is
+    // the defense-in-depth mirror of that check, not the primary gate.
+    const curName = isGithubRepoName(ws.repoName || ws.slug || '') ? String(ws.repoName || ws.slug) : '';
     const owner = String(ws.owner).replace(/[^A-Za-z0-9-]/g, '');
-    if (newName && owner && curName && newName !== curName) {
+    if (owner && curName && label !== curName && !isGithubRepoName(label)) {
+      notice = 'Renamed here — but that name isn’t valid on GitHub (letters, numbers, dots, dashes and underscores only), so the repo there is unchanged.';
+    } else if (owner && curName && label !== curName) {
+      const newName = label;
       const rr = await new Promise((res) => {
         runner.runScript('rename-repo.sh', `'${owner}' '${curName}' '${newName}'`, { ws, timeout: 60000 }).then(({ err, stdout }) => {
           if (err) { console.error('[claudible] rename-repo:', err.message); return res({ ok: false, error: 'exec' }); }

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Claudible — rename a repo workspace's GitHub repo (OWNER-only) and repoint the local clone's origin remote.
-# Args: $1 = owner, $2 = current repo name, $3 = new repo name. All strict [A-Za-z0-9-] (Claudible slug charset).
+# Args: $1 = owner, strict [A-Za-z0-9-] (a GitHub login's own charset); $2 = current repo name, $3 = new repo
+# name, both GitHub's own repo-name charset (letters, digits, dot, underscore, dash — C-3.4: a rename target
+# like `my.repo` must reach GitHub exactly as typed, never collapsed into `my-repo`).
 #
 # The workspace SLUG is deliberately NOT changed by the caller: it names ~/.claudible/repos/<slug> and, through
 # that, ~/.claude/projects/<encoded cwd>/ — i.e. EVERY Claude transcript for this project. Renaming it would
@@ -14,9 +16,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 owner="${1:-}"
 old="${2:-}"
 new="${3:-}"
-case "$owner" in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad owner"}';    exit 0 ;; esac
-case "$old"   in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad name"}';     exit 0 ;; esac
-case "$new"   in '' | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad new name"}'; exit 0 ;; esac
+case "$owner" in '' | *[!A-Za-z0-9-]*)      printf '{"ok":false,"error":"bad owner"}';    exit 0 ;; esac
+case "$old"   in '' | . | .. | *[!A-Za-z0-9._-]*) printf '{"ok":false,"error":"bad name"}';     exit 0 ;; esac
+case "$new"   in '' | . | .. | *[!A-Za-z0-9._-]*) printf '{"ok":false,"error":"bad new name"}'; exit 0 ;; esac
 
 command -v gh >/dev/null 2>&1 || { printf '{"ok":false,"error":"the GitHub CLI (gh) is not installed in WSL"}'; exit 0; }
 case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*) case "$(command -v gh 2>/dev/null)" in *.exe|/mnt/*) { printf '{"ok":false,"error":"gh resolves to a Windows gh.exe via interop — install the Linux gh inside WSL"}'; exit 0; } ;; esac ;; esac   # a Windows gh.exe leaking through WSL interop reads the WINDOWS credential store and mangles Linux paths
