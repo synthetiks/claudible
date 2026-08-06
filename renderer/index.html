@@ -445,6 +445,9 @@
     button.primary{color:var(--ink);font-size:var(--fs-md);padding:15px}
     button.live{color:#fff;border-color:var(--live);
       background:linear-gradient(180deg,#241310,#160c0b);box-shadow:0 0 22px -6px var(--live),inset 0 1px 0 rgba(255,255,255,.06)}
+    /* C-7.3 manual path: the settings voice row's failure notice (Rescan + See how to fix it) */
+    .voice-setup-note{margin-bottom:11px;padding:9px 10px;border:1px solid rgba(230,184,106,.35);border-radius:8px;
+      background:rgba(230,184,106,.07);font-size:var(--fs-xs);line-height:1.5;color:#e6b86a}
     /* voice selector pills */
     .voices{display:flex;gap:6px;margin-bottom:10px}
     .vpill{flex:1;width:auto;padding:8px 4px;font-size:var(--fs-xs);letter-spacing:.03em;color:var(--ink-dim);
@@ -578,6 +581,12 @@
     .ext-tog:hover{border-color:rgba(255,255,255,.22)}
     /* official-marketplace browser (the "+" beside Skills/Plugins) */
     .mkt-box{width:480px;max-width:92vw}
+    /* C-7.3 manual path panel — reuses .ext-row/.mkt-list, adds one line per item for the on-disk target */
+    .vm-path{margin-top:3px;font-size:var(--fs-2xs);font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
+      color:var(--ink-faint);word-break:break-all}
+    .vm-log{font-size:var(--fs-xs);color:var(--ink-faint);text-align:left;margin:0 0 14px}
+    .vm-log b{color:var(--ink-dim);font-weight:600}
+    .vm-log span{font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;font-size:var(--fs-2xs);word-break:break-all}
     #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:var(--fs-md);color:var(--ink);background:#0a0b0d;
       border:1px solid var(--hairline);border-radius:9px;padding:10px 12px}
     #mkt-search:focus{outline:none;border-color:rgba(255,255,255,.28)}
@@ -1597,6 +1606,16 @@
           voice in <span class="dot" id="d-stt"></span>
           <button class="collapse min" id="stt-collapse" title="show / hide last transcript">▾</button>
         </div>
+        <!-- C-7.3 owners' addition: the manual path. Shown only when the automatic (packaged native-Windows)
+             provision gave up — voiceProvisionFailedAt is set and voiceProvisioned() still says no. Rescan
+             re-checks fresh with no download; a hand-installed tree flips this row away with no restart. -->
+        <div class="voice-setup-note" id="voice-setup-note" style="display:none">
+          <span id="voice-setup-text">Voice setup failed — automatic download didn’t finish.</span>
+          <div class="effort-row" style="margin-top:6px">
+            <button type="button" class="eff-pill" id="voice-setup-fix">See how to fix it</button>
+            <button type="button" class="eff-pill" id="voice-setup-rescan">Rescan</button>
+          </div>
+        </div>
         <button id="talk" class="primary" title="Click to start, click again (■ Stop) to send — it won't stop on its own. Or hold the push-to-talk key to talk and release to send.">Talk</button>
         <div class="ptt-key-row"><span>push-to-talk key</span><button id="ptt-key-btn" class="keycap-btn">Left Alt</button></div>
         <div class="out" id="stt-out"></div>
@@ -1863,6 +1882,19 @@
         <button id="sync-go">Turn on collaboration</button>
         <button id="sync-cancel" class="ghost">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <!-- C-7.3 owners' addition: the failure chip's "see how to fix it" opens this — the manual steps, reusing
+       the .approve/.mkt-list shell rather than a new window. Rescan lives on the settings voice row itself. -->
+  <div class="approve" id="voice-manual-modal">
+    <div class="box mkt-box">
+      <h3>Fix voice setup by hand</h3>
+      <p>Automatic setup didn’t finish. Download these two pieces yourself and put each where it says below,
+        then use <b>Rescan</b> on the voice row in Settings — no re-download needed once Claudible can see them.</p>
+      <div class="mkt-list" id="voice-manual-list"><div class="ext-empty">loading…</div></div>
+      <p class="vm-log">Full setup log: <b>see</b> <span id="voice-manual-log"></span></p>
+      <div class="row"><button id="voice-manual-close" class="ghost">Close</button></div>
     </div>
   </div>
 

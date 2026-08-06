@@ -43,6 +43,10 @@ contextBridge.exposeInMainWorld('claudible', {
   preflightStatus: () => ipcRenderer.invoke('preflight:status'),        // { runner, gitBash, deps: [{ id, label, hint, state, version, account, required, auth, authSoft, installable, restartOnInstall, requires }] }
   preflightInstall: (depId) => ipcRenderer.invoke('preflight:install', depId),   // → { ok, error, restartRequired }; progress streams via onProvision({dep,phase,msg})
   preflightRestart: () => ipcRenderer.invoke('preflight:restart'),
+  // C-7.3 manual path: the failure chip's "see how to fix it" panel + the settings voice row's Rescan button
+  voiceManualInfo: () => ipcRenderer.invoke('voice:manualInfo'),   // { voiceDir, logPath, items:[{name,path,url}] } — same paths voiceProvisioned() actually checks
+  voiceRescan: () => ipcRenderer.invoke('voice:rescan'),           // → { ok, voiceReady } — re-checks fresh; clears the failed-stamp with no download if a hand-install is now found
+  voiceStatus: () => ipcRenderer.invoke('voice:status'),           // { voiceReady, voiceProvisioning, failed, failedCode } — cheap fs-only read, safe on drawer open (C-9.1)
   // Connect-Claude button/popup: main fires 'claude:needed' when a spawn finds no claude; renderer pops the dialog
   onClaudeNeeded: (cb) => ipcRenderer.on('claude:needed', () => cb()),
   claudeConnected: () => ipcRenderer.invoke('claude:connected'),   // bring the terminal up after connecting

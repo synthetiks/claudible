@@ -626,8 +626,17 @@ if (claudible.onProvision) claudible.onProvision((m) => {
     const sp = $('sb-voice'), note = $('voice-note'); if (!sp || !note) return;
     sp.style.display = ''; sp.title = (m && m.msg) || '';
     if (!m || m.phase === 'start') { setDot('d-voice', 'work'); note.textContent = 'voice · setting up…'; }
-    else if (m.phase === 'done') { setDot('d-voice', 'ok'); note.textContent = 'voice ready'; setTimeout(() => { const s = $('sb-voice'); if (s) s.style.display = 'none'; }, 8000); }
-    else if (m.phase === 'error') { setDot('d-voice', 'bad'); note.textContent = 'voice setup failed'; }
+    else if (m.phase === 'done') { setDot('d-voice', 'ok'); note.textContent = 'voice ready'; setTimeout(() => { const s = $('sb-voice'); if (s) s.style.display = 'none'; }, 8000); hideVoiceSetupNote(); }
+    else if (m.phase === 'error') {
+      setDot('d-voice', 'bad');
+      // C-7.3 owners' addition: a bare "failed" left the user nowhere to go. The chip now carries a real action
+      // (openVoiceManual/hideVoiceSetupNote/showVoiceSetupNote are function declarations further down — hoisted,
+      // so they're callable here regardless of source order).
+      note.innerHTML = 'voice setup failed — <button type="button" class="linkbtn" id="voice-fix-link">see how to fix it</button>';
+      const fixBtn = document.getElementById('voice-fix-link');
+      if (fixBtn) fixBtn.addEventListener('click', (e) => { e.stopPropagation(); openVoiceManual(); });
+      showVoiceSetupNote();   // mirror the same notice on the settings voice row, visible whenever that drawer is opened next
+    }
   } catch {}
 });
 claudible.onStatus((s) => {
@@ -2343,7 +2352,7 @@ function openDrawer(open) {
   drawer.classList.toggle('open', open);
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) { loadSkills(); loadPlugins(); try { refreshGhRow(); } catch (e) {} try { refreshAboutRow(); } catch (e) {} }       // refresh extension inventory + GitHub state + version/update info each time the drawer opens (W4: a real gh subprocess — on open, never on a timer; C-9.1: about row paints from cache instantly, updateStatus is a cache read too)
+  if (open) { loadSkills(); loadPlugins(); try { refreshGhRow(); } catch (e) {} try { refreshVoiceSetupRow(); } catch (e) {} try { refreshAboutRow(); } catch (e) {} }       // refresh extension inventory + GitHub state + the voice manual-path notice + version/update info each time the drawer opens (W4: a real gh subprocess — on open, never on a timer; C-9.1: about row paints from cache instantly, updateStatus is a cache read too; voice:status is fs-only, equally cheap)
   if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
@@ -2444,6 +2453,55 @@ if ($('mkt-search')) {
   $('mkt-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMkt(); } });
 }
 if ($('mkt-close')) $('mkt-close').addEventListener('click', closeMkt);
+
+// ---- C-7.3 owners' addition: voice manual path (failure chip's "see how to fix it" + the settings voice
+// row's Rescan). Modest on purpose — no new window, reuses the .approve/.mkt-list shell above. ----
+function showVoiceSetupNote() { const note = $('voice-setup-note'); if (note) note.style.display = ''; }
+function hideVoiceSetupNote() { const note = $('voice-setup-note'); if (note) note.style.display = 'none'; }
+// Cheap, fs-only read (voice:status) — safe to call every drawer open per C-9.1, unlike the full deps probe.
+async function refreshVoiceSetupRow() {
+  if (!$('voice-setup-note')) return;
+  let s = null; try { s = await claudible.voiceStatus(); } catch {}
+  if (s && s.failed && !s.voiceReady) showVoiceSetupNote(); else hideVoiceSetupNote();
+}
+async function openVoiceManual() {
+  $('voice-manual-modal').classList.add('show');
+  $('voice-manual-list').innerHTML = '<div class="ext-empty">loading…</div>';
+  let info = null; try { info = await claudible.voiceManualInfo(); } catch {}
+  renderVoiceManual(info);
+}
+function closeVoiceManual() { $('voice-manual-modal').classList.remove('show'); }
+function renderVoiceManual(info) {
+  const el = $('voice-manual-list'); if (!el) return;
+  if (!info || !Array.isArray(info.items)) { el.innerHTML = '<div class="ext-empty">couldn’t load the manual steps — see ~/.claudible/logs/provision.out</div>'; return; }
+  el.innerHTML = '';
+  info.items.forEach((it) => {
+    const row = document.createElement('div'); row.className = 'ext-row';
+    const main = document.createElement('div'); main.className = 'ext-main';
+    const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = it.name;
+    const url = document.createElement('div'); url.className = 'ext-desc'; url.textContent = it.url;
+    const pth = document.createElement('div'); pth.className = 'vm-path'; pth.textContent = 'put it at: ' + it.path;
+    main.appendChild(nm); main.appendChild(url); main.appendChild(pth);
+    row.appendChild(main); el.appendChild(row);
+  });
+  const logEl = $('voice-manual-log'); if (logEl) logEl.textContent = info.logPath || '~/.claudible/logs/provision.out';
+}
+async function voiceRescanClick() {
+  const btn = $('voice-setup-rescan'); if (!btn) return;
+  btn.disabled = true; const was = btn.textContent; btn.textContent = 'Rescanning…';
+  let r = null; try { r = await claudible.voiceRescan(); } catch {}
+  btn.disabled = false; btn.textContent = was;
+  if (r && r.ok && r.voiceReady) {
+    toast('Voice found — setup looks good now');
+    hideVoiceSetupNote();
+    const chip = $('sb-voice'); if (chip) chip.style.display = 'none';   // the failure chip (if still up from this launch) has nothing left to say
+  } else {
+    toast('Still not found at the expected paths — see “see how to fix it”');
+  }
+}
+if ($('voice-manual-close')) $('voice-manual-close').addEventListener('click', closeVoiceManual);
+if ($('voice-setup-fix')) $('voice-setup-fix').addEventListener('click', openVoiceManual);
+if ($('voice-setup-rescan')) $('voice-setup-rescan').addEventListener('click', voiceRescanClick);
 // default-effort selector — load the remembered value, highlight it, persist on click (applies to new sessions)
 (async () => {
   const row = $('effort-row'); if (!row) return;

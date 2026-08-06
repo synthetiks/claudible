@@ -3597,5 +3597,51 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['fewer than 2 applyGh branches gate wiz-finish.disabled on !ghSkipped']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 102. C-7.3 — THE OWNERS' MANUAL-PATH ADDITION. On an auto-provision failure the app must (1) surface what
+//   to do next — a real action on the failure chip, not just a log-path string in a title attribute — and
+//   (2) offer a RESCAN that re-checks voiceProvisioned() fresh and, with no download, clears the failed
+//   stamp + flips the settings voice row green the moment a hand-installed tree satisfies it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) voice:rescan exists, is wired end to end, re-checks FRESH (not a cached flag), and only clears the
+  //   failed stamp — never sets it, never spawns setup-win.ps1 — so a miss stays a miss with no side effect.
+  none('voice:rescan handler is missing or no longer re-checks voiceProvisioned() fresh (C-7.3)',
+    [/ipcMain\.handle\('voice:rescan', \(\) => \{/.test(MAIN) ? '' : "no ipcMain.handle('voice:rescan', ...) in main.js",
+     /const ready = voiceProvisioned\(\);/.test(MAIN) ? '' : 'voice:rescan does not call voiceProvisioned() fresh',
+     /delete s\.voiceProvisionFailedAt; delete s\.voiceProvisionFailedCode; writeSettings\(s\); \} \} catch \{\} \}\s*\n\s*return \{ ok: true, voiceReady: ready \};/.test(MAIN)
+       ? '' : 'voice:rescan no longer clears the failed stamp on success before returning',
+     /voiceRescan: \(\) => ipcRenderer\.invoke\('voice:rescan'\)/.test(PRELOAD) ? '' : 'no voiceRescan bridge in preload.js'].filter(Boolean));
+  // (b) the settings voice row's Rescan button exists, is wired to a handler that actually calls
+  //   claudible.voiceRescan() (not just re-painting stale state), and on success clears the notice.
+  none('the settings voice row lost its Rescan control, or Rescan no longer calls claudible.voiceRescan() (C-7.3)',
+    [/<button type="button" class="eff-pill" id="voice-setup-rescan">Rescan<\/button>/.test(HTML) ? '' : 'voice-setup-rescan button missing from index.html',
+     /\$\('voice-setup-rescan'\)\.addEventListener\('click', voiceRescanClick\)/.test(APP) ? '' : 'voice-setup-rescan has no click listener calling voiceRescanClick',
+     /async function voiceRescanClick\(\) \{[\s\S]{0,240}?claudible\.voiceRescan\(\)/.test(APP) ? '' : 'voiceRescanClick no longer calls claudible.voiceRescan()',
+     /r && r\.ok && r\.voiceReady\) \{[\s\S]{0,80}?hideVoiceSetupNote\(\)/.test(APP) ? '' : 'a successful rescan no longer hides the settings voice-setup notice'].filter(Boolean));
+  // (c) the failure path surfaces the manual info — the chip carries a real click action (not bare text), and
+  //   that action, plus the settings row's own button, both open the manual-steps panel.
+  none('the voice failure chip stopped offering "see how to fix it" (C-7.3)',
+    [/note\.innerHTML = 'voice setup failed — <button type="button" class="linkbtn" id="voice-fix-link">see how to fix it<\/button>';/.test(APP)
+       ? '' : 'the error-phase chip no longer renders a see-how-to-fix-it action',
+     /fixBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); openVoiceManual\(\); \}\)/.test(APP) ? '' : 'the chip action no longer opens openVoiceManual()',
+     /\$\('voice-setup-fix'\)\.addEventListener\('click', openVoiceManual\)/.test(APP) ? '' : 'the settings voice row\'s "See how to fix it" button no longer opens openVoiceManual()'].filter(Boolean));
+  // (d) the manual-steps panel actually carries the manual info: log path + per-item on-disk target, sourced
+  //   from main's voice:manualInfo (the same paths voiceProvisioned() checks — never re-typed by hand in the UI).
+  none('voice:manualInfo handler is missing, or the manual panel stopped rendering its items (C-7.3)',
+    [/ipcMain\.handle\('voice:manualInfo', \(\) => voiceManualInfo\(\)\);/.test(MAIN) ? '' : "no ipcMain.handle('voice:manualInfo', ...) in main.js",
+     /function voiceManualInfo\(\) \{/.test(MAIN) ? '' : 'voiceManualInfo() is gone from main.js',
+     /voiceManualInfo: \(\) => ipcRenderer\.invoke\('voice:manualInfo'\)/.test(PRELOAD) ? '' : 'no voiceManualInfo bridge in preload.js',
+     /pth\.textContent = 'put it at: ' \+ it\.path;/.test(APP) ? '' : 'renderVoiceManual no longer shows each item\'s on-disk target path'].filter(Boolean));
+  // (e) the notice survives a restart: a drawer opened AFTER the launch that failed must still show the
+  //   manual-path notice, driven by a fresh fs-only read of the persisted failed stamp — not only the
+  //   in-flight 'provision' event, which a later launch never fires again.
+  none('the settings voice row no longer re-checks the persisted failed stamp on drawer open (C-7.3)',
+    [/ipcMain\.handle\('voice:status', \(\) => \{/.test(MAIN) ? '' : "no ipcMain.handle('voice:status', ...) in main.js",
+     /failed = !!s\.voiceProvisionFailedAt;/.test(MAIN) ? '' : 'voice:status no longer reads the persisted failed stamp',
+     /try \{ refreshVoiceSetupRow\(\); \} catch \(e\) \{\}/.test(APP) ? '' : 'openDrawer no longer calls refreshVoiceSetupRow() on open',
+     /s && s\.failed && !s\.voiceReady\) showVoiceSetupNote\(\); else hideVoiceSetupNote\(\);/.test(APP) ? '' : 'refreshVoiceSetupRow no longer gates the notice on failed && !voiceReady'].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

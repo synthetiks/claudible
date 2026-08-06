@@ -408,6 +408,22 @@ function voiceProvisioned() {
         && bigEnough(path.join(v, 'kokoro', 'api', 'src', 'models', 'v1_0', 'kokoro-v1_0.pth'));
   } catch { return false; }
 }
+// C-7.3 owners' addition — the manual path. Same root + same four checks voiceProvisioned() tests, so this
+// can never drift from what actually flips the row green: one function describes both "is it there" and
+// "where does it go". URLs are the same ones setup-win.ps1 / setup.sh fetch (read there, not re-guessed).
+function voiceManualInfo() {
+  const v = process.env.CLAUDIBLE_VOICE || path.join(app.getPath('home'), '.claudible', 'voice');
+  return {
+    voiceDir: v,
+    logPath: path.join(app.getPath('home'), '.claudible', 'logs', 'provision.out'),
+    items: [
+      { name: 'Whisper server (whisper.cpp, prebuilt)', path: path.join(v, 'whisper', 'Release', 'whisper-server.exe'), url: 'https://github.com/ggml-org/whisper.cpp/releases (whisper-bin-x64.zip → Release\\whisper-server.exe)' },
+      { name: 'Whisper speech model (~150 MB)', path: path.join(v, 'whisper', 'models', 'ggml-base.bin'), url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin' },
+      { name: 'Kokoro (TTS server source)', path: path.join(v, 'kokoro'), url: 'https://github.com/remsky/Kokoro-FastAPI (git clone --depth 1)' },
+      { name: 'Kokoro model weights (~327 MB)', path: path.join(v, 'kokoro', 'api', 'src', 'models', 'v1_0', 'kokoro-v1_0.pth'), url: 'https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4/kokoro-v1_0.pth' },
+    ],
+  };
+}
 let provisioning = false;
 // 2a(1) — APPDIR_WSL is resolved ONCE, at module load, and the win runner memoizes gitBash()/appDirGuest()
 // alongside it. On the machine where "install voice" actually matters — a fresh one, where the wizard itself
@@ -3316,6 +3332,25 @@ ipcMain.handle('claude:refresh-session', (_e, opts) => {
 // of truth and one probe. On win-native that probe is pure-Node (no git-bash), which also fixes the old
 // false-negative where check-onboard.sh silently reported everything-not-installed when Git was missing.
 function voiceState() { return { voiceReady: voiceProvisioned(), voiceProvisioning: provisioning }; }
+// C-7.3 manual path: the log location, the exact download links setup would have fetched, and the exact
+// on-disk layout voiceProvisioned() expects — so a user who gave up on the download can finish it by hand.
+ipcMain.handle('voice:manualInfo', () => voiceManualInfo());
+// C-7.3 rescan: re-run voiceProvisioned() FRESH (never the boot snapshot) and, if a hand-installed tree now
+// satisfies it, clear the failed-stamp with no download — the same clear ensureVoiceProvisioned(force) does,
+// just without spawning setup-win.ps1. A miss leaves voiceProvisionFailedAt untouched (still "give up", per
+// C-7.3's own no-auto-retry rule) so the row stays red instead of quietly forgetting a real failure.
+ipcMain.handle('voice:rescan', () => {
+  const ready = voiceProvisioned();
+  if (ready) { try { const s = readSettings(); if (s.voiceProvisionFailedAt) { delete s.voiceProvisionFailedAt; delete s.voiceProvisionFailedCode; writeSettings(s); } } catch {} }
+  return { ok: true, voiceReady: ready };
+});
+// Cheap read for the settings voice row: pure fs checks + one settings read, no subprocess — safe to call
+// whenever the drawer opens (C-9.1's "never wait on the network" bar), unlike the full deps.detect probe.
+ipcMain.handle('voice:status', () => {
+  let failed = false, failedCode = null;
+  try { const s = readSettings(); failed = !!s.voiceProvisionFailedAt; failedCode = s.voiceProvisionFailedCode || null; } catch {}
+  return Object.assign({ failed, failedCode }, voiceState());
+});
 ipcMain.handle('onboard:status', async () => {
   let s = { claudeInstalled: false, claudeSignedIn: false, claudeVersion: '', ghInstalled: false, ghSignedIn: false, ghAccount: '' };
   try { s = Object.assign(s, deps.toOnboardStatus(await deps.detect(runner, voiceState()))); } catch {}
