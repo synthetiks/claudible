@@ -160,7 +160,7 @@ try {
     }
 
     'ffmpeg' {
-      # Same winget id setup-win.ps1's own (bundled-into-Voice) install already uses — keep the two in sync.
+      # Same winget id setup-win.ps1's own (bundled-into-Voice) install already uses - keep the two in sync.
       # Idempotent by construction: if the row is clicked after Voice already installed ffmpeg, Tool 'ffmpeg'
       # is true and this is a no-op done immediately; setup-win.ps1's own `Get-Command ffmpeg` guard is the
       # other half of that same idempotency, so installing this row first makes ITS ffmpeg step a no-op too.

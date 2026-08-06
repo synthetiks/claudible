@@ -58,7 +58,7 @@ ok('refreshSessions keeps its pre-await rename guard', (APP.match(/sessListEl\.q
 // ---- 3. modalPrompt self-heals a stolen keyboard ----
 const mpStart = APP.indexOf('function modalPrompt(');
 ok('modalPrompt found', mpStart >= 0);
-const mpBody = APP.slice(mpStart, mpStart + 4000);
+const mpBody = APP.slice(mpStart, mpStart + 6000);   // window must reach past C-3.4's wireNameValidator insertion to the blur-focus-reclaim block
 ok('modalPrompt input reclaims focus from the terminal while open', /inp\.addEventListener\('blur',[\s\S]{0,220}closest\('\.xterm'\)[\s\S]{0,40}inp\.focus\(\)/.test(mpBody));
 
 console.log(`naming-focus: ${pass} passed, ${fail} failed`);
