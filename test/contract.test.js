@@ -3714,5 +3714,56 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /KOKORO_MODEL_SHA256="TBD-/.test(SETUPSH) ? "setup.sh's KOKORO_MODEL_SHA256 is a TBD- placeholder" : ''].filter(Boolean));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 104. C-10.6 — IN-APP COMMIT CREDITING. Two pins the feature is judged by: the Settings toggle exists and
+//   defaults OFF, and the hook installer never clobbers a pre-existing (foreign) prepare-commit-msg hook.
+//   The real never-clobber behavior is proven functionally in test/coauthor-hook.test.js against a real
+//   throwaway directory; this block pins the WIRING that behavior depends on staying intact.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const COAUTHOR_LIB = read('lib/coauthorHook.js');
+  const COAUTHOR_SH = read('wsl/coauthor-hook.sh');
+  // (a) the toggle exists in the drawer, unchecked by default (no `checked` attribute), and the renderer
+  //   mirrors that default (absence/false -> OFF) rather than defaulting it on.
+  none('the Settings drawer lost the C-10.6 co-author toggle, or it no longer defaults off',
+    [/<input type="checkbox" id="auto-coauthor" \/>/.test(HTML) ? '' : 'index.html: #auto-coauthor is missing or gained a default `checked` attribute (must default OFF)',
+     /class="toggle" id="coauthor-toggle"/.test(HTML) ? '' : 'index.html: #coauthor-toggle no longer starts unchecked (`class="toggle"`, no `on`)',
+     /const ac = p\.autoCoauthor === true;/.test(APP) ? '' : "app.js no longer treats ONLY an explicit true as on (absence/false must read as OFF)"].filter(Boolean));
+  // (b) the toggle actually persists through savePrefs -> settings:set, and main reacts to a real flip (not
+  //   just stores it) by (un)installing the hook — the setting doing NOTHING when clicked would be as broken
+  //   as it defaulting on.
+  none('the auto-coauthor toggle no longer round-trips to main or main no longer reacts to it (C-10.6)',
+    [/savePrefs\(\{ autoCoauthor: e\.target\.checked \}\)/.test(APP) ? '' : 'app.js #auto-coauthor change handler no longer calls savePrefs({ autoCoauthor })',
+     /const prevAC = !!prev\.autoCoauthor, nextAC = !!\(obj && obj\.autoCoauthor\);/.test(MAIN) ? '' : "main.js settings:set no longer diffs autoCoauthor before/after"].filter(Boolean));
+  // (c) NEVER CLOBBER, at the wiring level: install() only ever backs up a foreign hook (copyFileSync to the
+  //   suffixed path) before writing its own file, and only when neither a marker nor a backup already exists —
+  //   the exact guard that makes a second install a no-op re-backup instead of silently dropping whatever ran
+  //   between the first install and now.
+  none('lib/coauthorHook.js install() no longer guards against clobbering a foreign hook',
+    [/const alreadyOurs = existing !== null && isOurs\(existing\);/.test(COAUTHOR_LIB) ? '' : 'install() no longer checks whether the existing file is already ours',
+     /if \(existing !== null && !alreadyOurs && !chained\) \{/.test(COAUTHOR_LIB) ? '' : 'install() no longer gates the backup on "foreign AND not already backed up"',
+     /fs\.copyFileSync\(hookPath, backupPath\);/.test(COAUTHOR_LIB) ? '' : 'install() no longer copies the foreign hook to a backup path before overwriting it'].filter(Boolean));
+  // (d) uninstall() is equally disciplined: a hook that is present but neither ours nor backed up is refused,
+  //   never deleted — the exact case of "someone hand-replaced our file" that must be left alone.
+  none('lib/coauthorHook.js uninstall() no longer refuses to touch a hook it cannot prove it owns',
+    [/if \(!isOurs\(current\)\) return \{ ok: false, error:/.test(COAUTHOR_LIB) ? '' : 'uninstall() no longer refuses on a non-Claudible hook',
+     /fs\.renameSync\(backupPath, hookPath\);/.test(COAUTHOR_LIB) ? '' : 'uninstall() no longer restores the backup by renaming it back over the live hook'].filter(Boolean));
+  // (e) the hook itself is a no-op for a solo commit (empty/missing coauthors file) and never fires on a
+  //   merge/squash message, which git already assembled.
+  none('the installed hook script lost its solo-commit no-op or its merge/squash skip (C-10.6)',
+    [/case "\$src" in merge\|squash\) exit 0 ;; esac/.test(COAUTHOR_LIB) ? '' : 'hookScript() no longer skips merge/squash sources',
+     /\[ -s "\$coauthors" \] \|\| exit 0/.test(COAUTHOR_LIB) ? '' : 'hookScript() no longer no-ops on an empty/missing coauthors file'].filter(Boolean));
+  // (f) uninstall is wired to the ONE sanctioned share teardown (stopLiveSharing), not some other end-of-share
+  //   path that could drift out of sync with it (see the share.stop() coupling pin above, #226).
+  none('C-10.6 uninstall is no longer called from stopLiveSharing',
+    [/function stopLiveSharing\(opts\) \{\s*\n\s*_coauthorTeardown\(\);/.test(MAIN) ? '' : '_coauthorTeardown() is no longer the first line of stopLiveSharing()'].filter(Boolean));
+  // (g) the wsl-side adapter never assumes `.git/hooks` — it asks git, so a repo with core.hooksPath moved
+  //   still gets the real hooks dir (and the real git dir, for the coauthors file).
+  none('coauthor-hook.sh / coauthor-tool.js no longer resolve hooks/git dirs through git itself',
+    [/git rev-parse --is-inside-work-tree/.test(COAUTHOR_SH) ? '' : 'coauthor-hook.sh no longer checks it is inside a real git repo',
+     /'rev-parse', '--git-dir'/.test(read('wsl/coauthor-tool.js')) ? '' : 'coauthor-tool.js no longer resolves the git dir via `git rev-parse --git-dir`',
+     /'rev-parse', '--git-path', 'hooks'/.test(read('wsl/coauthor-tool.js')) ? '' : "coauthor-tool.js no longer resolves hooks dir via `git rev-parse --git-path hooks`"].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

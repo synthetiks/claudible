@@ -1129,6 +1129,7 @@ if ($('announce-done')) $('announce-done').addEventListener('change', (e) => { a
 if ($('chat-chime')) $('chat-chime').addEventListener('change', (e) => { chimeOn = e.target.checked; $('chime-toggle').classList.toggle('on', chimeOn); savePrefs({ chime: chimeOn }); });
 if ($('full-readout')) $('full-readout').addEventListener('change', (e) => { fullReadout = e.target.checked; $('fullreadout-toggle').classList.toggle('on', fullReadout); savePrefs({ fullReadout: fullReadout }); });
 if ($('sess-history')) $('sess-history').addEventListener('change', (e) => { $('sesshist-toggle').classList.toggle('on', e.target.checked); savePrefs({ sessionHistory: e.target.checked }); if (typeof refreshHistoryFeed === 'function') refreshHistoryFeed(); });   // writes through savePrefs → enters the prefs cache → never clobbered; main gate reads settings.json fresh
+if ($('auto-coauthor')) $('auto-coauthor').addEventListener('change', (e) => { $('coauthor-toggle').classList.toggle('on', e.target.checked); savePrefs({ autoCoauthor: e.target.checked }); });   // C-10.6: main's settings:set handler diffs this and (un)installs the hook immediately — no extra IPC needed
 // soft, relaxing two-tone chime (Web Audio — no asset). Lazy ctx + resume (autoplay parks it until a gesture).
 let _chimeCtx = null;
 function playChime() {
@@ -1964,6 +1965,10 @@ function renderLiveBar() {
   });
 }
 claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
+claudible.onCoauthorSkipped((p) => {   // C-10.6: a visible note instead of a silently fabricated Co-authored-by email
+  const names = (p && Array.isArray(p.names)) ? p.names.filter(Boolean) : [];
+  if (names.length) toast(`No known email/GitHub login for ${names.join(', ')} — left off commit co-authors`);
+});
 claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped mid-share → reflect it so guests aren't met with a silent refusal
   tunnelUp = false; lastShareUrl = ''; lastShareRemote = false; lastShareNote = 'the tunnel dropped';
   toast('Live link dropped — the tunnel went down. Reconnecting in the background…');   // main's armTunnelRetry keeps dialing; no manual toggle needed anymore
@@ -3273,6 +3278,7 @@ function forgetWorkspaceCaches(wsId) {
   chimeOn = p.chime !== false; if ($('chat-chime')) { $('chat-chime').checked = chimeOn; $('chime-toggle').classList.toggle('on', chimeOn); }
   fullReadout = p.fullReadout !== false; if ($('full-readout')) { $('full-readout').checked = fullReadout; $('fullreadout-toggle').classList.toggle('on', fullReadout); }
   { const sh = p.sessionHistory !== false; if ($('sess-history')) { $('sess-history').checked = sh; $('sesshist-toggle').classList.toggle('on', sh); } }   // session history: default ON (absence = on; explicit false = off) — must mirror main's _histEnabled
+  { const ac = p.autoCoauthor === true; if ($('auto-coauthor')) { $('auto-coauthor').checked = ac; $('coauthor-toggle').classList.toggle('on', ac); } }   // C-10.6: default OFF (absence = off; only explicit true turns it on) — must mirror main's autoCoauthor read
   applyTtsSpeed(p.ttsSpeed || 0, false);
   if (p.pttKey) { if (isSafePttKey(p.pttKey)) pttKey = p.pttKey; else savePrefs({ pttKey: 'AltLeft' }); }   // self-heal a bad saved key (e.g. an old rebind to Space) so it can't keep eating the spacebar
   applyPttKey();   // render the current push-to-talk key (default or saved)

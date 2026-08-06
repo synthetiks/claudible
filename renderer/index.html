@@ -1682,6 +1682,20 @@
         </label>
       </div>
 
+      <!-- C-10.6, MK's design: OFF by default. Off = the app's own default behavior applies instead — a commit
+           made while a live session is running WITH guests connected credits everyone currently in that
+           session; a solo commit gets no trailer. Turning this ON widens that to every known collaborator on
+           every commit, live session or not. Never touches commits Claudible didn't help make (no live session
+           project = untouched repo). -->
+      <div class="sec">
+        <div class="label">commits</div>
+        <label class="toggle" id="coauthor-toggle" title="Off (default): while a live session is running with guests connected, commits in that project credit whoever is currently in the session — a solo commit gets no trailer. On: every known collaborator is credited on every commit, live or not.">
+          <input type="checkbox" id="auto-coauthor" />
+          <span class="sw"></span>
+          <span class="tlabel">Auto-add collaborators as co-authors on commits</span>
+        </label>
+      </div>
+
       <div class="sec">
         <div class="label">default effort</div>
         <div class="effort-row" id="effort-row">

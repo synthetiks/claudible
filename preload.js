@@ -137,6 +137,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareTypist: (cb) => ipcRenderer.on('share:typist', (_e, p) => cb(p)),   // { name } a guest is typing into the session I host
   onLiveTypist: (cb) => ipcRenderer.on('live:typist', (_e, p) => cb(p)),     // { tabId, name } someone is typing in a session I joined
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
+  onCoauthorSkipped: (cb) => ipcRenderer.on('coauthor:skipped', (_e, p) => cb(p)),   // C-10.6: { names } — a live guest has no known email/GitHub login, so the co-author hook left them off rather than fabricate an address
   onShareTunnelDown: (cb) => ipcRenderer.on('share:tunnel-down', (_e) => cb()),   // public tunnel dropped while sharing
   onShareTunnelUp: (cb) => ipcRenderer.on('share:tunnel-up', (_e, p) => cb(p)),   // { url } public tunnel is live — a fresh share, or the background self-heal recovered it
   onUpdateAvailable: (cb) => ipcRenderer.on('update:available', (_e, p) => cb(p)),   // a newer GitHub release exists (packaged builds only; notice-only, nothing auto-installs)

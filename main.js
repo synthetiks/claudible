@@ -144,7 +144,7 @@ const share = createShareServer({
     try { t.proc.write('\x1b[200~' + safe + '\x1b[201~'); } catch {}
   },
   onGuests: (n) => { try { win && win.webContents.send('share:guests', n); } catch {} },
-  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(mirrorTabId()); } catch {} },   // presence lights; refresh the HOSTING tab's injected context so the model sees who's here
+  onRoster: (roster) => { try { win && win.webContents.send('share:roster', roster); } catch {} _lastRoster = Array.isArray(roster) ? roster : []; try { _writeContext(mirrorTabId()); } catch {} try { _syncCoauthorHook(); } catch {} },   // presence lights; refresh the HOSTING tab's injected context so the model sees who's here; C-10.6: guests joining/leaving is exactly when the default commit-crediting roster changes
   onApprovalRequest: (info) => { try { win && win.webContents.send('share:approval', info); } catch {} },
   onApprovalCancel: (id) => { try { win && win.webContents.send('share:approval-cancel', id); } catch {} },
   onChat: (m) => { try { win && win.webContents.send('share:chat', m); } catch {} },   // guest → host chat
@@ -242,7 +242,7 @@ ipcMain.on('settings:get', (e) => { e.returnValue = readSettings(); });
 // applyPersistedDepEnv below BEFORE the git-bash resolve. Losing it produced the worst possible shape of bug —
 // "I installed Git, it worked, and after the restart the System check says it's missing again", with the
 // backend silently dead and nothing anywhere explaining why. Carry it forward instead.
-ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); const next = (obj && typeof obj === 'object') ? Object.assign({}, obj) : {}; if (prev.depEnv && !next.depEnv) next.depEnv = prev.depEnv; writeSettings(next); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn.
+ipcMain.on('settings:set', (e, obj) => { try { const prev = readSettings(); const prevHist = prev.sessionHistory !== false; const nextHist = !(obj && obj.sessionHistory === false); const next = (obj && typeof obj === 'object') ? Object.assign({}, obj) : {}; if (prev.depEnv && !next.depEnv) next.depEnv = prev.depEnv; writeSettings(next); if (prevHist !== nextHist) { try { _pendingCkpt.clear(); } catch {} if (nextHist) { try { _seedCkpt(activeWorkspace); } catch {} } try { _pushHistoryToShare(); } catch {} } if ((prev.collabName || '') !== ((obj && obj.collabName) || '')) { try { _writeAllContexts(); } catch {} } { const prevAC = !!prev.autoCoauthor, nextAC = !!(obj && obj.autoCoauthor); if (prevAC !== nextAC) { try { if (prevAC && !nextAC) _coauthorTeardown(); _syncCoauthorHook(); } catch {} } } e.returnValue = true; } catch (err) { console.error('[claudible] settings.json:', err.message); e.returnValue = false; } });   // sendSync: the renderer blocks until the file is written, so a force-kill right after savePrefs can't lose it (A2). Toggling sessionHistory clears any carried-over checkpoint ref so a post-toggle revert can't jump across the off period. A collabName rename refreshes every open tab's context.json so the injected "User" line doesn't go stale until the next respawn. C-10.6: turning the co-author setting OFF fully uninstalls first (so "off" really means off, not just a narrower roster), then re-syncs — which reinstalls under the DEFAULT live-session behavior if a share with guests is still running.
 // Self-bootstrap (provisioner): re-apply any dependency env the provisioner persisted — a portable Node/Git
 // the no-UAC fallback dropped under ~/.claudible (CLAUDIBLE_NODE / CLAUDIBLE_GIT_BASH), plus captured bin dirs.
 // MUST run BEFORE APPDIR_WSL + the win runner's git-bash resolve below, so a relaunch right after a Git install
@@ -1518,6 +1518,7 @@ function stopAdvertising(opts) {
 // RE-STAMPING presence — so an "ended" session could keep advertising itself for seconds).
 // (presence-clear's spawned wsl.exe outlives app exit — the same guarantee the pty reaper relies on.)
 function stopLiveSharing(opts) {
+  _coauthorTeardown();                                   // C-10.6: share ending is one of the two uninstall triggers — before the other teardown steps, using the REMEMBERED target
   disarmTunnelRetry();                                   // an explicit stop ends the self-heal too — a post-stop retry firing would spawn an orphan tunnel
   stopAdvertising(opts);                                 // opts.quitting → detached presence-clear (see above)
   share.stop();
@@ -2933,6 +2934,17 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
   runner.runScript('repo-invite.sh', `'${repo}' '${login}' '${owner}'`, { timeout: 60000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] repo-invite:', err.message); return resolve({ ok: false, error: 'invite failed' }); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+      if (r.ok) {
+        // C-10.6: remember this GitHub login as a known collaborator on THIS workspace — the "collaborators'
+        // GitHub identities where known from the invite flow" that let the co-author hook build a noreply
+        // address for someone even when they're not currently in the live roster. Append-only (an invite is
+        // never un-invited here) and de-duped by login; no email is known from this flow, only the login.
+        try {
+          ws.collaborators = Array.isArray(ws.collaborators) ? ws.collaborators : [];
+          if (!ws.collaborators.some((c) => c && c.login === login)) { ws.collaborators.push({ login }); saveRegistry(); }
+          _syncCoauthorHook();
+        } catch {}
+      }
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
     });
 }));
@@ -3856,6 +3868,80 @@ function _seedCkpt(ws) {
       if (!_pendingCkpt.get(ws.id)) _pendingCkpt.set(ws.id, id);
     });
   } catch {}
+}
+// ---- C-10.6: in-app commit crediting. A commit the USER makes in their own project repo (typed in Claudible's
+// terminal — the git menu, or by hand) gets Co-authored-by trailers via a prepare-commit-msg hook the app
+// installs, never by Claudible constructing a commit itself (it doesn't — see the git menu's gitCmd(), which
+// only types "git push"/"git pull" into the real terminal). This is NOT the claudible-development-style
+// session-sync bookkeeping commit (_pushHistoryToShare et al.) — that is Claudible's own commit, solo, untouched.
+//
+// DEFAULT (setting off): while a live share is running WITH guests connected, the shared/pinned workspace's
+// repo gets the hook, crediting whoever is currently in the roster; a solo commit (no live share, or a live
+// share nobody has joined) gets no trailer. Turning the Settings toggle on widens that SAME repo's crediting to
+// every known collaborator (repo:invite'd logins), regardless of who is connected right now. Scope is
+// deliberately the one repo C-5.1 guarantees is singular — the pinned share — never any other project's repo,
+// live or not: there is no safe "the" project to touch outside of an active share.
+let _coauthorReason = null;                 // null | 'live' | 'setting' — which consent installed the CURRENTLY live hook
+let _coauthorWs = null;                     // the workspace that reason was installed against (teardown target — resolved once at install time, not re-derived at teardown time, so it can't race the share server tearing down)
+let _coauthorChain = Promise.resolve();     // serialize: a roster flap and a settings toggle landing back-to-back must not race each other's file writes
+// The one workspace this feature is ever allowed to touch: the live-shared, PINNED tab's repo (C-5.1 guarantees
+// there is at most one). Anything else — a private tab, a project nobody is sharing — is out of scope on purpose.
+function _coauthorTargetWs() {
+  if (!share.status().running || sharedTabId == null) return null;
+  const rec = ptys.get(sharedTabId);
+  const ws = rec && rec.ws;
+  return (ws && ws.kind === 'repo' && ws.path) ? ws : null;
+}
+// Roster (display names only) -> coauthorHook entries, matched against ws.collaborators (GitHub logins recorded
+// by repo:invite) case-insensitively by name. No match = an unknown identity; buildCoauthorLines (wsl-side)
+// skips it rather than fabricate an email — see coauthor:skipped below for how that reaches the host.
+function _liveRosterEntries(ws) {
+  const list = Array.isArray(_lastRoster) ? _lastRoster : [];
+  const collabs = Array.isArray(ws && ws.collaborators) ? ws.collaborators : [];
+  return list.filter((r) => r && r.state && r.state !== 'gone').map((r) => {
+    const name = String((r && r.name) || '').trim();
+    const m = collabs.find((c) => c && c.login && c.login.toLowerCase() === name.toLowerCase());
+    return name ? (m ? { name, login: m.login, id: m.id } : { name }) : null;
+  }).filter(Boolean);
+}
+function _syncCoauthorHook() { _coauthorChain = _coauthorChain.then(_syncCoauthorHookNow, _syncCoauthorHookNow); return _coauthorChain; }
+function _syncCoauthorHookNow() {
+  try {
+    if (!APPDIR_WSL) return Promise.resolve();
+    const ws = _coauthorTargetWs();
+    if (!ws) return Promise.resolve();                                  // nothing live-shared right now → nothing to touch (stopLiveSharing owns real teardown, see below)
+    const settingOn = !!readSettings().autoCoauthor;
+    const entries = _liveRosterEntries(ws);
+    if (settingOn && Array.isArray(ws.collaborators)) {                 // widen to every KNOWN collaborator, connected or not
+      const already = new Set(entries.map((e) => (e.login || e.name || '').toLowerCase()));
+      for (const c of ws.collaborators) {
+        const key = String((c && c.login) || '').toLowerCase();
+        if (key && !already.has(key)) { already.add(key); entries.push({ name: c.login, login: c.login, id: c.id }); }
+      }
+    }
+    if (!settingOn && entries.length === 0 && _coauthorReason == null) return Promise.resolve();   // default behavior, nobody connected yet, nothing installed → stay quiet, don't install for an empty list
+    _coauthorReason = settingOn ? 'setting' : 'live';
+    _coauthorWs = ws;
+    const b64 = Buffer.from(JSON.stringify(entries)).toString('base64');
+    return runner.runScript('coauthor-hook.sh', `sync '${b64}'`, { ws, timeout: 8000 })
+      .then(({ err, stdout }) => {
+        if (err) { console.error('[claudible] coauthor-hook sync:', err.message); return; }
+        let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {}
+        if (r && r.ok === false) console.error('[claudible] coauthor-hook sync:', r.error);
+        if (r && Array.isArray(r.skipped) && r.skipped.length) { try { winSend('coauthor:skipped', { names: r.skipped }); } catch {} }   // "visible note" (C-10.6) rather than a fabricated address
+      })
+      .catch((e) => console.error('[claudible] coauthor-hook sync threw:', e && e.message));
+  } catch (e) { console.error('[claudible] coauthor-hook sync threw:', e && e.message); return Promise.resolve(); }
+}
+// The ONE uninstall trigger tied to "share ends" (C-10.6). Uses the REMEMBERED target (_coauthorWs), not a
+// fresh _coauthorTargetWs() read — by the time callers reach this, share state may already be mid-teardown.
+function _coauthorTeardown() {
+  const wasReason = _coauthorReason, ws = _coauthorWs;
+  _coauthorReason = null; _coauthorWs = null;
+  if (!wasReason || !ws || !APPDIR_WSL) return;
+  runner.runScript('coauthor-hook.sh', 'uninstall', { ws, timeout: 8000 })
+    .then(({ err }) => { if (err) console.error('[claudible] coauthor-hook uninstall:', err.message); })
+    .catch((e) => console.error('[claudible] coauthor-hook uninstall threw:', e && e.message));
 }
 ipcMain.handle('history:load', (e, arg) => {
   try {
