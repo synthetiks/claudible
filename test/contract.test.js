@@ -4007,5 +4007,47 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\.codrive-badge\{[^}]*background:var\(--live\)/.test(HTML) ? [] : ['.codrive-badge no longer uses var(--live) as its background']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 111. C-7.5 — setup.sh PARITY WITH setup-win.ps1. Two halves the posix/WSL path had not caught up to yet.
+//   (a) setup.sh now stops any live voice server BEFORE any rm/clone, mirroring setup-win.ps1's
+//   Stop-VoiceServers (a live server holds its own files open and blocks its own reinstall — found on a
+//   real Windows box during the v0.9.1 smoke, and the same class of bug can bite Linux/macOS too).
+//   (b) the ASCII gate (test/ps1-ascii.test.js) now scans setup/*.sh too, not just *.ps1, so the two
+//   setup halves can't quietly diverge on encoding again.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (a) stop_voice_servers exists, kills whisper-server by exact process name and Kokoro's python by a
+  //   command-line match scoped to THIS install's own kokoro dir (never a bare python/uvicorn match —
+  //   that would risk killing an unrelated process on the machine).
+  none('setup.sh lost its stop_voice_servers function, or it stopped matching both servers precisely (C-7.5)',
+    [/stop_voice_servers\(\) \{/.test(SETUPSH) ? '' : 'stop_voice_servers() is gone from setup.sh',
+     /pgrep -x whisper-server/.test(SETUPSH) ? '' : 'stop_voice_servers no longer matches whisper-server by exact process name',
+     /pgrep -f "\$VOICE\/kokoro"/.test(SETUPSH) ? '' : "stop_voice_servers no longer scopes its Kokoro match to \$VOICE/kokoro (would risk killing an unrelated python)"].filter(Boolean));
+  // (a, cont'd) it is actually CALLED — and called before the file's first rm -rf / git clone, not just
+  //   defined and left dead. Order matters: this is the whole point of the fix.
+  none('setup.sh no longer actually calls stop_voice_servers (defined but dead) (C-7.5)',
+    /\nstop_voice_servers\n/.test(SETUPSH) ? [] : ['no bare `stop_voice_servers` call in setup.sh']);
+  {
+    const callIdx = SETUPSH.indexOf('\nstop_voice_servers\n');
+    const firstRm = SETUPSH.search(/rm -rf "\$VOICE/);
+    const firstClone = SETUPSH.indexOf('git clone');
+    none("setup.sh calls stop_voice_servers AFTER it has already rm -rf'd or cloned something (C-7.5 — must run first)",
+      (callIdx !== -1 && firstRm !== -1 && firstClone !== -1 && callIdx < firstRm && callIdx < firstClone)
+        ? [] : [`stop_voice_servers call at ${callIdx}, first rm -rf "$VOICE at ${firstRm}, first git clone at ${firstClone}`]);
+  }
+  // (b) the ASCII gate now covers setup/*.sh via its own git ls-files scan, and setup.sh itself is clean —
+  //   it used to carry em dashes/ellipses that nothing scanned (harmless to bash, but a silent encoding
+  //   asymmetry with the .ps1 half this file is supposed to mirror).
+  const PS1ASCII = read('test/ps1-ascii.test.js');
+  none('test/ps1-ascii.test.js stopped scanning setup/*.sh (C-7.5)',
+    /git ls-files "setup\/\*\.sh"/.test(PS1ASCII) ? [] : ['no git ls-files "setup/*.sh" scan in test/ps1-ascii.test.js']);
+  none('setup.sh itself regressed to non-ASCII bytes (C-7.5)',
+    (() => {
+      const buf = fs.readFileSync(path.join(ROOT, 'setup/setup.sh'));
+      for (let i = 0; i < buf.length; i++) { if (buf[i] > 0x7f) return [`byte 0x${buf[i].toString(16)} at offset ${i}`]; }
+      return [];
+    })());
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
