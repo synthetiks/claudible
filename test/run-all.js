@@ -28,13 +28,21 @@ const sh = all.filter((f) => f.endsWith('.sh')).sort();
 // contract.test.js first: it is the broadest guard and the fastest way to see a wiring break.
 js.sort((a, b) => (a === 'contract.test.js' ? -1 : b === 'contract.test.js' ? 1 : a.localeCompare(b)));
 
-const steps = [...js.map((f) => ({ f, cmd: process.execPath })), ...sh.map((f) => ({ f, cmd: 'bash' }))];
+// win32: plain `bash` on PATH can resolve to the WSL interop launcher ahead of a real Git Bash, which mangles
+// the *.sh step's own path in its argv translation (see test/_bash-resolve.js). Resolve once, up front — a
+// no-op on every other platform, where bin stays 'bash' and the args below stay untouched (byte-identical to
+// before this file existed).
+const bash = process.platform === 'win32' ? require('./_bash-resolve') : null;
+const steps = [...js.map((f) => ({ f, cmd: process.execPath })), ...sh.map((f) => ({ f, cmd: bash ? bash.resolve().bin : 'bash' }))];
 
 const failures = [];
 const t0 = Date.now();
 for (const { f, cmd } of steps) {
   const started = Date.now();
-  const r = cp.spawnSync(cmd, [path.join(DIR, f)], { stdio: 'inherit', cwd: path.resolve(DIR, '..') });
+  // sh.includes(f), not a flag on the step: keeps this loop's destructuring exactly `{ f, cmd }` (a *.test.js
+  // step never needs translated args, and recomputing here is cheap against a handful of *.sh filenames).
+  const args = bash && sh.includes(f) ? bash.toArgs([path.join(DIR, f)]) : [path.join(DIR, f)];
+  const r = cp.spawnSync(cmd, args, { stdio: 'inherit', cwd: path.resolve(DIR, '..') });
   const code = r.status == null ? 1 : r.status;   // null = killed by a signal → treat as failure, never as a pass
   if (code !== 0) failures.push({ f, code, ms: Date.now() - started });
 }

@@ -3078,5 +3078,34 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the default (no remembered mode) case lost its fallback line']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 88. THE TEST HARNESS ITSELF MUST NOT SPAWN THE WSL INTEROP LAUNCHER. On win32, plain `bash` resolved via
+//   PATH can be C:\Windows\System32\bash.exe ahead of any real Git Bash — that launcher either mangles a
+//   Windows-style path in its own argv translation (backslashes vanish: `C:\Users\x\foo.sh` arrives as
+//   `C:Usersxfoo.sh`) or drops the argument into a WSL distro that never sees it, so run-all.js's own *.sh
+//   steps (and the two test/*.test.js files that shell out directly) died with exit 127 before this fix.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const RUN = read('test/run-all.js');
+  const BASHRESOLVE = read('test/_bash-resolve.js');
+  const ADOPT = read('test/adopt-workspace.test.js');
+  const APPDIR = read('test/appdir-quoting.test.js');
+  none('run-all.js resolves a real bash on win32 instead of a bare "bash" for its *.sh steps',
+    /process\.platform === 'win32' \? require\('\.\/_bash-resolve'\) : null/.test(RUN)
+      ? [] : ['run-all.js no longer gates bash resolution behind win32']);
+  none('…and ubuntu CI keeps spawning plain "bash" — the win32 branch must never change that path',
+    /cmd: bash \? bash\.resolve\(\)\.bin : 'bash'/.test(RUN) ? [] : ['the non-win32 fallback to a bare "bash" is gone']);
+  none("_bash-resolve.js mirrors runners/win.js's own probe/rejection, not a copy that could drift from it",
+    /require\('\.\.\/runners\/win\.js'\)\._internals\.gitBash\(\)/.test(BASHRESOLVE)
+      ? [] : ["_bash-resolve.js no longer reuses runners/win.js's gitBash()"]);
+  none('_bash-resolve.js falls back to WSL (path args translated via `wsl.exe wslpath -a`) only when no MSYS bash exists',
+    /wslpath', '-a'/.test(BASHRESOLVE) && /looksWindowsPath/.test(BASHRESOLVE)
+      ? [] : ['the WSL fallback / Windows-path translation is missing']);
+  none("adopt-workspace.test.js no longer spawns 'bash' literally (would hit the WSL launcher on win32)",
+    /cp\.execFileSync\('bash'/.test(ADOPT) ? ["a literal execFileSync('bash', …) survived"] : []);
+  none("appdir-quoting.test.js's own bash probe no longer hardcodes 'bash' literally",
+    /cp\.execFileSync\('bash', \['-c', 'true'\]/.test(APPDIR) ? ["the HAS_BASH probe still hardcodes 'bash'"] : []);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

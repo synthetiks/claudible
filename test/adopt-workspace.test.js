@@ -130,10 +130,17 @@ const phProjects = (workspaces, activeWsId) => {
 // ===========================================================================================================
 // 4. adopt-workspace.sh, driven for real against throwaway folders.
 // ===========================================================================================================
-const HAS_BASH = (() => { try { cp.execFileSync('bash', ['-c', 'true'], { stdio: 'ignore' }); return true; } catch { return false; } })();
+// win32: resolve a REAL bash (never the WSL interop launcher — see test/_bash-resolve.js) and translate the
+// Windows-style paths this file hands to it; every other platform is untouched (bashBin() === 'bash', toPath
+// is the identity).
+const BASH = process.platform === 'win32' ? require('./_bash-resolve') : null;
+const bashBin = () => (BASH ? BASH.resolve().bin : 'bash');
+const bashArgs = (args) => (BASH ? BASH.toArgs(args) : args);
+const bashPath = (p) => (BASH ? BASH.toPath(p) : p);
+const HAS_BASH = (() => { try { cp.execFileSync(bashBin(), bashArgs(['-c', 'true']), { stdio: 'ignore' }); return true; } catch { return false; } })();
 const HAS_GIT = (() => { try { cp.execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 function adopt(dir) {
-  const out = cp.execFileSync('bash', [path.join(ROOT, 'wsl/adopt-workspace.sh'), dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const out = cp.execFileSync(bashBin(), bashArgs([bashPath(path.join(ROOT, 'wsl/adopt-workspace.sh')), bashPath(dir)]), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   try { return JSON.parse(out.trim()); } catch { return { ok: false, error: 'PARSE_FAIL:' + out.slice(0, 120) }; }
 }
 function newRepo() {
@@ -306,7 +313,7 @@ if (HAS_BASH) {
   // no helper → every private fetch fails. Verified against the live repo; pinned so it can't come back.
   const sanitizer = GITFETCH.split('\n').find((l) => l.trim().startsWith('case "$GH" in'));
   ok('git-fetch.sh: the gh-path sanitizer line is findable', !!sanitizer);
-  const sanitize = (p) => cp.execFileSync('bash', ['-c', `GH="$1"\n${sanitizer}\nprintf '%s' "$GH"`, '_', p], { encoding: 'utf8' });
+  const sanitize = (p) => cp.execFileSync(bashBin(), bashArgs(['-c', `GH="$1"\n${sanitizer}\nprintf '%s' "$GH"`, '_', p]), { encoding: 'utf8' });
   eq('git-fetch.sh: a normal gh path SURVIVES the sanitizer', sanitize('/usr/bin/gh'), '/usr/bin/gh');
   eq('git-fetch.sh: …a Windows path with spaces survives too (it gets single-quoted)',
     sanitize('/c/Program Files/GitHub CLI/gh.exe'), '/c/Program Files/GitHub CLI/gh.exe');
@@ -329,7 +336,7 @@ if (HAS_BASH) {
   const end = start > -1 ? lines.findIndex((l, i) => i > start && l === 'fi') : -1;
   ok('session.sh: the .claude ownership block is findable', start > -1 && end > start);
   const BLOCK = lines.slice(start, end + 1).join('\n');
-  const own = (sdir) => cp.execFileSync('bash', ['-c', `SDIR="$1"\n${BLOCK}`, '_', sdir], { stdio: ['ignore', 'ignore', 'ignore'] });
+  const own = (sdir) => cp.execFileSync(bashBin(), bashArgs(['-c', `SDIR="$1"\n${BLOCK}`, '_', bashPath(sdir)]), { stdio: ['ignore', 'ignore', 'ignore'] });
   const mk = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'own-')); fs.mkdirSync(path.join(d, '.claude')); return d; };
   const CLAUDIBLE_SETTINGS = '{"autoCompactEnabled": false, "env": { "DISABLE_AUTO_COMPACT": "1" },\n'
     + '"statusLine": { "type": "command", "command": "\'/usr/bin/node\' \'/x/.claude/statusline.js\' \'/rt/s.json\'" } }';
