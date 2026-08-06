@@ -11,11 +11,14 @@
 #   2. Only DIRECT children are ever removed — never a recursive find, never a glob that could escape.
 #   3. A child that is a symlink is unlinked, never followed (so a symlink to $HOME can't be recursed into).
 #   4. Every deletion is by exact path from `find -mindepth 1 -maxdepth 1 -print0` — no word splitting, no globbing.
-# Args: none. Env: CLAUDIBLE_TRASH_MAX_AGE_DAYS, CLAUDIBLE_TRASH_MAX_MB (both optional, for the test).
+# Args: none. Env: CLAUDIBLE_TRASH_MAX_AGE_DAYS, CLAUDIBLE_TRASH_MAX_MB (both optional, for the test),
+# CLAUDIBLE_TRASH_EMPTY_ALL (C-3.6's "Delete trash" settings button — skip the age/size floor, remove everything
+# now; the renderer already confirmed this via the modal, stating it is permanent).
 set -u
 
 MAX_AGE_DAYS="${CLAUDIBLE_TRASH_MAX_AGE_DAYS:-30}"
 MAX_MB="${CLAUDIBLE_TRASH_MAX_MB:-2048}"
+EMPTY_ALL="${CLAUDIBLE_TRASH_EMPTY_ALL:-}"
 case "$MAX_AGE_DAYS" in ''|*[!0-9]*) MAX_AGE_DAYS=30 ;; esac
 case "$MAX_MB"       in ''|*[!0-9]*) MAX_MB=2048 ;; esac
 
@@ -46,27 +49,33 @@ zap() {
   if rm -rf -- "$p" 2>/dev/null; then removed=$((removed+1)); freed_kb=$((freed_kb + sz)); fi
 }
 
-# --- pass 1: age ---------------------------------------------------------------------------------------------
-while IFS= read -r -d '' p; do zap "$p"; done < <(find "$REAL" -mindepth 1 -maxdepth 1 -mtime "+$MAX_AGE_DAYS" -print0 2>/dev/null)
+if [ -n "$EMPTY_ALL" ]; then
+  # --- "Delete trash": every direct child, right now, age/size irrelevant. Same zap() guards as passes 1+2
+  # below (must live under $REAL, symlinks unlinked never followed) — this only removes the floor, not the safety.
+  while IFS= read -r -d '' p; do zap "$p"; done < <(find "$REAL" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+else
+  # --- pass 1: age -------------------------------------------------------------------------------------------
+  while IFS= read -r -d '' p; do zap "$p"; done < <(find "$REAL" -mindepth 1 -maxdepth 1 -mtime "+$MAX_AGE_DAYS" -print0 2>/dev/null)
 
-# --- pass 2: size cap. Oldest first, until under MAX_MB. -------------------------------------------------------
-# `ls -1dtr` sorts oldest-last→first and exists on GNU *and* BSD (`find -printf` is GNU-only and would silently
-# no-op the whole cap on macOS). A path containing a newline would split into two lines here — both then fail
-# zap()'s "must live under $REAL" guard, so it degrades to skipping that entry, never to deleting the wrong one.
-# (Our own delete-session.sh / delete-workspace.sh only ever write `<sanitized-id>.<timestamp>` names anyway.)
-total_kb="$(kb_of "$REAL")"; [ -n "$total_kb" ] || total_kb=0
-cap_kb=$((MAX_MB * 1024))
-if [ "$total_kb" -gt "$cap_kb" ]; then
-  oldest_first="$(find "$REAL" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | xargs -0 -r ls -1dtr 2>/dev/null)"
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    [ "$total_kb" -gt "$cap_kb" ] || break
-    sz="$(kb_of "$p")"; [ -n "$sz" ] || sz=0
-    zap "$p"
-    total_kb=$((total_kb - sz))
-  done <<EOF
+  # --- pass 2: size cap. Oldest first, until under MAX_MB. ----------------------------------------------------
+  # `ls -1dtr` sorts oldest-last→first and exists on GNU *and* BSD (`find -printf` is GNU-only and would silently
+  # no-op the whole cap on macOS). A path containing a newline would split into two lines here — both then fail
+  # zap()'s "must live under $REAL" guard, so it degrades to skipping that entry, never to deleting the wrong one.
+  # (Our own delete-session.sh / delete-workspace.sh only ever write `<sanitized-id>.<timestamp>` names anyway.)
+  total_kb="$(kb_of "$REAL")"; [ -n "$total_kb" ] || total_kb=0
+  cap_kb=$((MAX_MB * 1024))
+  if [ "$total_kb" -gt "$cap_kb" ]; then
+    oldest_first="$(find "$REAL" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | xargs -0 -r ls -1dtr 2>/dev/null)"
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      [ "$total_kb" -gt "$cap_kb" ] || break
+      sz="$(kb_of "$p")"; [ -n "$sz" ] || sz=0
+      zap "$p"
+      total_kb=$((total_kb - sz))
+    done <<EOF
 $oldest_first
 EOF
+  fi
 fi
 
 remaining_kb="$(kb_of "$REAL")"; [ -n "$remaining_kb" ] || remaining_kb=0

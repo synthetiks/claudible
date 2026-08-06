@@ -2503,6 +2503,24 @@ $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.c
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) openDrawer(false); });
+// C-3.6 — the trash icon (left of the settings X) and the settings drawer's own Open trash button do the exact
+// same thing: hand the recoverable trash folder straight to the OS file manager. A basic function on purpose —
+// no in-app browsing, just get the user to the folder.
+async function openTrashFolder() {
+  const r = await claudible.trashOpen();
+  if (!r || !r.ok) toast('Could not open trash' + (r && r.error ? ': ' + humanError(r.error) : ''));
+}
+$('drawer-trash').addEventListener('click', openTrashFolder);
+$('trash-open-btn').addEventListener('click', openTrashFolder);
+// "Delete trash" — permanent, right now, no 30-day grace. Confirmed via the same C-3.6 modal every other
+// destructive path in this file uses, and the modal body says plainly that it can't be undone.
+$('trash-delete-btn').addEventListener('click', async () => {
+  const ok = await confirmModal('Delete everything in trash?', 'Permanently removes every archived session and project in ~/.claudible/trash, right now. This cannot be undone.', 'Delete trash');
+  if (!ok) return;
+  const r = await claudible.trashEmpty();
+  if (r && r.ok) toast('Trash emptied' + (r.removed ? ' · ' + r.removed + ' item(s) removed' : ''));
+  else toast('Could not empty trash' + (r && r.error ? ': ' + humanError(r.error) : ''));
+});
 
 // ---------- Diff Review: what Claude changed in the active workspace's git repo, revert per hunk/file ----------
 let _diffTimer = null;
@@ -4180,6 +4198,14 @@ function doExportSessionText(s) {
     else toast(r && r.error === 'empty' ? 'Nothing to export in this session yet' : 'Export failed');
   }).catch(() => toast('Export failed'));
 }
+// C-3.6 — a one-question Claudible popup (modalChoice, same convention as every other in-app modal), for the
+// plain yes/no confirms scattered through the session/tab menus. Not every confirm() in the app is a delete
+// (mid-turn restart, enabling sync — those stay native `confirm()`, out of C-3.6's scope); this is only for the
+// ones that destroy something.
+async function confirmModal(title, body, okLabel) {
+  const choice = await modalChoice({ title, body, choices: [{ key: 'yes', label: okLabel || 'Delete', danger: true }, { key: 'cancel', label: 'Cancel' }] });
+  return choice === 'yes';
+}
 function savedSessMenuItems(row, p, s) {
   const aw = workspaces.find((w) => w.id === activeWsId);
   const synced = !!(aw && aw.kind === 'repo');                       // a shared/repo session may also live on GitHub
@@ -4202,12 +4228,12 @@ function savedSessMenuItems(row, p, s) {
   );
   if (synced) {                                                      // a synced session can be removed locally or for everyone
     items.push({ icon: TRASH_SVG, label: 'Delete for me', hint: 'Remove from this machine (may sync back from GitHub).',
-      act: () => { if (confirm('Delete “' + sessTitle(s) + '” from this machine?\nIt may sync back if a collaborator still has it. Moves to ~/.claudible/trash, kept 30 days.')) deleteSession(s.id, 'local'); } });
+      act: async () => { if (await confirmModal('Delete “' + sessTitle(s) + '” from this machine?', 'It may sync back if a collaborator still has it. Moves to ~/.claudible/trash, kept 30 days.', 'Delete for me')) deleteSession(s.id, 'local'); } });
     items.push({ icon: TRASH_SVG, label: 'Delete everywhere', danger: true, hint: 'Also delete from GitHub for everyone — can’t be undone.',
-      act: () => { if (confirm('Delete “' + sessTitle(s) + '” everywhere?\nThis removes it from GitHub for everyone and can’t be undone.')) deleteSession(s.id, 'everywhere'); } });
+      act: async () => { if (await confirmModal('Delete “' + sessTitle(s) + '” everywhere?', 'This removes it from GitHub for everyone and can’t be undone.', 'Delete everywhere')) deleteSession(s.id, 'everywhere'); } });
   } else {
     items.push({ icon: TRASH_SVG, label: 'Delete', danger: true, hint: 'Move to trash — kept 30 days, then swept.',
-      act: () => { if (confirm('Delete “' + sessTitle(s) + '”?\nMoves to ~/.claudible/trash, kept 30 days.')) deleteSession(s.id, 'local'); } });
+      act: async () => { if (await confirmModal('Delete “' + sessTitle(s) + '”?', 'Moves to ~/.claudible/trash, kept 30 days.', 'Delete')) deleteSession(s.id, 'local'); } });
   }
   return items;
 }
@@ -4369,7 +4395,10 @@ function modalChoice({ title, body, choices }) {
     const box = document.createElement('div');
     box.style.cssText = 'min-width:320px;max-width:440px;padding:20px;border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
     const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px';
-    const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:16px';
+    // white-space:pre-wrap — C-3.6's delete modals carry a \n\n-separated warning paragraph (the live-share
+    // notice appended to the body); textContent doesn't parse markup, so without this a real line break in the
+    // string collapses to a single space instead of a visual paragraph break.
+    const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:16px;white-space:pre-wrap';
     const list = document.createElement('div'); list.style.cssText = 'display:flex;flex-direction:column;gap:8px';
     box.appendChild(h); box.appendChild(bd); box.appendChild(list);
     const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
@@ -4398,7 +4427,9 @@ function modalPrompt({ title, body, placeholder, value, ok }) {
     const box = document.createElement('div');
     box.style.cssText = 'min-width:330px;max-width:440px;padding:20px;border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
     const h = document.createElement('div'); h.textContent = title; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px'; box.appendChild(h);
-    if (body) { const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:14px'; box.appendChild(bd); }
+    // white-space:pre-wrap — confirmDeleteFromGithub's body carries a \n\n-separated "type this to confirm"
+    // line; without it, the real line break collapses to a single space (same fix as modalChoice's body, above).
+    if (body) { const bd = document.createElement('div'); bd.textContent = body; bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:14px;white-space:pre-wrap'; box.appendChild(bd); }
     const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 200; inp.placeholder = placeholder || ''; inp.value = value || '';
     inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--hairline);border-radius:9px;background:#0a0b0d;color:#e7eaef;font:inherit;font-size:13px;outline:none;margin-bottom:16px';
     box.appendChild(inp);
@@ -5168,7 +5199,7 @@ function renderWsChips() {
     chip.addEventListener('contextmenu', (e) => {
       if (isLastLocal(w)) { try { toast(w.adopted ? 'This is your only project — add another first' : 'You need at least one local project'); } catch (e) {} return; }   // never delete the last local (the guaranteed home)
       e.preventDefault(); e.stopPropagation();
-      if (confirm(deleteWsPrompt(w))) deleteWorkspace(w);   // same wording as the ▾ menu — an adopted folder is never trashed
+      confirmDeleteWorkspace(w);   // same in-app popup as the ▾ menu (C-3.6) — an adopted folder is never trashed
     });
     el.appendChild(chip);
     if (isWsExpanded(w.id)) {                               // expanded → nest its sessions beneath it
@@ -5374,10 +5405,10 @@ async function openAcceptInviteModal(w) {
   if (r && r.ok) { await refreshWorkspaces(); switchWorkspace(w.id); }
   else if (!r || r.error !== 'cancelled') toast('Could not add: ' + humanError(r && r.error));
 }
-async function deleteWorkspace(w) {
-  const busyToast = () => toast('A session in this project is still running — stop it before deleting');
-  if (wsBusy(w.id)) { busyToast(); return; }               // fast local check; main re-checks against its authoritative rec.busy
-  let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
+// Shared result-handler for both delete paths below — main's workspace:delete AND workspace:deleteFromGithub
+// resolve the IDENTICAL {ok,activeId,moved,folderError} shape (the GitHub path literally delegates to the same
+// core on success, see main.js), so the tab-reconciliation belt-and-braces logic must not be forked in two places.
+async function applyWorkspaceDeleteResult(w, r, busyToast, okToast) {
   if (r && r.ok) {
     if (r.activeId) activeWsId = r.activeId;
     // main repointed + respawned EVERY tab that lived in the deleted workspace and tells us exactly which
@@ -5406,8 +5437,26 @@ async function deleteWorkspace(w) {
     // permission, disk full) it's still on disk, owned by nothing. Main used to discard that result entirely and
     // report a clean success. Say it out loud.
     if (r.folderError) toast(r.folderError);
+    else if (okToast) toast(okToast);
   } else if (r && r.error === 'busy') { busyToast(); }     // a turn started between the local check and main's authoritative one
   else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
+}
+async function deleteWorkspace(w) {
+  const busyToast = () => toast('A session in this project is still running — stop it before deleting');
+  if (wsBusy(w.id)) { busyToast(); return; }               // fast local check; main re-checks against its authoritative rec.busy
+  let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
+  await applyWorkspaceDeleteResult(w, r, busyToast);
+}
+// C-3.6 (shared project's "Delete from GitHub" option): confirmDeleteFromGithub already made the user type the
+// exact repo name — main re-validates that same string server-side (never trust the renderer alone for a
+// destructive cross-account action). On success this is a real GitHub deletion PLUS the usual local trash-move
+// (main's workspace:deleteFromGithub delegates to the exact same core workspace:delete already runs), so the
+// result shape — and therefore the reconciliation — is identical; only the confirmation toast differs.
+async function deleteWorkspaceFromGithub(w, confirmName) {
+  const busyToast = () => toast('A session in this project is still running — stop it before deleting');
+  if (wsBusy(w.id)) { busyToast(); return; }
+  let r = null; try { r = await claudible.workspaceDeleteFromGithub(w.id, confirmName); } catch {}
+  await applyWorkspaceDeleteResult(w, r, busyToast, 'Deleted “' + (w.repoName || w.slug || w.label) + '” from GitHub');
 }
 // ---- workspace options (▾) menu: every per-workspace action lives here so the chip stays a clean name ----
 // The green + on a project's manage menu. A CREATE action among toggles and destructive ops, so it is the one
@@ -5484,7 +5533,7 @@ function wsMenuItems(chip, nm, w) {
     } : {
       icon: TRASH_SVG, label: 'Delete project', danger: true,
       hint: 'Move this project’s folder to trash (kept 30 days). A repo keeps its GitHub copy.',
-    }, { act: () => { if (confirm(deleteWsPrompt(w))) deleteWorkspace(w); } }));
+    }, { act: () => confirmDeleteWorkspace(w) }));
   }
   return items;
 }
@@ -5675,17 +5724,79 @@ function isLastLocal(w) {
   if (w.adopted) return !workspaces.some((x) => x.id !== w.id && (x.kind === 'local' || (x.kind === 'repo' && !x.needsClone)));
   return w.kind === 'local' && workspaces.filter((x) => x.kind === 'local').length <= 1;
 }
-// One sentence for both delete affordances (the ▾ menu and the chip's right-click), so they can never disagree
-// about whether the folder survives.
-function deleteWsPrompt(w) {
-  const base = w.adopted
-    ? 'Remove "' + w.label + '" from Claudible?\nThis only stops tracking the folder as a project — nothing on disk is moved or deleted.'
-    : 'Delete project "' + w.label + '"?\nIts folder moves to ~/.claudible/trash and is kept for 30 days. A repo project keeps its GitHub repo — only the local copy is removed.';
-  // main.js tears the share down when the pinned tab's project goes (share:force-end, reason workspace-deleted),
-  // but this prompt — the last thing standing between the user and that — never mentioned live sharing at all.
-  return base + (liveShareLivesInWs(w.id)
+// One sentence-fragment for every delete flow below (the ▾ menu and the chip's right-click share it), so they
+// can never disagree about whether a live share is about to die with the project. main.js tears the share down
+// when the pinned tab's project goes (share:force-end, reason workspace-deleted) — this is the only warning of
+// that the user gets before clicking.
+function liveShareWarnSuffix(w) {
+  return liveShareLivesInWs(w.id)
     ? '\n\n⚠ Your live link streams a session in THIS project. Deleting it ends the share, and the link stops working for everyone you sent it to.'
-    : '');
+    : '';
+}
+// C-3.6 — the in-app Claudible popup that replaced every native confirm() on this path, styled like every other
+// Claudible popup (modalChoice — same convention openDeletedRemoteModal/openDivergedInfo already use). Options
+// depend on kind:
+//   ADOPTED folder — Claudible never created it, so the only action is "stop tracking"; nothing on disk moves.
+//   LOCAL project  — 'Delete' and 'Archive to trash'. Both call the SAME deleteWorkspace(): there is no separate
+//                    permanent-delete path for a local folder (by design — see delete-workspace.sh), so whichever
+//                    button is pressed, the 30-day trash window still applies. Two labels for one honest action,
+//                    matching the constitution's C-3.6 wording without pretending "Delete" is less recoverable
+//                    than it actually is.
+//   SHARED (repo)  — adds a third, genuinely destructive option: 'Delete from GitHub' additionally removes the
+//                    repo itself (confirmDeleteFromGithub, below) — the only option here that is NOT recoverable
+//                    from the trash. 'Delete only locally' and 'Archive to trash' are, again, the same trash-move.
+async function confirmDeleteWorkspace(w) {
+  if (w.adopted) {
+    const choice = await modalChoice({
+      title: 'Remove "' + w.label + '"?',
+      body: 'This only stops tracking the folder as a project — nothing on disk is moved or deleted.' + liveShareWarnSuffix(w),
+      choices: [{ key: 'remove', label: 'Remove from Claudible', danger: true }, { key: 'cancel', label: 'Cancel' }],
+    });
+    if (choice === 'remove') deleteWorkspace(w);
+    return;
+  }
+  if (w.kind === 'repo') {
+    const choice = await modalChoice({
+      title: 'Delete "' + w.label + '"?',
+      body: 'It’s a shared project — choose how far the deletion reaches.' + liveShareWarnSuffix(w),
+      choices: [
+        { key: 'github', label: 'Delete from GitHub', sub: 'Removes the repo on GitHub for EVERYONE, then the local copy too — cannot be undone.', danger: true },
+        { key: 'local', label: 'Delete only locally', sub: 'Moves this machine’s folder to trash (kept 30 days). The GitHub repo is left untouched.' },
+        { key: 'trash', label: 'Archive to trash', sub: 'Same move as "Delete only locally" — kept 30 days, recoverable.' },
+        { key: 'cancel', label: 'Cancel' },
+      ],
+    });
+    if (choice === 'github') await confirmDeleteFromGithub(w);
+    else if (choice === 'local' || choice === 'trash') deleteWorkspace(w);
+    return;
+  }
+  const choice = await modalChoice({
+    title: 'Delete "' + w.label + '"?',
+    body: 'Its folder moves to ~/.claudible/trash and is kept for 30 days — either option below is recoverable.' + liveShareWarnSuffix(w),
+    choices: [
+      { key: 'delete', label: 'Delete', danger: true },
+      { key: 'trash', label: 'Archive to trash' },
+      { key: 'cancel', label: 'Cancel' },
+    ],
+  });
+  if (choice === 'delete' || choice === 'trash') deleteWorkspace(w);
+}
+// The one truly irreversible option: deletes the GitHub repo itself (needs the gh CLI's delete_repo scope, which
+// most tokens don't carry by default). Guarded by typing the exact repo name — the same "type to confirm" bar
+// GitHub's own UI sets for this action — checked here AND again by main (workspace:deleteFromGithub) before it
+// ever shells out to `gh repo delete`.
+async function confirmDeleteFromGithub(w) {
+  const repoName = w.repoName || w.slug || w.label;
+  const owner = w.owner || '';
+  const typed = await modalPrompt({
+    title: 'Delete "' + repoName + '" from GitHub',
+    body: 'This permanently deletes ' + (owner ? owner + '/' + repoName : repoName) + ' on GitHub for everyone, then removes the local copy too. This cannot be undone.\n\nType the repo name to confirm: ' + repoName,
+    placeholder: repoName,
+    ok: 'Delete from GitHub',
+  });
+  if (typed === null) return;                                       // Cancel / Esc
+  if (typed !== repoName) { toast('Name didn’t match “' + repoName + '” — nothing was deleted'); return; }
+  await deleteWorkspaceFromGithub(w, typed);
 }
 // First launch (no local workspace existed → main materialized a default): once, welcome the user and open the
 // workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.

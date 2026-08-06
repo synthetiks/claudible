@@ -985,7 +985,10 @@ none('renderer: orphanTab is never rendered',
 //     is now kind-agnostic, and the stable gh: key is backfilled in the background onto a snapshot.
 // ---------------------------------------------------------------------------------------------------------
 {
-  const del = (MAIN.match(/ipcMain\.handle\('workspace:delete'[\s\S]*?\n\}\)\);/) || [''])[0];
+  // C-3.6 refactored the inline ipcMain.handle callback into a named workspaceDeleteCore(id) (so the "Delete
+  // from GitHub" path can call the exact same core after the repo itself is gone) — capture the FUNCTION now,
+  // not the registration line, up to the point it hands back off to ipcMain.handle.
+  const del = (MAIN.match(/function workspaceDeleteCore\(id\) \{[\s\S]*?\nipcMain\.handle\('workspace:delete'/) || [''])[0];
   none('the delete tombstone regrew its kind gate (adopted repos become phantoms again)',
     /const keys = repoTombstoneKeys\(ws\);\s*\n\s*if \(keys\.length\)/.test(del) && !/ws\.kind === 'repo' && ws\.owner && ws\.slug\) \{\s*\n\s*registry\.dismissedRepos/.test(del) ? [] : ['kind-agnostic tombstone missing']);
   none('the background gh-key backfill on delete is gone (external renames resurrect deleted projects)',
@@ -1540,8 +1543,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /This tab carries your live link[\s\S]{0,300}?STOPS WORKING/.test(APP)
       ? [] : ['the close confirm never names the public link']);
   none('deleting the pinned tab’s project does not mention live sharing at all',
-    /function deleteWsPrompt\(w\)[\s\S]{0,1000}?liveShareLivesInWs\(w\.id\)/.test(APP)
-      ? [] : ['deleteWsPrompt has no live-share warning']);
+    // C-3.6 replaced the single deleteWsPrompt() string with the confirmDeleteWorkspace() modal flow; the
+    // live-share warning moved into its own shared helper (liveShareWarnSuffix), appended in every branch.
+    /function liveShareWarnSuffix\(w\)[\s\S]{0,300}?liveShareLivesInWs\(w\.id\)/.test(APP)
+      && (APP.match(/liveShareWarnSuffix\(w\)/g) || []).length >= 4   // definition + all 3 confirmDeleteWorkspace body branches
+      ? [] : ['confirmDeleteWorkspace has no live-share warning, or a branch stopped appending it']);
   // The only auth path that never reaches guest.js, so no error card of its own can explain it.
   none('a revoked link still renders as an unstyled one-word page',
     /res\.writeHead\(403, \{ 'Content-Type': 'text\/html/.test(SRV) && /DENIED_HTML/.test(SRV)
@@ -3231,6 +3237,103 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the retired autoDraft/dedupeBlankDraft mechanism crept back in (C-4.4 said it could become dead)',
     /\bautoDraft\b/.test(APP.replace(/\/\/[^\n]*/g, '')) || /function dedupeBlankDraft/.test(APP)
       ? ['autoDraft or dedupeBlankDraft is referenced again outside comments'] : []);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 97. C-3.6 — the delete/trash flow (both owners' decision, 2026-08-06). Four pieces:
+//   (1) every native confirm() on a session/project delete path is gone, replaced by the SAME in-app modal
+//       convention (modalChoice) every other Claudible popup already uses.
+//   (2) the modal's options depend on kind: LOCAL → Delete / Archive to trash (both the same recoverable
+//       trash-move — there is no separate permanent-delete path for a local folder); SHARED (repo) → Delete
+//       from GitHub / Delete only locally / Archive to trash. 'Delete from GitHub' is guarded by typing the
+//       exact repo name, re-validated by main before it ever shells out to `gh repo delete`.
+//   (3) a trash icon LEFT of the settings drawer's × opens the OS file manager on the trash folder directly.
+//   (4) Settings gets Open trash + Delete trash (permanent, confirmed via the same modal first).
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (1) no native confirm() survives on the three exact strings this feature replaced (session delete + the
+  //     two project-delete call sites) — a partial revert (fixing the wording back but leaving confirm()) would
+  //     still fail this, since the STRINGS are gone, not just re-wrapped.
+  none('a native confirm() crept back into a session-delete menu item (C-3.6)',
+    /act: \(\) => \{ if \(confirm\('Delete/.test(APP)
+      ? ['savedSessMenuItems still calls confirm() directly'] : []);
+  none('a native confirm() crept back into a project-delete call site (C-3.6)',
+    /if \(confirm\(deleteWsPrompt\(w\)\)\)/.test(APP)
+      ? ['a project-delete site still calls confirm(deleteWsPrompt(w))'] : []);
+  none('deleteWsPrompt (the retired native-confirm string builder) is back (C-3.6)',
+    /function deleteWsPrompt\(w\)/.test(APP)
+      ? ['deleteWsPrompt still exists — confirmDeleteWorkspace should have replaced it'] : []);
+
+  // (2a) the modal exists and every session-delete path routes through it (confirmModal → modalChoice).
+  none('confirmModal is gone, or no longer built on modalChoice (C-3.6)',
+    /async function confirmModal\(title, body, okLabel\)[\s\S]{0,220}?modalChoice\(/.test(APP)
+      ? [] : ['confirmModal missing, or not implemented via modalChoice']);
+  none('a session-delete menu item stopped awaiting confirmModal (C-3.6)',
+    (APP.match(/await confirmModal\(/g) || []).length >= 3   // "Delete for me" / "Delete everywhere" / plain "Delete"
+      ? [] : ['fewer than 3 session-delete items call confirmModal']);
+
+  // (2b) confirmDeleteWorkspace exists and branches on kind exactly as the constitution specifies.
+  const cdw = (APP.match(/async function confirmDeleteWorkspace\(w\) \{[\s\S]*?\n\}\n/) || [''])[0];
+  none('confirmDeleteWorkspace is gone (C-3.6)', cdw ? [] : ['confirmDeleteWorkspace not found']);
+  none('a LOCAL project no longer offers both Delete and Archive to trash (C-3.6)',
+    [/key: 'delete', label: 'Delete', danger: true/.test(cdw) ? '' : 'no plain Delete choice',
+     /key: 'trash', label: 'Archive to trash'/.test(cdw) ? '' : 'no Archive to trash choice'].filter(Boolean));
+  none('a SHARED (repo) project no longer offers all three delete options (C-3.6)',
+    [/label: 'Delete from GitHub'/.test(cdw) ? '' : 'no Delete from GitHub choice',
+     /label: 'Delete only locally'/.test(cdw) ? '' : 'no Delete only locally choice',
+     (cdw.match(/label: 'Archive to trash'/g) || []).length >= 1 ? '' : 'no Archive to trash choice in the repo branch'].filter(Boolean));
+  none('confirmDeleteWorkspace stopped branching on w.kind === \'repo\' (C-3.6)',
+    /if \(w\.kind === 'repo'\) \{/.test(cdw) ? [] : ['the repo-kind branch is gone']);
+  none('an adopted folder can reach the repo/local trash options again (C-3.6)',
+    /if \(w\.adopted\) \{/.test(cdw) && cdw.indexOf("if (w.adopted) {") < cdw.indexOf("if (w.kind === 'repo')")
+      ? [] : ['the adopted-folder branch no longer returns before the kind checks']);
+
+  // (2c) 'Delete from GitHub' is guarded by typing the exact repo name, client AND server side.
+  none('confirmDeleteFromGithub stopped requiring the typed repo name to match (C-3.6)',
+    /async function confirmDeleteFromGithub\(w\)[\s\S]{0,900}?if \(typed !== repoName\)/.test(APP)
+      ? [] : ['confirmDeleteFromGithub no longer compares the typed value against repoName']);
+  none('main no longer re-validates the typed repo name server-side (C-3.6)',
+    /if \(!repoName \|\| String\(confirmName \|\| ''\) !== repoName\)/.test(MAIN)
+      ? [] : ['workspace:deleteFromGithub trusts the renderer without re-checking confirmName']);
+  none('the gh delete_repo scope hint is gone from delete-repo.sh (C-3.6)',
+    /gh auth refresh -h github\.com -s delete_repo/.test(fs.readFileSync(path.join(ROOT, 'wsl', 'delete-repo.sh'), 'utf8'))
+      ? [] : ['delete-repo.sh no longer tells the user how to grant the missing scope']);
+  none('workspace:deleteFromGithub stopped delegating to workspaceDeleteCore on success (C-3.6)',
+    /if \(!r\.ok\) return \{ ok: false, error: r\.error \|\| 'gh repo delete failed' \};\s*\n\s*return workspaceDeleteCore\(id\);/.test(MAIN)
+      ? [] : ['a successful gh repo delete no longer falls through to the ordinary local delete']);
+
+  // (3) the trash icon sits in the settings drawer's head, left of the × close button, and opens the OS file
+  //     manager on the trash folder (never a bare listing inside Claudible — "a basic function, nothing complex").
+  none('the drawer-head trash icon button is gone from index.html, or moved to the wrong side (C-3.6)',
+    /id="drawer-trash"[\s\S]{0,700}?id="drawer-close"/.test(HTML)
+      ? [] : ['drawer-trash no longer sits immediately before drawer-close in the drawer-head markup']);
+  none('the drawer-trash icon stopped opening the trash folder (C-3.6)',
+    /\$\('drawer-trash'\)\.addEventListener\('click', openTrashFolder\)/.test(APP)
+      ? [] : ['drawer-trash has no click handler wired to openTrashFolder']);
+
+  // (4) Settings gets Open trash + Delete trash, the latter permanent and confirmed via the modal first.
+  none('the settings drawer lost its Open trash / Delete trash buttons (C-3.6)',
+    [/id="trash-open-btn"/.test(HTML) ? '' : 'no #trash-open-btn in index.html',
+     /id="trash-delete-btn"/.test(HTML) ? '' : 'no #trash-delete-btn in index.html'].filter(Boolean));
+  none('Delete trash stopped confirming via the modal before running (C-3.6)',
+    /\$\('trash-delete-btn'\)\.addEventListener\('click', async \(\) => \{\s*\n\s*const ok = await confirmModal\(/.test(APP)
+      ? [] : ['#trash-delete-btn no longer confirms via confirmModal before calling claudible.trashEmpty']);
+  none('claudible.trashOpen / trashEmpty lost their preload bridge or main handler (C-3.6)',
+    [/trashOpen: \(\) => ipcRenderer\.invoke\('trash:open'\)/.test(PRELOAD) ? '' : 'preload.trashOpen missing',
+     /trashEmpty: \(\) => ipcRenderer\.invoke\('trash:empty'\)/.test(PRELOAD) ? '' : 'preload.trashEmpty missing',
+     /ipcMain\.handle\('trash:open'/.test(MAIN) ? '' : "main has no ipcMain.handle('trash:open')",
+     /ipcMain\.handle\('trash:empty'/.test(MAIN) ? '' : "main has no ipcMain.handle('trash:empty')"].filter(Boolean));
+  // "Delete trash" reuses trash-prune.sh's own guards (must resolve to a real .claudible/trash leaf, direct
+  // children only, symlinks unlinked never followed) via a flag, rather than a second `rm -rf` implementation.
+  none('trash:empty stopped using the CLAUDIBLE_TRASH_EMPTY_ALL flag on trash-prune.sh (C-3.6)',
+    /runScript\('trash-prune\.sh', '', \{ timeout: 120000, extraEnv: 'CLAUDIBLE_TRASH_EMPTY_ALL=1 ' \}\)/.test(MAIN)
+      ? [] : ['trash:empty no longer passes CLAUDIBLE_TRASH_EMPTY_ALL to trash-prune.sh']);
+  none('trash-prune.sh lost its EMPTY_ALL branch, or the guarded zap() is bypassed (C-3.6)',
+    (() => {
+      const tp = fs.readFileSync(path.join(ROOT, 'wsl', 'trash-prune.sh'), 'utf8');
+      return /if \[ -n "\$EMPTY_ALL" \]; then/.test(tp) && (tp.match(/zap "\$p"/g) || []).length >= 3
+        ? [] : ['the empty-all branch is gone, or no longer reuses zap() for its removals'];
+    })());
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

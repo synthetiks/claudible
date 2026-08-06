@@ -592,6 +592,35 @@ function pruneTrash() {
     if (r.removed) console.log(`[claudible] trash: pruned ${r.removed} item(s), freed ${Math.round((r.freedKb || 0) / 1024)}MB, ${Math.round((r.remainingKb || 0) / 1024)}MB left`);
   });
 }
+// C-3.6 — "Open trash" (the settings drawer's button AND the small trash icon left of its close button both
+// call this). Resolves the trash root exactly the way delete-workspace.sh/trash-prune.sh do ($HOME/.claudible/
+// trash, inside the RUNNER's own shell) via a tiny script, then converts that GUEST-side path into something
+// shell.openPath can actually open — identity on native win/posix, a real \\wsl$\... UNC path via wslpath -w on
+// the WSL backend (runner.toHostPath, the same translator diff/checkpoint paths already go through).
+ipcMain.handle('trash:open', async () => {
+  if (!APPDIR_WSL) return { ok: false, error: ERR_NO_BACKEND };
+  const { err, stdout } = await runner.runScript('trash-path.sh', '', { timeout: 8000 });
+  if (err) return { ok: false, error: err.message };
+  let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+  if (!r.ok || !r.path) return { ok: false, error: r.error || 'could not resolve the trash folder' };
+  let hostPath = r.path;
+  try { const h = runner.toHostPath(r.path); if (h) hostPath = h; } catch {}   // identity on win/posix; wslpath -w on WSL
+  const openErr = await shell.openPath(hostPath);
+  if (openErr) { console.error('[claudible] trash:open — shell.openPath:', openErr); return { ok: false, error: openErr }; }
+  return { ok: true };
+});
+// "Delete trash" (settings drawer) — permanent, and the renderer's C-3.6 modal says so before this ever runs.
+// Reuses trash-prune.sh (the same script the boot-time sweep calls) with CLAUDIBLE_TRASH_EMPTY_ALL=1, so every
+// guard that script already has — must resolve to a real .claudible/trash leaf, only direct children, symlinks
+// unlinked never followed — applies here too; the flag only removes the age/size floor, not the safety.
+ipcMain.handle('trash:empty', async () => {
+  if (!APPDIR_WSL) return { ok: false, error: ERR_NO_BACKEND };
+  const { err, stdout } = await runner.runScript('trash-prune.sh', '', { timeout: 120000, extraEnv: 'CLAUDIBLE_TRASH_EMPTY_ALL=1 ' });
+  if (err) return { ok: false, error: err.message };
+  let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+  if (r.ok === false) return { ok: false, error: r.error || 'could not empty the trash' };
+  return { ok: true, removed: r.removed || 0 };
+});
 
 // ---- embedded live Claude TUI (one pty per tab) ----
 // Ultracode effort isn't a CLI flag — after claude has rendered and its output has SETTLED (it's idle waiting for
@@ -2635,7 +2664,10 @@ ipcMain.handle('workspace:rename', async (e, payload) => {
 });
 // Delete a workspace: soft-delete its folder (recoverable) + drop it from the registry. Invariant: never the
 // last local workspace (the guaranteed home to open) — the renderer also hides delete in that case.
-ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
+// Named (not an inline ipcMain.handle callback) so C-3.6's "Delete from GitHub" path can call it AFTER the repo
+// itself is gone — same core, same result shape, same reconciliation on the renderer side (see app.js's
+// applyWorkspaceDeleteResult). Do not fork this logic; extend it here so both callers stay in sync.
+function workspaceDeleteCore(id) { return new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return resolve({ ok: false, error: 'unknown workspace' });
   // Mirrors the renderer's isLastLocal(). An ADOPTED entry only POINTS at a folder the user already owned —
@@ -2725,7 +2757,33 @@ ipcMain.handle('workspace:delete', (e, id) => new Promise((resolve) => {
       finish();
     });
   } else finish();
-}));
+}); }
+ipcMain.handle('workspace:delete', (e, id) => workspaceDeleteCore(id));
+// C-3.6 — the ONE truly irreversible option in the delete modal: also removes the GitHub repo itself. The
+// renderer already made the user type the exact repo name (confirmDeleteFromGithub); re-checked here too, since
+// a destructive cross-account action must never trust the renderer alone. `gh repo delete` needs the delete_repo
+// scope, which most tokens don't carry by default — delete-repo.sh classifies that failure with the exact fix
+// (`gh auth refresh -h github.com -s delete_repo`), same convention as install-claude.sh's error classification.
+// On success this delegates straight to workspaceDeleteCore — the repo is already gone, so what's left is
+// EXACTLY an ordinary local delete (same trash-move, same tab reconciliation, same result shape).
+ipcMain.handle('workspace:deleteFromGithub', async (e, payload) => {
+  const { id, confirmName } = payload || {};
+  const ws = registry.workspaces.find((w) => w.id === id);
+  if (!ws) return { ok: false, error: 'unknown workspace' };
+  if (ws.kind !== 'repo') return { ok: false, error: 'not a shared project' };
+  const repoName = ws.repoName || ws.slug || '';
+  if (!repoName || String(confirmName || '') !== repoName) return { ok: false, error: 'the typed name did not match — nothing was deleted' };
+  if (!ws.owner) return { ok: false, error: 'missing repo owner' };
+  // Same busy guard as the local delete below (workspaceDeleteCore repeats it too, but failing BEFORE the
+  // irreversible `gh repo delete` call is worth the duplicate check — a busy refusal after the repo is already
+  // gone would be a much worse surprise than a redundant read here).
+  for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id && rec.busy) return { ok: false, error: 'busy' }; }
+  const { err, stdout } = await runner.runScript('delete-repo.sh', `'${ws.owner}' '${repoName}'`, { timeout: 30000 });
+  if (err) return { ok: false, error: 'could not run the delete script: ' + err.message };
+  let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+  if (!r.ok) return { ok: false, error: r.error || 'gh repo delete failed' };
+  return workspaceDeleteCore(id);
+});
 // Reorder the workspace chips (drag). Accepts the new id order; any ids not listed keep their place at the end.
 ipcMain.handle('workspace:reorder', (e, ids) => {
   if (!Array.isArray(ids)) return { ok: false };
