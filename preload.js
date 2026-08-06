@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('claudible', {
   onClaudeNeeded: (cb) => ipcRenderer.on('claude:needed', () => cb()),
   claudeConnected: () => ipcRenderer.invoke('claude:connected'),   // bring the terminal up after connecting
   claudeState: () => ipcRenderer.invoke('claude:state'),           // cheap claude-only {installed,signedIn} for the dot/popup
+  ghState: () => ipcRenderer.invoke('gh:state'),                   // cheap {ghInstalled,ghSignedIn,ghAccount} for the Settings row (C-9.1: answers from cache, never awaits gh's network)
+  onGhStateChanged: (cb) => ipcRenderer.on('gh:state-changed', (_e, s) => cb(s)),   // fires when gh:state's background probe lands fresh data
   // diff review (what Claude changed in the workspace's git repo)
   diffList: (wsId) => ipcRenderer.invoke('diff:list', { wsId }),
   diffRevert: (patch, wsId) => ipcRenderer.invoke('diff:revert', { patch, wsId }),      // wsId = the project whose card this button lives on (Project History reviews many at once) — main must mutate THAT repo, not whatever's active

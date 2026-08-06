@@ -3118,5 +3118,26 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the confirm body lost its stacked-revert / single-slot-undo warning']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 88. C-9.1 — THE SETTINGS DRAWER MUST NEVER WAIT ON THE NETWORK. refreshGhRow used to await the FULL
+//   onboard:status probe (claude + gh + voice) just to paint one row. gh:state now answers instantly from a
+//   module-level cache and refreshes it in the background (5000ms timeout of its own), pushing fresh data over
+//   'gh:state-changed'. The wizard is unaffected — it still needs the full, blocking onboard:status.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('gh:state cheap handler is missing (drawer would block on onboardStatus again)',
+    [/ipcMain\.handle\('gh:state'/.test(MAIN) ? '' : "no ipcMain.handle('gh:state', ...) in main.js",
+     /function refreshGhStateCache\(\)/.test(MAIN) ? '' : 'no refreshGhStateCache() background-refresh function',
+     /setTimeout\(\(\) => resolve\(null\), 5000\)/.test(MAIN) ? '' : 'gh:state\'s background probe lost its 5000ms timeout',
+     /ghState: \(\) => ipcRenderer\.invoke\('gh:state'\)/.test(PRELOAD) ? '' : 'no ghState bridge in preload.js',
+     /onGhStateChanged: \(cb\) => ipcRenderer\.on\('gh:state-changed'/.test(PRELOAD) ? '' : 'no onGhStateChanged bridge in preload.js'].filter(Boolean));
+  none('refreshGhRow awaits onboardStatus again (the drawer would block on gh\'s network)',
+    [/async function refreshGhRow\(\) \{[\s\S]{0,200}?claudible\.onboardStatus\(\)/.test(APP) ? 'refreshGhRow still calls claudible.onboardStatus()' : '',
+     /s = await claudible\.ghState\(\);/.test(APP) ? '' : 'refreshGhRow no longer calls claudible.ghState()'].filter(Boolean));
+  none('connectGh success / a post-install no longer invalidate the drawer\'s gh cache',
+    [/if \(r\.ok\) refreshGhStateCache\(\);/.test(MAIN) ? '' : 'onboard:gh-login no longer refreshes the gh cache on success',
+     (MAIN.match(/refreshGhStateCache\(\);/g) || []).length >= 3 ? '' : 'refreshGhStateCache() is not called from both the connectGh-success and post-install paths'].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

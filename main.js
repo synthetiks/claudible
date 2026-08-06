@@ -3278,7 +3278,7 @@ ipcMain.handle('onboard:gh-login', async () => {
   child.on('exit', drop); child.on('error', drop);
   const killTimer = setTimeout(() => { try { child.kill(); } catch {} }, 360000);   // same 6-min abandon budget as the Claude step
   killTimer.unref && killTimer.unref();
-  return await new Promise((resolve) => {
+  const r = await new Promise((resolve) => {
     let out = '', err = '', done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     child.stdout.on('data', (d) => {
@@ -3296,6 +3296,11 @@ ipcMain.handle('onboard:gh-login', async () => {
     child.on('exit', (codeN) => finish(codeN === 0 ? { ok: true, code: '' } : { ok: false, error: (err || out || 'gh exited ' + codeN).trim().split('\n').slice(-2).join(' ').slice(0, 300) }));
     setTimeout(() => finish({ ok: false, error: (err || 'gh printed no device code in 20s').trim().split('\n').slice(-2).join(' ').slice(0, 300) }), 20000);
   });
+  // C-9.1: connectGh succeeding here means, at minimum, the device flow started — the drawer's cached gh row
+  // must not keep showing the pre-click answer. Re-probe in the background; the settings drawer's next
+  // 'gh:state-changed' (or its next open) picks up the real sign-in once gh finishes polling GitHub itself.
+  if (r.ok) refreshGhStateCache();
+  return r;
 });
 
 // ---- self-bootstrapping dependency provisioner (the System-check wizard step) ----------------------
@@ -3341,6 +3346,7 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
     }
     await refreshWindowsPath();   // async: never block the main process (pty I/O + every poller) on a PowerShell spawn
     if (runner.id === 'win' && typeof runner.resetCaches === 'function') runner.resetCaches();   // re-resolve git-bash/app-dir next call
+    refreshGhStateCache();   // C-9.1: an install here can be gh itself (or PATH moving broadly) — the drawer's cached gh row must not go stale across it
     // A cloudflared installed MID-SHARE must not wait out the 45s retry cadence: its env/path is applied just
     // above, so the very next candidates() read can see it — bring the tunnel (and with it, presence) up now.
     if (id === 'cloudflared' && share.status().running && !cloudflaredProc) kickTunnelRetryNow();
@@ -3390,6 +3396,27 @@ ipcMain.handle('claude:state', async () => {
     return { installed: c.state !== 'missing', signedIn: c.state === 'ready' };
   } catch { return { installed: false, signedIn: false }; }
 });
+// C-9.1 — cheap GitHub-only state for the settings drawer, modeled on claude:state above. There's no win-side
+// shortcut for gh the way runner.claudeState() is for claude, so the "cheap" part is a module-level cache: the
+// handler answers from it INSTANTLY (the drawer must never wait on the network) and kicks the real probe off in
+// the BACKGROUND with a hard 5000ms timeout of its own (deps.detect has none), pushing the fresh answer over
+// 'gh:state-changed' when it lands. The wizard is untouched — it still awaits the full onboard:status, because
+// blocking there is the point (the user is watching a spinner, not opening a drawer).
+let _ghStateCache = { ghInstalled: false, ghSignedIn: false, ghAccount: '' };
+let _ghStateRefreshing = false;   // one probe in flight — a burst of drawer-opens must not stack them
+function refreshGhStateCache() {
+  if (_ghStateRefreshing) return;
+  _ghStateRefreshing = true;
+  const timeout = new Promise((resolve) => { const t = setTimeout(() => resolve(null), 5000); t.unref && t.unref(); });
+  Promise.race([deps.detect(runner, voiceState()).then(deps.toOnboardStatus).catch(() => null), timeout])
+    .then((s) => {
+      _ghStateRefreshing = false;
+      if (!s) return;   // timed out or the probe itself threw — keep serving the last-known cache, never overwrite it with a false "signed out"
+      _ghStateCache = { ghInstalled: !!s.ghInstalled, ghSignedIn: !!s.ghSignedIn, ghAccount: s.ghAccount || '' };
+      try { win && win.webContents.send('gh:state-changed', _ghStateCache); } catch {}
+    });
+}
+ipcMain.handle('gh:state', () => { refreshGhStateCache(); return _ghStateCache; });
 
 // The active session's LATEST assistant reply, so the manual Speak button can re-read it even after a relaunch
 // (when the in-memory lastReply is empty) or for a session opened from history. Reads the transcript and returns

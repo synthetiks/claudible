@@ -5245,10 +5245,13 @@ function openUnameInfo() {
 // invites and repo-backed projects all depend on had no visible state anywhere in the running app, and 2g's
 // terminal menu item exists partly to work around exactly that. Refreshed when the drawer OPENS rather than on
 // a timer: it is a real gh subprocess, and nobody needs it polled while the drawer is shut.
-async function refreshGhRow() {
+// C-9.1: onboardStatus() runs the FULL dependency probe (claude + gh + voice), and the drawer used to await it
+// wholesale just to paint one row — the constitution's "the drawer must never wait on the network" rule. This
+// now paints instantly from gh:state's cached answer, then repaints again if/when its background recheck lands
+// fresher data (main pushes 'gh:state-changed'; wired once, below).
+function paintGhRow(s) {
   const dot = $('gh-dot'), txt = $('gh-text'), btn = $('gh-connect');
   if (!dot || !txt || !btn) return;
-  let s = null; try { s = await claudible.onboardStatus(); } catch (e) {}
   dot.className = 'gh-dot off'; btn.style.display = 'none';
   if (!s) { txt.textContent = 'Couldn’t check GitHub'; return; }
   if (!s.ghInstalled) { txt.textContent = 'GitHub CLI not installed — run the System check'; return; }
@@ -5260,6 +5263,12 @@ async function refreshGhRow() {
   dot.className = 'gh-dot on';
   txt.textContent = s.ghAccount ? ('Connected as ' + s.ghAccount) : 'Connected';
 }
+async function refreshGhRow() {
+  if (!$('gh-dot') || !$('gh-text') || !$('gh-connect')) return;
+  let s = null; try { s = await claudible.ghState(); } catch (e) {}
+  paintGhRow(s);
+}
+if (claudible.onGhStateChanged) claudible.onGhStateChanged((s) => paintGhRow(s));   // the background recheck landed — repaint if the drawer is (still) open
 if ($('gh-connect')) $('gh-connect').addEventListener('click', () => {
   // Reuse the terminal route (2g) rather than duplicating the wizard's device-code flow: it lands the user in
   // the real `gh auth login` prompts, which are readable and answerable, and it is one already-tested path.
