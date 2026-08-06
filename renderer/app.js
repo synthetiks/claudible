@@ -1794,6 +1794,16 @@ function activeRosterMembers() {
 // I'm the HOST of a live session (so I may terminate it / kick guests) when I'm NOT viewing someone else's joined
 // tab AND I'm sharing one of my own sessions (or a manual web link). A guest must never see these controls.
 function amHostingLive() { const t = AT(); return !(t && t.kind === 'live') && (!!sharedSessionId || webShare); }
+// C-5.9 roster redesign — the host is ALWAYS labeled as host: "HOST (name)" once a name is set, plain "HOST"
+// otherwise. ONE function, used by the roster (renderRoster, below) AND every chat "who" line, so the same
+// person never reads as the bare name in one place and "HOST" in the other (that mismatch was the owners'
+// note). Always feed it the SAME name value that's actually advertised over the wire (hostDisplayName here,
+// t.hostName / p.name for a guest) rather than collabName() directly — collabName() can be empty while the
+// advertised name already fell back to the 'Host' placeholder (ensureTunnel's `nm`), and feeding the two
+// different sources would make the host's own view say plain "HOST" while every guest sees "HOST (Host)":
+// exactly the cross-side mismatch this rule exists to kill. share/guest.js carries an identical copy of this
+// function for the browser guest page — it has no shared module with the renderer to import this from.
+function HOST(name) { const n = String(name || '').trim(); return n ? `HOST (${n})` : 'HOST'; }
 // The single session-control button in the chat head: the HOST sees "End Session" (terminate for everyone); a
 // JOINER (viewing a peer's live tab) sees "Leave Session" (disconnect + fall back to their own view). Mutually
 // exclusive — neither ever sees the other's button.
@@ -1812,7 +1822,7 @@ function renderRoster(roster) {
   const you = document.createElement('span'); you.className = 'rmember you';
   you.dataset.name = youName();                                       // voice-state projection matches pills by this (textContent also holds the ✕ kick glyph)
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
-  you.appendChild(document.createTextNode(youName()));
+  you.appendChild(document.createTextNode(hosting ? HOST(youName()) : youName()));   // you're the host → say so, same rule as the guest pill below
   el.appendChild(you);
   activeRosterMembers().forEach((g) => {
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
@@ -1820,7 +1830,7 @@ function renderRoster(roster) {
     m.dataset.name = g.name;
     m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab'));
     const d = document.createElement('span'); d.className = 'rdot ' + cls;
-    m.appendChild(d); m.appendChild(document.createTextNode(g.name));
+    m.appendChild(d); m.appendChild(document.createTextNode(g.host ? HOST(g.name) : g.name));
     if (hosting && !g.host && g.state !== 'gone') {                  // host can remove a guest who's present
       const k = document.createElement('button'); k.className = 'rkick'; k.type = 'button';
       k.title = 'Remove ' + g.name; k.setAttribute('aria-label', 'Remove ' + g.name); k.textContent = '✕';
@@ -1830,29 +1840,34 @@ function renderRoster(roster) {
     el.appendChild(m);
   });
   applyVoiceMarks();                                                  // project in-call state onto these fresh pills (one pill per person — never a second row for voice)
-  computeRosterOverflow();                                            // fold members past the strip's width into a "+N" pop-down
 }
-// Measure the roster strip and MOVE any chips that overflow its width into the "+N" pop-down (move, not clone, so
-// the kick buttons keep working). "You" (the first chip) always stays visible.
-function computeRosterOverflow() {
-  const el = $('chat-roster'), more = $('roster-more'), pop = $('roster-pop'); if (!el || !more || !pop) return;
-  requestAnimationFrame(() => {
-    if (!document.body.contains(el)) return;
-    const avail = el.clientWidth, overflow = [];
-    if (avail <= 0) { more.style.display = 'none'; return; }          // chat panel hidden / not laid out yet — don't fold everyone into "+N"
-    Array.prototype.forEach.call(el.children, (c, i) => {
-      if (i >= 1 && (c.offsetLeft + c.offsetWidth) > avail - 40) overflow.push(c);   // reserve ~40px for the +N pill
-    });
-    pop.innerHTML = '';
-    if (overflow.length) {
-      overflow.forEach((c) => pop.appendChild(c));
-      more.textContent = '+' + overflow.length + ' ▾'; more.style.display = '';
-    } else { more.style.display = 'none'; pop.classList.remove('show'); }
+// C-5.9 roster redesign: with badges ~2× bigger, more than 2-3 guests overflow the strip's width. The OLD
+// design folded overflow into a "+N" pop-down; that's gone now — the strip itself scrolls (overflow-x:auto
+// on #chat-roster handles native touch/trackpad scroll for free). This only adds mouse-drag panning, since a
+// plain scrollbar drag is awkward on a strip this short. #chat-roster is static markup, never recreated
+// (only its children are, on every render), so binding once here is enough — no re-init needed per render.
+(function initRosterDragScroll() {
+  const el = $('chat-roster'); if (!el) return;
+  let down = false, dragging = false, startX = 0, startScroll = 0;
+  el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;                                       // left button only — right-click still opens the voice volume popover
+    down = true; dragging = false; startX = e.pageX; startScroll = el.scrollLeft;
   });
-}
-// the "+N" pill toggles the pop-down; a click anywhere else closes it
-{ const rm = $('roster-more'); if (rm) rm.addEventListener('click', (e) => { e.stopPropagation(); const p = $('roster-pop'); if (p) p.classList.toggle('show'); }); }
-document.addEventListener('click', (e) => { const p = $('roster-pop'); if (p && p.classList.contains('show') && !e.target.closest('#roster-pop') && !e.target.closest('#roster-more')) p.classList.remove('show'); });
+  window.addEventListener('mousemove', (e) => {
+    if (!down) return;
+    const dx = e.pageX - startX;
+    if (!dragging && Math.abs(dx) > 4) { dragging = true; el.classList.add('dragging'); }   // small threshold: an ordinary click (e.g. the kick ✕) must not register as a drag
+    if (dragging) { el.scrollLeft = startScroll - dx; e.preventDefault(); }
+  });
+  window.addEventListener('mouseup', () => {
+    if (dragging) {                                                    // swallow the click a drag-release would otherwise fire (e.g. landing on a kick ✕)
+      const swallow = (e) => e.stopPropagation();
+      el.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => el.removeEventListener('click', swallow, true), 300);   // safety net: don't eat a click that never comes
+    }
+    down = false; dragging = false; el.classList.remove('dragging');
+  });
+})();
 // End the live session entirely: disconnect everyone + drop the tunnel/advertisement (mirrors "Stop sharing").
 async function terminateLive() {
   const go = await modalChoice({
@@ -2066,7 +2081,7 @@ function paintVoiceUi(st, room) {
     // doesn't know) still get their own .hvm pill here.
     _voiceMembers = joined ? (((st && st.members) || []).map((m) => ({ id: m.id, name: m.name, self: !!m.self, speaking: !!m.speaking, conn: m.conn }))) : [];
     _voiceRoom = room;
-    const pilled = new Set([...document.querySelectorAll('#chat-roster .rmember, #roster-pop .rmember')].map((n) => String(n.dataset.name || '').toLowerCase()).filter(Boolean));
+    const pilled = new Set([...document.querySelectorAll('#chat-roster .rmember')].map((n) => String(n.dataset.name || '').toLowerCase()).filter(Boolean));
     _voiceMembers.forEach((m) => {
       if (pilled.has(String(m.name || '').toLowerCase())) return;      // already a roster pill → decorated there, no duplicate row
       const el = document.createElement('div'); el.className = 'hvm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '') + (m.conn ? ' c-' + m.conn : '');
@@ -2091,7 +2106,7 @@ function paintVoiceUi(st, room) {
 // paintVoiceUi (fresh state) — whichever painted last, the marks land.
 let _voiceMembers = [], _voiceRoom = null;
 function applyVoiceMarks() {
-  const pills = document.querySelectorAll('#chat-roster .rmember, #roster-pop .rmember');
+  const pills = document.querySelectorAll('#chat-roster .rmember');
   pills.forEach((pill) => {
     const m = _voiceMembers.find((v) => nameEqCI(v.name, pill.dataset.name));
     pill.classList.toggle('invoice', !!m);
@@ -3060,7 +3075,7 @@ function sendChat() {
   const text = chatIn.value.trim(); if (!text) return;
   const ctx = chatCtx();
   if (ctx) { chatAppend(chatBufFor(ctx), { who: youName(), text, mine: true }, true); claudible.liveChatSend(ctx.tabId, text); }   // → the joined session
-  else { chatAppend(hostChat, { who: hostDisplayName, text, mine: true }, true); claudible.shareSendChat(text); }                  // → your guests
+  else { chatAppend(hostChat, { who: HOST(hostDisplayName), text, mine: true }, true); claudible.shareSendChat(text); }             // → your guests, always labeled as host (C-5.9)
   chatIn.value = '';
 }
 $('chat-send').addEventListener('click', sendChat);
@@ -3077,7 +3092,7 @@ claudible.onLiveChat((p) => {
   if (!p) return; const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
   const buf = chatBufFor(rec), onScreen = activeTabId === p.tabId;
   if (p.role === 'system') chatAppend(buf, { sys: true, text: p.text }, onScreen);
-  else if (p.text) { chatAppend(buf, { who: p.name || rec.hostName || 'host', text: p.text, mine: false }, onScreen); if (chimeOn) playChime(); }   // chime even if the live tab is backgrounded (parity with host chat)
+  else if (p.text) { chatAppend(buf, { who: p.role === 'host' ? HOST(p.name || rec.hostName) : (p.name || 'viewer'), text: p.text, mine: false }, onScreen); if (chimeOn) playChime(); }   // chime even if the live tab is backgrounded (parity with host chat)
 });
 // A JOINED session's Session-History feed (the host pushes its log over the live channel) → held on the live
 // tab's record; the Repo Review drawer renders it view-only when that tab is active (see refreshHistoryFeed).

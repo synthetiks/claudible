@@ -155,6 +155,10 @@ $('terminal').addEventListener('paste', function (e) {
 })();
 
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
+// C-5.9 roster redesign: the host is ALWAYS labeled as host — "HOST (name)" once the host has a name, plain
+// "HOST" otherwise — same rule the Electron app's roster/chat use (renderer/app.js), so a guest reading this
+// browser page and a guest reading the app never see the host described two different ways.
+function HOST(name) { var n = String(name || '').trim(); return n ? ('HOST (' + n + ')') : 'HOST'; }
 var wsPaused = false;   // host-in-private-project pause state (freezes the mirror)
 // end-state bookkeeping: `left` = the guest clicked Disconnect (a FINAL state — never auto-reconnect back in);
 // `wasAdmitted` = we got past approval at least once (so a later dead socket is "the session ended", not "bad link");
@@ -512,7 +516,7 @@ function renderVoiceUi(st) {
       var el = document.createElement('div');
       el.className = 'vm' + (m.speaking ? ' speaking' : '') + (m.self ? ' self' : '') + (m.conn ? ' c-' + m.conn : '');
       var dot = document.createElement('span'); dot.className = 'vmdot';
-      var label = (m.id === 'host' ? (hostName || 'host') : m.name);
+      var label = (m.id === 'host' ? HOST(hostName) : m.name);
       if (!m.self && m.conn && m.conn !== 'connected') label += ' · ' + m.conn;   // surface connecting/failed for diagnosis
       var nm = document.createElement('span'); nm.textContent = label;
       if (m.self) { el.title = 'you'; }
@@ -601,7 +605,8 @@ function connect() {
         applyStatus(msg.status);
       } else if (msg.type === 'chat') {
         if (msg.role === 'system') addSystemChat(msg.text);
-        else addChat(msg.name || (msg.role === 'host' ? hostName : 'viewer'), msg.text, false);
+        else if (msg.role === 'host') addChat(HOST(msg.name || hostName), msg.text, false);
+        else addChat(msg.name || 'viewer', msg.text, false);
       } else if (msg.type === 'typist') {
         showTypist(msg.name);                                 // host or another guest is typing (the server never echoes your own)
       } else if (msg.type === 'paused') {

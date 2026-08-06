@@ -3467,5 +3467,59 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['paintAboutUpdateLine no longer builds the "you\'re on X · latest is Y" line']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 99. C-5.9 — the roster redesign (owners' note, 2026-08-06). Badges become ~2× bigger and rectangular
+//   (.hv-btn/.chat-term's shape language); the kick ✕ is visible by default, not hover-only; "Group Chat"
+//   becomes "Chat"; and the host is ALWAYS labeled as host — "HOST (name)" once a name is set, plain "HOST"
+//   otherwise — through ONE format function used by both the roster and every chat "who" line, on the
+//   Electron app AND the browser guest page (share/guest.js has its own copy; no shared module to import).
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the kick ✕ went back to hover-only opacity (C-5.9 — must be visible by default)',
+    /\.rmember:hover \.rkick\{opacity/.test(HTML)
+      ? ['.rmember:hover .rkick{opacity…} is back in index.html — the ✕ is hidden until hover again'] : []);
+  none('the kick ✕ lost its non-zero default opacity (C-5.9)',
+    /\.rkick\{[^}]*opacity:\.9[^}]*\}/.test(HTML)
+      ? [] : ['.rkick{…} no longer sets a visible-by-default opacity']);
+  none('name badges are no longer rectangular / button-shaped (C-5.9)',
+    /\.rmember\{[^}]*height:28px[^}]*border-radius:8px[^}]*\}/.test(HTML)
+      ? [] : ['.rmember{…} lost the 28px height / 8px radius that matches .hv-btn/.chat-term']);
+  none('the roster strip stopped being horizontally scrollable (C-5.9 — more than 2-3 guests must stay reachable)',
+    /\.chat-roster\{[^}]*overflow-x:auto[^}]*\}/.test(HTML)
+      ? [] : ['#chat-roster no longer sets overflow-x:auto']);
+  none('the old "+N" pop-down fold crept back in (C-5.9 replaced it with strip scrolling)',
+    /roster-more|roster-pop/.test(HTML) || /roster-more|roster-pop|computeRosterOverflow/.test(APP)
+      ? ['a roster-more/roster-pop/computeRosterOverflow reference is back — the strip should scroll, not fold']
+      : []);
+  none('"Group Chat" is back instead of "Chat" (C-5.9 — it never fit its spot)',
+    /<span class="chat-title">Group Chat<\/span>/.test(HTML)
+      ? ['index.html still has the old "Group Chat" label']
+      : /<span class="chat-title">Chat<\/span>/.test(HTML) ? [] : ['no <span class="chat-title">Chat</span> in index.html']);
+  // the HOST() label function: defined once per file (renderer + browser guest page each need their own copy),
+  // and actually used by BOTH the roster (renderRoster's "you" chip + the host's roster pill) and chat (the
+  // host's own outgoing "who", and every received host chat line) — a partial wire-up would still leave the
+  // exact mismatch the owners called out: bare name in the roster, "HOST" only in chat.
+  none('app.js lost the HOST() label function (C-5.9)',
+    /function HOST\(name\) \{ const n = String\(name \|\| ''\)\.trim\(\); return n \? `HOST \(\$\{n\}\)` : 'HOST'; \}/.test(APP)
+      ? [] : ['app.js no longer defines function HOST(name) with the "HOST (name)" / "HOST" format']);
+  none('guest.js lost its own HOST() label function (C-5.9 — browser page has no shared module with the renderer)',
+    /function HOST\(name\) \{ var n = String\(name \|\| ''\)\.trim\(\); return n \? \('HOST \(' \+ n \+ '\)'\) : 'HOST'; \}/.test(GUEST_JS)
+      ? [] : ['guest.js no longer defines function HOST(name) with the "HOST (name)" / "HOST" format']);
+  none('renderRoster stopped labeling the host with HOST() (C-5.9)',
+    [/you\.appendChild\(document\.createTextNode\(hosting \? HOST\(youName\(\)\) : youName\(\)\)\);/.test(APP)
+       ? '' : 'the "you" chip no longer wraps HOST() when you are hosting',
+     /m\.appendChild\(d\); m\.appendChild\(document\.createTextNode\(g\.host \? HOST\(g\.name\) : g\.name\)\);/.test(APP)
+       ? '' : 'the roster member loop no longer wraps HOST() around a host entry\'s name'].filter(Boolean));
+  none('the host\'s own outgoing chat message stopped using HOST() (C-5.9)',
+    /who: HOST\(hostDisplayName\)/.test(APP)
+      ? [] : ['sendChat no longer labels your own host-share message with HOST(hostDisplayName)']);
+  none('a joined tab\'s received host chat stopped using HOST() (C-5.9)',
+    /who: p\.role === 'host' \? HOST\(p\.name \|\| rec\.hostName\) : \(p\.name \|\| 'viewer'\)/.test(APP)
+      ? [] : ['onLiveChat no longer wraps a host-authored message\'s "who" in HOST()']);
+  none('guest.js\'s chat rendering stopped using HOST() for host messages (C-5.9)',
+    /addChat\(HOST\(msg\.name \|\| hostName\), msg\.text, false\);/.test(GUEST_JS)
+      ? [] : ['guest.js\'s chat handler no longer wraps a host message\'s name in HOST()']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

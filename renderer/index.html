@@ -1280,35 +1280,43 @@
     .chat-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--hairline-soft)}
     .chat-title{font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
     .chat-head-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
-    /* roster strip — community icon + members inline on ONE line; overflow folds into a "+N" pop-down */
-    .roster-strip{position:relative;display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--hairline-soft)}
+    /* roster strip — community icon + members inline on ONE line. C-5.9 roster redesign: badges got big enough
+       that folding overflow into a "+N" pop-down (the old design) would hide most guests behind a click — the
+       strip scrolls instead, so every name stays reachable by drag or by native touch/trackpad scroll. */
+    .roster-strip{position:relative;display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--hairline-soft)}
     .roster-ico{flex:none;display:flex;align-items:center;color:var(--ink-faint)}
     .roster-ico svg{width:15px;height:15px;display:block}
-    .chat-roster{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:nowrap;overflow:hidden;
-      font-size:var(--fs-2xs);letter-spacing:.04em;color:var(--ink-faint);text-transform:none}   /* position:relative → chips' offsetLeft is measured against THIS strip (the overflow math depends on it) */
-    .roster-more{flex:none;width:auto;display:inline-flex;align-items:center;gap:2px;padding:2px 8px;font-size:var(--fs-2xs);
-      letter-spacing:.04em;border-radius:999px;color:var(--ink-dim);background:rgba(255,255,255,.04);border:1px solid var(--hairline)}
-    .roster-more:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
-    .roster-pop{position:absolute;top:calc(100% - 2px);right:8px;z-index:30;display:none;flex-direction:column;gap:7px;
-      min-width:120px;max-height:220px;overflow:auto;padding:9px 11px;border-radius:9px;background:#14171c;
-      border:1px solid var(--hairline);box-shadow:0 12px 30px -12px #000}
-    .roster-pop.show{display:flex}
-    .roster-pop .rmember{font-size:var(--fs-xs)}
-    .rmember{flex:none;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
-    .rmember.you{color:var(--ink-dim)}
+    /* height is FIXED (badge height + a scrollbar gutter) so the strip never grows/shrinks when the scrollbar
+       shows or hides — that would be a layout jump. overflow-x only; overflow-y stays hidden on purpose. */
+    .chat-roster{position:relative;flex:1;min-width:0;height:33px;display:flex;align-items:center;gap:7px;flex-wrap:nowrap;
+      overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-gutter:stable;cursor:grab;
+      font-size:var(--fs-2xs);letter-spacing:.04em;color:var(--ink-faint);text-transform:none}
+    .chat-roster.dragging{cursor:grabbing;user-select:none}
+    .chat-roster::-webkit-scrollbar{height:5px}
+    .chat-roster::-webkit-scrollbar-track{background:transparent}
+    .chat-roster::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:8px}
+    .chat-roster::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
+    /* name badges: ~2× the old inline-text pills, and RECTANGULAR — same shape language as .hv-btn/.chat-term
+       (28px tall, 8px radius, the button-face gradient) so a badge and "Join voice"/"End Session" read as one
+       control family, per the owners' roster-redesign note. */
+    .rmember{flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;white-space:nowrap;
+      border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#191c22,#101216);
+      box-shadow:inset 0 1px 0 var(--sheen);font-size:var(--fs-xs);color:var(--ink-dim)}
+    .rmember.you{color:var(--ink);border-color:rgba(255,255,255,.16)}
     /* in a voice call → the person's ONE roster pill carries the mic state (never a second pill in the voice
        strip below — that duplicate row was the "two CrazyDevs" report). Pulses subtly while they speak. */
     .rmember.invoice::after{content:'🎙';font-size:var(--fs-2xs);margin-left:2px;opacity:.7;filter:grayscale(35%);transition:opacity var(--dur-base),filter var(--dur-base)}
     .rmember.invoice.speaking{color:var(--ink)}
     .rmember.invoice.speaking::after{opacity:1;filter:none;text-shadow:0 0 7px rgba(95,180,135,.9)}
-    /* host live-controls: a small "End live" in the chat head + a per-guest ✕ revealed on hover */
+    /* host live-controls: a small "End live" in the chat head + a per-guest ✕ on the badge itself */
     .chat-term{flex:none;width:auto;font:inherit;font-size:var(--fs-xs);font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background var(--dur-fast),color var(--dur-fast)}   /* width:auto overrides button{width:100%}; sized to MATCH .hv-btn (same height/min-width/radius) so End/Leave and Join voice read as one control family */
     .chat-term:hover{background:rgba(229,86,75,.26);color:#ff9b91}
-    .rkick{flex:none;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin-left:1px;border:none;border-radius:4px;background:none;color:var(--ink-faint);font-size:var(--fs-xs);line-height:1;cursor:pointer;opacity:0;transition:opacity var(--dur-fast),color var(--dur-fast)}
-    .rmember:hover .rkick{opacity:.75}
-    .rkick:hover{opacity:1;color:var(--live)}
-    .rmember.gone{color:var(--ink-faint);opacity:.7}
-    .rdot{width:6px;height:6px;border-radius:50%;background:#565c66;flex:none}
+    /* kick ✕ — VISIBLE BY DEFAULT (no hover-only opacity: a host on a touch device has no hover state to
+       reveal it from). Sits joined to its badge, same rounded-square language, clearly its own click target. */
+    .rkick{flex:none;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin-left:2px;border:none;border-radius:5px;background:rgba(255,255,255,.07);color:var(--ink-dim);font-size:var(--fs-xs);line-height:1;cursor:pointer;opacity:.9;transition:opacity var(--dur-fast),color var(--dur-fast),background var(--dur-fast)}
+    .rkick:hover{opacity:1;color:#fff;background:rgba(229,86,75,.45)}
+    .rmember.gone{color:var(--ink-faint);opacity:.65}
+    .rdot{width:7px;height:7px;border-radius:50%;background:#565c66;flex:none}
     .rdot.ok{background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}
     .rdot.idle{background:#e0a93b;box-shadow:0 0 6px -1px #e0a93b}
     .rdot.gone{background:var(--live);opacity:.85}
@@ -1522,7 +1530,7 @@
     </div><!-- /center -->
     <div class="chat" id="chat">
       <div class="chat-head">
-        <span class="chat-title">Group Chat</span>
+        <span class="chat-title">Chat</span>
         <span class="chat-head-actions">
           <button id="hv-btn" class="hv-btn" title="Talk with your viewers"><span class="hv-ic">🎙</span> Join voice</button>
           <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
@@ -1532,8 +1540,6 @@
       <div class="roster-strip" id="roster-strip">
         <span class="roster-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.6 19a5.4 5.4 0 0 1 10.8 0"/><path d="M16 5.3a3 3 0 0 1 0 5.4"/><path d="M17.4 13.5A5.4 5.4 0 0 1 21 19"/></svg></span>
         <span class="chat-roster" id="chat-roster"></span>
-        <button class="roster-more" id="roster-more" type="button" style="display:none" title="Show everyone" aria-label="Show everyone in the session"></button>
-        <div class="roster-pop" id="roster-pop"></div>
       </div>
       <div class="voicerow" id="voicerow" style="display:none">
         <div class="hv-members" id="hv-members"></div>
