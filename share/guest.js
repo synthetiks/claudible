@@ -161,6 +161,21 @@ var wsPaused = false;   // host-in-private-project pause state (freezes the mirr
 // `reconnTries` = consecutive failed reconnects since we were last live, the signal that the host is gone for good.
 var left = false, wasAdmitted = false, reconnTries = 0;
 var myPid = null;                                          // our voice-room peer id (from the hello)
+// C-5.10: double-check we're actually watching what the host promised. The host's tracker frame carries the
+// PINNED tab's session id (an empty/absent field means an older host build or no tracker push yet — skip the
+// check, don't false-alarm). Remember the FIRST one we're told and compare every later one against it: if the
+// host re-pins the mirror to a different session mid-share, guests who joined expecting the earlier one must
+// see that, not silently keep watching whatever now streams. (C-5.1 is one step from breaking again otherwise.)
+var knownSessionId = null, sessionMismatch = false;
+function checkSessionId(sid) {
+  if (!sid || knownSessionId === sid) return;
+  if (!knownSessionId) { knownSessionId = sid; return; }
+  if (sessionMismatch) return;                              // already flagged — don't re-toast on every subsequent frame
+  sessionMismatch = true;
+  var chip = $('sess-chip');
+  if (chip) { chip.classList.add('mismatch'); chip.title = 'This share switched to a different session than the one you joined.'; }
+  addSystemChat('This share switched to a different session — what you’re watching may not be what you joined.');
+}
 // The connection indicator now lives on the top session chip's dot (green = live, red = down, amber = connecting).
 function setStatus(txt, cls) {
   var s = $('stxt'); if (s) s.textContent = txt;
@@ -359,6 +374,7 @@ function applyReadOnlyInput() {
 // Mirror the host's session tracker (context %, cost, tokens) — values arrive pre-formatted.
 function applyStatus(s) {
   if (!s) return;
+  if (typeof s.sessionId === 'string') checkSessionId(s.sessionId);
   if (typeof s.ctxPct === 'number') {
     $('ctxpct').textContent = s.ctxPct + '%';
     var segs = $('ctxsegs');
@@ -374,7 +390,9 @@ function applyStatus(s) {
   // no readout for them any more, so they are dropped here rather than written to elements that no longer exist.
   if (s.session != null) {
     var chip = $('sess-chip');
-    $('sess-chip-text').textContent = s.session || 'live session';   // keep the chip visible (it carries the connection dot)
+    // A flagged mismatch (see checkSessionId) keeps reading as the warning rather than being overwritten by
+    // the next label update — the whole point is that it stays visible, not that it flashes once and is gone.
+    $('sess-chip-text').textContent = sessionMismatch ? 'different session!' : (s.session || 'live session');
     if (chip) chip.style.display = '';
   }
 }

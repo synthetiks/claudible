@@ -2975,5 +2975,29 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the main render loop no longer threads r.wsId (the card\'s true workspace) into each row']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 89. C-5.10 — the guest double-checks it's watching what the host promised. The host already threads the
+//   PINNED tab's session id through the tracker frame (s.sessionId, alongside s.session) and main forwards
+//   the whole status payload verbatim to share.broadcastStatus — this pin guards BOTH ends staying wired,
+//   plus the guest-side comparison that was the actually-missing half: remember the FIRST id, warn on a
+//   later mismatch. (If this ever "temporarily" regresses, C-5.1 is one step from breaking again.)
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the host tracker no longer threads sessionId onto the pinned tab\'s status frame (C-5.10 host half)',
+    /sessionId: \(t\.session && t\.session !== 'new'\) \? t\.session : ''/.test(APP)
+      ? [] : ['pushTracker no longer sends sessionId']);
+  none('main no longer forwards the raw tracker payload to guests (sessionId would be silently dropped)',
+    /ipcMain\.on\('share:tracker', \(e, s\) => \{[\s\S]{0,400}?share\.broadcastStatus\(s\);/.test(MAIN)
+      ? [] : ['share:tracker handler no longer forwards s verbatim']);
+  none('guest.js lost the session-mismatch check (C-5.10 — one step from C-5.1 breaking again)',
+    [/function checkSessionId\(sid\)/.test(GUEST_JS) ? '' : 'checkSessionId is gone',
+     /if \(!knownSessionId\) \{ knownSessionId = sid; return; \}/.test(GUEST_JS) ? '' : 'no longer remembers the FIRST sessionId as the baseline',
+     /sessionMismatch = true;/.test(GUEST_JS) ? '' : 'no mismatch flag is ever set',
+     /checkSessionId\(s\.sessionId\)/.test(GUEST_JS) ? '' : 'applyStatus no longer calls checkSessionId'].filter(Boolean));
+  none('a flagged session mismatch is never actually shown to the guest',
+    [/chip\.classList\.add\('mismatch'\)/.test(GUEST_JS) ? '' : 'no visible chip warning on mismatch',
+     /sessionMismatch \? 'different session!'/.test(GUEST_JS) ? '' : 'the chip label falls back to the normal session name instead of staying a warning'].filter(Boolean));
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

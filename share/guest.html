@@ -183,6 +183,10 @@
     .sesschip b{font-weight:600;color:var(--silver);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .sesschip b::before{content:'\201C'} .sesschip b::after{content:'\201D'}   /* quote the name so it reads as a title, not a label */
     .sesslbl{flex:none;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    /* C-5.10: the host advertised a DIFFERENT session than the one this guest was watching — same red the
+       rest of the guest UI already uses for "something's wrong" (dot.bad / card.bad), not a new color. */
+    .sesschip.mismatch{border-color:var(--live);background:rgba(229,86,75,.14)}
+    .sesschip.mismatch b{color:var(--live)}
     /* "Disconnect" — a guest's own clean exit. Lives in the voice strip, pushed to the right (margin-left:auto)
        so voice controls stay on the left and "leave" reads as its own thing. Quiet red — leave-the-room, not a
        primary action. (The old projects/browse strip that used to host it was removed as redundant.) */
