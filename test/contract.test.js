@@ -3816,5 +3816,37 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['preflight.sh no longer detects or reports ffmpeg']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 106. C-8.3 — DISCARD GOES TO TRASH, NOT rm -f. "Discard" on a brand-new (untracked) file used to be a
+//   silent, permanent `rm -f` — a real deletion dressed up as a one-click button. It now routes through the
+//   same recoverable Claudible trash every other delete uses (C-3.6's flow): moved under
+//   ~/.claudible/trash/discarded-files/<timestamp>-<pid>-<basename>, left for trash-prune.sh's existing
+//   30-day/2GB sweep to bound. Tracked-file behavior (apply-reverse restores the old version) is untouched —
+//   this pin only touches the discard branch.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const DIFFAPPLY = read('wsl/diff-apply.sh');
+  none('diff-apply.sh\'s discard case went back to rm -f\'ing the file (C-8.3 regressed)',
+    /rm -f -- "\$target"/.test(DIFFAPPLY)
+      ? ['discard still calls rm -f -- "$target" instead of moving it to trash'] : []);
+  none('diff-apply.sh\'s discard case no longer moves the file into the Claudible trash (C-8.3)',
+    /trashdir="\$HOME\/\.claudible\/trash\/discarded-files"/.test(DIFFAPPLY) &&
+    /mv -f -- "\$target" "\$dest"/.test(DIFFAPPLY)
+      ? [] : ['discard no longer mkdirs ~/.claudible/trash/discarded-files and mv -f\'s the target into it']);
+  none('diff-apply.sh\'s discard case dropped the pid-suffixed recoverable name (C-8.3)',
+    /dest="\$trashdir\/\$ts-\$\$-\$base"/.test(DIFFAPPLY)
+      ? [] : ['dest is no longer built as $trashdir/$ts-$$-$base — same-named same-second discards could clobber each other in trash']);
+  none('diff-apply.sh\'s apply-reverse (tracked-file revert) branch was touched by the C-8.3 fix',
+    /git apply -R --recount "\$tmp"/.test(DIFFAPPLY)
+      ? [] : ['apply-reverse no longer reverse-applies via git apply -R — tracked-file restore should be untouched']);
+
+  none('the Discard button\'s title no longer mentions the trash (C-8.3)',
+    /db\.title = 'Move this new file to the trash'/.test(APP)
+      ? [] : ['renderUntracked\'s Discard button title text changed away from the trash wording']);
+  none('the Discard success toast no longer says the file went to the trash (C-8.3)',
+    /toast\('Discarded to trash — recoverable from Settings'\)/.test(APP)
+      ? [] : ['renderUntracked\'s success toast no longer says "Discarded to trash — recoverable from Settings"']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

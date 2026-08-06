@@ -3102,10 +3102,10 @@ function renderUntracked(p, wsId) {
   const head = document.createElement('div'); head.className = 'diff-file-head';
   const nm = document.createElement('span'); nm.className = 'diff-path'; nm.textContent = p; nm.title = p;
   const tag = document.createElement('span'); tag.className = 'diff-counts'; const t = document.createElement('i'); t.className = 'add'; t.textContent = 'new'; tag.appendChild(t);
-  const db = document.createElement('button'); db.className = 'diff-revert-file'; db.textContent = 'Discard'; db.title = 'Delete this new file';
+  const db = document.createElement('button'); db.className = 'diff-revert-file'; db.textContent = 'Discard'; db.title = 'Move this new file to the trash';
   db.addEventListener('click', async () => {
     db.disabled = true; let r = null; try { r = await claudible.diffDiscard(p, wsId); } catch {}
-    if (r && r.ok) { toast('Discarded ' + p); refreshDiff(); } else { db.disabled = false; toast('Discard failed' + (r && r.error ? ': ' + humanError(r.error) : '')); }
+    if (r && r.ok) { toast('Discarded to trash — recoverable from Settings'); refreshDiff(); } else { db.disabled = false; toast('Discard failed' + (r && r.error ? ': ' + humanError(r.error) : '')); }
   });
   head.appendChild(nm); head.appendChild(tag); head.appendChild(db); row.appendChild(head); return row;
 }

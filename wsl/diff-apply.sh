@@ -2,7 +2,7 @@
 # Claudible — apply a Diff Review action in a workspace's git repo. Resolves the SAME cwd as diff.sh.
 # All user/repo-controlled data is read from an APP-CONTROLLED temp file ($2), never inlined into the
 # command, so repo paths/patch text can't break the shell. Emits one JSON line.
-#   $1 = mode: 'apply-reverse' (revert a hunk/file patch) | 'discard' (delete an untracked file)
+#   $1 = mode: 'apply-reverse' (revert a hunk/file patch) | 'discard' (move an untracked file to the trash)
 #   $2 = path to a temp file: the unified patch (apply-reverse) OR the target path (discard)
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
@@ -21,10 +21,18 @@ case "$mode" in
     ;;
   discard)
     target="$(cat "$tmp")"
-    # Only delete a file git considers UNTRACKED inside this repo (never a tracked or out-of-tree path).
+    # Only move a file git considers UNTRACKED inside this repo (never a tracked or out-of-tree path).
     case "$target" in ""|/*|*..*) emit '{"ok":false,"error":"bad path"}'; exit 0 ;; esac
     if git ls-files --others --exclude-standard -z 2>/dev/null | grep -qzxF -- "$target"; then
-      rm -f -- "$target" 2>/dev/null && emit '{"ok":true}' || emit '{"ok":false,"error":"delete failed"}'
+      # C-8.3: a "brand-new" file is still real work — route it through the same recoverable Claudible
+      # trash every other delete uses (delete-workspace.sh/delete-session.sh's own convention) instead of
+      # rm -f'ing it into oblivion. trash-prune.sh's 30-day/2GB sweep bounds it from here on, same as
+      # everything else in the trash.
+      trashdir="$HOME/.claudible/trash/discarded-files"; mkdir -p "$trashdir" 2>/dev/null
+      base="$(basename -- "$target")"
+      ts="$(date +%Y%m%d-%H%M%S)"
+      dest="$trashdir/$ts-$$-$base"   # pid-suffixed: two discards of same-named files in the same second must not clobber each other in trash
+      if mv -f -- "$target" "$dest" 2>/dev/null; then emit '{"ok":true}'; else emit '{"ok":false,"error":"could not move to trash"}'; fi
     else
       emit '{"ok":false,"error":"not an untracked file"}'
     fi
