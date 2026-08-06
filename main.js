@@ -4037,8 +4037,43 @@ ipcMain.handle('history:append', (e, payload) => {
 });
 
 // Safety net: never let a stray error from a pty/agent take the whole cockpit down.
-process.on('uncaughtException', (e) => console.error('[claudible] uncaughtException:', e && e.message));
-process.on('unhandledRejection', (e) => console.error('[claudible] unhandledRejection:', e && (e.message || e)));
+// Crash visibility (C-13 item 5 / roadmap B12.4): ALWAYS ON, unlike the CLAUDIBLE_DEBUG opt-in file log
+// above — a packaged GUI build has no console, so before this a crash left a stranger nothing to attach to
+// a bug report. Written SYNCHRONOUSLY, in the handlers themselves: on uncaughtException this line may be
+// the process's last act before Electron tears down, so nothing here can be deferred to a callback/promise.
+// Dependency-free (fs/path only) — rotates at ~1MB keeping exactly one .old, same idea as every other log
+// in this file. Does not change exit behavior: neither handler calls process.exit, same as before this fix.
+const CRASH_LOG_DIR = path.join(app.getPath('home'), '.claudible', 'logs');
+const CRASH_LOG_FILE = path.join(CRASH_LOG_DIR, 'crash.log');
+function _writeCrashLog(kind, e) {
+  try {
+    fs.mkdirSync(CRASH_LOG_DIR, { recursive: true });
+    try {
+      const st = fs.statSync(CRASH_LOG_FILE);
+      if (st.size > 1024 * 1024) {   // ~1MB: rotate, keeping exactly one .old (overwritten each time, never a chain)
+        fs.copyFileSync(CRASH_LOG_FILE, CRASH_LOG_FILE + '.old');
+        fs.writeFileSync(CRASH_LOG_FILE, '');
+      }
+    } catch {}   // no existing file yet (first crash ever) — nothing to rotate
+    const stack = (e && e.stack) ? e.stack : String((e && (e.message || e)) || 'unknown error');
+    const line = `[${new Date().toISOString()}] ${kind} - Claudible v${app.getVersion()} (build ${BUILD.short || 'unknown'})\n${stack}\n\n`;
+    fs.appendFileSync(CRASH_LOG_FILE, line);   // sync: safe to call from a handler that may be the process's last act
+  } catch {}   // logging must never itself throw back into the net that is trying to keep the process alive
+  return CRASH_LOG_FILE;
+}
+process.on('uncaughtException', (e) => {
+  console.error('[claudible] uncaughtException:', e && e.message);
+  const logFile = _writeCrashLog('uncaughtException', e);
+  // dialog.showErrorBox is safe to call from a main-process crash handler (native, synchronous). Names the
+  // exact log path so a user can attach it to a bug report without hunting for ~/.claudible/logs themselves.
+  try { dialog.showErrorBox('Claudible hit an error', 'Claudible ran into an unexpected error. Details were saved to a log file you can attach to a bug report:\n\n' + logFile); } catch {}
+});
+// unhandledRejection logs but does NOT dialog: promise rejections fire far more often than real crashes
+// (a stray network call, a cancelled fetch) and a popup for every one would train users to click through it.
+process.on('unhandledRejection', (e) => {
+  console.error('[claudible] unhandledRejection:', e && (e.message || e));
+  _writeCrashLog('unhandledRejection', e);
+});
 
 // Startup sweep: every dir under runtime/tabs/ is a DEAD generation at this point (no tabs exist yet) —
 // left by the previous run or a crash. Reap each one's possibly-still-alive WSL-side tree (boot.pid +

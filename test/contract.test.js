@@ -3848,5 +3848,41 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['renderUntracked\'s success toast no longer says "Discarded to trash — recoverable from Settings"']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 107. C-13 item 5 / roadmap B12.4 — CRASH VISIBILITY. Before this, uncaughtException/unhandledRejection
+//   just console.error'd — invisible in a packaged GUI build, so a stranger who crashed had nothing to
+//   attach to a bug report. Now: an ALWAYS-ON rotating crash log under ~/.claudible/logs/crash.log,
+//   written SYNCHRONOUSLY inside the handlers (uncaughtException may be the process's last act), and
+//   uncaughtException additionally shows a native error dialog naming the log path. unhandledRejection
+//   logs but does NOT dialog (too noisy). CLAUDIBLE_DEBUG's separate opt-in debug.log is untouched.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('the crash log writer is gone or no longer synchronous (C-13/B12.4)',
+    [/function _writeCrashLog\(kind, e\) \{/.test(MAIN) ? '' : '_writeCrashLog() is gone from main.js',
+     /fs\.appendFileSync\(CRASH_LOG_FILE, line\)/.test(MAIN) ? '' : '_writeCrashLog no longer writes crash.log synchronously (fs.appendFileSync)',
+     /CRASH_LOG_FILE = path\.join\(CRASH_LOG_DIR, 'crash\.log'\)/.test(MAIN) ? '' : 'the crash log is no longer named crash.log under CRASH_LOG_DIR',
+     /CRASH_LOG_DIR = path\.join\(app\.getPath\('home'\), '\.claudible', 'logs'\)/.test(MAIN) ? '' : 'the crash log dir moved off ~/.claudible/logs'].filter(Boolean));
+  none('the crash log stopped rotating at ~1MB with one .old (C-13/B12.4)',
+    [/st\.size > 1024 \* 1024/.test(MAIN) ? '' : 'rotation no longer triggers at ~1MB',
+     /fs\.copyFileSync\(CRASH_LOG_FILE, CRASH_LOG_FILE \+ '\.old'\)/.test(MAIN) ? '' : 'rotation no longer keeps a .old copy'].filter(Boolean));
+  none('uncaughtException no longer writes the crash log (C-13/B12.4)',
+    /process\.on\('uncaughtException', \(e\) => \{\s*\n\s*console\.error\('\[claudible\] uncaughtException:', e && e\.message\);\s*\n\s*const logFile = _writeCrashLog\('uncaughtException', e\);/.test(MAIN)
+      ? [] : ['uncaughtException handler no longer calls _writeCrashLog']);
+  none('unhandledRejection no longer writes the crash log (C-13/B12.4)',
+    /process\.on\('unhandledRejection', \(e\) => \{\s*\n\s*console\.error\('\[claudible\] unhandledRejection:', e && \(e\.message \|\| e\)\);\s*\n\s*_writeCrashLog\('unhandledRejection', e\);/.test(MAIN)
+      ? [] : ['unhandledRejection handler no longer calls _writeCrashLog']);
+  none('the crash dialog no longer names the log file path (C-13/B12.4)',
+    /dialog\.showErrorBox\('Claudible hit an error', 'Claudible ran into an unexpected error\. Details were saved to a log file you can attach to a bug report:\\n\\n' \+ logFile\)/.test(MAIN)
+      ? [] : ['uncaughtException no longer shows a dialog naming the crash log path']);
+  none('unhandledRejection started popping a dialog too (should stay log-only — too noisy)',
+    /process\.on\('unhandledRejection'[\s\S]{0,400}?showErrorBox/.test(MAIN)
+      ? ['unhandledRejection handler now calls dialog.showErrorBox — it should log only'] : []);
+  {
+    const handlersBlock = MAIN.match(/process\.on\('uncaughtException'[\s\S]*?\n\}\);\s*\n[\s\S]*?process\.on\('unhandledRejection'[\s\S]*?\n\}\);/);
+    none('the crash handlers changed exit behavior (should keep running, same as before this fix)',
+      (handlersBlock && !/process\.exit/.test(handlersBlock[0])) ? [] : ['a crash handler now calls process.exit (or the handlers block no longer matches) — exit behavior must stay unchanged']);
+  }
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
