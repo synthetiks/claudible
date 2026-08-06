@@ -46,6 +46,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # C-10.1: embed the exact commit each installer was built from. package.json's version alone can't
+      # answer "which commit is this installer" the way it does for a git-clone install — lib/buildIdentity.js's
+      # readGitSha() reads .git directly there, but package.json's "files" list deliberately excludes .git from
+      # every packaged build. Plain short sha, read back by that same file's readPackagedBuildSha() fallback; a
+      # missing/malformed file degrades to version-only, never a crash. `shell: bash` works on all three runners
+      # (GitHub's windows-latest ships Git Bash) — same idiom the tag-check step above already relies on.
+      - name: Write packaged build SHA
+        shell: bash
+        run: echo "${GITHUB_SHA::7}" > build-sha.txt
+
       # node-pty 1.1.0 ships prebuilds for win32 + darwin but NOT linux.
       # node-pty-prebuilt-multiarch carries the linux prebuilds; ptyInfo() falls
       # back to it at runtime. Add it only on the Linux runner (keeps win/mac lean).

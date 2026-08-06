@@ -1486,6 +1486,10 @@
           <span class="tw-txt" id="build-drift-txt"></span>
           <button class="tw-install" id="build-drift-update" type="button" title="Pull the update and restart Claudible">Update &amp; restart</button>
         </div>
+        <div class="tunnel-warn" id="update-avail" style="display:none"><!-- C-10.1: a packaged build learning of a newer GitHub release used to fire a ONE-TIME toast — trivially missed, and gone forever once it scrolled off. This chip stays up for the rest of the run (this build never re-checks) until you click through; nothing downloads or installs itself. -->
+          <span class="tw-txt" id="update-avail-txt"></span>
+          <button class="tw-install" id="update-avail-open" type="button" title="Open the GitHub releases page">Download</button>
+        </div>
         <div class="tunnel-warn" id="presence-warn" style="display:none"><!-- standing "your presence pushes are failing" warning. A failed push while the UI says "Sharing live" is INVISIBLE otherwise: peers simply never see you, and the host has no way to tell. Same chip vocabulary as the tunnel/build-drift warnings — a toast is far too easy to miss for a state that silently strands every peer. -->
           <span class="tw-txt" id="presence-warn-txt"></span>
         </div>
@@ -1713,6 +1717,15 @@
           <button class="eff-pill danger" id="trash-delete-btn" type="button">Delete trash</button>
         </div>
         <div style="font-size:var(--fs-xs);color:var(--ink-faint);margin-top:4px">archived sessions &amp; projects · auto-emptied after 30 days or above 2&nbsp;GB · Delete trash is permanent, right now</div>
+      </div>
+
+      <!-- C-10.1: version + build ALWAYS visible here, not just in the status-bar badge — a smoke test can
+           tell a stale installer apart from a fresh one at a glance. The update line only appears once the
+           once-per-launch GitHub check has actually landed (packaged builds only; C-9.1: never wait on it). -->
+      <div class="sec" id="sec-about">
+        <div class="label">about</div>
+        <div id="about-version" style="font-size:var(--fs-sm)">claudible</div>
+        <div id="about-update" style="font-size:var(--fs-xs);color:var(--ink-faint);margin-top:4px"></div>
       </div>
 
     </div>

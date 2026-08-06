@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onShareTunnelDown: (cb) => ipcRenderer.on('share:tunnel-down', (_e) => cb()),   // public tunnel dropped while sharing
   onShareTunnelUp: (cb) => ipcRenderer.on('share:tunnel-up', (_e, p) => cb(p)),   // { url } public tunnel is live — a fresh share, or the background self-heal recovered it
   onUpdateAvailable: (cb) => ipcRenderer.on('update:available', (_e, p) => cb(p)),   // a newer GitHub release exists (packaged builds only; notice-only, nothing auto-installs)
+  updateStatus: () => ipcRenderer.invoke('update:status'),   // C-10.1: cached result of the last release check ({mine,latest,newer} or null) — Settings' "you're on X · latest is Y", never triggers a new network call
   onShareApproval: (cb) => ipcRenderer.on('share:approval', (_e, info) => cb(info)),
   onShareApprovalCancel: (cb) => ipcRenderer.on('share:approval-cancel', (_e, id) => cb(id)),
   // voice room — audio frames are relayed through the share server (server-relayed PCM, not peer-to-peer)

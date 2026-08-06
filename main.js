@@ -14,13 +14,16 @@ const { makeKeyedQueue } = require('./lib/keyedQueue');             // serialize
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
 const { createShareServer, sanitizePaste, isTypingBytes } = require('./share/server');
 const { shq } = require('./runners/_shared');   // single-quote-safe interpolation for values that ride into a bash -lc arg string (defense-in-depth on the presence stamps below)
-const { readGitSha } = require('./lib/buildIdentity');
+const { readGitSha, readPackagedBuildSha } = require('./lib/buildIdentity');
 const { makePresenceRelay, mergePeerFrame, reconcilePeerLists } = require('./lib/presenceRelay');
 const selfUpdate = require('./lib/selfUpdate');
 const { lastJsonLine } = require('./lib/lastJsonLine');   // banner-proof extraction of a script's one JSON result line (bash -lc is a LOGIN shell — profiles print above it)
 // The running build's git identity, captured AT BOOT — the process keeps executing this even after a
-// `git pull` moves the files under it, which is precisely the drift checkBuildDrift() surfaces.
-const BUILD = readGitSha(__dirname) || { sha: '', short: '', at: 0 };
+// `git pull` moves the files under it, which is precisely the drift checkBuildDrift() surfaces. Packaged
+// installs ship no `.git` dir, so readGitSha() always misses there — readPackagedBuildSha() is the C-10.1
+// fallback, reading the short sha build.yml embeds at package time; still '' when neither is available
+// (a build that predates the embed step), and every BUILD.short reader already degrades gracefully on ''.
+const BUILD = readGitSha(__dirname) || readPackagedBuildSha(__dirname) || { sha: '', short: '', at: 0 };
 const { renderReplayHtml } = require('./share/replay');
 const { startCloudflared } = require('./share/cloudflared');
 // A packaged (installed) build runs from a READ-ONLY app dir, so writable runtime state can't live there. On
@@ -3255,6 +3258,7 @@ ipcMain.handle('session:export-text', async (e, arg) => {
 let _claudeVer;   // undefined = not fetched yet
 ipcMain.handle('app:version', () => app.getVersion());   // the real Claudible version (package.json) for the status-bar badge — was hardcoded in the HTML
 ipcMain.handle('app:buildSha', () => BUILD.short || '');   // the running build's git sha — semver doesn't move between releases, this does
+ipcMain.handle('update:status', () => lastUpdateCheck);   // C-10.1: the cached result of the last GitHub release check, for Settings' "you're on X · latest is Y" — reads the cache only, never fires a new network call
 ipcMain.handle('claude:version', (_e, force) => {
   if (!force && _claudeVer !== undefined) return _claudeVer;   // force = re-read after an in-app update (the cache is otherwise app-lifetime)
   return new Promise((resolve) => {
@@ -3852,6 +3856,11 @@ function reapDeadGenerations() {
 // builds ask GitHub for the latest release ONCE per launch, off the critical path, and merely TELL the user;
 // nothing downloads or installs itself. Fails silent by design: offline, rate-limited, or a private repo
 // (pre-public beta) all just skip the notice.
+// C-10.1: the result is CACHED here regardless of whether it's newer, so Settings can answer "you're on X ·
+// latest is Y" instantly (update:status below) without ever triggering a second network call of its own —
+// stays null until this check has actually run once (packaged builds only; C-9.1's "never wait on the
+// network" rule means Settings shows nothing extra until then, not a fake placeholder).
+let lastUpdateCheck = null;
 function checkForUpdate() {
   if (!app.isPackaged) return;
   try {
@@ -3867,10 +3876,13 @@ function checkForUpdate() {
         try {
           const latest = String((JSON.parse(body).tag_name || '')).replace(/^v/, '');
           const mine = app.getVersion();
-          if (!/^\d+\.\d+\.\d+$/.test(latest) || latest === mine) return;
+          if (!/^\d+\.\d+\.\d+$/.test(latest)) return;
           // Numeric semver compare — notify only when latest is genuinely NEWER (a dev build ahead of the tag must not nag).
           const nl = latest.split('.').map(Number), nm = mine.split('.').map(Number);
-          const newer = nl[0] !== nm[0] ? nl[0] > nm[0] : nl[1] !== nm[1] ? nl[1] > nm[1] : nl[2] > nm[2];
+          const newer = latest !== mine && (nl[0] !== nm[0] ? nl[0] > nm[0] : nl[1] !== nm[1] ? nl[1] > nm[1] : nl[2] > nm[2]);
+          lastUpdateCheck = { mine, latest, newer };
+          // Persistent chip (C-10.1), not a one-time toast — the old toast could be missed entirely and the
+          // notice was gone forever. The chip stays up until restart; nothing here re-checks.
           if (newer) winSend('update:available', { latest, mine });
         } catch {}
       });

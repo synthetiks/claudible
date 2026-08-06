@@ -4,6 +4,11 @@ node_modules/
 # electron-builder output (installers are built in CI, never committed)
 /dist/
 
+# C-10.1: the packaged build's commit sha, written by build.yml (or scripts/ensure-build-sha.js locally)
+# right before electron-builder packages the app — never checked in, or every source checkout would claim
+# to be whatever commit last ran a local `npm run dist:*`.
+/build-sha.txt
+
 # live session state — ephemeral; may contain personal paths / session names / cost
 /runtime/
 

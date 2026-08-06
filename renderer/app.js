@@ -156,6 +156,7 @@ const LIVE_TTL_S = 120;   // a stamp older than this is aged out (host re-stamps
 const SKEW_TOL_S = 120;   // how far ahead of OUR clock a peer's ts may sit before we stop trusting it. MUST match wsl/sessions-sync-tool.js SKEW_TOL. Generous on purpose: WSL2 clocks genuinely drift after host sleep, and a briefly-invisible honest host beats rejecting one who is merely a few seconds fast.
 const STARTING_TTL_S = 60;   // a url-less "going live…" stamp (phase-1 advertise) ages out fast — the tunnel either lands (full stamp replaces it) or failed (no zombie row)
 let MY_SHA = '';               // the running build's git sha (fetched at boot) — build-skew hints on live badges
+let APP_VERSION = '';          // the running claudible version (fetched at boot) — Settings' About row (C-10.1)
 // Sessions a JOINED tab's OWN socket already proved offline (the host ended). Suppressed from the badge instantly,
 // ahead of the ~10s git poll / TTL — see setLiveState. Value = when it was marked (ms): the suppression self-clears
 // once git presence ALSO shows the session gone, and — as a guaranteed exit — after DEAD_SUPPRESS_MS regardless,
@@ -487,8 +488,9 @@ document.querySelectorAll('.panel button').forEach((b) =>
   $('sb-kokoro').textContent = 'kokoro ' + ep.kokoro.split(':').pop();
   // the embedded Claude Code CLI version, left of whisper/kokoro — hidden gracefully if it can't be resolved
   try { const cv = await claudible.claudeVersion(); const el = $('sb-claude'); if (el) { if (cv) { el.textContent = 'claude code ' + cv; el.style.display = ''; } else { el.style.display = 'none'; } } } catch {}
-  try { const av = await claudible.appVersion(); const ve = $('app-ver'); if (ve && av) ve.textContent = 'claudible v' + av; } catch {}   // real version, not the hardcoded 'v0.2'
+  try { const av = await claudible.appVersion(); const ve = $('app-ver'); if (ve && av) { APP_VERSION = av; ve.textContent = 'claudible v' + av; } } catch {}   // real version, not the hardcoded 'v0.2'
   try { MY_SHA = (await claudible.buildSha()) || ''; } catch {}   // my running build — compared against the sha peers now carry in their presence stamps
+  try { paintAboutRow(); } catch (e) {}   // the drawer may already be open (rare, but boot is async) — paint once version+sha land, cheap no-op otherwise
 })();
 
 // ---------- session tracker ----------
@@ -1987,9 +1989,15 @@ if (claudible.onPresenceHealth) claudible.onPresenceHealth((p) => {
     // applied), and the chip hides itself via share:tunnel-up.
   });
 }
+// C-10.1: a PERSISTENT chip, not a one-time toast — the old toast could be missed entirely (scroll it away
+// once and it's gone forever) and MK twice smoke-tested a stale installer with nothing on screen to say so.
+// This stays up for the rest of the run; nothing here re-checks or auto-downloads.
 if (claudible.onUpdateAvailable) claudible.onUpdateAvailable((p) => {   // notice-only: installed builds otherwise NEVER learn a fix shipped
-  toast('Claudible ' + p.latest + ' is out (you run ' + p.mine + ') — grab the new installer from the GitHub releases page.');
+  const el = $('update-avail'), tx = $('update-avail-txt');
+  if (el && tx) { tx.textContent = 'Claudible ' + p.latest + ' is out (you run ' + p.mine + ') → download'; el.style.display = ''; }
+  paintAboutUpdateLine(p.mine, p.latest, true);   // keep Settings' line in sync if the drawer is already open
 });
+{ const b = $('update-avail-open'); if (b) b.addEventListener('click', () => { try { claudible.openExternal('https://github.com/synthetiks/claudible/releases/latest'); } catch (e) {} }); }
 if (claudible.onAdvertiseLost) claudible.onAdvertiseLost((p) => {   // the presence heartbeat lost the one-host-per-session claim (our presence went stale — sleep/outage — and a collaborator went live on the same session) → stop claiming to share
   sharedSessionId = null; sharedWsId = null; advertisedSession = null;
   updateCollab(); updateAdvertise(); refreshSessions(); refreshExpandedTrees();
@@ -2299,11 +2307,28 @@ $('approve-no').addEventListener('click', () => decideApproval(false));
 // ---------- settings drawer ----------
 // The voice + command + share controls now live in a slide-in drawer to free the main area.
 const drawer = $('drawer'), drawerScrim = $('drawer-scrim');
+// C-10.1, piece 1: version + build sha, from the SAME two boot-time fetches the status-bar badge already
+// made (appVersion/buildSha) — no extra IPC round-trip, paints instantly whether or not it's landed yet.
+// piece 3: "you're on X · latest is Y" once the once-per-launch release check has actually run (packaged
+// builds only) — degrades to nothing (not a guess, not a stale placeholder) until then, per C-9.1.
+function paintAboutRow() {
+  const ve = $('about-version');
+  if (ve) ve.textContent = 'claudible v' + (APP_VERSION || '?') + (MY_SHA ? ' · build ' + MY_SHA.slice(0, 7) : '');
+}
+function paintAboutUpdateLine(mine, latest, newer) {
+  const el = $('about-update');
+  if (!el) return;
+  el.textContent = mine ? ("you're on " + mine + ' · ' + (newer ? latest + ' is available' : 'latest is ' + (latest || mine))) : '';
+}
+async function refreshAboutRow() {
+  paintAboutRow();
+  try { const st = await claudible.updateStatus(); if (st && st.mine) paintAboutUpdateLine(st.mine, st.latest, st.newer); } catch (e) {}
+}
 function openDrawer(open) {
   drawer.classList.toggle('open', open);
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) { loadSkills(); loadPlugins(); try { refreshGhRow(); } catch (e) {} }       // refresh extension inventory + GitHub state each time the drawer opens (W4: a real gh subprocess — on open, never on a timer)
+  if (open) { loadSkills(); loadPlugins(); try { refreshGhRow(); } catch (e) {} try { refreshAboutRow(); } catch (e) {} }       // refresh extension inventory + GitHub state + version/update info each time the drawer opens (W4: a real gh subprocess — on open, never on a timer; C-9.1: about row paints from cache instantly, updateStatus is a cache read too)
   if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------

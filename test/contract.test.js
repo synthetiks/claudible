@@ -2721,7 +2721,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('Settings lost its GitHub row (the state sync/invites depend on is invisible again)',
     [/id="gh-text"/.test(HTML) ? '' : 'no #gh-text row in the drawer',
      /async function refreshGhRow\(\)/.test(APP) ? '' : 'no refreshGhRow()',
-     /if \(open\) \{ loadSkills\(\); loadPlugins\(\); try \{ refreshGhRow\(\); \} catch \(e\) \{\} \}/.test(APP) ? '' : 'refreshGhRow is not wired to the drawer opening'].filter(Boolean));
+     /if \(open\) \{ loadSkills\(\); loadPlugins\(\); try \{ refreshGhRow\(\); \} catch \(e\) \{\}/.test(APP) ? '' : 'refreshGhRow is not wired to the drawer opening'].filter(Boolean));
   none('…and its dot has no reserved slot, so resolving the state nudges the text',
     /\.gh-dot\.off\{visibility:hidden\}/.test(HTML) ? [] : ['.gh-dot.off is not visibility:hidden — the same shift .ws-dot.off exists to prevent']);
   none('the Settings connect button duplicates the device-code flow instead of reusing 2g',
@@ -3382,6 +3382,89 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       return /if \[ -n "\$EMPTY_ALL" \]; then/.test(tp) && (tp.match(/zap "\$p"/g) || []).length >= 3
         ? [] : ['the empty-all branch is gone, or no longer reuses zap() for its removals'];
     })());
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 98. C-10.1 — update visibility, the owners' three-piece fix. (1) installed version + build sha visible in
+//   Settings' About row, packaged builds included (readGitSha() can't see a commit there — no .git ships —
+//   so readPackagedBuildSha() reads a build-time-embedded file instead, degrading to null the same way).
+//   (2) the packaged update notice is a PERSISTENT chip (#update-avail), not the old one-time toast — the
+//   toast call site is gone outright, not just re-wrapped. (3) Settings shows "you're on X · latest is Y"
+//   once the once-per-launch release check has actually run, fed by a cached main-side result exposed
+//   through a small pull-only IPC (update:status) that never itself triggers a new network call.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (1a) BUILD falls back to the packaged-install sha when there's no .git to read, and buildIdentity.js
+  //      actually exports the fallback (a revert of either half re-breaks packaged version/build display).
+  none('BUILD lost its packaged-install (no .git) sha fallback (C-10.1)',
+    /const BUILD = readGitSha\(__dirname\) \|\| readPackagedBuildSha\(__dirname\) \|\| \{ sha: '', short: '', at: 0 \};/.test(MAIN)
+      ? [] : ['main.js no longer falls back to readPackagedBuildSha(__dirname) when readGitSha finds no .git']);
+  none('readPackagedBuildSha is gone from lib/buildIdentity.js, or unexported (C-10.1)',
+    (() => {
+      const bi = fs.readFileSync(path.join(ROOT, 'lib', 'buildIdentity.js'), 'utf8');
+      return /function readPackagedBuildSha\(dir\)/.test(bi) && /module\.exports = \{ readGitSha, readPackagedBuildSha \};/.test(bi)
+        ? [] : ['readPackagedBuildSha missing, or not exported alongside readGitSha'];
+    })());
+  none('build.yml stopped embedding the packaged build sha before packaging (C-10.1)',
+    (() => {
+      const by = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'build.yml'), 'utf8');
+      return /echo "\$\{GITHUB_SHA::7\}" > build-sha\.txt/.test(by) ? [] : ['build.yml no longer writes build-sha.txt from GITHUB_SHA'];
+    })());
+  none('package.json stopped shipping build-sha.txt in the packaged app (C-10.1)',
+    /"build-sha\.txt",/.test(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+      ? [] : ['build-sha.txt is no longer in the electron-builder "files" list']);
+
+  // (1b) the About row exists in the drawer and paints version + sha from the SAME boot-time fetches the
+  //      status-bar badge already made — no new network/IPC round trip on drawer open.
+  none('the Settings About row (#about-version / #about-update) is gone from index.html (C-10.1)',
+    [/id="about-version"/.test(HTML) ? '' : 'no #about-version in index.html',
+     /id="about-update"/.test(HTML) ? '' : 'no #about-update in index.html'].filter(Boolean));
+  none('paintAboutRow stopped showing version + build sha (C-10.1)',
+    /function paintAboutRow\(\) \{[\s\S]{0,220}?APP_VERSION[\s\S]{0,140}?MY_SHA/.test(APP)
+      ? [] : ['paintAboutRow no longer reads both APP_VERSION and MY_SHA']);
+  none('the boot version fetch stopped setting APP_VERSION (C-10.1)',
+    /APP_VERSION = av; ve\.textContent = 'claudible v' \+ av;/.test(APP)
+      ? [] : ['the app:version boot fetch no longer sets APP_VERSION']);
+
+  // (2a) the toast call site is GONE — a partial revert that re-adds the toast text while leaving the chip
+  //      markup behind would still fail this (the constitution says the toast is REPLACED, not duplicated).
+  none('the old one-time update toast crept back in (C-10.1 replaced it with a persistent chip)',
+    /toast\('Claudible ' \+ p\.latest \+ ' is out/.test(APP)
+      ? ["onUpdateAvailable still calls toast('Claudible ' + p.latest + ' is out…')"] : []);
+  none('onUpdateAvailable stopped painting the persistent #update-avail chip (C-10.1)',
+    /const el = \$\('update-avail'\), tx = \$\('update-avail-txt'\);[\s\S]{0,200}?el\.style\.display = '';/.test(APP)
+      ? [] : ['onUpdateAvailable no longer shows the #update-avail chip']);
+  none('the #update-avail chip markup is gone from index.html, or lost its Download button (C-10.1)',
+    [/id="update-avail" style="display:none"/.test(HTML) ? '' : 'no #update-avail chip in index.html',
+     /id="update-avail-txt"/.test(HTML) ? '' : 'no #update-avail-txt span',
+     /id="update-avail-open"/.test(HTML) ? '' : 'no #update-avail-open button'].filter(Boolean));
+  none('#update-avail-open stopped opening the GitHub releases page (C-10.1)',
+    /\$\('update-avail-open'\)[\s\S]{0,120}?claudible\.openExternal\('https:\/\/github\.com\/synthetiks\/claudible\/releases\/latest'\)/.test(APP)
+      ? [] : ['#update-avail-open no longer opens the releases page via claudible.openExternal']);
+
+  // (2b) checkForUpdate's early-return regression guard: a revert that puts back `|| latest === mine` would
+  //      make lastUpdateCheck (and therefore Settings' line) never populate for an up-to-date install.
+  none('checkForUpdate stopped caching the up-to-date case too (C-10.1 piece 3 needs it even when not newer)',
+    /if \(!\/\^\\d\+\\\.\\d\+\\\.\\d\+\$\/\.test\(latest\)\) return;/.test(MAIN) && !/if \(!\/\^\\d\+\\\.\\d\+\\\.\\d\+\$\/\.test\(latest\) \|\| latest === mine\) return;/.test(MAIN)
+      ? [] : ["checkForUpdate's early return still short-circuits on latest === mine before caching"]);
+  none('checkForUpdate stopped writing lastUpdateCheck on every successful check (C-10.1)',
+    /lastUpdateCheck = \{ mine, latest, newer \};/.test(MAIN)
+      ? [] : ['checkForUpdate no longer caches { mine, latest, newer } to lastUpdateCheck']);
+
+  // (3) the cache is exposed via a small pull-only IPC, wired end to end, and Settings actually reads it on
+  //     drawer open (never on a timer, never blocking the drawer's instant paint — C-9.1).
+  none('update:status lost its main handler, or its preload bridge (C-10.1)',
+    [/ipcMain\.handle\('update:status', \(\) => lastUpdateCheck\)/.test(MAIN) ? '' : "no ipcMain.handle('update:status', ...) in main.js",
+     /updateStatus: \(\) => ipcRenderer\.invoke\('update:status'\)/.test(PRELOAD) ? '' : 'no updateStatus bridge in preload.js'].filter(Boolean));
+  none('refreshAboutRow stopped reading claudible.updateStatus() (C-10.1)',
+    /async function refreshAboutRow\(\) \{[\s\S]{0,220}?claudible\.updateStatus\(\)/.test(APP)
+      ? [] : ['refreshAboutRow no longer calls claudible.updateStatus()']);
+  none('refreshAboutRow is no longer called when the drawer opens (C-10.1)',
+    /try \{ refreshAboutRow\(\); \} catch \(e\) \{\} \}/.test(APP)
+      ? [] : ['openDrawer no longer calls refreshAboutRow() on open']);
+  none('paintAboutUpdateLine stopped rendering "you\'re on X · latest is Y" (C-10.1)',
+    /function paintAboutUpdateLine\(mine, latest, newer\)[\s\S]{0,260}?you're on/.test(APP)
+      ? [] : ['paintAboutUpdateLine no longer builds the "you\'re on X · latest is Y" line']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
