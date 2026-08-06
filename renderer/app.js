@@ -2530,7 +2530,7 @@ function repoIdOf(aw) {
 // ---- Session-history activity feed (top of the Repo Review drawer) ----
 // Renders the last N prompts (who · when · what) from the main-owned log. Shows only when the
 // sessionHistory setting is on and there are entries — otherwise stays hidden (zero footprint).
-function renderHistoryEntry(en, revertable) {
+function renderHistoryEntry(en, revertable, wsId) {
   const row = document.createElement('div'); row.className = 'hf-row';
   const meta = document.createElement('div'); meta.className = 'hf-meta';
   // "3 files (+42/-10)" — mirrors lib/history.js summarizeFiles (the sandboxed renderer can't require lib/);
@@ -2566,7 +2566,7 @@ function renderHistoryEntry(en, revertable) {
   if (en.checkpointRef && revertable && localSnap) {
     const rev = document.createElement('button'); rev.className = 'hf-revert'; rev.title = 'Revert code to this prompt'; rev.setAttribute('aria-label', 'Revert code to this prompt');
     rev.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2-9.3"/></svg>';   // rewind-arrow
-    rev.onclick = (e) => { e.stopPropagation(); revertToCheckpoint(en); };
+    rev.onclick = (e) => { e.stopPropagation(); revertToCheckpoint(en, wsId); };
     row.appendChild(rev);
   }
   const copy = document.createElement('button'); copy.className = 'hf-copy'; copy.title = 'Copy prompt'; copy.setAttribute('aria-label', 'Copy prompt');
@@ -2588,9 +2588,9 @@ function wsBusy(wsId) { if (!wsId) return false; for (const t of tabs.values()) 
 // Roll the working tree back to the code snapshot captured at this prompt. Destructive (working-tree ONLY — it does
 // not rewind commits), so we confirm first; checkpoint.sh captures an 'undo' snapshot before restoring, which we
 // then offer so the revert is reversible.
-async function revertToCheckpoint(en) {
+async function revertToCheckpoint(en, wsId) {
   if (!en || !en.checkpointRef) return;
-  const targetWs = _histFeedWsId || activeWsId;   // the ws this feed was loaded for — NOT activeWsId, which can lag main after a guest-driven or auto-close switch
+  const targetWs = wsId !== undefined ? wsId : (_histFeedWsId || activeWsId);   // the wsId the CARD this row renders under actually learned (r.wsId) — NOT activeWsId, which can lag main after a guest-driven or auto-close switch, and not _histFeedWsId, which is one shared global that a second expanded card overwrites
   const name = histSessionName(en.session);
   const busy = wsBusy(targetWs);
   const choice = await modalChoice({
@@ -2655,7 +2655,7 @@ async function loadHistoryInto(targetWsId, wrap, liveEntries) {
     if (!lall.length) { wrap.innerHTML = '<div class="ph-empty">No session history yet.</div>'; return; }
     wrap.innerHTML = '';
     const lshown = Math.min(_histShown, lall.length);
-    lall.slice(0, lshown).forEach((en) => wrap.appendChild(renderHistoryEntry(en, false)));
+    lall.slice(0, lshown).forEach((en) => wrap.appendChild(renderHistoryEntry(en, false, targetWsId)));
     if (lall.length > lshown) { const lmore = document.createElement('button'); lmore.className = 'hf-expand'; lmore.textContent = 'Show ' + Math.min(10, lall.length - lshown) + ' more'; lmore.onclick = () => { _histShown += 10; loadHistoryInto(targetWsId, wrap, liveEntries); }; wrap.appendChild(lmore); }
     return;
   }
@@ -2672,7 +2672,7 @@ async function loadHistoryInto(targetWsId, wrap, liveEntries) {
   }
   const all = r.entries.slice().reverse();                             // newest first
   const shown = Math.min(_histShown, all.length);
-  all.slice(0, shown).forEach((en, i) => wrap.appendChild(renderHistoryEntry(en, i < 10)));   // only the newest 10 keep a live checkpoint → only they get a Revert button
+  all.slice(0, shown).forEach((en, i) => wrap.appendChild(renderHistoryEntry(en, i < 10, r.wsId || targetWsId)));   // only the newest 10 keep a live checkpoint → only they get a Revert button; r.wsId is the CARD's true workspace (learned above), not whatever _histFeedWsId a later-loaded card since overwrote
   if (all.length > shown) {
     const more = document.createElement('button'); more.className = 'hf-expand';
     more.textContent = 'Show ' + Math.min(10, all.length - shown) + ' more';

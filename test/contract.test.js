@@ -2955,5 +2955,25 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /resetCaches,/.test(WSL_JS.slice(WSL_JS.indexOf('module.exports'))) ? '' : 'resetCaches is not exported'].filter(Boolean));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 88. C-8.1 — the green-lit two-card revert bug. With two Project History cards expanded, reverting from the
+//   SECOND card's feed used to hit the FIRST card's workspace: revertToCheckpoint read the one shared
+//   _histFeedWsId/activeWsId globals instead of the wsId the clicked row's own card actually learned (r.wsId,
+//   captured per-card by loadHistoryInto). Mirrors the already-correct doDiffRevert/loadDiffInto pattern,
+//   which threads wsId as an explicit parameter instead of reading a shared global.
+// ---------------------------------------------------------------------------------------------------------
+{
+  none('renderHistoryEntry no longer threads a wsId into its Revert button (reverts the wrong card again)',
+    [/function renderHistoryEntry\(en, revertable, wsId\)/.test(APP) ? '' : 'renderHistoryEntry lost its wsId parameter',
+     /revertToCheckpoint\(en, wsId\)/.test(APP) ? '' : 'the Revert button no longer closes over the row’s wsId'].filter(Boolean));
+  none('revertToCheckpoint no longer prefers its passed wsId over the shared globals (C-8.1 regressed)',
+    [/async function revertToCheckpoint\(en, wsId\)/.test(APP) ? '' : 'revertToCheckpoint lost its wsId parameter',
+     /const targetWs = wsId !== undefined \? wsId : \(_histFeedWsId \|\| activeWsId\)/.test(APP) ? '' : 'targetWs no longer prefers the passed wsId, falling back to the globals only when undefined',
+     /wsBusy\(targetWs\)/.test(APP) ? '' : 'the busy safety check no longer uses the per-card targetWs'].filter(Boolean));
+  none('loadHistoryInto no longer passes each card\'s own wsId to renderHistoryEntry',
+    /renderHistoryEntry\(en, i < 10, r\.wsId \|\| targetWsId\)/.test(APP)
+      ? [] : ['the main render loop no longer threads r.wsId (the card\'s true workspace) into each row']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
