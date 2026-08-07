@@ -4,6 +4,47 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-08-07
+
+The build that answers the owners' first hardware session — and the first release tested by machines
+driving the real app. A new end-to-end harness (Playwright launching isolated Claudible instances, a
+simulated second machine, and a real browser as the share-link guest) now replays the owners' own test
+scenarios; every fix below carries its harness spec, red before the fix and green after. Still a
+pre-release: the owners' spot-check on real hardware is the last word.
+
+**Fixed** *(each verified end-to-end by the harness unless noted)*
+- **The share is now welded to the session you chose.** Sharing never follows you around the app: the
+  guest sees the session you decided to share, full stop. Starting any second share while one runs is
+  refused with a message naming the running share — in every combination of in-app live sessions and
+  web links (the hardware session caught a web link handed out mid-live-session with no refusal). Share
+  links now carry the promised session's identity and the guest page warns if what arrives ever differs.
+- **Continuing a collaborator's session now syncs.** A machine never pushed content for sessions it
+  didn't author — titles and presence synced while the actual conversation silently didn't (the owners'
+  exact finding). Extending a collaborator's session now publishes like any other; true forks still get
+  the divergence treatment, never silently overwritten.
+- **The privacy pause has a button now.** The server could always block guest input while paused — but
+  no control existed to pause. Pause/Resume now lives in the share bar; while paused, guest typing and
+  pasting provably never reach your terminal.
+- **Browser guests can copy again** — selecting terminal text and copying works even when the browser's
+  clipboard API stalls.
+- **LIVE badges clear fast** after Stop (the "end" signal now drives the peer's sidebar directly instead
+  of waiting out a poll), and **renames repaint on arrival** — no more hovering to make a new name show.
+- **Co-author crediting engages on real projects**: adopted workspaces qualify, collaborator identities
+  are recorded by the real invite flow (and self-heal), and when a guest can't be credited the app says
+  so out loud instead of silently skipping the trailer.
+- **Creating or adopting a project while live no longer misbehaves**: the new-project path parks with the
+  Create overlay (never auto-spawns a session — the hardware condition was being live at the time), and
+  adopting a folder can't drag your live session into the new project.
+- Trash entries are named after the project you deleted, not internal slugs. Pending GitHub invites are
+  now visible: the inviter sees "waiting for acceptance," the invitee gets an accept row instead of
+  nothing.
+
+**Known limitations**
+- Voice, installer UX, true two-network sharing, the WSL flavor, and macOS remain human-test territory —
+  the harness can't reach them.
+- The owners' re-test of this build on real hardware is pending; until then treat the fixes as
+  harness-proven, one tier below hardware-proven.
+
 ## [0.9.7] — 2026-08-07
 
 A hardware-validation pre-release: 34 changes verified in code and by 691 automated checks (up from 491),
