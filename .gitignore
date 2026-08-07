@@ -12,6 +12,11 @@ node_modules/
 # live session state — ephemeral; may contain personal paths / session names / cost
 /runtime/
 
+# Playwright E2E harness output (test/e2e/) — generated per run, never committed
+/test-results/
+/playwright-report/
+/blob-report/
+
 # logs (incl. electron-out.log / electron-err.log when launched via cmd)
 *.log
 /logs/
