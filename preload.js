@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld('claudible', {
   onBackendUnavailable: (cb) => ipcRenderer.on('backend:unavailable', (_e, s) => cb(s)),   // I3/S-root: the script backend could not resolve at boot — say so instead of letting ~35 handlers fail in silence
   backendRetry: () => ipcRenderer.invoke('backend:retry'),   // C-1.5: the persistent banner's Retry button — re-resolve the backend without a restart
   discoverWorkspaces: () => ipcRenderer.invoke('workspace:discover'),   // manual "check for invited projects"
+  invitesPending: () => ipcRenderer.invoke('invites:pending'),   // B17 UX: repos invited-but-not-yet-accepted on GitHub — normal discovery can't see these at all
+  invitesAccept: (id) => ipcRenderer.invoke('invites:accept', { id }),   // one-click accept (gh api PATCH) for a row returned by invitesPending
   workspaceImport: (repo) => ipcRenderer.invoke('workspace:import', { repo }),   // 3b: clone an EXISTING GitHub repo by owner/repo or URL (no invite gate)
   openExternal: (url) => ipcRenderer.invoke('open-external', url),   // open a repo URL in the real browser
   sessionListWs: (wsId) => ipcRenderer.invoke('session:list-ws', wsId),   // list a (possibly non-active) workspace's sessions

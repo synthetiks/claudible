@@ -1044,6 +1044,12 @@
     .ws-note code{font-size:var(--fs-xs);color:var(--silver);background:rgba(255,255,255,.05);padding:0 3px;border-radius:3px}
     /* "Been invited? Check for invites" — discovery also runs on window focus, this is the immediate manual path */
     .ws-invite-check{font-size:var(--fs-xs);color:var(--ink-dim);text-align:left;margin:-4px 0 12px}
+    /* B17 UX: PENDING (not-yet-accepted) GitHub collaborator invites — invisible to normal discovery until
+       accepted on github.com. One row per invite + an inline Accept — see refreshPendingInvites() in app.js. */
+    #ws-pending-invites{display:none;text-align:left;margin:-4px 0 12px;flex-direction:column;gap:5px}
+    #ws-pending-invites.show{display:flex}
+    .ws-pending-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:var(--fs-xs);color:var(--ink-dim);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:6px 9px}
+    .ws-pending-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .linkbtn{display:inline;width:auto;padding:0;border:none;background:none;color:var(--accent,#7bb6ee);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
     .linkbtn:hover{color:var(--ink)}
     .linkbtn:disabled{opacity:.5;cursor:default;text-decoration:none}
@@ -1895,6 +1901,8 @@
       <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
       <div class="ws-busy" id="ws-busy"></div>
       <div class="ws-invite-check">Been invited to a shared project? <button type="button" id="ws-discover" class="linkbtn">Check for invites</button></div>
+      <!-- B17 UX: pending (not-yet-accepted) GitHub invites — populated by refreshPendingInvites() in app.js -->
+      <div id="ws-pending-invites"></div>
       <div class="row">
         <button id="ws-create">Create</button>
         <button id="ws-cancel" class="ghost">Cancel</button>

@@ -61,7 +61,8 @@ else
   # `ls -1dtr` sorts oldest-last→first and exists on GNU *and* BSD (`find -printf` is GNU-only and would silently
   # no-op the whole cap on macOS). A path containing a newline would split into two lines here — both then fail
   # zap()'s "must live under $REAL" guard, so it degrades to skipping that entry, never to deleting the wrong one.
-  # (Our own delete-session.sh / delete-workspace.sh only ever write `<sanitized-id>.<timestamp>` names anyway.)
+  # (Our own delete-session.sh / delete-workspace.sh only ever write `<sanitized-id-or-label>.<timestamp>` names
+  # anyway — delete-workspace.sh's label_clean strips whitespace/newlines the same way the id sanitizers do.)
   total_kb="$(kb_of "$REAL")"; [ -n "$total_kb" ] || total_kb=0
   cap_kb=$((MAX_MB * 1024))
   if [ "$total_kb" -gt "$cap_kb" ]; then

@@ -6538,6 +6538,7 @@ function openWsModal() {
   if (wsNameCheck) wsNameCheck();                            // fresh value → clears any stale disabled/popup state
   $('ws-modal').classList.add('show');
   setTimeout(() => $('ws-name-in').focus(), 60);
+  refreshPendingInvites();   // B17 UX: opening "New project" is the natural moment to surface a pending invite too — see its own comment above
 }
 function closeWsModal() { $('ws-modal').classList.remove('show'); firstRunActive = false; closeNameCharPop(); }
 async function createWorkspace() {
@@ -6599,11 +6600,19 @@ async function createWorkspace() {
   // never moved, so calling it "New session" would be a lie. Give the new project a tab of its own instead.
   // (Both skip the first-run placeholder cleanup below on purpose: on first run there is one idle, unshared tab
   // and no time to switch away, so neither flag can be set alongside wasFirstRun.)
+  // C1 (HARDWARE-SMOKE-RESULTS.md): this used to call newBlankTab(newWsId, 'new') directly, which — unlike every
+  // other "give it a tab of its own" fallback in this file (see switchWorkspace's C-4.4 comment above) — spawns a
+  // REAL pty immediately (setActiveTab -> sync()) instead of parking. A brand-new project can never have an
+  // existing session to resume, so C-4.4's overlay applies unconditionally here: park it, exactly like every
+  // other unresolved-project path, and let the overlay's own Create button (commitParkedTab) be what's actually
+  // allowed to spawn. This was invisible on a normal machine (the harness's own C1 spec passes) because keptTab is
+  // FALSE on a bare create — it only goes true while a share is live (or the tab is mid-turn), which is exactly
+  // the hardware condition C1 was filed under.
   if (r.superseded || r.keptTab) {
     activeWsId = newWsId;
     await refreshWorkspaces();
     if (r.keptTab) {
-      if (!newBlankTab(newWsId, 'new')) toast('Project added — close a tab to open it (this one is still running)');
+      if (!parkedTabFor(newWsId, 'empty')) toast('Project added — close a tab to open it (this one is still running)');
     }
     refreshSessions();
     return;
@@ -6621,12 +6630,48 @@ async function createWorkspace() {
   focusTermSoon(150);
 }
 $('ws-add').addEventListener('click', openWsModal);
+// B17 UX — PENDING (not-yet-accepted) GitHub collaborator invites. discoverWorkspaces()/sessions-discover.sh
+// only ever sees repos already accepted (GitHub's /user/repos), so a fresh repo:invite was TOTALLY INVISIBLE
+// in-app until the invited side remembered to accept it on github.com themselves. Modest surface: one row per
+// pending invite in the New-project modal, with an inline Accept that shortcuts the exact same `gh api` click —
+// see invites:pending/invites:accept (main.js) and pending-invites.sh/accept-invitation.sh, which degrade to an
+// empty list silently if gh is missing or the token lacks scope (never an error the user has to parse).
+async function refreshPendingInvites() {
+  const box = $('ws-pending-invites'); if (!box) return;
+  let list = null; try { list = await claudible.invitesPending(); } catch {}
+  box.innerHTML = '';
+  const rows = Array.isArray(list) ? list.filter((x) => x && Number.isFinite(x.id) && x.owner && x.repo) : [];
+  box.classList.toggle('show', rows.length > 0);
+  if (!rows.length) return;
+  rows.forEach((inv) => {
+    const row = document.createElement('div'); row.className = 'ws-pending-row';
+    const txt = document.createElement('span'); txt.textContent = inv.owner + '/' + inv.repo + ' — invite waiting';
+    txt.title = inv.owner + '/' + inv.repo;
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'linkbtn'; btn.textContent = 'Accept';
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = 'accepting…';
+      let r = null; try { r = await claudible.invitesAccept(inv.id); } catch {}
+      if (r && r.ok) {
+        row.remove();
+        if (!box.children.length) box.classList.remove('show');
+        toast('Accepted — “' + inv.owner + '/' + inv.repo + '” will appear shortly');   // main kicks a discover pass; onWorkspaceAdded repaints the list when it lands
+      } else {
+        btn.disabled = false; btn.textContent = 'Accept';
+        toast('Could not accept: ' + humanError((r && r.error) || 'unknown'));
+      }
+    });
+    row.appendChild(txt); row.appendChild(btn);
+    box.appendChild(row);
+  });
+}
 // "Check for invites" — discovery also re-runs on window focus, but this is the immediate manual path for
 // "I just accepted MK's invite on GitHub, show it now". onWorkspaceAdded repaints the list when it finds one.
 if ($('ws-discover')) $('ws-discover').addEventListener('click', async () => {
   const b = $('ws-discover'); if (b.disabled) return;
   b.disabled = true; const was = b.textContent; b.textContent = 'checking…';
   let r = null; try { r = await claudible.discoverWorkspaces(); } catch {}
+  refreshPendingInvites();   // catches an invite that's still pending (not yet accepted) alongside any newly-accepted ones
   b.disabled = false; b.textContent = was;
   if (r && r.ok) toast(r.added ? ('Found ' + r.added + ' invited project' + (r.added > 1 ? 's' : '')) : 'No new invites — you’re all caught up');
   else if (r && r.reason === 'gh-auth') toast('Connect GitHub first (Settings → GitHub) — invites can’t be checked without it');   // R31: "can't look" ≠ "all caught up"

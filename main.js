@@ -2416,6 +2416,34 @@ ipcMain.handle('workspace:discover', async () => {
   const r = await discoverWorkspaces();
   return { ok: !!(r && r.ok), added: (r && r.added ? r.added.length : 0), reason: (r && r.reason) || '' };
 });
+// B17 UX — discoverWorkspaces()/sessions-discover.sh only ever sees repos the user ALREADY has access to
+// (/user/repos). A fresh repo:invite is otherwise TOTALLY INVISIBLE in-app until the invited side remembers to
+// go to github.com themselves and click Accept. This surfaces those pending invitations as a modest row (New-
+// project modal, refreshPendingInvites in app.js) — degrades to an empty list silently (pending-invites.sh) if
+// gh is missing, unauthenticated, or lacks the scope for /user/repository_invitations.
+ipcMain.handle('invites:pending', () => new Promise((resolve) => {
+  if (!APPDIR_WSL) return resolve([]);
+  runner.runScript('pending-invites.sh', '', { timeout: 15000, maxBuffer: 1024 * 1024 }).then(({ err, stdout }) => {
+    if (err) return resolve([]);
+    let list = []; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch {}
+    resolve(Array.isArray(list) ? list.filter((x) => x && Number.isFinite(x.id) && x.owner && x.repo) : []);
+  });
+}));
+// Accept one pending invite by id (see accept-invitation.sh — a `gh api -X PATCH` shortcut for the same click
+// on github.com). On success, kick discoverWorkspaces() immediately so the now-accessible repo materializes as
+// a workspace right away — the renderer's existing onWorkspaceAdded listener (workspace:added) repaints it,
+// exactly like the manual "Check for invites" path already does.
+ipcMain.handle('invites:accept', (e, payload) => new Promise((resolve) => {
+  const id = Number(payload && payload.id);
+  if (!Number.isFinite(id) || id <= 0 || Math.floor(id) !== id) return resolve({ ok: false, error: 'bad id' });
+  if (!APPDIR_WSL) return resolve({ ok: false, error: ERR_NO_BACKEND });
+  runner.runScript('accept-invitation.sh', `'${id}'`, { timeout: 20000 }).then(({ err, stdout }) => {
+    if (err) { console.error('[claudible] accept-invitation:', err.message); return resolve({ ok: false, error: 'accept failed' }); }
+    let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
+    if (r.ok) { _lastDiscover = Date.now(); discoverWorkspaces().catch(() => {}); }
+    resolve(r.ok ? { ok: true } : { ok: false, error: r.error || 'accept failed' });
+  });
+}));
 // Turn sync on/off for a workspace. Enabling = one-time consent to publish this workspace's transcripts;
 // it clones if needed, sets up the branch, and kicks a first sync. Disabling leaves all files in place.
 ipcMain.handle('session:syncSetEnabled', async (e, payload) => {
@@ -2936,7 +2964,11 @@ function workspaceDeleteCore(id) { return new Promise((resolve) => {
   // project must never remove the folder. delete-workspace.sh prefers CLAUDIBLE_WS_DIR (wsEnv emits ws.path), so
   // shelling out here would `mv -f` their real source tree into ~/.claudible/trash. Unregister only.
   if (APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo')) {
-    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
+    // Owners' note: pass the human project LABEL through as $3 so the trash entry reads as the project the user
+    // actually named ("ws-local-E2E Overlay Proj.20260807-…") instead of the internal slug — delete-workspace.sh
+    // sanitizes it for the filesystem itself; shq here is only the shell-interpolation guard (same pattern as
+    // every other free-text value that rides into a runScript argStr, e.g. the presence-stamp calls above).
+    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}' '${shq(ws.label || slug)}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-workspace:', err.message); return finish('the project was removed, but its folder could not be moved to trash'); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       if (r.ok === false) { console.error('[claudible] delete-workspace refused:', r.error); return finish('the project was removed, but its folder is still on disk' + (r.error && /\s/.test(r.error) ? ': ' + r.error : '')); }   // R41: only append the script's reason when it's a sentence — a bare code stapled to a good message reads as gibberish (the console keeps the raw one)

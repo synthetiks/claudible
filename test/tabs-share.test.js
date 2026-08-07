@@ -370,8 +370,15 @@ ok('main.js: liveSessionId comes from the PINNED tab (covers a web-share with no
   /function liveSessionId\(\)[\s\S]{0,260}?ptys\.get\(sharedTabId\)/.test(MAIN));
 ok('app.js: switchWorkspace never recycles the live-shared tab',
   /if \(t\.busy \|\| t\.tabId === sharedTabIdR\) \{/.test(APP));
-ok('app.js: createWorkspace/adopt open a new tab when main kept the current one',
-  /if \(r\.keptTab\) \{[\s\S]{0,600}?newBlankTab\(newWsId, 'new'\)/.test(APP));
+// C1 (HARDWARE-SMOKE-RESULTS.md): this used to be newBlankTab(newWsId, 'new') — which, unlike every other
+// "give the project a tab of its own" fallback in this file, spawns a REAL pty immediately instead of parking.
+// A freshly CREATED (or adopted) project can never have an existing session to resume, so C-4.4's overlay
+// applies unconditionally here too: park it via parkedTabFor, exactly like switchWorkspace's own keptTab branch
+// does when it resolves to a genuinely empty project. This was invisible on a bare create (keptTab is normally
+// false there) — it only goes true while a share is live or the tab is mid-turn, which is the hardware condition.
+ok('app.js: createWorkspace/adopt open a PARKED tab (never an automatic pty) when main kept the current one',
+  /if \(r\.keptTab\) \{[\s\S]{0,600}?parkedTabFor\(newWsId, 'empty'\)/.test(APP)
+  && !/if \(r\.keptTab\) \{[\s\S]{0,600}?newBlankTab\(newWsId, 'new'\)/.test(APP));
 ok('app.js: the share ends in exactly one place, called only by End Session + force-end',
   /function endLiveNow\(msg\)/.test(APP)
   && (APP.match(/endLiveNow\(/g) || []).length === 3);   // definition + terminateLive + onShareForceEnd
