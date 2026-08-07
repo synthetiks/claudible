@@ -743,17 +743,36 @@ if (gchatHead) gchatHead.addEventListener('click', function () { setChatCollapse
 var isMac = /mac/i.test(navigator.platform || navigator.userAgent || '');
 function copyText(t) {
   if (!t) return;
-  // Three real failure modes, all covered: API absent (plain-http/LAN share -> navigator.clipboard is
-  // undefined), API throws synchronously, and — the common one — writeText REJECTS asynchronously
-  // (document unfocused, permission denied, in-app webviews). A bare try/catch cannot see an async
-  // rejection, so the legacy fallback silently never engaged and nothing was copied.
-  function legacyCopy() {
-    try { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch (e2) {}
-  }
+  // B12 (HARDWARE-SMOKE-RESULTS.md): this used to try navigator.clipboard.writeText() FIRST and only fall
+  // back to the legacy document.execCommand('copy') path from that promise's OWN .catch(). That fallback
+  // depends on writeText() actually SETTLING (resolve or reject) to ever run at all — and on a real browser
+  // tab, a clipboard-write permission prompt or a broken/slow webview clipboard handler can leave that
+  // promise PENDING indefinitely (never rejecting), so the .catch() simply never fires and nothing is ever
+  // copied. Even when it does reject promptly, execCommand('copy') itself needs to run inside the SAME
+  // user-gesture activation window as the Ctrl+C keydown — waiting on an async microtask first narrows that
+  // window for no reason.
+  // Fix: run the synchronous, gesture-scoped execCommand path FIRST, unconditionally, right in this call —
+  // guaranteed to still be inside the keydown's activation, and never dependent on any promise settling.
+  // Only reach for the modern async Clipboard API afterward, as a best-effort upgrade attempt that this
+  // function does not wait on or depend on for success.
+  var legacyOk = false;
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = t;
+    ta.setAttribute('readonly', '');                 // no on-screen keyboard on mobile guests
+    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';   // off-screen but still focusable/selectable (display:none/visibility:hidden elements can't be select()ed in every browser)
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    legacyOk = document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch (e) { legacyOk = false; }
+  if (legacyOk) return;   // already on the clipboard via the synchronous path — no need to also race the async API
+  // execCommand unsupported/disabled (or somehow still failed) — try the modern API too; fire-and-forget,
+  // its own rejection (however late) has nothing left to do since there is no further fallback beyond this.
   try {
     var p = navigator.clipboard && navigator.clipboard.writeText(t);
-    if (p && typeof p.then === 'function') p.catch(legacyCopy); else if (!p) legacyCopy();
-  } catch (e) { legacyCopy(); }
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  } catch (e) {}
 }
 window.addEventListener('keydown', function (e) {
   var mod = isMac ? (e.metaKey && !e.ctrlKey && !e.altKey) : (e.ctrlKey && !e.metaKey && !e.altKey);
