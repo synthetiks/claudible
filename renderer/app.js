@@ -2013,6 +2013,13 @@ claudible.onCoauthorSkipped((p) => {   // C-10.6: a visible note instead of a si
   const names = (p && Array.isArray(p.names)) ? p.names.filter(Boolean) : [];
   if (names.length) toast(`No known email/GitHub login for ${names.join(', ')} — left off commit co-authors`);
 });
+// C-10.6/B14: guests are connected to a live share, but NOT ONE of them resolves to a known GitHub identity —
+// the hook has nobody to credit and installs nothing. Said once out loud (main warns at most once per share)
+// instead of the prior silent no-op that made a real live-session commit carry no trailer with no explanation.
+if (claudible.onCoauthorNoIdentity) claudible.onCoauthorNoIdentity((p) => {
+  const names = (p && Array.isArray(p.names)) ? p.names.filter(Boolean) : [];
+  if (names.length) toast(`Couldn’t credit guests — no GitHub identity for ${names.join(', ')}`);
+});
 if (claudible.onSettingsBackupNotice) claudible.onSettingsBackupNotice((p) => {   // C-3.7: your hand edit to a .claude file was about to be overwritten — preserved as a dated backup first, never lost silently
   const files = (p && Array.isArray(p.files)) ? p.files.filter(Boolean) : [];
   if (files.length) toast(`Saved your edited .claude/${files.join(', .claude/')} to a dated backup before updating it`);

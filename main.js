@@ -2563,6 +2563,12 @@ ipcMain.handle('workspace:acceptInvite', async (e, payload) => {
   const after = live();
   if (!after) return { ok: false, error: 'unknown workspace' };      // deleted mid-clone: the registry is already right; don't resurrect it
   if (!c.ok && !(payload && payload.useDefault) && after.path) { delete after.path; saveRegistry(); }   // failed custom clone → don't leave a dangling path
+  // C-10.6/B14: the JOINING side of an invite never got GitHub identity metadata at all — repo:invite only ever
+  // wrote ws.collaborators onto the INVITER's own workspace object. Without this, a workspace accepted here
+  // starts every live share with an empty collaborators list, and the co-author hook has nothing to match
+  // against until _syncCoauthorHookNow's own lazy backfill eventually kicks in. Best-effort, fire-and-forget —
+  // an accept must not wait on (or fail because of) an extra GitHub call on top of the clone it already awaited.
+  if (c.ok) { try { refreshCollaborators(after); } catch {} }
   if (c.ok && !after.syncSessions) {
     // R3: the accept modal promises "sessions still sync with the team" — but nothing ever enabled it, so the
     // invited collaborator landed in a normal-looking project that could neither see the team's sessions nor
@@ -3033,11 +3039,13 @@ ipcMain.handle('repo:invite', (e, payload) => new Promise((resolve) => {
         // C-10.6: remember this GitHub login as a known collaborator on THIS workspace — the "collaborators'
         // GitHub identities where known from the invite flow" that let the co-author hook build a noreply
         // address for someone even when they're not currently in the live roster. Append-only (an invite is
-        // never un-invited here) and de-duped by login; no email is known from this flow, only the login.
+        // never un-invited here) and de-duped by login; the plain login push below is the IMMEDIATE best-effort
+        // (this login is now creditable even if the network call after it fails or is slow); refreshCollaborators
+        // then upgrades it to {login,id} — GitHub's own id-prefixed noreply convention — from the real API.
         try {
           ws.collaborators = Array.isArray(ws.collaborators) ? ws.collaborators : [];
           if (!ws.collaborators.some((c) => c && c.login === login)) { ws.collaborators.push({ login }); saveRegistry(); }
-          _syncCoauthorHook();
+          refreshCollaborators(ws).finally(() => { try { _syncCoauthorHook(); } catch {} });
         } catch {}
       }
       resolve(r.ok ? { ok: true, status: r.status || 'invited' } : { ok: false, error: r.error || 'invite failed' });
@@ -3982,14 +3990,75 @@ function _seedCkpt(ws) {
 // live or not: there is no safe "the" project to touch outside of an active share.
 let _coauthorReason = null;                 // null | 'live' | 'setting' — which consent installed the CURRENTLY live hook
 let _coauthorWs = null;                     // the workspace that reason was installed against (teardown target — resolved once at install time, not re-derived at teardown time, so it can't race the share server tearing down)
+let _coauthorWarnedWs = null;               // wsId already told "couldn't credit guests" this share — the loud degrade fires at most ONCE per live share, not once per roster tick
+const _coauthorCollabRefreshedAt = new Map();   // wsId -> ms of the last lazy GitHub collaborators backfill (see refreshCollaborators below), throttled so a stuck-unresolvable guest doesn't hammer the API every roster tick
+// {owner, repo} for a GitHub call to target — a Claudible-managed 'repo' workspace (ws.owner/ws.repoName|slug),
+// OR an ADOPTED local folder whose own git remote already pointed at a real GitHub repo at adopt time
+// (workspace:adopt's GITHUB_REMOTE parse, stored as ws.repoId = "owner/name"). The adopted case is the B14
+// hardware gap: the owners' claudible-development workspace — the sessions/tools repo, added as an EXISTING
+// local clone via "Adopt an existing folder" rather than created/invited through the app's own repo pipeline —
+// is exactly ws.kind==='local', ws.adopted:true. Before this fix, _coauthorTargetWs's `ws.kind === 'repo'` gate
+// excluded it categorically: no amount of collaborators metadata could ever have mattered, because the live
+// share never even looked at this workspace's repo identity. null = no resolvable GitHub identity at all (a
+// genuinely local folder, or an adopted one with no GitHub remote).
+function _repoIdentity(ws) {
+  if (!ws) return null;
+  if (ws.kind === 'repo') {
+    const repo = isGithubRepoName(ws.repoName || ws.slug || '') ? String(ws.repoName || ws.slug) : '';
+    const owner = String(ws.owner || '').replace(/[^A-Za-z0-9-]/g, '');
+    return (repo && owner) ? { owner, repo } : null;
+  }
+  if (ws.kind === 'local' && ws.adopted && ws.repoId) {
+    const m = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(String(ws.repoId));
+    return m ? { owner: m[1], repo: m[2] } : null;
+  }
+  return null;
+}
+// Ask GitHub for a repo's REAL collaborators (login + stable numeric id) and merge them into ws.collaborators.
+// This is the authoritative source, independent of how access was granted — repo:invite records the inviter's
+// OWN side the moment they click Invite, but that leaves real gaps this closes: (1) the INVITEE's own local
+// copy of the workspace never got that metadata at all; (2) an ADOPTED folder never goes through repo:invite in
+// the first place (it's gated to ws.kind==='repo'); (3) a repo whose collaborators were added straight on
+// GitHub, or that predates any of this wiring, has an empty ws.collaborators forever; (4) an invite recorded
+// only a bare login (repo:invite has no cheap way to learn the numeric id), so its noreply address falls back
+// to the plain-login form instead of GitHub's own id-prefixed convention. Merges rather than replaces —
+// GitHub's list wins for anyone it names (it's the ground truth), but this never drops an entry a real-time
+// flow already knows if this GET raced ahead of GitHub's own consistency window. Best-effort: never throws,
+// never blocks a caller on a failed/offline lookup.
+function refreshCollaborators(ws) {
+  const id = _repoIdentity(ws);
+  if (!id || !APPDIR_WSL) return Promise.resolve(false);
+  return runner.runScript('repo-collaborators.sh', `'${id.repo}' '${id.owner}'`, { timeout: 20000 })
+    .then(({ err, stdout }) => {
+      if (err) { console.error('[claudible] repo-collaborators:', err.message); return false; }
+      let list = null; try { list = JSON.parse(String(stdout).trim() || 'null'); } catch {}
+      if (!Array.isArray(list) || !list.length) return false;
+      const live = registry.workspaces.find((w) => w.id === ws.id);   // re-resolve — this ran across an await, the workspace may have moved on
+      if (!live) return false;
+      const cur = Array.isArray(live.collaborators) ? live.collaborators : [];
+      const byLogin = new Map(cur.map((c) => [String((c && c.login) || '').toLowerCase(), c]).filter(([k]) => k));
+      for (const c of list) {
+        const login = String((c && c.login) || '').trim();
+        if (!login) continue;
+        byLogin.set(login.toLowerCase(), { login, id: c.id });
+      }
+      live.collaborators = Array.from(byLogin.values());
+      saveRegistry();
+      return true;
+    })
+    .catch((e) => { console.error('[claudible] repo-collaborators threw:', e && e.message); return false; });
+}
 let _coauthorChain = Promise.resolve();     // serialize: a roster flap and a settings toggle landing back-to-back must not race each other's file writes
 // The one workspace this feature is ever allowed to touch: the live-shared, PINNED tab's repo (C-5.1 guarantees
-// there is at most one). Anything else — a private tab, a project nobody is sharing — is out of scope on purpose.
+// there is at most one). Anything else — a private tab, a project nobody is sharing — is out of scope on
+// purpose. "Has a repo" means _repoIdentity resolves — a Claudible-managed repo workspace OR an adopted local
+// folder with a real GitHub remote (see _repoIdentity above); a genuinely local/unlinked folder still never
+// qualifies, live share or not.
 function _coauthorTargetWs() {
   if (!share.status().running || sharedTabId == null) return null;
   const rec = ptys.get(sharedTabId);
   const ws = rec && rec.ws;
-  return (ws && ws.kind === 'repo' && ws.path) ? ws : null;
+  return (ws && ws.path && _repoIdentity(ws)) ? ws : null;
 }
 // Roster (display names only) -> coauthorHook entries, matched against ws.collaborators (GitHub logins recorded
 // by repo:invite) case-insensitively by name. No match = an unknown identity; buildCoauthorLines (wsl-side)
@@ -4008,35 +4077,63 @@ function _syncCoauthorHookNow() {
   try {
     if (!APPDIR_WSL) return Promise.resolve();
     const ws = _coauthorTargetWs();
-    if (!ws) return Promise.resolve();                                  // nothing live-shared right now → nothing to touch (stopLiveSharing owns real teardown, see below)
+    if (!ws) { _coauthorWarnedWs = null; return Promise.resolve(); }   // nothing live-shared right now → nothing to touch (stopLiveSharing owns real teardown, see below); reset the once-per-share warn so a NEW share can warn again
     const settingOn = !!readSettings().autoCoauthor;
-    const entries = _liveRosterEntries(ws);
-    if (settingOn && Array.isArray(ws.collaborators)) {                 // widen to every KNOWN collaborator, connected or not
-      const already = new Set(entries.map((e) => (e.login || e.name || '').toLowerCase()));
-      for (const c of ws.collaborators) {
-        const key = String((c && c.login) || '').toLowerCase();
-        if (key && !already.has(key)) { already.add(key); entries.push({ name: c.login, login: c.login, id: c.id }); }
+    // "Connected" = real guests in the roster right now — this is the signal that a lazy backfill is worth the
+    // network round-trip (nobody here yet → don't ask GitHub for nothing).
+    const connected = (Array.isArray(_lastRoster) ? _lastRoster : []).filter((r) => r && r.state && r.state !== 'gone');
+    // LAZY BACKFILL (B14): a repo whose collaborators were never recorded — an ADOPTED folder (repo:invite is
+    // gated to ws.kind==='repo' and never runs against one), a repo whose collaborators were added straight on
+    // GitHub, or one that predates this wiring entirely (the owners' own claudible-development workspace, per
+    // the hardware finding) — has an empty ws.collaborators FOREVER, so nobody here ever resolves no matter who
+    // joins. Ask GitHub once (throttled to once a minute per workspace) instead of staying silently broken.
+    const needsBackfill = connected.length > 0 && !(Array.isArray(ws.collaborators) && ws.collaborators.length);
+    const lastRefresh = _coauthorCollabRefreshedAt.get(ws.id) || 0;
+    let backfill = Promise.resolve(false);
+    if (needsBackfill && (Date.now() - lastRefresh > 60000)) { _coauthorCollabRefreshedAt.set(ws.id, Date.now()); backfill = refreshCollaborators(ws); }
+    return backfill.then(() => {
+      const entries = _liveRosterEntries(ws);                          // re-read AFTER any backfill above — ws.collaborators may just have been populated
+      if (settingOn && Array.isArray(ws.collaborators)) {               // widen to every KNOWN collaborator, connected or not
+        const already = new Set(entries.map((e) => (e.login || e.name || '').toLowerCase()));
+        for (const c of ws.collaborators) {
+          const key = String((c && c.login) || '').toLowerCase();
+          if (key && !already.has(key)) { already.add(key); entries.push({ name: c.login, login: c.login, id: c.id }); }
+        }
       }
-    }
-    if (!settingOn && entries.length === 0 && _coauthorReason == null) return Promise.resolve();   // default behavior, nobody connected yet, nothing installed → stay quiet, don't install for an empty list
-    _coauthorReason = settingOn ? 'setting' : 'live';
-    _coauthorWs = ws;
-    const b64 = Buffer.from(JSON.stringify(entries)).toString('base64');
-    return runner.runScript('coauthor-hook.sh', `sync '${b64}'`, { ws, timeout: 8000 })
-      .then(({ err, stdout }) => {
-        if (err) { console.error('[claudible] coauthor-hook sync:', err.message); return; }
-        let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {}
-        if (r && r.ok === false) console.error('[claudible] coauthor-hook sync:', r.error);
-        if (r && Array.isArray(r.skipped) && r.skipped.length) { try { winSend('coauthor:skipped', { names: r.skipped }); } catch {} }   // "visible note" (C-10.6) rather than a fabricated address
-      })
-      .catch((e) => console.error('[claudible] coauthor-hook sync threw:', e && e.message));
+      if (!settingOn && entries.length === 0 && _coauthorReason == null) return;   // default behavior, nobody connected yet, nothing installed → stay quiet, don't install for an empty list
+      _coauthorReason = settingOn ? 'setting' : 'live';
+      _coauthorWs = ws;
+      const b64 = Buffer.from(JSON.stringify(entries)).toString('base64');
+      return runner.runScript('coauthor-hook.sh', `sync '${b64}'`, { ws, timeout: 8000 })
+        .then(({ err, stdout }) => {
+          if (err) { console.error('[claudible] coauthor-hook sync:', err.message); return; }
+          let r = null; try { r = JSON.parse(String(stdout).trim() || 'null'); } catch {}
+          if (r && r.ok === false) console.error('[claudible] coauthor-hook sync:', r.error);
+          if (r && Array.isArray(r.skipped) && r.skipped.length) {
+            // r.active (coauthor-tool.js) tells the two failure shapes apart. active===0 with skipped names is a
+            // TOTAL BLACKOUT (C-10.6/B14): real guests are connected but NOT ONE of them resolves to a known
+            // GitHub identity — the hook installs nothing at all (coauthorHook.js only installs once lines.length
+            // >= 1), which used to be a silent no-op with no explanation. Say so ONCE per live share — winSend
+            // fires on EVERY roster tick (join/leave/idle/active), and r.skipped repeats every time, so this
+            // still needs its own once-per-share guard even though the underlying signal is per-tick. active>0
+            // (SOME guests resolved, others didn't) keeps the original per-tick note; it's already informative
+            // in context ("Alice was credited; Bob wasn't") rather than "nobody was credited, and here's why".
+            if (!r.active) {
+              if (_coauthorWarnedWs !== ws.id) { _coauthorWarnedWs = ws.id; try { winSend('coauthor:noIdentity', { names: r.skipped }); } catch {} }
+            } else {
+              try { winSend('coauthor:skipped', { names: r.skipped }); } catch {}   // "visible note" (C-10.6) rather than a fabricated address
+            }
+          }
+        })
+        .catch((e) => console.error('[claudible] coauthor-hook sync:', e && e.message));
+    });
   } catch (e) { console.error('[claudible] coauthor-hook sync threw:', e && e.message); return Promise.resolve(); }
 }
 // The ONE uninstall trigger tied to "share ends" (C-10.6). Uses the REMEMBERED target (_coauthorWs), not a
 // fresh _coauthorTargetWs() read — by the time callers reach this, share state may already be mid-teardown.
 function _coauthorTeardown() {
   const wasReason = _coauthorReason, ws = _coauthorWs;
-  _coauthorReason = null; _coauthorWs = null;
+  _coauthorReason = null; _coauthorWs = null; _coauthorWarnedWs = null;   // a fresh share (even on the same repo) gets to warn again if it's still unresolvable
   if (!wasReason || !ws || !APPDIR_WSL) return;
   runner.runScript('coauthor-hook.sh', 'uninstall', { ws, timeout: 8000 })
     .then(({ err }) => { if (err) console.error('[claudible] coauthor-hook uninstall:', err.message); })

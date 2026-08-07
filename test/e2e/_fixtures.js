@@ -305,6 +305,30 @@ function seedRepoWorkspace({ persist, home }, { slug, owner, remote, collaborato
   return ws;
 }
 
+// An ADOPTED workspace: kind:'local', adopted:true, repoId:"owner/name" — the shape workspace:adopt (main.js)
+// gives an EXISTING local git clone whose own `origin` remote already points at a real GitHub repo, as opposed
+// to a repo Claudible created/invited the user into (kind:'repo'). This is the B14 hardware gap: the owners'
+// own claudible-development workspace (the sessions/tools repo) was added this way — an existing local clone,
+// not created/invited through the app — so it never carried ws.kind==='repo' at all. Mirrors seedRepoWorkspace's
+// shape/clone logic exactly; only the registry entry's kind/adopted/repoId differ.
+function seedAdoptedRepoWorkspace({ persist, home }, { slug, owner, remote, collaborators }) {
+  const wid = `local-${slug}`;
+  const sdir = path.join(home, '.claudible', 'workspaces', slug);   // workspace:adopt never provisions under ~/.claudible/repos — it points straight at wherever the folder already lives; this mirrors that shape without needing a real folder-picker dialog
+  const ws = {
+    id: wid, label: slug, kind: 'local', slug, adopted: true, path: sdir,
+    repoId: `${owner}/${slug}`, createdAt: Date.now(),
+  };
+  if (Array.isArray(collaborators) && collaborators.length) ws.collaborators = collaborators;
+  fs.mkdirSync(path.dirname(sdir), { recursive: true });
+  cp.execFileSync('git', ['clone', '-q', remote, sdir], { windowsHide: true });
+
+  const wsFile = path.join(persist, 'workspaces.json');
+  const reg = JSON.parse(fs.readFileSync(wsFile, 'utf8'));
+  reg.workspaces.push(ws);
+  fs.writeFileSync(wsFile, JSON.stringify(reg));
+  return ws;
+}
+
 // Fabricate a real (qualifying) Claude transcript directly on disk — the file shape sync + the sidebar both
 // gate on (wsl/prompt-scan.js's hasRealPrompt / wsl/sessions-tool.js's msgs counter): a `type:"user"` line
 // whose message.content is non-empty text not starting with '<' or 'Caveat'. This is the harness's stand-in
@@ -394,6 +418,6 @@ async function syncNowRetry(page, wsId, { budgetMs = 30000, gapMs = 1500 } = {})
 
 module.exports = {
   launchClaudible, REPO_ROOT, FAKE_CLAUDE_DIR, FAKE_GH_DIR, isPidAlive, listDescendantPids,
-  resolveGitBash, localBareRemote, seedRepoWorkspace, writeFakeTranscript, launchPair, sleep, syncNowRetry,
-  waitForAppReady,
+  resolveGitBash, localBareRemote, seedRepoWorkspace, seedAdoptedRepoWorkspace, writeFakeTranscript, launchPair,
+  sleep, syncNowRetry, waitForAppReady,
 };

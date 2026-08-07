@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld('claudible', {
   onLiveTypist: (cb) => ipcRenderer.on('live:typist', (_e, p) => cb(p)),     // { tabId, name } someone is typing in a session I joined
   onShareRoster: (cb) => ipcRenderer.on('share:roster', (_e, r) => cb(r)),
   onCoauthorSkipped: (cb) => ipcRenderer.on('coauthor:skipped', (_e, p) => cb(p)),   // C-10.6: { names } — a live guest has no known email/GitHub login, so the co-author hook left them off rather than fabricate an address
+  onCoauthorNoIdentity: (cb) => ipcRenderer.on('coauthor:noIdentity', (_e, p) => cb(p)),   // C-10.6/B14: guests are connected to a live share but NONE resolve to a known GitHub identity — the hook installs nothing to credit; said once out loud rather than silently doing nothing
   onSettingsBackupNotice: (cb) => ipcRenderer.on('settings:backup-notice', (_e, p) => cb(p)),   // C-3.7: { tabId, files } — a hand-edited .claude file was about to be overwritten; a dated backup was taken first
   onShareTunnelDown: (cb) => ipcRenderer.on('share:tunnel-down', (_e) => cb()),   // public tunnel dropped while sharing
   onShareTunnelUp: (cb) => ipcRenderer.on('share:tunnel-up', (_e, p) => cb(p)),   // { url } public tunnel is live — a fresh share, or the background self-heal recovered it
