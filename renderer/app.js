@@ -5789,8 +5789,12 @@ function wsMenuItems(chip, nm, w) {
       act: () => openInviteModal(w) });
     if (w.syncSessions) {
       const extra = (st.synced != null ? ' · ' + st.synced + ' synced' : '') + (st.diverged ? ' · ' + st.diverged + ' to review' : '');
-      items.push({ icon: CLOUD_SVG, label: (st.status === 'syncing' ? 'Syncing sessions…' : 'Sync sessions now') + extra, on: true,
-        hint: 'Collaborating in Claudible: teammates see your sessions and can Join live. Push & pull now.', act: () => triggerSyncNow(w) });
+      // C29 UX finding: this row used to read "Sync sessions now" with no state word at all — indistinguishable
+      // from the OFF-state's "Collaborate in Claudible…" action, so a project that already had sync ON looked
+      // like clicking here was what turned it on. It's actually a manual trigger for an always-running
+      // background sync (C-0.8's one-click resolve) — the label must say ON, matching "Screen-share: ON" above.
+      items.push({ icon: CLOUD_SVG, label: (st.status === 'syncing' ? 'Sync: ON — syncing…' : 'Sync: ON — sync now') + extra, on: true,
+        hint: 'Session sync is already ON — teammates see your sessions and can Join live. Click to push & pull immediately.', act: () => triggerSyncNow(w) });
       items.push({ icon: CLOUD_SVG, label: 'Turn off collaboration',
         hint: 'Stop sharing this project’s sessions — no more sync, and teammates can no longer Join live.', act: () => disableSync(w) });
     } else {

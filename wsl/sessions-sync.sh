@@ -438,9 +438,31 @@ import_sessions() {
   return 0
 }
 
+# B18: a foreign-authored session that THIS machine genuinely continued (resumed someone else's transcript and
+# added turns) must still reach collaborators — the machine that originally authored it may never touch it
+# again, so "never republish" would silently strand every turn we added, forever (hardware finding: sync branch
+# showed title+presence commits but no content commit — "transcript sync skips foreign-authored sessions").
+# Returns 0 (export) if $1 is a clean forward extension of every known branch copy of id $2, 1 (skip) if it's
+# identical to one (nothing new to publish) or genuinely forked (not a clean append — leave it for the
+# divergence machinery in import_sessions to flag; publishing a conflicting fork here would be a silent
+# overwrite risk, exactly what the foreign-trust boundary exists to prevent).
+foreign_grew() {   # $1=local file  $2=id
+  local c csz lsz best="" bestsz=-1
+  for c in "$WT"/sessions/*/"$2.jsonl"; do
+    [ -e "$c" ] || continue
+    case "$c" in "$WT/sessions/$author/"*) continue ;; esac   # our own dir wouldn't have it yet (nothing exported under this id before)
+    csz="$(wc -c < "$c" 2>/dev/null || echo 0)"
+    [ "$csz" -gt "$bestsz" ] && { best="$c"; bestsz="$csz"; }
+  done
+  [ -n "$best" ] || return 1                                  # no branch copy found (shouldn't happen) — be safe, don't publish
+  cmp -s "$best" "$1" && return 1                              # identical to the freshest known branch copy → nothing new
+  lsz="$(wc -c < "$1" 2>/dev/null || echo 0)"
+  [ "$lsz" -gt "$bestsz" ] && head -c "$bestsz" "$1" | cmp -s - "$best"   # true only if local = branch copy + more turns (clean append)
+}
 # Copy this machine's transcripts into our own author dir. Skips: the live session, and any session that
-# ORIGINATED elsewhere (already present under another author on the branch) — we never re-publish an
-# imported session under our own name, so attribution and the disjoint-path invariant both hold.
+# ORIGINATED elsewhere and was NOT extended here — we never re-publish an untouched import under our own name,
+# so attribution and the disjoint-path invariant both hold for the common (unchanged) case. A foreign session
+# THIS machine actually continued (foreign_grew) is the one exception — see the comment above.
 export_sessions() {
   mkdir -p "$WT/sessions/$author" 2>/dev/null
   PUSHED=0
@@ -453,7 +475,9 @@ export_sessions() {
     case "$id" in '' | -* | *- | *[!A-Za-z0-9-]*) continue ;; esac
     is_live "$id" && continue                                  # never sync the currently-live session
     tombstoned "$id" && continue                                    # deleted everywhere → never re-publish
-    grep -qxF -- "$id" "$FSET" 2>/dev/null && continue              # imported (foreign) → never republish under our name
+    if grep -qxF -- "$id" "$FSET" 2>/dev/null; then
+      foreign_grew "$f" "$id" || continue                            # imported and untouched (or genuinely forked) → never republish under our name
+    fi
     m="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"; age=$(( $(date +%s) - m ))   # torn-write guard: skip a file still (GNU stat -c, BSD/macOS stat -f fallback)
     [ "$age" -ge 0 ] && [ "$age" -lt "${CLAUDIBLE_SYNC_MIN_AGE:-2}" ] && continue   # being written (~2s); ignore future mtimes (clock skew)
     has_real_prompt "$f" "$_rp" || continue                          # promptless stub (fork artifact / killed boot) — noise that must never spread to collaborators; it exports once it gains a real prompt (same definition the app's picker uses)
