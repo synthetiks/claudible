@@ -1840,11 +1840,30 @@ function updateSessionCtrlBtn() {
   else if (amHostingLive()) { btn.style.display = ''; btn.textContent = 'End Session'; btn.title = 'End the live session for everyone'; }
   else { btn.style.display = 'none'; }
 }
+// B10/C-5.6: the host's Pause/Resume control — the missing entry point to the paused-mirror privacy feature.
+// Only the HOST of a live session sees it (a joiner never gets to pause someone else's mirror); the label and
+// aria-pressed state are the single source of truth for "am I paused right now", driven entirely by main's
+// share:paused pushes (claudible.onSharePaused below) — never guessed locally, since the pause can also flip
+// automatically (the host tabbing into a private workspace) without this control being clicked at all.
+let sharePaused = false;
+function updatePauseBtn() {
+  const btn = $('pause-btn'); if (!btn) return;
+  const show = amHostingLive();
+  btn.style.display = show ? '' : 'none';
+  if (!show) return;
+  btn.classList.toggle('active', sharePaused);
+  btn.textContent = sharePaused ? 'Resume' : 'Pause';
+  btn.title = sharePaused
+    ? 'Resume the live mirror — guests will see your terminal again'
+    : 'Pause the live mirror — nothing you type, and nothing a guest sends, will reach the other side until you resume';
+  btn.setAttribute('aria-pressed', sharePaused ? 'true' : 'false');
+}
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
   const hosting = amHostingLive();
   updateSessionCtrlBtn();                                            // host: "End Session" · joiner: "Leave Session" (mutually exclusive)
+  updatePauseBtn();                                                  // host only: Pause/Resume (B10/C-5.6)
   const you = document.createElement('span'); you.className = 'rmember you';
   you.dataset.name = youName();                                       // voice-state projection matches pills by this (textContent also holds the ✕ kick glyph)
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
@@ -1910,6 +1929,7 @@ async function terminateLive() {
 function endLiveNow(msg) {
   if (sharedSessionId) { sharedSessionId = null; sharedWsId = null; }
   if (webShare) { webShare = false; webShareUI(false); }
+  sharePaused = false; updatePauseBtn();                          // B10: a manual pause must not outlive the share it belonged to (mirrors main's manualPause reset on share:stop)
   try { if (hostVoice && hostVoice.isJoined && hostVoice.isJoined()) hostVoice.leave(); } catch {}   // R20: the host's own voice-room membership outlived the share — mic stayed hot and the next share inherited a ghost member; every guest path already drops voice on leave, the HOST's end paths never did
   guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
   updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions(); refreshExpandedTrees();   // updateCollab→ensureTunnel drops the tunnel (closes guests). refreshSessions is ACTIVE-LIST-ONLY — without refreshExpandedTrees the ended session keeps its green rail + Live badge in any other project's open tree
@@ -1941,6 +1961,10 @@ function renderLiveBar() {
   // lands, match by session.)
   const onSharedTab = !!(t && t.kind !== 'live' && ((sharedTabIdR != null && t.tabId === sharedTabIdR) || (sharedSessionId && t.session === sharedSessionId)));
   bar.classList.remove('elsewhere');
+  // B10/C-5.6: sharePaused only ever reflects MY OWN outgoing share (never set on a joined/liveTab), so the
+  // control's state is obvious here too, not just on the #pause-btn label — same rule as the co-drive badge.
+  bar.classList.toggle('paused', !liveTab && sharePaused);
+  const liveTxt = $('live-txt'); if (liveTxt) liveTxt.textContent = (!liveTab && sharePaused) ? 'Paused' : 'Live';
   // …but a host browsing another session must still SEE that their live session is running. Hiding the bar
   // outright is what made "I clicked away" look like "it ended". Show a compact, unmistakable reminder that
   // jumps back to it. (Only for a session share — a manual web link has no session tab to return to.)
@@ -1981,6 +2005,10 @@ function renderLiveBar() {
   });
 }
 claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
+// B10/C-5.6: fires on EVERY pause transition — a manual click of #pause-btn, but just as often the host simply
+// tabbing into a private workspace (main's syncShare/respawnPty auto-derive it). Either way this is the ONLY
+// place sharePaused is assigned, so the control can never drift from what the share server is actually doing.
+if (claudible.onSharePaused) claudible.onSharePaused((p) => { sharePaused = !!(p && p.paused); updatePauseBtn(); renderLiveBar(); });
 claudible.onCoauthorSkipped((p) => {   // C-10.6: a visible note instead of a silently fabricated Co-authored-by email
   const names = (p && Array.isArray(p.names)) ? p.names.filter(Boolean) : [];
   if (names.length) toast(`No known email/GitHub login for ${names.join(', ')} — left off commit co-authors`);
@@ -3204,6 +3232,15 @@ if (chatLog) chatLog.addEventListener('click', async (e) => {
   toast((r && r.ok) ? 'Message copied' : 'Could not copy — ' + humanError('clipboard'));
 });
 { const _term = $('chat-terminate'); if (_term) _term.addEventListener('click', () => { const t = AT(); if (t && t.kind === 'live') closeTab(t.tabId); else terminateLive(); }); }   // host → End Session (terminate for all); joiner → Leave Session (close the joined tab → back to single-person view)
+// B10/C-5.6: click just asks main to flip it — sharePaused itself is never set here, only from the
+// claudible.onSharePaused push below, so the button never claims a state main hasn't confirmed.
+{ const _pause = $('pause-btn'); if (_pause) _pause.addEventListener('click', () => {
+  _pause.disabled = true;
+  claudible.sharePause(!sharePaused)
+    .then((r) => { if (!r || !r.ok) toast('Could not change the pause state'); })
+    .catch(() => toast('Could not change the pause state'))
+    .finally(() => { _pause.disabled = false; });
+}); }
 // Append to a SPECIFIC buffer; only repaint if that buffer is the one currently on screen.
 function chatAppend(buf, entry, onScreen) { buf.push(entry); if (buf.length > 400) buf.shift(); if (onScreen) renderChatLog(); }
 function sendChat() {

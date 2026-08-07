@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld('claudible', {
   shareNewLink: () => ipcRenderer.invoke('share:newlink'),
   shareKick: (name) => ipcRenderer.invoke('share:kick', { name }),   // host removes one guest by name
   shareApprove: (id, ok) => ipcRenderer.invoke('share:approve', { id, ok }),
+  sharePause: (paused) => ipcRenderer.invoke('share:pause', { paused: !!paused }),   // B10/C-5.6: host Pause/Resume control
+  onSharePaused: (cb) => ipcRenderer.on('share:paused', (_e, p) => cb(p)),           // { paused, manual } — fires on EVERY pause transition, host-triggered or auto (private workspace)
   shareTracker: (s) => ipcRenderer.send('share:tracker', s),
   shareSendChat: (text) => ipcRenderer.send('share:chat-send', text),
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),

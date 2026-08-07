@@ -60,6 +60,11 @@ function fgRec() { return ptys.get(fgTabId) || null; }
 // attribution) — but everything guests can see or drive gates on the PIN, so the host can open and work in
 // any other session without a byte of it reaching a guest, while the shared session keeps streaming.
 let sharedTabId = null;
+// B10/C-5.6: the host's own explicit Pause control (share bar). Independent of isShareable(mirrorWs()) — a
+// manual pause must survive the host merely switching foreground tabs / workspaces (syncShare and respawnPty's
+// auto-derive both defer to this when it's set, via setSharePaused/derivePaused below), and clears on its own
+// only when the host clicks Resume or the share itself starts/stops.
+let manualPause = false;
 const _typUi = { name: '', ts: 0 };   // throttle for the host cockpit's "guest is typing" chip (share:typist)
 let _typHostTs = 0;                   // throttle for telling guests "the host is typing" (share.broadcastTypist)
 function mirrorTabId() { return sharedTabId || fgTabId; }   // pinned while sharing; follows focus otherwise (keeps the replay ring warm pre-share)
@@ -847,6 +852,19 @@ function spawnPty(tabId, cols, rows, ws, session) {
 // Claudible collaborator can watch the synced session live). The browsable LIBRARY below stays shared-only, so
 // turning on Sync never exposes your other synced workspaces to a web guest you handed a link to.
 function isShareable(ws) { return !!(ws && (ws.shared || ws.syncSessions)); }
+// B10/C-5.6: every auto-derived pause decision (syncShare, respawnPty, setForegroundTab) routes through this
+// instead of raw `!isShareable(ws)`, so a host's explicit manual Pause always wins over "this workspace happens
+// to be shareable" — otherwise the very next tab focus / workspace sync would silently un-pause behind the
+// host's back.
+function derivePaused(ws) { return manualPause || !isShareable(ws); }
+// The ONE place that calls share.setPaused — every call site (auto-derive AND the forced teardown freezes)
+// routes through here so the host's own Pause control always reflects reality, including transitions the
+// control didn't cause itself (e.g. the host tabbing into a private workspace auto-pauses the mirror).
+function setSharePaused(p) {
+  const v = !!p;
+  try { share.setPaused(v); } catch {}
+  try { winSend('share:paused', { paused: v, manual: manualPause }); } catch {}
+}
 // The granted workspace library a guest is allowed to see (paths/urls stripped); marks which is live.
 function grantedList() {
   const lw = mirrorWs();                                   // "live" = the SHARED tab's workspace while pinned, not wherever the host is browsing
@@ -857,7 +875,7 @@ function grantedList() {
 // and refresh the visible library. No-op when not sharing.
 function syncShare() {
   if (!share.status().running) return;
-  try { share.setPaused(!isShareable(mirrorWs())); } catch {}   // pause tracks the SHARED tab's workspace, so the host focusing a private tab can't pause (or unpause) the mirror
+  try { setSharePaused(derivePaused(mirrorWs())); } catch {}   // pause tracks the SHARED tab's workspace (or the host's manual override), so the host focusing a private tab can't pause (or unpause) the mirror
   try { share.setWorkspaces(grantedList()); } catch {}
   try { _pushHistoryToShare(); } catch {}                  // guests' Session-History feed follows the live workspace (share start / foreground / ws switches all route through here)
 }
@@ -950,11 +968,11 @@ function respawnPty(tabId, session, opts) {
   // were never granted. Keyed on the PINNED tab, not on movesShared — a manual web-share pins whatever tab was in
   // the foreground, and that tab's session can be '' (resume-latest), which makes movesShared false.
   const freezeMirror = onPinned && endShare;
-  if (freezeMirror) { try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {} }
+  if (freezeMirror) { try { setSharePaused(true); share.resetRing(); share.resetStatus(); } catch {} }
   if (tabId === mirrorTabId()) {
     // Set paused BEFORE the new pty can emit a byte, so a private workspace's output never reaches a guest.
     // (The freeze above is authoritative — never un-pause it here on the way back in.)
-    try { if (share.status().running && !freezeMirror) share.setPaused(!isShareable(ws)); } catch {}
+    try { if (share.status().running && !freezeMirror) setSharePaused(derivePaused(ws)); } catch {}
   }
   const old = rec && rec.proc;
   if (rec && rec.reloadTimer) { try { clearTimeout(rec.reloadTimer); } catch {} rec.reloadTimer = null; }   // a pending post-sync reload for the OLD generation dies with it (the new pty re-reads the transcript anyway)
@@ -1036,7 +1054,7 @@ function setForegroundTab(tabId) {
     try { share.resetRing(); share.resetStatus(); } catch {}                        // drop the previous tab's replay/tracker
     // Only (re)evaluate the mirror pause when we actually KNOW this tab's workspace — pausing on an unknown ws would
     // wrongly treat it as private and wipe the ring. If the pty hasn't spawned yet, spawnPty wires the mirror on spawn.
-    if (ws) { try { if (share.status().running) share.setPaused(!isShareable(ws)); } catch {} }
+    if (ws) { try { if (share.status().running) setSharePaused(derivePaused(ws)); } catch {} }
     if (rec) { try { share.setSize(rec.cols, rec.rows); } catch {} }
     syncShare();
     // Foreground changed → guest input now targets a different pty; any pending typist tag belonged to the
@@ -1121,7 +1139,7 @@ ipcMain.handle('tab:close', (e, { tabId }) => {
   // dead id (never fall back to the host's private foreground) and tell the renderer to end the share for real.
   if (sharedTabId === tabId) {
     _liveTiming('share: FORCE-END — the pinned tab (' + tabId + ') was closed; the live link dies with it');
-    try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    try { setSharePaused(true); share.resetRing(); share.resetStatus(); } catch {}
     stopAdvertising();                                                 // stop re-stamping + clear presence NOW, not after the renderer round-trip (else the heartbeat keeps advertising an ended session for seconds)
     try { winSend('share:force-end', { reason: 'tab-closed' }); } catch {}
   }
@@ -1364,6 +1382,7 @@ ipcMain.handle('share:start', (e, opts) => {
       const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
       sharedTabId = fgTabId;                              // PIN: the tab being viewed at start IS the live session; the host is free to roam afterwards
       try { winSend('share:pinned', { tabId: sharedTabId }); } catch {}   // renderer mirrors THIS tab's tracker to guests from now on
+      manualPause = false;                                // a fresh share always starts unpaused/auto (B10) — share.start() itself already reset the server's own `paused`
       const fr0 = ptys.get(sharedTabId) || fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
       syncShare();                                        // tell guests the granted library + pause if the live ws is private
       let base = `http://127.0.0.1:${port}`, remote = false, note = null, localDns = true, reason = null;
@@ -1409,10 +1428,21 @@ ipcMain.handle('share:stop', async () => {
   // nulls it — that ordering (and the whole teardown) lives in stopLiveSharing(), shared with the quit path.
   stopLiveSharing();
   sharedTabId = null;                                    // UN-PIN: no live session → the idle mirror plumbing follows focus again
+  manualPause = false;                                   // B10: a manual pause must not outlive the share it belonged to
   try { winSend('share:pinned', { tabId: null }); } catch {}
   _lastRoster = [];
   _writeAllContexts();                                   // sharing ended → the hosting tab's context drops the "hosting" block (back to solo)
   return { ok: true };
+});
+// B10/C-5.6: the host's explicit Pause/Resume control. Toggling flips `manualPause` and re-derives the real
+// pause state through the SAME helper every other pause decision uses — so a host who pauses while already on
+// a private workspace, or resumes while still on one, gets the correct combined result (and the share bar's
+// notify below fires either way, whatever the actual resulting state turns out to be).
+ipcMain.handle('share:pause', (e, arg) => {
+  if (!share.status().running) return { ok: false, error: 'not sharing' };
+  manualPause = !!(arg && arg.paused);
+  try { setSharePaused(derivePaused(mirrorWs())); } catch {}
+  return { ok: true, paused: share.status().paused };
 });
 ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time link (re-invite)
   if (!share.status().running || !shareBaseUrl) return { ok: false, error: 'not sharing' };
@@ -2858,7 +2888,7 @@ function workspaceDeleteCore(id) { return new Promise((resolve) => {
     // (Nothing can interleave before the freeze today — JS is single-threaded and there's no await — but the
     // ordering must not depend on that.) The renderer's force-end drops the tunnel a beat later.
     _liveTiming('share: FORCE-END — the project owning the pinned tab (' + sharedTabId + ') was deleted; the live link dies with it');
-    try { share.setPaused(true); share.resetRing(); share.resetStatus(); } catch {}
+    try { setSharePaused(true); share.resetRing(); share.resetStatus(); } catch {}
     stopAdvertising();                                                 // stop re-stamping + clear presence NOW (parity with tab-close) rather than waiting on the renderer's force-end round-trip
     try { winSend('share:force-end', { reason: 'workspace-deleted' }); } catch {}
   } else {

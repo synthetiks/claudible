@@ -1074,6 +1074,12 @@
     /* the host is browsing another session while their live one keeps running — a quiet reminder + a way back */
     .livebar.elsewhere{background:rgba(95,180,135,.045);border-bottom-color:rgba(95,180,135,.12)}
     .livebar.elsewhere .live-dot{animation:none;opacity:.75}
+    /* B10/C-5.6: the host explicitly paused (or auto-paused by tabbing into a private workspace) — the SAME bar
+       that says "Live" must say so, not just #pause-btn, or a host who never glances at the chat panel would
+       have no way to tell guests are frozen out. Amber, matching #pause-btn's rest-state palette. */
+    .livebar.paused{background:rgba(224,169,59,.1);border-bottom-color:rgba(224,169,59,.28)}
+    .livebar.paused .live-dot{background:#e0a93b;box-shadow:0 0 8px -1px #e0a93b;animation:none}
+    .livebar.paused .live-txt{color:#e0a93b}
     /* C-5.2: unmissable while the RUNNING share's real served mode is co-drive (not the checkbox) — paints
        whenever an approved guest can actually type on this machine, and disappears the instant that stops
        being true (view-only, or the share ends). Compact so it never crowds the roster pills next to it. */
@@ -1323,6 +1329,14 @@
     .rmember.invoice::after{content:'🎙';font-size:var(--fs-2xs);margin-left:2px;opacity:.7;filter:grayscale(35%);transition:opacity var(--dur-base),filter var(--dur-base)}
     .rmember.invoice.speaking{color:var(--ink)}
     .rmember.invoice.speaking::after{opacity:1;filter:none;text-shadow:0 0 7px rgba(95,180,135,.9)}
+    /* B10/C-5.6: Pause/Resume — same control-family sizing as .hv-btn/.chat-term (28px tall, 8px radius,
+       min-width 112px) so it reads as one row of live-session controls. Amber (not red/danger) at rest: pausing
+       is a privacy action, not a destructive one — the SAME warning color already used for tunnel-warn/idle
+       roster dots. .active (currently paused) inverts to a solid fill so "I am paused right now" is unmissable,
+       same visual language as .hv-mute.muted going solid red while the mic is muted. */
+    .pause-btn{flex:none;width:auto;font:inherit;font-size:var(--fs-xs);font-weight:600;letter-spacing:.01em;color:#e0a93b;background:rgba(224,169,59,.13);border:1px solid rgba(224,169,59,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background var(--dur-fast),color var(--dur-fast)}
+    .pause-btn:hover{background:rgba(224,169,59,.24);color:#f0c168}
+    .pause-btn.active{color:#fff;border-color:#e0a93b;background:rgba(224,169,59,.5)}
     /* host live-controls: a small "End live" in the chat head + a per-guest ✕ on the badge itself */
     .chat-term{flex:none;width:auto;font:inherit;font-size:var(--fs-xs);font-weight:600;letter-spacing:.01em;color:#e58479;background:rgba(229,86,75,.13);border:1px solid rgba(229,86,75,.32);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:112px;padding:0 10px;cursor:pointer;transition:background var(--dur-fast),color var(--dur-fast)}   /* width:auto overrides button{width:100%}; sized to MATCH .hv-btn (same height/min-width/radius) so End/Leave and Join voice read as one control family */
     .chat-term:hover{background:rgba(229,86,75,.26);color:#ff9b91}
@@ -1525,7 +1539,7 @@
     <div class="center">
       <!-- LIVE bar: shown when this session is live (synced collab) — who's in it -->
       <div class="livebar" id="livebar" style="display:none">
-        <span class="live-dot"></span><span class="live-txt">Live</span>
+        <span class="live-dot"></span><span class="live-txt" id="live-txt">Live</span>
         <!-- C-5.2: real served mode only — app.js's renderLiveBar keys this off lastShareReadOnly / the
              joined tab's liveReadOnly (the server's actual mode), never the #share-ro checkbox -->
         <span class="codrive-badge" id="codrive-badge" style="display:none" title="Co-drive is on — an approved guest can run commands on your computer, as you.">CO-DRIVE</span>
@@ -1552,6 +1566,10 @@
         <span class="chat-head-actions">
           <button id="hv-btn" class="hv-btn" title="Talk with your viewers"><span class="hv-ic">🎙</span> Join voice</button>
           <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
+          <!-- B10/C-5.6: the missing entry point to the paused-mirror privacy feature — host-only (never shown to
+               a joiner), independent of the auto-pause that already fires when the host tabs into a private
+               project. Same size/shape family as hv-btn/chat-term; app.js's updatePauseBtn() owns label + state. -->
+          <button class="pause-btn" id="pause-btn" type="button" title="Pause the live mirror" style="display:none">Pause</button>
           <button class="chat-term" id="chat-terminate" type="button" title="End the live session for everyone" style="display:none">End live</button>
         </span>
       </div>
