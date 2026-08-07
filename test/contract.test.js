@@ -4119,5 +4119,83 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /function renderPluginsList\(list\) \{/.test(APP) ? '' : 'no renderPluginsList(list) function in app.js'].filter(Boolean));
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 113. C-5.1 — THE OWNERS' PIN LAW (amended 2026-08-07). A share is welded to the session the host chose at
+//   start; it NEVER follows the host, and starting a second share while one runs is refused, in all four
+//   web/collab orderings. The 2026-08-07 hardware exposure: ensureTunnel()'s `want === tunnelUp` boolean
+//   short-circuit let toggleShareSession silently relabel a running share (sharedSessionId flipped to a NEW
+//   session) without ever calling share:start again — so main's real pin (sharedTabId) never moved, but every
+//   renderer surface describing WHICH session was shared (presence, sidebar, elsewhere-bar) drifted to whatever
+//   the host most recently clicked, while guests kept receiving the ORIGINAL pinned tab's bytes under the new
+//   session's name. Four-layer fix: (1) toggleShareSession gets the same B13 refusal doStartSharing already had,
+//   (2) ensureTunnel gets an identity-aware backstop so a mismatch can never silently reuse the tunnel, (3) main's
+//   live:advertise self-checks against the REAL pin before publishing presence, (4) the share link itself carries
+//   the pinned session's id so guest.js's C-5.10 tripwire has an independent promise to check every frame
+//   against, not just its own first-seen frame.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const appNoComments = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bodyOf = (name) => (appNoComments.match(new RegExp('function ' + name + '\\([\\s\\S]*?(?=\\nfunction |\\nconst |\\nlet )')) || [''])[0];
+
+  // (1) toggleShareSession refuses a share for a DIFFERENT session than what's actually pinned, before ever
+  //     touching sharedSessionId — mirrors doStartSharing's own B13 guard (pin #86b), applied to the collab path.
+  const tog = bodyOf('toggleShareSession');
+  none('toggleShareSession lost its B13 refusal (a second Share can relabel a running one again)',
+    [/if \(tunnelUp && sharedTabIdR != null\) \{/.test(tog) ? '' : 'no tunnelUp/sharedTabIdR guard',
+     /if \(pinnedRec && pinnedRec\.session !== s\.id\) \{/.test(tog)
+       ? '' : 'guard no longer compares the pinned tab\'s RAW session (incl. an unresolved new/\'\' draft) against the requested id'].filter(Boolean));
+  {
+    // …and the refusal must fire BEFORE sharedSessionId is ever reassigned, or the state corruption already
+    // happened by the time the check runs.
+    const iGuard = tog.indexOf('if (tunnelUp && sharedTabIdR != null)');
+    const iAssign = tog.indexOf("sharedSessionId = s.id; sharedWsId = activeWsId;");
+    none('toggleShareSession\'s B13 guard runs AFTER sharedSessionId is reassigned (too late to refuse)',
+      (iGuard > -1 && iAssign > -1 && iGuard < iAssign) ? [] : ['guard does not precede the sharedSessionId assignment']);
+  }
+
+  // (2) ensureTunnel's short-circuit is identity-aware, not a bare boolean — the backstop for any caller that
+  //     doesn't go through toggleShareSession's own guard first. Must never mutate state on a host merely
+  //     browsing away from the pinned tab (collabLive/tunnelUp legitimately stay true the whole time).
+  const ens = bodyOf('ensureTunnel');
+  none('ensureTunnel lost its identity-aware backstop before the want===tunnelUp short-circuit',
+    [/if \(collabLive && tunnelUp && sharedTabIdR != null && sharedSessionId\) \{/.test(ens) ? '' : 'no collabLive/tunnelUp/sharedSessionId guard',
+     /if \(pinnedRec && pinnedRec\.session !== sharedSessionId\) \{/.test(ens) ? '' : 'backstop no longer compares the pinned tab\'s RAW session against sharedSessionId'].filter(Boolean));
+  {
+    const iBackstop = ens.indexOf('if (collabLive && tunnelUp && sharedTabIdR != null && sharedSessionId)');
+    const iShort = ens.indexOf('if (want === tunnelUp)');
+    none('the identity backstop runs AFTER the want===tunnelUp short-circuit (too late — already no-op\'d)',
+      (iBackstop > -1 && iShort > -1 && iBackstop < iShort) ? [] : ['backstop does not precede the short-circuit']);
+  }
+
+  // (3) main.js: live:advertise refuses to publish a session other than the one actually pinned.
+  none('main.js: live:advertise lost its self-check against the real pin (C-5.1 defense in depth)',
+    [/function pinnedSessionId\(\)/.test(MAIN) ? '' : 'pinnedSessionId() helper is gone',
+     /const pinnedSid = pinnedSessionId\(\);\s*\n\s*if \(pinnedSid && pinnedSid !== sid\) \{/.test(MAIN)
+       ? '' : 'live:advertise no longer compares the requested sid against the real pin',
+     /error: 'session-mismatch'/.test(MAIN) ? '' : 'no session-mismatch refusal shape'].filter(Boolean));
+  none('app.js: updateAdvertise no longer handles a session-mismatch refusal (would strand "sharing" in the UI)',
+    /if \(r && r\.error === 'session-mismatch'\) \{[\s\S]{0,600}?sharedSessionId = null; sharedWsId = null;/.test(APP)
+      ? [] : ['no session-mismatch branch rolls sharedSessionId back']);
+
+  // (4) the share link carries the pinned session's id, and guest.js checks EVERY frame (including the first)
+  //     against that independent promise — closing the "first-seen becomes truth" gap C-5.10's old design left.
+  none('main.js: a share link no longer embeds the pinned session\'s id (C-5.10 has no independent promise again)',
+    [(MAIN.match(/&sid=\$\{sid0\}/g) || []).length >= 2 ? '' : 'share:start\'s already-running reuse no longer embeds &sid= in both url/localUrl',
+     (MAIN.match(/&sid=\$\{sid\}/g) || []).length >= 2 ? '' : 'share:start\'s fresh-tunnel path no longer embeds &sid= in both url/localUrl',
+     /&sid=\$\{pinnedSessionId\(\)\}/.test(MAIN) ? '' : 'share:newlink no longer embeds &sid='].filter(Boolean));
+  none('guest.js: promisedSessionId is no longer read from the link\'s ?sid= param',
+    /var promisedSessionId = new URLSearchParams\(location\.search\)\.get\('sid'\);/.test(GUEST_JS)
+      ? [] : ['promisedSessionId is not sourced from the URL']);
+  none('guest.js: checkSessionId no longer checks EVERY frame against the promised id (only first-seen again)',
+    [/if \(promisedSessionId != null\) \{/.test(GUEST_JS) ? '' : 'no promised-id branch in checkSessionId',
+     /if \(!promisedSessionId\) \{ promisedSessionId = sid; return; \}/.test(GUEST_JS)
+       ? '' : 'an empty (resume-latest) promise no longer adopts the first real id',
+     /if \(sid !== promisedSessionId\) flagSessionMismatch\(\);/.test(GUEST_JS)
+       ? '' : 'a promised mismatch no longer flags on the very first frame'].filter(Boolean));
+  none('guest.js: the pre-C-5.10-hardening fallback (first-seen tripwire) is gone for older host builds',
+    /if \(knownSessionId === sid\) return;\s*\n\s*if \(!knownSessionId\) \{ knownSessionId = sid; return; \}\s*\n\s*flagSessionMismatch\(\);/.test(GUEST_JS)
+      ? [] : ['no first-seen fallback when the link predates ?sid=']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
