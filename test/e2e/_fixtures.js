@@ -280,13 +280,21 @@ function localBareRemote() {
 // EVERY synced workspace "not just those with an open tab". Auto-activating the seeded repo workspace here
 // would give it an open tab on both instances, letting the (working) slow poll silently stand in for the
 // (hardware-broken, per B18/C29) beacon and mask exactly the bug the sync-pair spec exists to reproduce.
-function seedRepoWorkspace({ persist, home }, { slug, owner, remote }) {
+function seedRepoWorkspace({ persist, home }, { slug, owner, remote, collaborators }) {
   const wid = `repo-${slug}`;
   const ws = {
     id: wid, label: slug, kind: 'repo', slug, owner, repoName: slug,
     repoUrl: remote, syncSessions: true, createdAt: Date.now(),
   };
   const sdir = winRunner._internals.sessionDir(ws, home);   // C:\...\home\.claudible\repos\<slug> — same dir sessions-sync.sh's SDIR resolves to (see wsl/sessions-sync.sh:37)
+  // main.js's OWN creation flow (workspace:create's attach()) always sets `path` to the script's resolved
+  // absolute dir — several main.js gates key on it being truthy (e.g. _coauthorTargetWs, main.js ~3938: "ws.kind
+  // === 'repo' && ws.path"). Setting it here to the SAME value sessionDir() would already compute from
+  // kind+slug is a no-op for path resolution (sessionDir() prefers ws.path when present, and this IS that
+  // value) — it exists purely so a seeded repo workspace's SHAPE matches a real one for every consumer that
+  // checks ws.path's mere presence, not just its resolution.
+  ws.path = sdir;
+  if (Array.isArray(collaborators) && collaborators.length) ws.collaborators = collaborators;   // repo:invite'd GitHub identities — see coauthor-hook.js's buildCoauthorLines
   fs.mkdirSync(path.dirname(sdir), { recursive: true });
   cp.execFileSync('git', ['clone', '-q', remote, sdir], { windowsHide: true });
 
@@ -350,6 +358,21 @@ async function launchPair({ slug, remote, timeout } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Wait until the renderer's OWN top-level script (app.js) has actually started executing — NOT just that the
+// document parsed far enough to have a <title> (Playwright's toHaveTitle only proves that, since <title> sits
+// in <head>, long before the bottom-of-body <script src="app.js"> tag even starts fetching/running). Under this
+// box's own documented cross-spec CPU contention (see share-guest.spec.js / sync-pair.spec.js's headers), that
+// gap can outlast a spec's very first `page.evaluate` read of one of app.js's top-level `let`s — which throws a
+// hard ReferenceError ("X is not defined"), not a soft "not yet" — and most of Playwright's own retry helpers
+// (expect.poll included) do NOT retry past a thrown exception, so the race fails the WHOLE test in under a
+// second instead of politely waiting out its timeout. `typeof` is the one JS construct that reads an
+// undeclared identifier without throwing, so it is safe to poll before app.js exists at all. `activeWsId`
+// (renderer/app.js line ~175, `let workspaces = [], activeWsId = 'legacy'`) is declared early and unconditionally.
+async function waitForAppReady(page, timeout = 20000) {
+  const { expect } = require('playwright/test');
+  await expect.poll(() => page.evaluate(() => (typeof activeWsId !== 'undefined')), { timeout }).toBe(true);
+}
+
 // Retry session:syncNow through TRANSIENT failures — the remote-head beacon (main.js's per-ws probe chain,
 // ~main.js:2046-2159) polls EVERY synced repo workspace regardless of whether it has an open tab, so it can
 // be holding this workspace's sync lock at the exact moment a spec's own manual call fires. 'sync-busy'
@@ -372,4 +395,5 @@ async function syncNowRetry(page, wsId, { budgetMs = 30000, gapMs = 1500 } = {})
 module.exports = {
   launchClaudible, REPO_ROOT, FAKE_CLAUDE_DIR, FAKE_GH_DIR, isPidAlive, listDescendantPids,
   resolveGitBash, localBareRemote, seedRepoWorkspace, writeFakeTranscript, launchPair, sleep, syncNowRetry,
+  waitForAppReady,
 };
