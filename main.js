@@ -1356,7 +1356,8 @@ ipcMain.handle('share:start', (e, opts) => {
       return { ok: false, error: 'already-sharing-other-tab', sharedTabId, reason: 'A share is already running and pinned to a different session. Stop it before starting a new one.' };
     }
     const st0 = share.status();
-    return { ok: true, url: `${shareBaseUrl}/?t=${st0.token}`, localUrl: `${shareBaseUrl}/?t=${st0.token}`, remote: !!cloudflaredProc, note: null, readOnly: st0.readOnly };
+    const sid0 = pinnedSessionId();
+    return { ok: true, url: `${shareBaseUrl}/?t=${st0.token}&sid=${sid0}`, localUrl: `${shareBaseUrl}/?t=${st0.token}&sid=${sid0}`, remote: !!cloudflaredProc, note: null, readOnly: st0.readOnly };
   }
   shareStartInFlight = (async () => {
     try {
@@ -1393,7 +1394,8 @@ ipcMain.handle('share:start', (e, opts) => {
       shareBaseUrl = base;
       const st = share.status();
       _writeAllContexts();                                // now hosting → tell the model (the fg tab's context flips to "hosting")
-      return { ok: true, url: `${base}/?t=${token}`, localUrl: `http://127.0.0.1:${port}/?t=${token}`, remote, note, localDns, reason, readOnly: st.readOnly };
+      const sid = pinnedSessionId();                       // C-5.10: the link itself carries the pinned session's id — an independent "promise" guest.js can check tracker frames against
+      return { ok: true, url: `${base}/?t=${token}&sid=${sid}`, localUrl: `http://127.0.0.1:${port}/?t=${token}&sid=${sid}`, remote, note, localDns, reason, readOnly: st.readOnly };
     } catch (err) { return { ok: false, error: String(err.message || err) }; }
   })();
   shareStartInFlight.finally(() => { shareStartInFlight = null; });   // release the lock once this start settles
@@ -1415,7 +1417,7 @@ ipcMain.handle('share:stop', async () => {
 ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time link (re-invite)
   if (!share.status().running || !shareBaseUrl) return { ok: false, error: 'not sharing' };
   const t = share.regenerateLink();
-  return { ok: true, url: `${shareBaseUrl}/?t=${t}` };
+  return { ok: true, url: `${shareBaseUrl}/?t=${t}&sid=${pinnedSessionId()}` };   // the pin never moves on a re-invite — carry the same promised sid
 });
 ipcMain.handle('share:kick', (e, arg) => { try { return { ok: !!share.kickGuest(arg && arg.name) }; } catch { return { ok: false }; } });   // host removes one guest by name
 // Host's verdict on a pending guest. `ok:false` means the request was already gone (the guest gave up, timed out,

@@ -3,6 +3,14 @@
 'use strict';
 var $ = function (id) { return document.getElementById(id); };
 var token = new URLSearchParams(location.search).get('t') || '';
+// C-5.10: the PROMISE, independent of anything the tracker channel itself later claims. The host mints this link
+// at the exact moment it pins a session (main.js share:start/share:newlink), straight from the pty the pin
+// actually points at — never from the renderer's belief of what it's sharing. null = an older host build that
+// never set the param (skip the promised-vs-actual check rather than false-alarm on a link that predates it);
+// '' = the link was minted before the pinned session had a real id yet (a brand-new/resume-latest session) —
+// legitimate, not a mismatch; the first real id the tracker reports becomes the promise (see checkSessionId).
+var promisedSessionId = new URLSearchParams(location.search).get('sid');
+if (promisedSessionId != null) promisedSessionId = promisedSessionId.replace(/[^A-Za-z0-9-]/g, '');
 var STORE_KEY = 'claudible_resume';
 // If THIS tab already claimed THIS link before (a refresh), reuse its private resume token so we
 // reconnect without re-prompting the host. A different/new link ignores a stale stored token.
@@ -171,14 +179,28 @@ var myPid = null;                                          // our voice-room pee
 // host re-pins the mirror to a different session mid-share, guests who joined expecting the earlier one must
 // see that, not silently keep watching whatever now streams. (C-5.1 is one step from breaking again otherwise.)
 var knownSessionId = null, sessionMismatch = false;
-function checkSessionId(sid) {
-  if (!sid || knownSessionId === sid) return;
-  if (!knownSessionId) { knownSessionId = sid; return; }
+function flagSessionMismatch() {
   if (sessionMismatch) return;                              // already flagged — don't re-toast on every subsequent frame
   sessionMismatch = true;
   var chip = $('sess-chip');
   if (chip) { chip.classList.add('mismatch'); chip.title = 'This share switched to a different session than the one you joined.'; }
   addSystemChat('This share switched to a different session — what you’re watching may not be what you joined.');
+}
+function checkSessionId(sid) {
+  if (!sid || sessionMismatch) return;
+  if (promisedSessionId != null) {
+    // Independent promise available (the link's own ?sid=, set by the host at pin-time) — compare EVERY frame
+    // against it, including the very first one. This is what "first-seen becomes truth" (the fallback below)
+    // structurally cannot catch: a bug that gets the FIRST frame itself wrong.
+    if (!promisedSessionId) { promisedSessionId = sid; return; }   // link minted before the pinned session got its real id (fresh/resume-latest) — the first real id becomes the promise
+    if (sid !== promisedSessionId) flagSessionMismatch();
+    return;
+  }
+  // Fallback for a link minted by an older host build with no sid param: first-seen tripwire only — it can
+  // never catch a bad INITIAL pairing (promised one thing, delivered another from frame 1), only later drift.
+  if (knownSessionId === sid) return;
+  if (!knownSessionId) { knownSessionId = sid; return; }
+  flagSessionMismatch();
 }
 // The connection indicator now lives on the top session chip's dot (green = live, red = down, amber = connecting).
 function setStatus(txt, cls) {
