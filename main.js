@@ -68,6 +68,15 @@ function mirrorWs() {
   const r = ptys.get(sharedTabId); if (r && r.ws) return r.ws;
   const it = tabIntent.get(sharedTabId); return (it && it.ws) || null;   // respawn gap; unknown reads as private → mirror pauses (privacy-first)
 }
+// C-5.1/C-5.10: the ONE authoritative answer to "which session is actually pinned right now" — sourced straight
+// from the pty record the PIN points at, never from anything the renderer believes it's sharing. '' covers the
+// legitimate resume-latest/fresh-session case (no real id assigned yet). Used to (a) embed a truthful sid in
+// every share link so guest.js has an independent "promised" value to check tracker frames against, and (b)
+// refuse a live:advertise that claims a session other than the one actually streaming.
+function pinnedSessionId() {
+  const r = sharedTabId != null ? ptys.get(sharedTabId) : null;
+  return r ? String(r.session || '').replace(/[^A-Za-z0-9-]/g, '') : '';
+}
 // Native live-join: a JOINED peer session is NOT a local pty — it's a CLIENT WebSocket (held in main because the
 // renderer's CSP forbids a wss:// socket) that mirrors a peer's terminal into a cockpit tab. Kept entirely
 // separate from `ptys`/`fgTabId` so watching/co-driving a peer NEVER touches the user's own outgoing share.
@@ -1595,6 +1604,17 @@ ipcMain.handle('live:advertise', (e, payload) => new Promise((resolve) => {
   const sid = String((payload && payload.sessionId) || '').replace(/[^A-Za-z0-9-]/g, '');
   const st = share.status();
   if (!sid || !st.running || !st.token) return resolve({ ok: false, error: 'not live' });
+  // C-5.1 defense in depth (2026-08-07 hardware finding): presence must never claim a session other than the one
+  // ACTUALLY pinned and streaming — the renderer's belief (sharedSessionId) is exactly what drifted from main's
+  // real pin (sharedTabId) when the renderer's own tunnel-reconciler let a second share request silently relabel
+  // itself instead of re-pinning. Refuse here so a future regression of that renderer guard can never again
+  // publish a claim the tunnel can't back up. '' tolerates the legitimate resume-latest case (the pinned tab's
+  // real id isn't assigned yet).
+  const pinnedSid = pinnedSessionId();
+  if (pinnedSid && pinnedSid !== sid) {
+    _liveTiming(`advertise: REFUSED session-mismatch — advertise asked for ${sid}, pin is ${pinnedSid}`);
+    return resolve({ ok: false, error: 'session-mismatch', pinnedSessionId: pinnedSid });
+  }
   advertisedNameB64 = Buffer.from(String((payload && payload.name) || '')).toString('base64');   // chosen display name → presence (badge/roster)
   // The SHARED session's project, named by the renderer — NOT main's ambient activeWorkspace, which follows
   // the foreground tab and can legitimately be a different (or non-repo) project while the share streams on.
