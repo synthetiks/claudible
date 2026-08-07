@@ -3533,6 +3533,17 @@ function updateAdvertise() {
           toast((r.by || 'A collaborator') + ' went live on this session first — use Join to hop in instead');
           return;
         }
+        if (r && r.error === 'session-mismatch') {
+          // C-5.1 defense in depth: main refused to publish a claim the tunnel can't back up — sharedSessionId
+          // drifted from the session actually pinned (should be unreachable now that toggleShareSession/
+          // ensureTunnel refuse this up front; if it ever fires again, C-5.1 has regressed). Roll back rather
+          // than leave the UI saying "sharing" while presence stayed silent.
+          if (sharedSessionId === want) { sharedSessionId = null; sharedWsId = null; }
+          if (advertisedSession === want) advertisedSession = null;
+          updateCollab(); refreshSessions(); refreshExpandedTrees();
+          toast('Couldn’t advertise this session — a different one is already pinned to the running share. Stop sharing first.');
+          return;
+        }
         // starting:true = the phase-1 "going live…" stamp landed, peers already see the row and the tunnel is
         // merely finishing its spawn — the scary toast would be noise on every single share. Only warn when the
         // stamp ALSO failed (offline / branch unreachable): then nobody can see or join anything.
@@ -3562,6 +3573,24 @@ function syncShareRoLock() {
 async function ensureTunnel() {
   if (tunnelBusy) return;                                  // an op is in flight; it reconciles at the end
   const want = webShare || collabLive;
+  // C-5.1 backstop, defense in depth: `want` is a bare boolean and cannot see an IDENTITY change — a share
+  // already up, re-requested for a DIFFERENT session, reads as want:true→true and the line below would silently
+  // no-op, never re-pinning main. toggleShareSession already refuses this before sharedSessionId ever changes
+  // (see its own guard) — this only fires if some future caller reaches here without going through that guard
+  // first, and it deliberately does NOT mutate any state (a host merely browsing away from the pinned tab must
+  // NEVER trip this — C-5.1: the pin never follows focus, and collabLive/tunnelUp legitimately stay true the
+  // whole time the host works elsewhere).
+  if (collabLive && tunnelUp && sharedTabIdR != null && sharedSessionId) {
+    const pinnedRec = tabs.get(sharedTabIdR);
+    // Raw comparison (not gated on the pinned session being a resolved id) — 'new'/'' never equals a concrete
+    // sharedSessionId, so an unresolved pin must refuse a mismatched request too, same reasoning as
+    // toggleShareSession's own guard above.
+    if (pinnedRec && pinnedRec.session !== sharedSessionId) {
+      toast('Already sharing another session — stop it before starting a new one.');
+      syncShareRoLock(); refreshChatPanel();
+      return;   // refuse: never silently relabel a running share
+    }
+  }
   if (want === tunnelUp) { syncShareRoLock(); refreshChatPanel(); updateAdvertise(); return; }
   tunnelBusy = true;
   try {
@@ -3624,6 +3653,25 @@ function toggleShareSession(s) {
     updateCollab(); updateAdvertise(); refreshSessions(); refreshExpandedTrees();   // …and drop the green rail + badge from every other project's open tree
     toast('Stopped sharing this session');
   } else {
+    // C-5.1 B13 guard — the same one doStartSharing already carries (app.js ~2284), given to the in-app collab
+    // toggle too. Without it: a share already up (web link OR an earlier collab session) and pinned to session
+    // Y, then a click here targeting session Z used to just flip sharedSessionId to Z and call updateCollab() →
+    // ensureTunnel() — whose `want === tunnelUp` boolean short-circuit (both true, unchanged) meant shareStart
+    // was NEVER called again: main's real pin (sharedTabId) stayed on Y forever, but presence/the sidebar/the
+    // elsewhere-bar all relabeled themselves to Z. Guests kept receiving Y's bytes under Z's name — the exact
+    // 2026-08-07 hardware exposure. Refuse instead: stop first, then share.
+    if (tunnelUp && sharedTabIdR != null) {
+      const pinnedRec = tabs.get(sharedTabIdR);
+      // Compare the RAW session on the pinned tab, not just a resolved id: 'new'/'' (an unresolved fresh draft
+      // — a plain web-link share can be pinned to one before Claude ever assigns it a real session) can never
+      // legitimately equal a concrete s.id from the sidebar, so it must refuse here too, not slip through as
+      // "nothing to compare yet".
+      if (pinnedRec && pinnedRec.session !== s.id) {
+        const which = (pinnedRec.curSessionLabel || pinnedRec.title) || 'another session';
+        toast('Already sharing “' + which + '” — Claudible shares one session at a time. Stop that share first, then share this one.');
+        return;
+      }
+    }
     // ONE live host per session: if a collaborator is already live on this session (their fresh presence is
     // what draws the green Join badge on this very row), a second "Share live" would advertise a rival host —
     // two divergent "live" copies and an ambiguous Join target. Refuse up front; the presence script re-checks
