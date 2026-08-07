@@ -1,0 +1,30 @@
+#!/bin/sh
+# test/e2e/fake-gh/gh — extensionless twin of gh.cmd, for git-bash's OWN PATH search inside wsl/*.sh (run via
+# `bash -c`, not through Windows' CreateProcess). MSYS bash resolves a bare command name by trying EACH
+# candidate extension ACROSS EVERY PATH directory in turn (no-ext everywhere, then .exe everywhere, then .cmd
+# everywhere, ...) rather than exhausting one directory before moving to the next — so on a machine with a
+# REAL .exe gh install (GitHub CLI ships gh.exe), that real .exe wins over this shim's gh.cmd regardless of
+# which directory comes first on PATH. A bare `gh` here is found in the FIRST (no-extension) pass, before the
+# real .exe is ever considered. (Confirmed empirically: gh.cmd alone was silently shadowed by a real gh.exe
+# elsewhere on PATH, no matter how PATH was ordered.)
+#
+# DELIBERATELY PLAIN SHELL, NOT a `#!/usr/bin/env node` shebang into fake-gh.js: runners/win.js's runScript()
+# (SEAMS §7) — the one thing that ever invokes wsl/sessions-sync.sh, and so the one thing that ever needs this
+# file — ALWAYS sets MSYS_NO_PATHCONV=1 (win.js:686-687, needed elsewhere for leading-slash gh API args). That
+# env var also disables MSYS's mount-table-aware translation of a shebang interpreter's OWN path argument, so
+# when this harness's repo root lives under a non-canonical MSYS mount alias (e.g. a sandboxed checkout under
+# a `/tmp`-aliased temp dir), invoking a WINDOWS program (node.exe) via shebang here fails with a mistranslated
+# path ("Cannot find module 'C:\tmp\...'" — the naive /tmp→C:\tmp swap, not the real mount target). A POSIX
+# interpreter (sh, itself part of the same MSYS runtime) needs no such translation, so this exact failure mode
+# cannot happen here — confirmed empirically against the node-shebang version this replaced.
+login="${CLAUDIBLE_E2E_GH_LOGIN:-e2e-user}"
+if [ "$1" = "api" ]; then
+  for a in "$@"; do
+    if [ "$a" = "user" ]; then printf '%s\n' "$login"; exit 0; fi
+  done
+fi
+if [ "$1" = "auth" ] && [ "$2" = "token" ]; then
+  printf '%s\n' "e2e-fake-gh-token"; exit 0
+fi
+echo "fake-gh: unsupported subcommand (out of scope for this harness): $*" >&2
+exit 1
