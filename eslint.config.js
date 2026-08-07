@@ -74,7 +74,7 @@ module.exports = [
   // share/server.js are node too (required by main.js) — before they were listed here they matched NO block
   // and were silently unlinted, which is how a whole file can drift with zero gate.
   {
-    files: ['main.js', 'preload.js', 'lib/**/*.js', 'runners/**/*.js', 'hooks/**/*.js', 'wsl/**/*.js', 'test/**/*.js', 'eslint.config.js', 'share/cloudflared.js', 'share/server.js', 'share/replay.js', 'scripts/**/*.js'],
+    files: ['main.js', 'preload.js', 'lib/**/*.js', 'runners/**/*.js', 'hooks/**/*.js', 'wsl/**/*.js', 'test/**/*.js', 'eslint.config.js', 'playwright.config.js', 'share/cloudflared.js', 'share/server.js', 'share/replay.js', 'scripts/**/*.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: NODE_GLOBALS },
     rules: RULES,
   },
@@ -82,6 +82,22 @@ module.exports = [
   // Cloudflare Worker (ES module, Workers runtime). It matched NO block before — `eslint --print-config` returned
   // zero rules for it — which is the exact drift this config's Node comment warns about, repeated on an
   // internet-facing file. It ships inert and is excluded from build.files, but it is still code we publish.
+  // E2E specs drive the real app: page.evaluate() callbacks execute INSIDE the renderer/guest window, so
+  // they legitimately reference renderer globals and browser built-ins that node-side lint can't see.
+  // Declared readonly (merging with the base test/**/*.js block) instead of switching off no-undef — a
+  // genuine typo in a spec still fails lint.
+  {
+    files: ['test/e2e/**/*.spec.js'],
+    languageOptions: {
+      globals: {
+        window: 'readonly', document: 'readonly', navigator: 'readonly', claudible: 'readonly', tabs: 'readonly',
+        activeSession: 'readonly', activeTabId: 'readonly', activeWsId: 'readonly',
+        sharedSessionId: 'readonly', sharedTabIdR: 'readonly', lastShareUrl: 'readonly',
+        tunnelUp: 'readonly', setActiveTab: 'readonly',
+      },
+    },
+  },
+
   {
     files: ['relay/worker.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: WORKER_GLOBALS },

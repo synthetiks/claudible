@@ -2185,9 +2185,12 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // code: .claude/ is the hook bundle Claudible injects into a workspace (gitignored, regenerated per run)
   // and .git/. Verified untracked+ignored before excluding them — not assumed.
   const ignores = ['node_modules', 'dist', 'runtime', 'patches', 'assets', path.join('test', 'fixtures'), '.git', '.claude'];
+  // Star-replacement must run BEFORE the ** placeholder expands: `(?:.*/)?` contains a `*`, and replacing
+  // stars afterwards mangled it into `(?:.[^/]*/)?` — a ONE-segment matcher. That made this pin blind to
+  // files two+ directories deep (test/e2e/findings/ was flagged unlinted while real eslint linted it fine).
   const toRe = (g) => new RegExp('^' + g.split('/').map((p) => p === '**' ? '@@' : p)
-    .join('/').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/@@\//g, '(?:.*/)?').replace(/@@/g, '.*')
-    .replace(/\*/g, '[^/]*') + '$');
+    .join('/').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
+    .replace(/@@\//g, '(?:.*/)?').replace(/@@/g, '.*') + '$');
   const res = globs.map(toRe);
   const walk = (dir, acc) => {
     for (const e of fs.readdirSync(path.join(ROOT, dir || '.'), { withFileTypes: true })) {
