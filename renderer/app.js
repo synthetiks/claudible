@@ -3975,6 +3975,25 @@ async function pollTitles(force) {
   refreshSessions();
 }
 setInterval(pollTitles, 20000);
+// B15 companion to pollTitles: fetch ONE non-active workspace's shared titles on demand (a beacon-driven
+// sync:changed push, never a poll of its own — see onSyncChanged). pollTitles only ever touches the ACTIVE
+// workspace and, on every call, REPLACES remoteTitles wholesale — so merging into it here is only good until
+// the next active-ws poll overwrites it. Also write the per-workspace warm cache (remoteTitlesCache[wsId]),
+// which sessTitle() falls back to and which that overwrite can't touch — that's what makes the fresh name
+// stick rather than flicker back to stale the moment you're not looking at THIS workspace.
+async function refreshWsTitles(wsId) {
+  if (!wsId) return;
+  const w = workspaces.find((x) => x.id === wsId);
+  if (!(w && w.kind === 'repo')) return;
+  let m = {}; try { m = await claudible.titleList(wsId); } catch (e) {}
+  if (!m || typeof m !== 'object') return;
+  remoteTitles = Object.assign({}, remoteTitles, m);   // session ids are globally unique — no cross-project collision risk (same guarantee the tree renderer already relies on)
+  try {
+    const c = Object.assign({}, loadPrefs().remoteTitlesCache || {});
+    c[wsId] = Object.assign({}, c[wsId] || {}, m);
+    savePrefs({ remoteTitlesCache: c });
+  } catch (e) {}
+}
 // Build-skew hint: presence stamps carry the publisher's git sha, so both sides can SEE drift instead of
 // guessing. Only speaks when both shas are known and differ — silence is never proof of sameness.
 function _skewNote(peer) {
@@ -6654,7 +6673,15 @@ claudible.onSyncChanged((s) => {
   if (!s || !s.id) return;
   _wsSessCache.delete(s.id);                                          // pulled changes are on disk now → any cached session list for this ws is stale; drop it so the switch-away pre-fill + non-active tree can't serve pre-sync rows
   if (s.id === activeWsId) { refreshSessions(); try { pollTitles(true); } catch (e) {} }   // a pull that changed anything also refreshes shared titles immediately (renames land on the next sync, not the next 20s poll)
-  else { refreshWsSubtree(s.id); }                                    // a non-active but EXPANDED project must update in place too — not only when you next switch into it
+  else {
+    refreshWsSubtree(s.id);                                           // a non-active but EXPANDED project must update in place too — not only when you next switch into it
+    // B15: refreshWsSubtree alone only repaints from whatever this ws's title cache already holds — stale
+    // until this workspace is made ACTIVE, because pollTitles only ever fetches the ACTIVE workspace's own
+    // titles (remoteTitles is a flat id->title map it wholesale-replaces on every active-ws poll). A
+    // collaborator's rename in a project you're merely WATCHING (expanded, not active) used to sit there until
+    // you clicked into it — interaction-driven, not event-driven. Fetch and repaint again once it lands.
+    if (isWsExpanded(s.id)) { try { refreshWsTitles(s.id).then(() => refreshWsSubtree(s.id)); } catch (e) {} }
+  }
   // Repo Review (diff + history feed) was never wired to sync: a pulled commit/revert only showed after switching
   // away and back. Refresh it now (no-op when the drawer is closed / the card is collapsed).
   try { refreshDiff({ quiet: true }); } catch (e) {}

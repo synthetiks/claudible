@@ -94,6 +94,8 @@ module.exports = [
         activeSession: 'readonly', activeTabId: 'readonly', activeWsId: 'readonly',
         sharedSessionId: 'readonly', sharedTabIdR: 'readonly', lastShareUrl: 'readonly',
         tunnelUp: 'readonly', setActiveTab: 'readonly',
+        sessIndex: 'readonly', toggleShareSession: 'readonly', advertisedSession: 'readonly',
+        setWsExpanded: 'readonly', renderWsChips: 'readonly', isWsExpanded: 'readonly',
       },
     },
   },

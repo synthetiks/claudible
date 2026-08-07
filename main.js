@@ -2110,11 +2110,26 @@ function _beaconArm(wsId, delay) {
   _beaconTimers.set(wsId, t);
 }
 const _beaconCost = new Map();   // wsId -> ms the last probe actually took
+// B5 (HARDWARE-SMOKE-RESULTS.md, C-0.5): "Stop-badge gone ≤5s — FAIL (mild), 5-15s to clear." The realtime
+// relay 'end' frame (_relayPub below) is the intended <1s path, but it is INERT until a relay URL is deployed
+// (DEFAULT_RELAY_URL is '' at HEAD — lib/presenceRelay.js) — so today EVERY badge update, live or ended,
+// travels this git beacon alone. The cost*4 floor two lines down is correct anti-jam medicine for a QUIET
+// workspace (see the comment there), but on a real GitHub round-trip (B21: probes measured 1.1-3.3s) it also
+// floors the cadence to ~4-13s for a workspace someone is ACTIVELY WATCHING because a collaborator is live —
+// exactly the moment a peer is staring at the badge waiting for it to clear. _beaconHasLivePeer is true only
+// while the last confirmed presence read still shows a joinable peer, so this fast lane is self-expiring: the
+// very next probe that finds the branch quiet (the peer's clean Stop, or its own dead-host TTL) drops straight
+// out of it. It does NOT touch the failure backoff below — an unreachable remote still backs off regardless.
+function _beaconHasLivePeer(wsId) {
+  const list = _lastPeers.get(wsId);
+  return Array.isArray(list) && list.some((p) => p && p.url && p.token);
+}
 function _beaconDelay(wsId) {
   let hidden = false; try { hidden = !(win && !win.isDestroyed() && win.isVisible()); } catch {}
   const base = hidden ? BEACON_HIDDEN_MS : BEACON_MS;
   const errs = Math.min(5, _beaconErr.get(wsId) || 0);
   const backoff = Math.min(60000, base * Math.pow(2, errs));   // healthy: base cadence; failing: 2x per miss, capped at 60s; one success resets
+  if (_beaconHasLivePeer(wsId)) return backoff;   // B5 fast lane — see above; skip the slow-quiet-network floor while someone is confirmed live
   // …and back off on SLOW as well as FAILED. The error backoff never fired for a probe that succeeded, just
   // slowly — so on a machine where one probe costs 10-12s the 1.5s cadence meant the chain was saturated, one
   // git-bash spawn permanently in flight per synced workspace, starving every other script call behind it.
@@ -2159,6 +2174,15 @@ async function _beaconProbe(wsId) {
       _beaconHeads.set(wsId, r.head);
       _beaconDirty.set(wsId, r.head);
       _liveTiming(`beacon: head moved ${wsId} (probe ${Date.now() - t0}ms)`);
+      // B15 (HARDWARE-SMOKE-RESULTS.md, C-0.3): a rename commits to meta/<author>.json on this SAME branch —
+      // it moves the head exactly like a session push does, but sessions-sync.sh's `sync` op only reports
+      // imported/updated/pushed for CONTENT changes, so doSync's own `changed` flag (below, once the owed sync
+      // actually runs) never fires for a title-only commit. Without this, the renderer had NO event-driven
+      // signal for a rename at all and silently fell back to pollTitles' 20s poll (the measured ~20s hardware
+      // lag). The beacon already re-probes this workspace on its own C-6.2-governed cadence — piggyback on the
+      // head-move it JUST detected instead of adding a new poll: renderer's onSyncChanged re-fetches titles
+      // (and sessions) for whichever workspace this is, active or merely expanded, no interaction required.
+      try { winSend('sync:changed', { id: wsId, ids: [] }); } catch {}
       runPresence('presence-list', (pr) => {
         // A FAILED read must never masquerade as "nobody is live" — pushing [] here erased good rows on
         // every peer over a local blip. Skip; _beaconDirty stays owed, the next probe retries.

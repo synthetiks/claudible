@@ -125,6 +125,11 @@ if [ "$op" = "remote-head" ]; then
   # empty output) from "unreachable" (rc 128) — the old pipe through cut discarded rc and paid a SECOND
   # ls-remote to re-learn it, doubling round-trips on the steady state and overshooting the caller's 12s
   # exec budget (2 × timeout 8) on a slow remote.
+  # TEST-ONLY, off by default everywhere: a same-machine `git init --bare` remote (the e2e harness's stand-in
+  # for GitHub, test/e2e/_fixtures.js's localBareRemote) answers in milliseconds, so B5-badge-clear.spec.js
+  # cannot reproduce B21's measured real-GitHub probe latency (1.1-3.3s) without this. Digit/decimal-guarded
+  # so a malformed or absent env (every real install) is a silent no-op, exactly like CLAUDIBLE_NOW above.
+  case "${CLAUDIBLE_E2E_SLOW_PROBE_S:-}" in ''|*[!0-9.]*) ;; *) sleep "$CLAUDIBLE_E2E_SLOW_PROBE_S" ;; esac
   raw="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null)"; rc=$?
   head_sha="${raw%%$'\t'*}"
   if [ -z "$head_sha" ]; then

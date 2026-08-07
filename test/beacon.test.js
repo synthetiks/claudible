@@ -115,5 +115,40 @@ ok('main: first sighting announces current state too (already-live-before-I-look
 ok('script: a failed direct-read fetch falls back to the worktree path instead of a silent stale read',
   /if \[ -n "\$\{CLAUDIBLE_DIRECT_READ:-\}" \]; then[\s\S]{0,1600}?GD="\$WT"/.test(SH));
 
+// ---- B5 (HARDWARE-SMOKE-RESULTS.md, C-0.5): the "Stop-badge gone <=5s" fast lane ----
+// A wall-clock e2e assertion for this alone is environment-noisy (see test/e2e/findings/B5-badge-clear.spec.js's
+// own header — this box's baseline git-bash spawn cost is itself several seconds, swamping small timing
+// margins run to run) — these pins are the DETERMINISTIC tripwire: revert _beaconHasLivePeer's short-circuit
+// and this file goes red immediately, independent of any machine's spawn-cost variance.
+ok('main: _beaconHasLivePeer exists and reads the confirmed peers cache, not a guess',
+  /function _beaconHasLivePeer\(wsId\) \{/.test(MAIN) && /_lastPeers\.get\(wsId\)/.test(MAIN.slice(MAIN.indexOf('function _beaconHasLivePeer'), MAIN.indexOf('function _beaconHasLivePeer') + 300)));
+ok('main: _beaconDelay skips the slow-quiet-network floor while a peer is confirmed live, BEFORE computing it',
+  (() => {
+    const i = MAIN.indexOf('function _beaconDelay(wsId) {');
+    if (i < 0) return false;
+    const body = MAIN.slice(i, i + 1600);
+    const liveLine = body.indexOf('_beaconHasLivePeer(wsId)');
+    const floorLine = body.indexOf('cost * 4');
+    return liveLine > -1 && floorLine > -1 && liveLine < floorLine;
+  })());
+ok('main: the fast lane never bypasses the FAILURE backoff (an unreachable remote still backs off)',
+  /if \(_beaconHasLivePeer\(wsId\)\) return backoff;/.test(MAIN));
+
+// ---- B15 (HARDWARE-SMOKE-RESULTS.md, C-0.3): rename reaches an expanded-but-inactive project ----
+ok('main: the beacon emits sync:changed on ANY head move, not only content changes (a rename moves the branch too)',
+  (() => {
+    const moved = MAIN.indexOf('_liveTiming(`beacon: head moved ${wsId}');
+    const pushed = MAIN.indexOf("winSend('sync:changed', { id: wsId, ids: [] })");
+    return moved > -1 && pushed > -1 && pushed > moved && pushed - moved < 1200;
+  })());
+ok('renderer: refreshWsTitles exists and merges into BOTH remoteTitles and the durable per-workspace cache',
+  /async function refreshWsTitles\(wsId\)/.test(APP) && /remoteTitles = Object\.assign\(\{\}, remoteTitles, m\)/.test(APP) && /remoteTitlesCache/.test(APP));
+ok('renderer: onSyncChanged fetches titles for a non-active EXPANDED workspace, not just the active one',
+  (() => {
+    const sub = APP.indexOf('refreshWsSubtree(s.id);');
+    const fetch = APP.indexOf('if (isWsExpanded(s.id)) { try { refreshWsTitles(s.id).then(() => refreshWsSubtree(s.id)); } catch (e) {} }');
+    return sub > -1 && fetch > -1 && fetch > sub && fetch - sub < 800;
+  })());
+
 console.log(`beacon: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
