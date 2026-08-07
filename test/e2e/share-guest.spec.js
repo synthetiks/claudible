@@ -23,21 +23,28 @@
 // reach that http://127.0.0.1:<port> URL directly; only a REMOTE guest on another network could not, and this
 // spec's guest is (honestly, by design) same-machine — the loopback IS "whatever is reachable" here.
 'use strict';
-const { test, expect } = require('playwright/test');
+const { test, expect, chromium } = require('playwright/test');
 const { launchClaudible, listDescendantPids } = require('./_fixtures');
 
-test('host shares a live link; a real browser guest connects, is approved, and mirrors the terminal', async ({ browser }) => {
-  const host = await launchClaudible({
-    withClaude: true,   // a live pty tab is what gets shared — see the fake-claude shim's own rationale
-    env: {
-      // See the file header — this deliberately forces main.js's documented loopback fallback instead of a
-      // real (or real-but-unregistered) cloudflared tunnel.
-      CLAUDIBLE_CLOUDFLARED: process.execPath,
-    },
-  });
-
-  let guestPage = null;
+test('host shares a live link; a real browser guest connects, is approved, and mirrors the terminal', async () => {
+  // A DEDICATED chromium instance, launched and closed entirely within this test — not the `browser` fixture
+  // parameter, which Playwright keeps alive for the whole WORKER (i.e. across every spec file in this run,
+  // since playwright.config.js pins workers:1). Left running, it competed for CPU with smoke.spec.js's own
+  // orphan-process teardown right after this spec, tightening that spec's already-un-retried post-stop() pid
+  // check enough to flake under combined-suite runs (never in isolation). Owning the full lifecycle here keeps
+  // every other spec's timing exactly what it would be if this file never ran.
+  let guestBrowser = null, host = null, guestPage = null;
   try {
+    guestBrowser = await chromium.launch();
+    host = await launchClaudible({
+      withClaude: true,   // a live pty tab is what gets shared — see the fake-claude shim's own rationale
+      env: {
+        // See the file header — this deliberately forces main.js's documented loopback fallback instead of a
+        // real (or real-but-unregistered) cloudflared tunnel.
+        CLAUDIBLE_CLOUDFLARED: process.execPath,
+      },
+    });
+
     // ---- host: wait for the fake-claude pty so there is something live to share (same poll as smoke.spec.js) ----
     let descendants = [];
     const spawnDeadline = Date.now() + 15000;
@@ -63,7 +70,7 @@ test('host shares a live link; a real browser guest connects, is approved, and m
     expect(url, 'share link should be a loopback URL (the forced tunnel fallback) — got: ' + url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?t=/);
 
     // ---- guest: a REAL Playwright browser context (not another Electron window) navigating to that URL ----
-    const guestContext = await browser.newContext();
+    const guestContext = await guestBrowser.newContext();
     guestPage = await guestContext.newPage();
     await guestPage.goto(url);
 
@@ -93,6 +100,7 @@ test('host shares a live link; a real browser guest connects, is approved, and m
       .toBeGreaterThan(0);
   } finally {
     if (guestPage) { try { await guestPage.context().close(); } catch {} }
-    await host.stop();
+    if (guestBrowser) { try { await guestBrowser.close(); } catch {} }
+    if (host) await host.stop();
   }
 });
