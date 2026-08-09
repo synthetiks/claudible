@@ -571,6 +571,16 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
       .sort((a, b) => b.m - a.m);
     jsonl = files;
     try { fs.readFileSync(path.win32.join(pdir, '.claudible-foreign'), 'utf8').split(/\r?\n/).forEach((l) => l.trim() && foreign.add(l.trim())); } catch {}
+    // TRUST OVERRIDE (.claudible-trusted). The foreign mark is written by sessions-sync on EVERY import and is
+    // permanent by design, so it cannot tell "a collaborator wrote this" apart from "this is my own session,
+    // synced back from my other machine". In the second case the guard is pure friction: the user watches
+    // their own Bypass setting ignored session after session, and clearing the foreign entry by hand does not
+    // hold because the next sync re-adds it (sessions-sync.sh's mark_foreign is append-only and permanent).
+    // This sidecar is the user's explicit, per-id answer, and sync NEVER writes it — so the decision survives
+    // every future import. Deliberately a SEPARATE file rather than deleting the foreign entry: we still know
+    // the transcript arrived over the wire, the user has simply vouched for this one id. Nothing here weakens
+    // the default — an unlisted id is still sandboxed exactly as before.
+    try { fs.readFileSync(path.win32.join(pdir, '.claudible-trusted'), 'utf8').split(/\r?\n/).forEach((l) => l.trim() && foreign.delete(l.trim())); } catch {}
   } catch {}
   const launch = pickResumeTarget(session, jsonl, foreign);
   const claude = whichClaude();

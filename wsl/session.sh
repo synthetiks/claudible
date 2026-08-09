@@ -292,7 +292,16 @@ PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^
 # approval-prompting mode (and without --add-dir "$HOME"), and is NEVER auto-resumed — only opened by an
 # explicit user choice in the switcher. sessions-sync.sh records foreign ids in this sidecar on import.
 FOREIGN_LIST="$PROJ/.claudible-foreign"
-is_foreign() { [ -f "$FOREIGN_LIST" ] && grep -qxF -- "$1" "$FOREIGN_LIST"; }
+# TRUST OVERRIDE. The foreign mark is append-only and permanent by design, so it cannot tell "a collaborator
+# wrote this" apart from "this is my own session, synced back from my other machine". For the second case the
+# guard is pure friction: the user's own Bypass setting is ignored every session, and clearing the foreign
+# entry by hand does not hold because the next import re-adds it. This sidecar is the user's explicit,
+# per-id answer; sessions-sync NEVER writes it, so the decision survives every future import. A separate file
+# (not a deletion) keeps the two facts distinguishable: the transcript still came in over the wire, the user
+# has simply vouched for this id. An id that is not listed stays sandboxed exactly as before.
+TRUSTED_LIST="$PROJ/.claudible-trusted"
+is_trusted() { [ -f "$TRUSTED_LIST" ] && grep -qxF -- "$1" "$TRUSTED_LIST"; }
+is_foreign() { [ -f "$FOREIGN_LIST" ] && grep -qxF -- "$1" "$FOREIGN_LIST" && ! is_trusted "$1"; }
 # Default reasoning effort — a remembered Claudible setting inlined as CLAUDIBLE_EFFORT. Invalid/empty → omit
 # (Claude uses its own default). Applied to fresh AND resumed launches.
 EFFORT="${CLAUDIBLE_EFFORT:-}"

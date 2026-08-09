@@ -3139,6 +3139,21 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the foreign branch still falls back to a generic notice when no override is remembered (C-9.3)',
     /\*\)\s*echo "\[claudible\] opening a collaborator's session - Claude will ask before running tools\."/.test(resumeOneBody)
       ? [] : ['the default (no remembered mode) case lost its fallback line']);
+
+  // TRUST OVERRIDE (.claudible-trusted). The foreign mark is append-only and permanent, so it cannot tell a
+  // collaborator's transcript apart from the user's OWN session synced back from their OWN second machine.
+  // For the latter the guard is pure friction, and hand-clearing the foreign entry does not survive the next
+  // import. The sidecar is the user's explicit per-id answer. Two properties must hold together, on BOTH
+  // backends: trusted overrides foreign, and sync NEVER writes the sidecar (or the override would not last).
+  none('the trust override is gone from session.sh (a synced-back own session is friction forever)',
+    [/TRUSTED_LIST="\$PROJ\/\.claudible-trusted"/.test(SESH92) ? '' : 'no TRUSTED_LIST',
+     /is_trusted\(\)/.test(SESH92) ? '' : 'no is_trusted helper',
+     /is_foreign\(\)[^\n]*&& ! is_trusted "\$1"/.test(SESH92) ? '' : 'is_foreign does not consult is_trusted'].filter(Boolean));
+  none('the trust override is gone from the win runner',
+    /\.claudible-trusted'\), 'utf8'\)[\s\S]{0,120}?foreign\.delete\(l\.trim\(\)\)/.test(read('runners/win.js'))
+      ? [] : ['win.js never subtracts .claudible-trusted from the foreign set']);
+  none('sessions-sync writes .claudible-trusted (that would let an import forge trust)',
+    /claudible-trusted/.test(read('wsl/sessions-sync.sh')) ? ['sessions-sync.sh references the trusted sidecar'] : []);
 }
 
 // ---------------------------------------------------------------------------------------------------------
