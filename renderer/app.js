@@ -682,6 +682,28 @@ claudible.onStatus((s) => {
       const _aw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace, not the sidebar's — a background tab resolving while you view another ws must gate + publish against ITS OWN repo
       if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then((r) => { if (r && r.ok === false) toast('Named here — sharing the name failed, will keep retrying'); pollTitles(true); }).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators. R38: a failed publish was silent (the rename path already toasts this same line); the inverse reconciler keeps retrying either way
     }
+    // KEEP THE NAME ACROSS A CLEAR. `/clear` mints a new session id, but to the person looking at it this is
+    // the same window with its context emptied — they named that window, and dropping the name on every clear
+    // turns a readable sidebar into a pile of untitled rows. Carry the name onto the new id through the exact
+    // store + publish path a rename uses, so collaborators see it too and the row simply stays put.
+    // Two deliberate limits: only an EXPLICIT name is carried (never an auto-derived one — hasExplicitTitle is
+    // the same test the sidebar uses to decide a name was meant), and never over a name the new session
+    // already has. This also gives the continuation a human-visible link, since both transcripts end up
+    // sharing one name in the synced meta file.
+    if (driftFrom && !hasExplicitTitle(s.sessionId, t.wsId)) {
+      const _cp = loadPrefs();
+      const carried = (_cp.sessionTitles || {})[driftFrom] || titleVal(remoteTitles[driftFrom]) || '';
+      if (carried) {
+        const ctitles = Object.assign({}, _cp.sessionTitles || {}); ctitles[s.sessionId] = carried;
+        const cts = Object.assign({}, _cp.sessionTitleTs || {}); cts[s.sessionId] = Date.now();
+        saveSessionTitles(ctitles, cts);
+        const _cw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace (same rule as the rename path) — a background tab must publish against ITS OWN repo
+        if (_cw && _cw.kind === 'repo') {
+          remoteTitles[s.sessionId] = { n: carried, ts: cts[s.sessionId] };
+          try { claudible.titleSet(s.sessionId, carried, t.wsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
+        }
+      }
+    }
     // The share is welded to a session ID but streams a pinned TAB, and until now nothing kept the two in
     // agreement. Re-weld to what is actually running, then re-advertise so the LIVE badge and Join point at the
     // live conversation instead of one nobody is in. updateAdvertise() stays keyed on the SHARED session (never

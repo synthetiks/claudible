@@ -4292,6 +4292,26 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // A cleared session is NOT user-created: bornNew drives the unsaved-row filter and must keep its meaning.
   none('drift sets bornNew (a cleared session would render as a user-created unsaved row)',
     /driftFrom[\s\S]{0,400}?t\.bornNew = true/.test(A) ? ['drift path writes bornNew'] : []);
+  // ROW SAFETY — deliberately NOT solved with new code. A just-cleared session has 0 messages, so it is not in
+  // savedIds, and bornNew is (correctly) false, so it is not in liveTabs either. The tab would vanish from its
+  // own sidebar — except section 8's `orphanTab` already exists for exactly this shape ("the active tab always
+  // has a sidebar row", written for the unresumable-fallback case, which is the same shape as /clear drift).
+  // Adding a second row-source for drift would risk re-flashing the phantom row that liveTabs' comment warns
+  // about, in the file that has hosted three separate row bugs. So drift RELIES on orphanTab, and this pin
+  // records the dependency: orphanTab must keep admitting a real, unsaved, non-bornNew session on the active tab.
+  none('orphanTab stopped covering a real-but-unsaved session (a cleared session would vanish from the sidebar)',
+    /if \(sid === 'new'\) return null;|if \(sid == null \|\| sid === 'new'\) return null;/.test(A)
+      && /if \(savedIds\.has\(sid\)\) return null;/.test(A)
+      && /if \(liveTabs\.some\(\(r\) => r\.tabId === t\.tabId\)\) return null;/.test(A)
+      && /\n *return t;\n *\}\)\(\);/.test(A)
+      ? [] : ['orphanTab no longer returns a real, unsaved, non-bornNew active tab']);
+  // KEEP THE NAME: /clear mints a new id, but the user sees one window with cleared context. The name is
+  // carried onto the new id through the SAME store+publish path a rename uses, so the row stays readable and
+  // collaborators see it. Only an EXPLICIT name, and never over a name the new session already has.
+  none('a cleared session no longer inherits its window name (the sidebar fills with untitled rows)',
+    A.includes('if (driftFrom && !hasExplicitTitle(s.sessionId, t.wsId))') ? [] : ['no name carry-forward on drift']);
+  none('the carry-forward invented its own publish path instead of reusing titleSet',
+    A.includes('claudible.titleSet(s.sessionId, carried, t.wsId)') ? [] : ['carry-forward does not publish through titleSet']);
   none('guests are moved silently again (no system line on the chat they already have)',
     M.includes("ipcMain.handle('share:session-changed'") && M.includes('share.systemChat(')
       ? [] : ['no share:session-changed handler emitting a system chat']);
