@@ -44,5 +44,16 @@ if ! gh repo create "$owner/$slug" --private --source=. --remote=origin --push >
   printf '{"ok":false,"error":"could not create or push the repo on GitHub (name taken, or no network) — if a repo was created, delete it on GitHub and try again"}'; exit 0
 fi
 gh repo edit "$owner/$slug" --add-topic claudible-workspace >/dev/null 2>&1 || true
-printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","path":"%s"}' \
-  "$slug" "$owner" "$owner" "$slug" "$dir"
+# The SEPARATE PRIVATE sessions repo — same split create-workspace.sh applies to a from-scratch project, so a
+# local project upgraded to a shared one is protected identically. Without this, upgrading is the one path
+# that still lands transcripts on the code repo, and it is invisible until the day someone opens that repo up.
+# Best-effort: the upgrade has already succeeded by here, so a failure is reported in `note`, never fatal.
+sess_repo="$slug-sessions"
+if gh repo create "$owner/$sess_repo" --private >/dev/null 2>&1; then
+  git remote add claudible-sessions "https://github.com/$owner/$sess_repo.git" >/dev/null 2>&1
+  printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","path":"%s","sessionsRepo":"%s/%s"}' \
+    "$slug" "$owner" "$owner" "$slug" "$dir" "$owner" "$sess_repo"
+else
+  printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","path":"%s","note":"transcripts will sync to the project repo — the separate private sessions repo could not be created"}' \
+    "$slug" "$owner" "$owner" "$slug" "$dir"
+fi

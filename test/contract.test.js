@@ -4244,6 +4244,23 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['no sessions repo creation']);
   none('the sessions repo is created without --private (it would be PUBLIC)',
     /gh repo create "\$owner\/\$sess_repo"(?![^\n]*--private)/.test(CW) ? ['sessions repo not created private'] : []);
+  // The three paths a project can reach a collaborator by. Miss any one and their transcripts land on the CODE
+  // repo instead - silently, on their machine, and invisible to the project owner.
+  const CL = read('wsl/clone-workspace.sh'), INV = read('wsl/repo-invite.sh'), UP = read('wsl/upgrade-workspace.sh');
+  none('a cloned shared project no longer wires the sessions remote (a collaborator would push transcripts to the code repo)',
+    /sessionsRepo/.test(CL) && /remote add claudible-sessions/.test(CL) ? [] : ['clone-workspace does not wire claudible-sessions']);
+  none('the clone path feeds an unvalidated sessionsRepo string into a remote URL',
+    /sess=""/.test(CL) && /A-Za-z0-9/.test(CL) ? [] : ['sessionsRepo is not charset-validated before becoming a URL']);
+  none('inviting a collaborator no longer adds them to the sessions repo (their sync can neither fetch nor push)',
+    INV.includes("collaborators/$login") && /slug-sessions/.test(INV) ? [] : ['repo-invite does not invite to the sessions repo']);
+  none('a sessions-repo invite failure now fails the whole invite (the code invite already succeeded)',
+    /"status":"invited","note":/.test(INV) ? [] : ['no non-fatal note path for a sessions-repo invite failure']);
+  none('upgrading a local project to a repo skips the sessions split (the one path that would still expose)',
+    /slug-sessions/.test(UP) && /remote add claudible-sessions/.test(UP) ? [] : ['upgrade-workspace does not create the sessions repo']);
+  // THE COMPATIBILITY GUARANTEE: every project created before this change has no claudible-sessions remote and
+  // must behave EXACTLY as before. The fallback is what makes this shippable with no migration.
+  none('the origin fallback is gone (every pre-existing project would break)',
+    /^SREM=origin/m.test(SS) ? [] : ['SREM no longer defaults to origin']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

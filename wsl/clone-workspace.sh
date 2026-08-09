@@ -51,6 +51,19 @@ mkdir -p "$(dirname "$dir")" 2>/dev/null
 # never the sanitized value. This is the fix: before, $slug was cloned here too, so a name GitHub allows but
 # Claudible's folder charset doesn't (my_repo, next.js) silently fetched a DIFFERENT, sanitized-name repo.
 if gh repo clone "$owner/$repo" "$dir" >/dev/null 2>&1; then
+  # WIRE THE SESSIONS REMOTE. Without this a collaborator's clone has no `claudible-sessions` remote, so
+  # sessions-sync falls back to origin and pushes THEIR transcripts onto the CODE repo — re-creating, on their
+  # machine, the exact exposure the split exists to prevent. Silent, and invisible to the project owner.
+  # The pairing is read from the committed marker rather than guessed from a naming convention, so it stays
+  # correct if the convention ever changes or the repo is renamed.
+  sess="$(sed -n 's/.*"sessionsRepo"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$dir/.claudible-workspace" 2>/dev/null | head -1)"
+  case "$sess" in
+    */*) case "$sess" in
+           *[!A-Za-z0-9._/-]*) sess="" ;;   # owner/repo charset only — this string reaches a git remote URL
+         esac ;;
+    *) sess="" ;;
+  esac
+  [ -n "$sess" ] && git -C "$dir" remote add claudible-sessions "https://github.com/$sess.git" >/dev/null 2>&1
   printf '{"ok":true,"slug":"%s","owner":"%s","repoName":"%s","repoUrl":"https://github.com/%s/%s","path":"%s"}' "$slug" "$owner" "$repo" "$owner" "$repo" "$dir"
 else
   [ "$pre_existed" = 0 ] && rm -rf "$dir" 2>/dev/null   # only ever remove the dir this run created

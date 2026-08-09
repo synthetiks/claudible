@@ -30,7 +30,24 @@ if [ "$me" != "$owner" ]; then
 fi
 
 if gh api -X PUT "repos/$owner/$slug/collaborators/$login" -f permission=push >/dev/null 2>&1; then
-  printf '{"ok":true,"status":"invited"}'
+  # INVITE TO THE SESSIONS REPO TOO. A project's transcripts live in a SEPARATE private repo
+  # (<slug>-sessions, created by create-workspace.sh) so the code repo can be made public safely. Access to
+  # the code repo alone therefore buys a collaborator nothing on the sessions side: their sync would fail to
+  # fetch and fail to push, and the symptom is the one this project has already burned hours on — sharing
+  # that silently does nothing. Same push permission, same invite semantics.
+  # Only attempted when the repo actually exists: projects created before the split have no second repo, and
+  # a 404 there is normal, not an error. The code invite above is what decides ok — a sessions-repo hiccup
+  # is reported in `note` rather than failing an invite that genuinely succeeded.
+  sess="$slug-sessions"
+  if gh repo view "$owner/$sess" >/dev/null 2>&1; then
+    if gh api -X PUT "repos/$owner/$sess/collaborators/$login" -f permission=push >/dev/null 2>&1; then
+      printf '{"ok":true,"status":"invited","sessionsRepo":"%s/%s"}' "$owner" "$sess"
+    else
+      printf '{"ok":true,"status":"invited","note":"invited to the project, but adding them to the private sessions repo (%s) failed — they will not receive synced sessions until that is fixed"}' "$sess"
+    fi
+  else
+    printf '{"ok":true,"status":"invited"}'
+  fi
 else
   printf '{"ok":false,"error":"invite failed — check the username, and that the repo exists under %s"}' "$owner"
 fi
