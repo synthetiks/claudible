@@ -73,11 +73,39 @@ case "$kind" in
       gh repo delete "$owner/$slug" --yes >/dev/null 2>&1
       printf '{"ok":false,"error":"clone failed; if a private repo was left at github.com/%s/%s, delete it or pick another name"}' "$owner" "$slug"; exit 0
     fi
+    # A SEPARATE PRIVATE REPO FOR THE TRANSCRIPTS, wired as the `claudible-sessions` remote.
+    #
+    # Sessions used to ride a branch of the code repo itself. That put every prompt, every reply, and
+    # everything Claude read along the way — file contents, command output, whatever secrets passed through —
+    # one "make public" click away from the world, with no warning and no undo (the branch survives in history,
+    # forks and clones). We nearly shipped exactly that on this very project.
+    #
+    # So the split is structural now, not a thing anyone has to remember: code here, conversations next door,
+    # private. sessions-sync.sh prefers this remote and falls back to origin when it is absent, so every
+    # project made before this change keeps working untouched.
+    #
+    # Best-effort by design: if the second repo cannot be created (no permission, name taken, offline) the
+    # workspace is still perfectly usable — it just syncs the old way. Failing the whole creation over the
+    # sessions repo would be a worse trade than falling back, so we say so in `note` and move on.
+    sess_repo="$slug-sessions"
+    if gh repo create "$owner/$sess_repo" --private >/dev/null 2>&1; then
+      git -C "$dir" remote add claudible-sessions "https://github.com/$owner/$sess_repo.git" >/dev/null 2>&1
+      sessions_note=""
+    else
+      sessions_note=" (transcripts will sync to the project repo — the separate private sessions repo could not be created)"
+    fi
     # Keep Claude's runtime + transcripts OUT of the repo (no committed secrets), then push that rule up.
     printf '.claude/\n' > "$dir/.gitignore"
     mkdir -p "$dir/.claude" 2>/dev/null
     # A committed marker so a collaborator's Claudible can DISCOVER this repo as a workspace (sessions-discover.sh).
-    printf '{"claudible":true,"slug":"%s"}\n' "$slug" > "$dir/.claudible-workspace"
+    # It also names the sessions repo, so a collaborator cloning this project can wire the same `claudible-sessions`
+    # remote instead of guessing — and so the pairing survives even if the naming convention ever changes.
+    # (The marker lives in the CODE repo and only records a repo NAME, never any transcript content.)
+    if [ -n "$sessions_note" ]; then
+      printf '{"claudible":true,"slug":"%s"}\n' "$slug" > "$dir/.claudible-workspace"
+    else
+      printf '{"claudible":true,"slug":"%s","sessionsRepo":"%s/%s"}\n' "$slug" "$owner" "$sess_repo" > "$dir/.claudible-workspace"
+    fi
     marker_ok=1
     (
       cd "$dir" || exit 1
@@ -87,8 +115,13 @@ case "$kind" in
       git push >/dev/null 2>&1
     ) || marker_ok=0   # &&-chained so marker_ok reflects the WHOLE publish (a failed commit no longer hides behind an up-to-date push); gpgsign disabled so the commit succeeds for gpg/hook users
     if [ "$marker_ok" = 1 ]; then
-      printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s"}' \
-        "$slug" "$owner" "$owner" "$slug"
+      if [ -n "$sessions_note" ]; then
+        printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","note":"%s"}' \
+          "$slug" "$owner" "$owner" "$slug" "${sessions_note# }"
+      else
+        printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","sessionsRepo":"%s/%s"}' \
+          "$slug" "$owner" "$owner" "$slug" "$owner" "$sess_repo"
+      fi
     else
       printf '{"ok":true,"kind":"repo","slug":"%s","owner":"%s","repoUrl":"https://github.com/%s/%s","note":"repo created, but publishing the discovery marker failed — collaborators may not see it until your next sync"}' \
         "$slug" "$owner" "$owner" "$slug"

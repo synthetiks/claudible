@@ -91,6 +91,15 @@ mtime_age() {   # seconds since $1's mtime (0 floor for clock skew); GNU stat -c
 
 WT="$HOME/.claudible/sessions-sync/$WS_SLUG"         # the isolated sessions worktree
 BR="claudible/sessions"                              # the orphan branch sessions ride on
+# WHICH REMOTE THE TRANSCRIPTS RIDE ON. Historically this was always `origin` — the code repo itself — so a
+# project's full conversation history (prompts, replies, file contents, command output, anything Claude read)
+# lived on a branch of the very repo you might one day make public. Deleting the branch afterwards does not
+# undo that: it stays in the history, and in every fork and clone. We nearly shipped exactly that.
+# So a repo workspace created by Claudible now also gets a SEPARATE PRIVATE repo for its sessions, wired here
+# as the `claudible-sessions` remote (create-workspace.sh). Sessions ride THAT; the code repo carries code.
+# Falls back to `origin` when the remote is absent, which is every project made before this change — their
+# behaviour is byte-identical to before, and nothing needs migrating for them to keep working.
+SREM=origin   # resolved for real below, AFTER the Windows path normalization — see the SREM block
 
 # Windows git-bash: the runner sets MSYS_NO_PATHCONV, so git.exe receives our paths LITERALLY and misreads the
 # MSYS '/c/…' form as 'C:\c\…' — which silently breaks `worktree add`/`-C` (the cause of "could not set up the
@@ -102,6 +111,10 @@ if command -v cygpath >/dev/null 2>&1; then
   SDIR="$(cygpath -m "$SDIR" 2>/dev/null || printf '%s' "$SDIR")"
   WT="$(cygpath -m "$WT" 2>/dev/null || printf '%s' "$WT")"
 fi
+# Resolve the sessions remote HERE, not at the SREM= line above: git.exe only understands SDIR once cygpath has
+# rewritten it, so probing earlier answers "no such remote" on the win flavor and silently falls back to origin
+# — putting transcripts back on the code repo, which is the exact failure this whole mechanism exists to stop.
+git -C "$SDIR" remote get-url claudible-sessions >/dev/null 2>&1 && SREM=claudible-sessions
 LIVE="${CLAUDIBLE_LIVE_SESSION:-}"
 case "$LIVE" in *[!A-Za-z0-9\ -]*) LIVE="" ;; esac   # a clean id — or a SPACE-SEPARATED list of them (R13: the hosted session AND a busy tab's session can both be live writers; excluding only one exported the other mid-write)
 is_live() { case " $LIVE " in *" $1 "*) return 0 ;; esac; return 1; }   # id ∈ the exclusion list
@@ -130,7 +143,7 @@ if [ "$op" = "remote-head" ]; then
   # cannot reproduce B21's measured real-GitHub probe latency (1.1-3.3s) without this. Digit/decimal-guarded
   # so a malformed or absent env (every real install) is a silent no-op, exactly like CLAUDIBLE_NOW above.
   case "${CLAUDIBLE_E2E_SLOW_PROBE_S:-}" in ''|*[!0-9.]*) ;; *) sleep "$CLAUDIBLE_E2E_SLOW_PROBE_S" ;; esac
-  raw="$($_tmo git -C "$SDIR" ls-remote origin "refs/heads/$BR" 2>/dev/null)"; rc=$?
+  raw="$($_tmo git -C "$SDIR" ls-remote "$SREM" "refs/heads/$BR" 2>/dev/null)"; rc=$?
   head_sha="${raw%%$'\t'*}"
   if [ -z "$head_sha" ]; then
     if [ "$rc" -eq 0 ]; then emit "{\"ok\":true,\"op\":\"remote-head\",\"head\":\"\"}"
@@ -194,9 +207,9 @@ gitwt() { GIT_EDITOR=true git -C "$WT" -c user.name="$author" -c user.email="$au
 #     a zombie "live" row for the full 120s TTL (the "closing Claudible takes forever" report).
 # A non-fast-forward push (someone else pushed mid-flight) refreshes the base and the caller retries.
 gitp() { GIT_AUTHOR_NAME="$author" GIT_AUTHOR_EMAIL="$author@users.noreply.github.com" GIT_COMMITTER_NAME="$author" GIT_COMMITTER_EMAIL="$author@users.noreply.github.com" git -C "$SDIR" "$@"; }
-presence_base() {   # freshest known origin/$BR commit (fetch only when we know nothing) - echoes sha, '' if no branch
-  local b; b="$(git -C "$SDIR" rev-parse -q --verify "refs/remotes/origin/$BR" 2>/dev/null)"
-  [ -n "$b" ] || { git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1; b="$(git -C "$SDIR" rev-parse -q --verify "refs/remotes/origin/$BR" 2>/dev/null)"; }
+presence_base() {   # freshest known $SREM/$BR commit (fetch only when we know nothing) - echoes sha, '' if no branch
+  local b; b="$(git -C "$SDIR" rev-parse -q --verify "refs/remotes/$SREM/$BR" 2>/dev/null)"
+  [ -n "$b" ] || { git -C "$SDIR" fetch "$SREM" "$BR" >/dev/null 2>&1; b="$(git -C "$SDIR" rev-parse -q --verify "refs/remotes/$SREM/$BR" 2>/dev/null)"; }
   printf '%s' "$b"
 }
 presence_attempt() {   # $1=set|clear  $2=json line (set only). ONE build+push try. 0=pushed; on reject the base is refreshed for the next try.
@@ -215,21 +228,21 @@ presence_attempt() {   # $1=set|clear  $2=json line (set only). ONE build+push t
   [ -n "$newroot" ] || return 1
   commit="$(gitp commit-tree "$newroot" -p "$base" -m "claudible: presence $mode $author" 2>/dev/null)"
   [ -n "$commit" ] || return 1
-  if gitp push origin "$commit:refs/heads/$BR" >/dev/null 2>&1; then
-    gitp update-ref "refs/remotes/origin/$BR" "$commit" >/dev/null 2>&1 \
-      || git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1   # keep the local view current (the beacon and later attempts compare against it); if the ref update lost a lock race, a real fetch restores truth so presence_base never trusts a stale cache
+  if gitp push "$SREM" "$commit:refs/heads/$BR" >/dev/null 2>&1; then
+    gitp update-ref "refs/remotes/$SREM/$BR" "$commit" >/dev/null 2>&1 \
+      || git -C "$SDIR" fetch "$SREM" "$BR" >/dev/null 2>&1   # keep the local view current (the beacon and later attempts compare against it); if the ref update lost a lock race, a real fetch restores truth so presence_base never trusts a stale cache
     return 0
   fi
-  git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
+  git -C "$SDIR" fetch "$SREM" "$BR" >/dev/null 2>&1
   return 1
 }
-presence_holder_refuse() {   # $1=sid - the one-host arbiter over origin/$BR's live/ blobs, no worktree. Prints the refusal line or nothing.
+presence_holder_refuse() {   # $1=sid - the one-host arbiter over $SREM/$BR's live/ blobs, no worktree. Prints the refusal line or nothing.
   local d p nd out
   d="$(mktemp -d 2>/dev/null)" || return 0
   while IFS= read -r -d '' p; do
     case "$p" in live/*.json) ;; *) continue ;; esac
-    git -C "$SDIR" show "origin/$BR:$p" 2>/dev/null | head -c 4096 > "$d/$(basename "$p")"
-  done < <(git -C "$SDIR" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null)
+    git -C "$SDIR" show "$SREM/$BR:$p" 2>/dev/null | head -c 4096 > "$d/$(basename "$p")"
+  done < <(git -C "$SDIR" ls-tree -r --name-only -z "$SREM/$BR" -- live/ 2>/dev/null)
   nd="$d"; command -v cygpath >/dev/null 2>&1 && nd="$(cygpath -m "$d" 2>/dev/null || printf '%s' "$d")"
   # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
   out="$( (unset MSYS_NO_PATHCONV; CL_DIR="$nd" CL_SID="$1" CL_ME="$author" node "$HERE/sessions-sync-tool.js" live-holder 2>/dev/null) )"
@@ -237,7 +250,7 @@ presence_holder_refuse() {   # $1=sid - the one-host arbiter over origin/$BR's l
   printf '%s' "$out"
 }
 presence_yield_own() {   # $1=sid - retract my own on-branch claim for sid (a lost race) so peers converge on ONE host now, not after the TTL
-  git -C "$SDIR" show "origin/$BR:live/$author.json" 2>/dev/null | grep -q "\"session\":\"$1\"" || return 0
+  git -C "$SDIR" show "$SREM/$BR:live/$author.json" 2>/dev/null | grep -q "\"session\":\"$1\"" || return 0
   local i; for i in 1 2 3; do presence_attempt clear && return 0; done
   return 0
 }
@@ -282,15 +295,15 @@ ensure_worktree() {
   rm -rf "$WT" 2>/dev/null
   git -C "$SDIR" worktree prune >/dev/null 2>&1
   mkdir -p "$(dirname "$WT")" 2>/dev/null
-  git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
-  if git -C "$SDIR" show-ref --verify --quiet "refs/remotes/origin/$BR"; then
+  git -C "$SDIR" fetch "$SREM" "$BR" >/dev/null 2>&1
+  if git -C "$SDIR" show-ref --verify --quiet "refs/remotes/$SREM/$BR"; then
     # Remote branch exists → attach a worktree. If a local branch already exists (possibly with unpushed
     # self-healing commits), attach it as-is and let pull_branch merge origin in; only create-from-origin
     # when there is no local branch, so we never force-reset away local commits.
     if git -C "$SDIR" show-ref --verify --quiet "refs/heads/$BR"; then
       git -C "$SDIR" worktree add "$WT" "$BR" >/dev/null 2>&1 || return 1
     else
-      git -C "$SDIR" worktree add -B "$BR" "$WT" "origin/$BR" >/dev/null 2>&1 || return 1
+      git -C "$SDIR" worktree add -B "$BR" "$WT" "$SREM/$BR" >/dev/null 2>&1 || return 1
     fi
     return 0
   fi
@@ -308,11 +321,11 @@ ensure_worktree() {
   mkdir -p "$WT/sessions" 2>/dev/null; : > "$WT/sessions/.gitkeep"
   gitwt add -A >/dev/null 2>&1
   gitwt commit -m "claudible: init sessions branch" >/dev/null 2>&1
-  if ! gitwt push -u origin "$BR" >/dev/null 2>&1; then
+  if ! gitwt push -u "$SREM" "$BR" >/dev/null 2>&1; then
     # Race: a collaborator created the branch first → adopt theirs (our empty init is discardable).
-    git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1
-    gitwt reset --hard "origin/$BR" >/dev/null 2>&1
-    gitwt branch --set-upstream-to="origin/$BR" "$BR" >/dev/null 2>&1
+    git -C "$SDIR" fetch "$SREM" "$BR" >/dev/null 2>&1
+    gitwt reset --hard "$SREM/$BR" >/dev/null 2>&1
+    gitwt branch --set-upstream-to="$SREM/$BR" "$BR" >/dev/null 2>&1
   fi
   return 0
 }
@@ -324,11 +337,11 @@ pull_branch() {
   # "cannot lock ref". Measured under stress: ~7-25% of contended fetches. One immediate retry wins the next
   # slot — without it every collision surfaced as a generic "pull failed" sync error.
   local _ferr
-  if ! _ferr="$(git -C "$WT" fetch origin "$BR" 2>&1 >/dev/null)"; then
-    case "$_ferr" in *"cannot lock ref"*) git -C "$WT" fetch origin "$BR" >/dev/null 2>&1 || return 1 ;; *) return 1 ;; esac
+  if ! _ferr="$(git -C "$WT" fetch "$SREM" "$BR" 2>&1 >/dev/null)"; then
+    case "$_ferr" in *"cannot lock ref"*) git -C "$WT" fetch "$SREM" "$BR" >/dev/null 2>&1 || return 1 ;; *) return 1 ;; esac
   fi
-  git -C "$WT" show-ref --verify --quiet "refs/remotes/origin/$BR" || return 0   # nothing pushed yet
-  gitwt merge --no-edit "origin/$BR" >/dev/null 2>&1 && return 0
+  git -C "$WT" show-ref --verify --quiet "refs/remotes/$SREM/$BR" || return 0   # nothing pushed yet
+  gitwt merge --no-edit "$SREM/$BR" >/dev/null 2>&1 && return 0
   # A conflict should not happen (disjoint per-author paths) but must NEVER wedge sync — pull_branch is the
   # first gate of every op. Origin wins; our OWN session content is re-derived from $PROJ on the next export, so
   # reset loses nothing real — EXCEPT tombstones (deletion markers aren't re-derivable). Snapshot any local
@@ -336,7 +349,7 @@ pull_branch() {
   # instead of resurrecting the session for collaborators.
   gitwt merge --abort >/dev/null 2>&1
   local keep; keep="$(tombstone_ids 2>/dev/null)"
-  gitwt reset --hard "origin/$BR" >/dev/null 2>&1 || return 1
+  gitwt reset --hard "$SREM/$BR" >/dev/null 2>&1 || return 1
   if [ -n "$keep" ]; then
     mkdir -p "$WT/sessions/.tombstones" 2>/dev/null
     local t; for t in $keep; do case "$t" in *[!A-Za-z0-9-]*) continue ;; esac; : > "$WT/sessions/.tombstones/$t"; done
@@ -501,8 +514,8 @@ commit_and_push() {
   fi
   local i
   for i in 1 2 3; do
-    gitwt push origin "$BR" >/dev/null 2>&1 && return 0
-    git -C "$WT" rev-parse "@{upstream}" >/dev/null 2>&1 || gitwt branch --set-upstream-to="origin/$BR" "$BR" >/dev/null 2>&1
+    gitwt push "$SREM" "$BR" >/dev/null 2>&1 && return 0
+    git -C "$WT" rev-parse "@{upstream}" >/dev/null 2>&1 || gitwt branch --set-upstream-to="$SREM/$BR" "$BR" >/dev/null 2>&1
     pull_branch || return 1                                          # integrate the new remote tip, then retry
     purge_tombstoned                                                 # the merge may have re-introduced a raced re-add — purge + re-stage before retrying
     gitwt add --ignore-removal -- . >/dev/null 2>&1
@@ -572,7 +585,7 @@ case "$op" in
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: delete session $did" >/dev/null 2>&1
     pushed=0
     for i in 1 2 3; do
-      if gitwt push origin "$BR" >/dev/null 2>&1; then pushed=1; break; fi
+      if gitwt push "$SREM" "$BR" >/dev/null 2>&1; then pushed=1; break; fi
       pull_branch || break                                 # integrate the new tip (keeps our commit), then retry
     done
     [ "$pushed" = 1 ] || fail "push failed (no access, or network)"
@@ -679,7 +692,7 @@ case "$op" in
     # plumbing (see above): the app-quit detached one-shot must survive index.lock corpses and never wait
     # behind a dying sync, or peers watch a zombie "live" row for the full TTL.
     if [ -z "$(presence_base)" ]; then emit "{\"ok\":true,\"op\":\"presence-clear\"}"; exit 0; fi   # no branch -> nothing advertised, ever
-    if ! git -C "$SDIR" show "origin/$BR:live/$author.json" >/dev/null 2>&1; then
+    if ! git -C "$SDIR" show "$SREM/$BR:live/$author.json" >/dev/null 2>&1; then
       emit "{\"ok\":true,\"op\":\"presence-clear\"}"; exit 0                                        # already clear on the freshest known view
     fi
     pushed=0
@@ -696,19 +709,19 @@ case "$op" in
       # OUTSIDE the per-ws queue (opts.direct). A presence-only change fetches a few hundred bytes; a big
       # session delta is capped by `timeout` and the sync path picks it up anyway.
       _tmo=""; command -v timeout >/dev/null 2>&1 && _tmo="timeout 8"
-      if $_tmo git -C "$SDIR" fetch origin "$BR" >/dev/null 2>&1; then
+      if $_tmo git -C "$SDIR" fetch "$SREM" "$BR" >/dev/null 2>&1; then
         GD="$SDIR"
       else
         # The bounded fetch failed (blip, wedge): DON'T silently read a stale view as if it were fresh — a
         # peers list missing the just-added session would paint nothing and the announce is one-shot. Fall
         # back to the resilient worktree path, whose own fetch gets a second chance on a separate code path.
         ensure_worktree || fail "could not set up the sessions branch"
-        git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+        git -C "$WT" fetch "$SREM" "$BR" >/dev/null 2>&1
         GD="$WT"
       fi
     else
       ensure_worktree || fail "could not set up the sessions branch"
-      git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+      git -C "$WT" fetch "$SREM" "$BR" >/dev/null 2>&1
       GD="$WT"
     fi
     # Emit each collaborator's live/<author>.json blob on its own line, then let node JSON-validate each so a single
@@ -722,8 +735,8 @@ case "$op" in
       while IFS= read -r -d '' path; do
         case "$path" in live/*.json) ;; *) continue ;; esac
         [ "$path" = "live/$author.json" ] && continue                # skip my own advertisement
-        git -C "$GD" show "origin/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r'; printf '\n'
-      done < <(git -C "$GD" ls-tree -r --name-only -z "origin/$BR" -- live/ 2>/dev/null) \
+        git -C "$GD" show "$SREM/$BR:$path" 2>/dev/null | head -c 4096 | tr -d '\n\r'; printf '\n'
+      done < <(git -C "$GD" ls-tree -r --name-only -z "$SREM/$BR" -- live/ 2>/dev/null) \
       | (unset MSYS_NO_PATHCONV; node "$HERE/sessions-sync-tool.js" presence-filter)
     )"
     [ -n "$result" ] && emit "$result" || emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[]}"   # node absent/failed → still emit a valid (empty) list so the renderer never chokes
@@ -742,14 +755,14 @@ case "$op" in
     (unset MSYS_NO_PATHCONV; CL_ID="$tid" CL_B64="$tb64" CL_FILE="$WT/meta/$author.json" node "$HERE/sessions-sync-tool.js" title-write) || fail "title write failed"
     gitwt add -- "meta/$author.json" >/dev/null 2>&1
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: title $author" >/dev/null 2>&1
-    pushed=0; for i in 1 2 3; do gitwt push origin "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    pushed=0; for i in 1 2 3; do gitwt push "$SREM" "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
     [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"title-set\"}" || emit "{\"ok\":false,\"op\":\"title-set\",\"error\":\"push failed\"}"
     ;;
   title-list)
     # Resolve every id to its newest title across all authors (last-writer-wins by ts). Read straight off origin
     # via fetch + show — NO worktree merge — like presence-list, so this poll never fights the background sync.
     ensure_worktree || fail "could not set up the sessions branch"
-    git -C "$WT" fetch origin "$BR" >/dev/null 2>&1
+    git -C "$WT" fetch "$SREM" "$BR" >/dev/null 2>&1
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
     (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" CL_TS=1 node "$HERE/sessions-sync-tool.js" title-read) || fail "title read failed"
     ;;

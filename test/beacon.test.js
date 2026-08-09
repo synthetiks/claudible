@@ -25,7 +25,7 @@ function ok(label, c) { c ? pass++ : (fail++, console.error('  FAIL ' + label));
 ok('script: remote-head + presence-starting are allowlisted ops',
   /case "\$op" in [^\n]*remote-head[^\n]*presence-starting[^\n]*\) ;; \*\) fail "bad op"/.test(SH));
 ok('script: remote-head is a bare BOUNDED ls-remote (a big session push must not stretch the probe)',
-  /ls-remote origin "refs\/heads\/\$BR"/.test(SH) && !/fetch origin "\$BR"[\s\S]{0,400}op\\":\\"remote-head/.test(SH.slice(SH.indexOf('"$op" = "remote-head"'), SH.indexOf('"$op" = "remote-head"') + 1400)));
+  /ls-remote "\$SREM" "refs\/heads\/\$BR"/.test(SH) && !/fetch "\$SREM" "\$BR"[\s\S]{0,400}op\\":\\"remote-head/.test(SH.slice(SH.indexOf('"$op" = "remote-head"'), SH.indexOf('"$op" = "remote-head"') + 1400)));
 ok('script: remote-head reports an unreachable remote as ok:false (the per-ws backoff signal)',
   /remote unreachable/.test(SH));
 ok('script: remote-head answers BEFORE the gh-api author block (API-budget invariant)',
@@ -40,7 +40,7 @@ ok('script: presence writes are worktree-FREE plumbing (no pull, no worktree, no
   // presence-set / presence-starting / presence-clear must build the commit directly (mktree + commit-tree +
   // push) and never call pull_branch or gitwt inside their blocks — the worktree path is what made stamps
   // wait behind syncs and made the app-quit clear die on index.lock corpses. Behavior: presence-plumbing.test.sh.
-  if (!/gitp commit-tree/.test(SH) || !/gitp mktree/.test(SH) || !/update-ref "refs\/remotes\/origin\/\$BR"/.test(SH)) return false;
+  if (!/gitp commit-tree/.test(SH) || !/gitp mktree/.test(SH) || !/update-ref "refs\/remotes\/\$SREM\/\$BR"/.test(SH)) return false;
   const spans = [['  presence-set)', '  presence-starting)'], ['  presence-starting)', '  presence-clear)'], ['  presence-clear)', '  presence-list)']];
   for (const [from, to] of spans) {
     const i = SH.indexOf(from), j = SH.indexOf(to);

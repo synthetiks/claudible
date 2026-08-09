@@ -4215,5 +4215,36 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['no first-seen fallback when the link predates ?sid=']);
 }
 
+
+// ---------------------------------------------------------------------------------------------------------
+// 93. TRANSCRIPTS DO NOT RIDE THE CODE REPO. Sessions used to sync to a branch of the project's OWN repo, so
+//   every prompt, reply, file content and command output sat one "make public" click from the world — and
+//   deleting the branch afterwards does not undo it (history, forks, clones). This project nearly shipped
+//   exactly that. A repo workspace now also gets a SEPARATE PRIVATE sessions repo, wired as the
+//   `claudible-sessions` remote; sessions-sync prefers it and falls back to origin so pre-existing projects
+//   are untouched. Three properties must hold together or the guarantee is not real.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const SS = read('wsl/sessions-sync.sh'), CW = read('wsl/create-workspace.sh');
+  none('sessions-sync no longer resolves a dedicated sessions remote (transcripts fall back onto the code repo)',
+    /SREM=claudible-sessions/.test(SS) && /remote get-url claudible-sessions/.test(SS)
+      ? [] : ['no claudible-sessions remote resolution']);
+  // The probe MUST run after the cygpath rewrite: git.exe cannot read the MSYS form of SDIR, so probing
+  // earlier answers "no such remote" on the win flavor and silently puts transcripts back on the code repo.
+  none('the sessions-remote probe moved back above the Windows path normalization (silently re-exposes on win)',
+    SS.indexOf('remote get-url claudible-sessions') > SS.indexOf('WT="$(cygpath -m "$WT"')
+      ? [] : ['the claudible-sessions probe runs before SDIR is cygpath-normalized']);
+  // A leftover hard-coded origin on a $BR operation would send THAT operation to the code repo while the rest
+  // went next door — the worst outcome, because it leaks quietly rather than failing.
+  none('a session-branch git op still hard-codes origin instead of $SREM',
+    SS.split('\n').filter((l) => !/^\s*#/.test(l) && /\$BR/.test(l) && /\borigin\b/.test(l) && !/SREM/.test(l))
+      .map((l) => 'hard-coded origin: ' + l.trim().slice(0, 90)));
+  none('create-workspace no longer mints the private sessions repo + remote',
+    /gh repo create "\$owner\/\$sess_repo" --private/.test(CW) && /remote add claudible-sessions/.test(CW)
+      ? [] : ['no sessions repo creation']);
+  none('the sessions repo is created without --private (it would be PUBLIC)',
+    /gh repo create "\$owner\/\$sess_repo"(?![^\n]*--private)/.test(CW) ? ['sessions repo not created private'] : []);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
