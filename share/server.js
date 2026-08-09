@@ -749,7 +749,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName, paused };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, systemChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
 module.exports = { createShareServer, uniqueName, cleanName, stripCtrlV, sanitizePaste, isTypingBytes };

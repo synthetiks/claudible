@@ -4263,5 +4263,46 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /^SREM=origin/m.test(SS) ? [] : ['SREM no longer defaults to origin']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// 94. /clear MOVES A SHARED SESSION OUT FROM UNDER THE MIRROR. Sharing welds a session ID at Share time but
+//   streams a pinned TAB, and nothing kept the two in agreement. Claude Code mints a new session id from
+//   INSIDE the pty (/clear, /compact), so none of the guards that protect a pinned tab from being re-pointed
+//   ever fire: the guest was carried into a conversation the host never shared while presence advertised the
+//   old id. Observed live. The drift handler must fire ONLY on real drift, and must never touch the two
+//   invariants around it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const A = read('renderer/app.js'), M = read('main.js'), PL = read('preload.js'), SRV = read('share/server.js');
+  none('onStatus no longer distinguishes real drift from a first resolve / a genuine new session',
+    A.includes("const driftFrom = (t.session && t.session !== 'new') ? t.session : null;")
+      ? [] : ["driftFrom guard missing - a first resolve or a genuine new session would count as drift"]);
+  // All four conditions matter: real drift, the SHARED tab, and a weld still naming the session we drifted
+  // from (so a re-share that happened meanwhile is never stomped).
+  none('the drift re-weld lost one of its four guards',
+    A.includes('if (driftFrom && sharedTabIdR != null && t.tabId === sharedTabIdR && sharedSessionId === driftFrom)')
+      ? [] : ['the drift guard is not the full four-way check']);
+  none('drift no longer re-welds + re-advertises (presence would name a session nobody is in)',
+    A.includes('sharedSessionId = s.sessionId;') && A.includes('updateAdvertise();')
+      ? [] : ['no re-weld + updateAdvertise on drift']);
+  // THE INVARIANT: updateAdvertise is keyed on the SHARED session, never the viewed one — that is what stops
+  // ordinary browsing from unadvertising. Drift may only READ it.
+  none('updateAdvertise stopped keying on the shared session (browsing would unadvertise)',
+    A.includes("const want = (aw && aw.kind === 'repo' && sharedSessionId) ? sharedSessionId : null;")
+      ? [] : ['updateAdvertise no longer keys on sharedSessionId']);
+  // A cleared session is NOT user-created: bornNew drives the unsaved-row filter and must keep its meaning.
+  none('drift sets bornNew (a cleared session would render as a user-created unsaved row)',
+    /driftFrom[\s\S]{0,400}?t\.bornNew = true/.test(A) ? ['drift path writes bornNew'] : []);
+  none('guests are moved silently again (no system line on the chat they already have)',
+    M.includes("ipcMain.handle('share:session-changed'") && M.includes('share.systemChat(')
+      ? [] : ['no share:session-changed handler emitting a system chat']);
+  none('share/server no longer exports systemChat (main could not announce the change)',
+    SRV.includes('broadcastChat, systemChat,') ? [] : ['systemChat not exported']);
+  none('preload: shareSessionChanged is not bridged',
+    PL.includes("shareSessionChanged: () => ipcRenderer.invoke('share:session-changed')") ? [] : ['no shareSessionChanged bridge']);
+  none('the drift notice can pause, kick or end the share (it must stay advisory)',
+    /share:session-changed[\s\S]{0,600}?(setSharePaused|kickGuest|share\.stop)/.test(M)
+      ? ['the session-changed handler mutates share state'] : []);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

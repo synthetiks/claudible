@@ -663,6 +663,13 @@ claudible.onStatus((s) => {
   // collaborator deleted it) and the runner fell back to a different one — without this the highlight sticks wrong.
   if (s.sessionId && t.session !== s.sessionId) {
     const wasNew = (t.session === 'new');   // adopting a real id FROM an explicit 'new' = a genuine user-created session (keep its live·unsaved row until it saves). Adopting one from ''/another id = a switch/resume → NOT born-new, so it can never flash a phantom row.
+    // DRIFT: an ESTABLISHED session changed id underneath a running pty. That is `/clear` (and `/compact`, and
+    // any future in-pty command that starts a fresh conversation) — Claude Code mints a new session id from
+    // INSIDE the terminal, through no IPC, so not one of the guards that protect a pinned tab from being
+    // re-pointed ever fires. Adopting it silently is what let a live guest be carried into a conversation the
+    // host never shared, while presence kept advertising the old id. `''`→id (first resolve) and `'new'`→id (a
+    // genuine new session) are NOT drift and must keep their existing behaviour untouched.
+    const driftFrom = (t.session && t.session !== 'new') ? t.session : null;
     t.session = s.sessionId;
     t.bornNew = wasNew;
     if (t.tabId === activeTabId) activeSession = s.sessionId;
@@ -674,6 +681,18 @@ claudible.onStatus((s) => {
       saveSessionTitles(titles, tstamps);   // copy → mutable (cached map may be a frozen contextBridge object); bounded + evictable
       const _aw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace, not the sidebar's — a background tab resolving while you view another ws must gate + publish against ITS OWN repo
       if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then((r) => { if (r && r.ok === false) toast('Named here — sharing the name failed, will keep retrying'); pollTitles(true); }).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators. R38: a failed publish was silent (the rename path already toasts this same line); the inverse reconciler keeps retrying either way
+    }
+    // The share is welded to a session ID but streams a pinned TAB, and until now nothing kept the two in
+    // agreement. Re-weld to what is actually running, then re-advertise so the LIVE badge and Join point at the
+    // live conversation instead of one nobody is in. updateAdvertise() stays keyed on the SHARED session (never
+    // the viewed one) — that invariant is what stops ordinary browsing from unadvertising, so it is only ever
+    // read here, never changed. Guarded three ways: real drift only, the SHARED tab only, and only while the
+    // weld still names the session we just drifted away from (never stomp a re-share that happened meanwhile).
+    if (driftFrom && sharedTabIdR != null && t.tabId === sharedTabIdR && sharedSessionId === driftFrom) {
+      sharedSessionId = s.sessionId;
+      updateAdvertise();
+      try { claudible.shareSessionChanged && claudible.shareSessionChanged(); } catch (e) {}   // tell the guests, in their own chat, instead of moving them silently
+      try { toast('Session cleared — still sharing this window with your guests'); } catch (e) {}
     }
     if (sidebarReady && t.wsId === activeWsId) refreshSessions();
   }

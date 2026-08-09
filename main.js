@@ -1444,6 +1444,17 @@ ipcMain.handle('share:pause', (e, arg) => {
   try { setSharePaused(derivePaused(mirrorWs())); } catch {}
   return { ok: true, paused: share.status().paused };
 });
+// The shared conversation was cleared out from under the mirror (`/clear`, `/compact`, or any in-pty command
+// that starts a fresh session). The guests' terminal keeps streaming — the pty never changed — so without a
+// word they would simply watch the screen empty and carry on typing into a conversation they were never shown
+// joining. Say it in the chat they already have, as a system line, so the change is visible rather than felt.
+// Deliberately advisory: it never pauses, kicks, or ends the share. The renderer has already re-welded and
+// re-advertised by the time this fires; this is the human half of the same event.
+ipcMain.handle('share:session-changed', () => {
+  if (!share.status().running) return { ok: false, error: 'not sharing' };
+  try { share.systemChat('The host cleared this session — you are still connected, continuing in the same window.'); } catch {}
+  return { ok: true };
+});
 ipcMain.handle('share:newlink', () => {                 // mint a fresh one-time link (re-invite)
   if (!share.status().running || !shareBaseUrl) return { ok: false, error: 'not sharing' };
   const t = share.regenerateLink();
