@@ -2676,6 +2676,15 @@ ipcMain.handle('workspace:import', async (e, payload) => {
     if (i >= 0) { registry.workspaces.splice(i, 1); saveRegistry(); }
     return { ok: false, error: c.error || 'clone failed' };
   }
+  // Tag the repo as a Claudible workspace so OTHER collaborators' (and this user's other devices') discovery
+  // can find it — create-workspace.sh does this at creation, but imports never did, leaving the repo invisible
+  // to every other machine's scan (a GitHub invite alone changes nothing: discovery filters on the topic, not
+  // on access). Best-effort and non-blocking: topic edits need admin rights on the repo; without them the
+  // import is still fine locally and the owner can tag later. syncSessions stays off — see the note above:
+  // publishing transcripts remains a separate, explicit choice.
+  runner.runScript('tag-workspace.sh', `'${owner}' '${repoName}'`, { timeout: 30000 }).then(({ err }) => {
+    if (err) console.error('[claudible] tag-workspace:', err.message);
+  });
   return { ok: true, workspace: registry.workspaces.find((w) => w.id === wid) || ws };
 });
 // Provision a new workspace (local mkdir or a private GitHub repo), register it, switch to it, start fresh.
