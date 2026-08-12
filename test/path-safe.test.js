@@ -75,13 +75,13 @@ is('the double quote genuinely breaks the round-trip', roundTrips('/home/a"b'), 
 is('the newline genuinely breaks the round-trip', roundTrips('/home/a' + CTRL(10) + 'b'), false);
 is('the backslash silently CORRUPTS the round-trip (no throw)', roundTrips('/home/a\\b'), false);
 
-// ---- isContainedPath (CASE-24) — isSafePath AND absolute AND no '.'/'..' segment --------------------------
+// ---- isContainedPath — isSafePath AND absolute AND no '.'/'..' segment -----------------------------------
 // Defense-in-depth against a hand-edited workspaces.json. Custom save locations are a real feature: this is
 // NOT "under a fixed root" — it's "a real absolute path with no traversal segments".
 for (const p of ['C:/work/proj', '/home/u/proj']) is(`isContainedPath allows ${JSON.stringify(p)}`, isContainedPath(p), true);
 for (const p of ['relative/x', 'C:/a/../b', '../x', '/a/./b']) is(`isContainedPath rejects ${JSON.stringify(p)}`, isContainedPath(p), false);
 // existing isSafePath behavior is untouched by isContainedPath's existence
-for (const p of ALLOWED) is(`isSafePath unaffected by CASE-24 for ${JSON.stringify(p)}`, isSafePath(p), true);
+for (const p of ALLOWED) is(`isSafePath unaffected by isContainedPath for ${JSON.stringify(p)}`, isSafePath(p), true);
 is('PATH_TRAVERSAL_MSG is a sentence', /\s/.test(PATH_TRAVERSAL_MSG), true);
 
 console.log(`\npath-safe: ${pass} passed, ${fail} failed`);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/sessions-lineage-index.test.sh — CASE-26 / CLEAR-DRIFT-PATCH-PLAN FIX C.
+# test/sessions-lineage-index.test.sh — session lineage recording + generated INDEX.md.
 #
 # Drives wsl/sessions-sync-tool.js's "lineage-write" and "index-write" subcommands directly (the same way
 # test/port-parity.sh drives "title-write": env vars + a node spawn, no worktree/network needed), plus

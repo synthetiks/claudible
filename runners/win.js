@@ -524,8 +524,8 @@ function spawnEnv(runtimeId, base, modelStrategy) {
   };
   // "Plan big, execute small" (Anthropic cookbook pattern, parity with wsl/session.sh): the main session
   // plans/synthesizes on the user's chosen model; SUBAGENTS are nudged toward Sonnet 5 via the context hook's
-  // delegation text, NOT via a hard env pin: per R-22(b) ("never override"), CLAUDE_CODE_SUBAGENT_MODEL was
-  // proven (API stamps, run wf_ee694f22-0ed) to override even explicitly-requested spawn models.
+  // delegation text, NOT via a hard env pin. The strategy is a default only and must never override an explicit
+  // model choice: CLAUDE_CODE_SUBAGENT_MODEL was measured (API stamps) overriding explicitly-requested spawn models.
   if (modelStrategy === 'planBigExecSmall') {
     defaults.CLAUDIBLE_MODEL_STRATEGY = 'planBigExecSmall';   // read by the context hook for the delegation nudge
   }

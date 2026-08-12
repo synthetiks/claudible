@@ -2688,12 +2688,12 @@ if ($('voice-setup-rescan')) $('voice-setup-rescan').addEventListener('click', v
     else toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
   }));
 })();
-// model-strategy selector — "plan big, execute small" (Anthropic cookbook, R-22): OFF by default — only an explicit
+// model-strategy selector — "plan big, execute small" (Anthropic cookbook pattern): OFF by default — only an explicit
 // 'planBigExecSmall' enables it. When on, Sonnet 5 is only the DEFAULT for subagents that request no model — an
 // explicitly requested model always wins (advisory nudge, never an env override).
 (async () => {
   const row = $('strategy-row'); if (!row) return;
-  // Every fallback here is 'off' — the main-process default is OFF (R-22), so an unreadable/failed IPC must
+  // Every fallback here is 'off' — the main-process default is OFF, so an unreadable/failed IPC must
   // NOT paint the opt-in pill as active or the UI would claim a strategy the session never got.
   const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.strategy || 'off') === (v || 'off')));
   let cur = 'off'; try { cur = await claudible.modelStrategyGet(); } catch {}
@@ -4662,7 +4662,7 @@ async function deleteSession(id, scope, force) {
   if (deletingIds.has(id)) return;
   deletingIds.add(id);
   const myWs = activeWsId;   // the deleted row's workspace, captured NOW — the awaits below (and a joined live tab being on screen) can leave main's active ws pointing elsewhere
-  // CASE-13 — ask the sync-awareness question FIRST, for the same reason the busy pre-flight below runs first:
+  // Ask the sync-awareness question FIRST, for the same reason the busy pre-flight below runs first:
   // everything between here and the delete call (re-pointing every owning tab, respawning their ptys, ending the
   // live share) is irreversible, so a needsForce refusal that came back AFTER it would leave the user with the
   // session still on disk, their guests disconnected and their tab moved — a refusal that damaged more than the
@@ -4734,7 +4734,7 @@ async function deleteSession(id, scope, force) {
   }
   setOrder(order);
   let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs, force); } catch {} finally { deletingIds.delete(id); }
-  // CASE-13, residual race only: the pre-flight above already answered this question before anything was torn
+  // Residual race only: the pre-flight above already answered this question before anything was torn
   // down, so reaching here means the sync worktree changed under us mid-delete (or the workspace stopped being
   // kind:'repo'). Handle it rather than reporting a generic failure — but the teardown has happened, so this is
   // the degraded path, not the designed one.
@@ -5874,7 +5874,7 @@ async function deleteWorkspace(w, force) {
   const busyToast = () => toast('A session in this project is still running — stop it before deleting');
   if (wsBusy(w.id)) { busyToast(); return; }               // fast local check; main re-checks against its authoritative rec.busy
   let r = null; try { r = await claudible.workspaceDelete(w.id, force); } catch {}
-  // CASE-13: REFUSE-with-explicit-override — the workspace was NOT touched (main's dirty check runs before any
+  // REFUSE-with-explicit-override — the workspace was NOT touched (main's dirty check runs before any
   // mutation), so this is a true refusal: nothing to reconcile here, just ask for the second, explicit confirm.
   if (r && r.ok === false && r.needsForce) {
     const counts = [

@@ -16,7 +16,7 @@
 # now; the renderer already confirmed this via the modal, stating it is permanent).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the trash
-. "$HERE/_git-safe.sh"                                   # CASE-13: a trashed entry's .git/config is attacker-controlled same as any adopted project's
+. "$HERE/_git-safe.sh"                                   # a trashed entry's .git/config is attacker-controlled same as any adopted project's
 
 MAX_AGE_DAYS="${CLAUDIBLE_TRASH_MAX_AGE_DAYS:-30}"
 MAX_MB="${CLAUDIBLE_TRASH_MAX_MB:-2048}"
@@ -48,7 +48,7 @@ zap() {
   case "$p" in "$REAL"/*) ;; *) return 0 ;; esac        # GUARD 2 (again, per-entry): must be inside the trash
   case "$p" in *"/.."*) return 0 ;; esac                 # paranoia: no traversal components
   if [ -L "$p" ]; then rm -f -- "$p" 2>/dev/null && removed=$((removed+1)); return 0; fi   # GUARD 3
-  # CASE-13: a trashed repo (ws-* entries hold their .git at the top level; proj-*/syncwt-* entries hold no
+  # A trashed repo (ws-* entries hold their .git at the top level; proj-*/syncwt-* entries hold no
   # repo, so a top-level check alone suffices) that still has uncommitted work or commits never pushed to its
   # upstream outlives the age AND size caps — only the user-confirmed "Delete trash" (EMPTY_ALL, below) is the
   # override. This is a RETENTION rule, not a refusal: the caller (boot-time sweep) never sees an error either way.

@@ -133,8 +133,8 @@ eq('spawnEnv missing runtimeId -> default tab', spawnEnv('', be).CLAUDIBLE_TAB, 
 // an explicit user override in the real env WINS (we only supply a default) — never fight a deliberate setting
 eq('spawnEnv honors a user override of the threshold',
   spawnEnv('t', { CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '5' }).CLAUDE_CODE_RESUME_THRESHOLD_MINUTES, '5');
-// "plan big, execute small": strategy on → hook-nudge env var only, NEVER the subagent-model env pin (R-22(b):
-// CLAUDE_CODE_SUBAGENT_MODEL was proven, API stamps, run wf_ee694f22-0ed, to override even explicitly-requested
+// "plan big, execute small": strategy on → hook-nudge env var only, NEVER the subagent-model env pin (a default
+// must never override an explicit choice: CLAUDE_CODE_SUBAGENT_MODEL was measured, API stamps, overriding explicitly-requested
 // spawn models, so the app must never set it).
 eq('spawnEnv strategy on does NOT pin the subagent model', spawnEnv('t', be, 'planBigExecSmall').CLAUDE_CODE_SUBAGENT_MODEL, undefined);
 eq('spawnEnv strategy on exports the nudge var', spawnEnv('t', be, 'planBigExecSmall').CLAUDIBLE_MODEL_STRATEGY, 'planBigExecSmall');

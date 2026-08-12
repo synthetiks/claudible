@@ -29,7 +29,7 @@ KOKORO_PIN_TAG="v0.1.4"
 # whisper.cpp is git-cloned below -- pin a TAG (for a readable clone command) AND the COMMIT it resolves to
 # (tags are movable refs; a commit is not). A value starting with "TBD-" means nobody has verified it yet.
 WHISPER_PIN_TAG="v1.9.1"
-# Computed 2026-08-12 under R-23 (owner-granted, one-time sanction): GET
+# Computed 2026-08-12 by a one-time maintainer-verified fetch from the official host: GET
 # https://api.github.com/repos/ggml-org/whisper.cpp/git/ref/tags/v1.9.1 -- object.type came back "commit"
 # (a lightweight tag, not annotated), so object.sha IS the commit already; no second dereference through
 # object.url was needed (an annotated tag would have required following object.url and taking ITS
@@ -46,7 +46,7 @@ sha256_of() {   # portable: sha256sum (Linux) first, shasum -a 256 (macOS) as fa
 verify_checksum() {
   local path="$1" expected="$2" label="$3" actual
   case "$expected" in
-    ''|TBD-*) say "REFUSING: no verified SHA-256 pin for $label -- a binary this script would execute/extract has no fingerprint (see the *_SHA256 block; pins require an R-23-sanctioned refresh)."; return 1 ;;
+    ''|TBD-*) say "REFUSING: no verified SHA-256 pin for $label -- a binary this script would execute/extract has no fingerprint (see the *_SHA256 block; pins are refreshed only from official sources by a maintainer)."; return 1 ;;
   esac
   actual="$(sha256_of "$path")"
   if [ -z "$actual" ]; then say "REFUSING: no sha256sum/shasum on this system -- cannot verify $label; install coreutils (sha256sum) and re-run."; return 1; fi
@@ -139,7 +139,7 @@ if [ ! -x "$VOICE/whisper/build/bin/whisper-server" ]; then
   # Tags are movable refs -- verify the COMMIT the clone actually resolved to, not just the tag name.
   actual="$(git -C "$VOICE/whisper" rev-parse HEAD)"
   case "$WHISPER_PIN_COMMIT" in
-    ''|TBD-*) rm -rf "$VOICE/whisper"; say "REFUSING: no verified commit pin for whisper.cpp $WHISPER_PIN_TAG -- a repo this script would build has no fingerprint (see WHISPER_PIN_COMMIT; pins require an R-23-sanctioned refresh)."; exit 1 ;;
+    ''|TBD-*) rm -rf "$VOICE/whisper"; say "REFUSING: no verified commit pin for whisper.cpp $WHISPER_PIN_TAG -- a repo this script would build has no fingerprint (see WHISPER_PIN_COMMIT; pins are refreshed only from official sources by a maintainer)."; exit 1 ;;
   esac
   if [ "$actual" != "$WHISPER_PIN_COMMIT" ]; then
     rm -rf "$VOICE/whisper"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/delete-safety.test.sh — CASE-13: deleting work that exists nowhere else must REFUSE, not warn.
+# test/delete-safety.test.sh — deleting work that exists nowhere else must REFUSE, not warn.
 #
 # Three layers share one override env, CLAUDIBLE_FORCE_DELETE=1, which ONLY the user's second, explicit
 # "delete anyway" confirm ever sets:

@@ -16,7 +16,7 @@ const ck = require('../lib/checkpoint.js');
 const gitSafe = require('../lib/git-safe.js');
 
 const repo = process.cwd();   // checkpoint.sh cd'd into the workspace repo before invoking node
-// CASE-22/B-25: checkpoint-tool runs against a possibly-adopted workspace repo whose .git/config is not ours to
+// checkpoint-tool runs against a possibly-adopted workspace repo whose .git/config is not ours to
 // trust — neutralize the same command-executing keys the shell sites already do. GIT_ASKPASS/SSH_ASKPASS are
 // deleted once here (not by buildEnv, which only returns an additive object) so no inherited value survives.
 delete process.env.GIT_ASKPASS;

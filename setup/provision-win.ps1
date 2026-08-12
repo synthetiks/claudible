@@ -28,9 +28,9 @@ $ErrorActionPreference = 'Stop'
 # and hashing the real bytes (Get-FileHash -Algorithm SHA256) -- never guessed, never copied from an
 # upstream page. A value starting with 'TBD-' means nobody has verified it yet, and Fetch-Verified below
 # FAILS CLOSED on a TBD/missing pin or a mismatch: an unverified binary is never extracted or executed.
-# Re-verify by hand and update this block (see also R-23's refresh rule) before trusting a new value.
+# Re-verify by hand and update this block from the official host only, before trusting a new value.
 #
-# Computed 2026-08-12 under R-23 (owner-granted, one-time network sanction for THIS pin-fill only):
+# Computed 2026-08-12 by a one-time maintainer-verified fetch made solely for THIS pin-fill:
 # each URL below was downloaded to a scratch dir, hashed with Get-FileHash -Algorithm SHA256, the bytes
 # deleted immediately after, and the hash lowercased to match Fetch-Verified's comparison. None of these
 # values were copied from a webpage.

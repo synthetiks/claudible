@@ -27,7 +27,7 @@ case "$owner" in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"ba
 case "$repo" in '' | . | .. | *[!A-Za-z0-9._-]*) printf '{"ok":false,"error":"bad repo name"}'; exit 0 ;; esac
 case "$slug"  in '' | -* | *- | *[!A-Za-z0-9-]*) printf '{"ok":false,"error":"bad slug"}'; exit 0 ;; esac
 # Same charset as lib/pathSafe.js (main.js rejects it first) and as adopt-workspace.sh. Belt: workspaces.json is hand-editable.
-# CASE-24: also refuse traversal segments — main.js's isContainedPath is the primary guard; this is the belt.
+# Also refuse traversal segments — main.js's isContainedPath is the primary guard; this is the belt.
 case "$dir_in" in *\'* | *\"* | *\\* | *[[:cntrl:]]* | .. | ../* | */.. | */../*) printf '{"ok":false,"error":"bad dir"}'; exit 0 ;; esac
 
 if [ -n "$dir_in" ]; then dir="$dir_in"; else dir="$HOME/.claudible/repos/$slug"; fi

@@ -27,7 +27,7 @@ $KNOWN_HASHES = @{
   # kokoro-v1_0.pth -- https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4/kokoro-v1_0.pth (~327MB)
   'kokoro-v1_0.pth' = '496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4'
   # whisper-bin-x64.zip -- https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip
-  # Computed 2026-08-12 under R-23 (owner-granted, one-time sanction): downloaded the URL above directly,
+  # Computed 2026-08-12 by a one-time maintainer-verified fetch: downloaded the URL above directly,
   # 7982101 bytes observed, hashed with Get-FileHash -Algorithm SHA256 against the downloaded bytes (not
   # copied from a page), bytes deleted immediately after.
   'whisper-bin-x64.zip' = '7d8be46ecd31828e1eb7a2ecdd0d6b314feafd82163038ab6092594b0a063539'
@@ -37,7 +37,7 @@ $KNOWN_HASHES = @{
 $KOKORO_PIN_TAG = 'v0.1.4'
 function Test-Checksum($path, $key) {
   $expected = $KNOWN_HASHES[$key]
-  if ((-not $expected) -or ($expected.StartsWith('TBD-'))) { Warn "REFUSING: no verified SHA-256 pin for $key -- a binary this script would execute/extract has no fingerprint (see setup-win.ps1's KNOWN_HASHES block; pins require an R-23-sanctioned refresh)."; return $false }
+  if ((-not $expected) -or ($expected.StartsWith('TBD-'))) { Warn "REFUSING: no verified SHA-256 pin for $key -- a binary this script would execute/extract has no fingerprint (see setup-win.ps1's KNOWN_HASHES block; pins are refreshed only from official sources by a maintainer)."; return $false }
   $actual = (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLower()
   if ($actual -ne $expected) {
     Warn "CHECKSUM MISMATCH for $key -- the download does not match the pinned SHA-256."

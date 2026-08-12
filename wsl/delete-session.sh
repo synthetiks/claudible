@@ -14,7 +14,7 @@ esac
 PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 src="$PROJ/$id.jsonl"
 [ -f "$src" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
-# CASE-13: sync-awareness only (this is a REPO workspace's shared-session sync worktree, never the workspace's
+# Sync-awareness only (this is a REPO workspace's shared-session sync worktree, never the workspace's
 # own .git — soft-delete already keeps the transcript recoverable, so this is not the dirty-repo check above).
 # If sync is on for this workspace and no synced copy of this session exists yet, deleting now would delete
 # the ONLY copy anywhere. Default refuses; CLAUDIBLE_FORCE_DELETE=1 (the renderer's explicit re-confirm) skips it.
@@ -28,7 +28,7 @@ if [ "${CLAUDIBLE_FORCE_DELETE:-}" != 1 ] && [ -n "${WS_SLUG:-}" ] && [ -d "$HOM
     exit 0
   fi
 fi
-# CASE-13 pre-flight: the renderer must know whether this delete WOULD be refused BEFORE it re-points the tabs
+# Delete pre-flight: the renderer must know whether this delete WOULD be refused BEFORE it re-points the tabs
 # holding this session and ends a live share on it — none of which is undoable, so a refusal discovered after
 # them is no refusal at all. CHECK_ONLY answers with the same shape as a real run (the needsForce branch above
 # has already exited if it applies) and stops here: nothing is moved, nothing is written, no marker is touched.

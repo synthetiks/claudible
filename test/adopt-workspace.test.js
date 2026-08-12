@@ -250,7 +250,7 @@ ok('_git-safe.sh: blocks the ext transport (arbitrary command)', /protocol\.ext\
 ok('_git-safe.sh: uses git\'s env-var config so it applies to EVERY git call in the process',
   /GIT_CONFIG_COUNT=/.test(GITSAFE) && /GIT_CONFIG_KEY_0/.test(GITSAFE));
 
-// CASE-12/22/23 + B-25: lib/git-safe.js is the ONE shared source of truth for the allowlist. _git-safe.sh and
+// lib/git-safe.js is the ONE shared source of truth for the git-config allowlist. _git-safe.sh and
 // context-hook.js each carry their own hand-written copy (a bash script cannot require(), and context-hook.js is
 // staged as a standalone file — see its own header). This parity pin requires lib/git-safe.js's SAFE_KEYS and
 // asserts BOTH copies contain every key=value pair, in order, with the same total count — a key added to one
@@ -266,7 +266,7 @@ SAFE_KEYS.forEach((k, i) => {
   const jsPair = new RegExp(`GIT_CONFIG_KEY_${i}: '${reEscape(k.key)}', GIT_CONFIG_VALUE_${i}: '${reEscape(k.value)}'`);
   ok(`context-hook.js: index ${i} (${k.key}=${JSON.stringify(k.value)}) matches lib/git-safe.js SAFE_KEYS`, jsPair.test(CONTEXT_HOOK));
 });
-// CASE-22 (node edition of the tree-wide sweep): the two node-layer git call sites must go through the shared
+// Node edition of the tree-wide sweep: the two node-layer git call sites must go through the shared
 // lib/git-safe.js module rather than reimplementing (or omitting) the allowlist.
 const CKPT_TOOL = fs.readFileSync(path.join(ROOT, 'wsl/checkpoint-tool.js'), 'utf8');
 const SELF_UPDATE = fs.readFileSync(path.join(ROOT, 'lib/selfUpdate.js'), 'utf8');
@@ -336,15 +336,15 @@ for (const s of shFiles) {
     /^\s*\.\s+"\$HERE\/_git-safe\.sh"/m.test(raw));
 }
 // Non-vacuity: if the detector regex ever stops matching, every check above passes by finding nothing to check.
-// A FLOOR, not a census — the number only ever goes up as scripts learn to run git. CASE-13 raised it by two:
+// A FLOOR, not a census — the number only ever goes up as scripts learn to run git. The delete-safety work raised it by two:
 // delete-workspace.sh (the dirty/unpushed refusal) and trash-prune.sh (a trashed .git/config is attacker-class
 // exactly like an adopted one) both invoke git now, and both source the neutralizer.
-ok('…and the sweep actually reached the git-touching scripts (12+ today, incl. CASE-13\'s two)', swept >= 12);
+ok('…and the sweep actually reached the git-touching scripts (12+ today, incl. the two delete scripts)', swept >= 12);
 // session.sh's own exemption above is deliberately narrow: it covers session.sh's TOP-LEVEL shell (which execs
 // claude, so sourcing the neutralizer there would leak GIT_CONFIG_* into the user's own git). It does NOT cover
 // the bash-fallback context-hook.sh that session.sh WRITES via heredoc — that generated script is a separate
 // process (invoked per-prompt as its own hook, never exec'd into the user's session) and runs `git config`
-// against a possibly-adopted, attacker-controlled workspace .git/config, so it must guard itself (CASE-12 twin).
+// against a possibly-adopted, attacker-controlled workspace .git/config, so it must guard itself (same guard as the node context hook).
 // Pin the heredoc region directly so a future edit can't silently drop the guard while the outer sweep above
 // keeps passing on the strength of an exemption that was never meant to cover this inner script.
 {
@@ -353,7 +353,7 @@ ok('…and the sweep actually reached the git-touching scripts (12+ today, incl.
   const heredoc = heredocMatch ? heredocMatch[1] : '';
   const gitConfigIdx = heredoc.search(/git config/);
   const sourceIdx = heredoc.search(/\.\s+"\$gs"/);
-  ok('wsl/session.sh: the generated context-hook.sh sources _git-safe.sh BEFORE its git config calls (fail-closed guard, CASE-12 twin)',
+  ok('wsl/session.sh: the generated context-hook.sh sources _git-safe.sh BEFORE its git config calls (fail-closed guard, same as the node context hook)',
     gitConfigIdx !== -1 && sourceIdx !== -1 && sourceIdx < gitConfigIdx);
   // …and FAIL-CLOSED, not merely ordered. "Source line comes first" is satisfied by a script that sources the
   // neutralizer when it exists and then runs git ANYWAY when it doesn't — which is the exact hole this case is

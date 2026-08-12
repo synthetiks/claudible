@@ -45,7 +45,7 @@ function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy
   const perm = ['bypass', 'acceptEdits'].includes(permMode) ? ` CLAUDIBLE_PERMISSION_MODE='${permMode}'` : '';
   // "Plan big, execute small" (Anthropic cookbook pattern): the main session plans/synthesizes on the user's
   // chosen model while SUBAGENTS are nudged toward Sonnet 5 via the context hook's delegation text (session.sh
-  // no longer hard-pins CLAUDE_CODE_SUBAGENT_MODEL — see R-22(b)). Allowlist inline: only the one known value
+  // no longer hard-pins CLAUDE_CODE_SUBAGENT_MODEL — a default never overrides an explicit model choice). Allowlist inline: only the one known value
   // ever reaches the bash string.
   const strat = modelStrategy === 'planBigExecSmall' ? ` CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall'` : '';
   const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + strat + ' ' + wsEnv(ws) + ' ';

@@ -48,7 +48,7 @@ export CLAUDE_CODE_RESUME_TOKEN_THRESHOLD="${CLAUDE_CODE_RESUME_TOKEN_THRESHOLD:
 # "PLAN BIG, EXECUTE SMALL" (Anthropic cookbook pattern; app setting, default OFF — opt in). The main session
 # plans and synthesizes on the user's chosen model; SUBAGENTS — the token-heavy leg (bulk reading, sweeps,
 # workflows) — are nudged toward Sonnet 5 via the context hook's delegation text, NOT via a hard env pin: per
-# R-22(b) ("never override"), CLAUDE_CODE_SUBAGENT_MODEL was proven (API stamps, run wf_ee694f22-0ed) to override
+# design ("never override" an explicit choice), CLAUDE_CODE_SUBAGENT_MODEL was measured (API stamps) to override
 # even explicitly-requested spawn models, so we no longer set it here. The exported strategy var is only
 # inherited by the context hook, which injects the nudge (the savings only happen if the model delegates).
 if [ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ]; then
@@ -205,7 +205,7 @@ printf '%s\n' "\$line" >> "\$out"
 exit 0
 EOF
   chmod +x "$SDIR/.claude/hook.sh"
-  # CASE-12 twin: the bash-fallback context hook runs `git config` against the (possibly adopted, attacker-
+  # Same attacker-controlled-config guard as the node hook: the bash-fallback context hook runs `git config` against the (possibly adopted, attacker-
   # controlled) workspace .git/config on every prompt — stage the SAME shared allowlist source of truth the
   # node hook and every other git-touching script use (lib/git-safe.js's header explains why copies are evil;
   # this IS one of the two sanctioned copies, not a third). Atomic tmp+mv, mirrors stage_hook above.
@@ -229,7 +229,7 @@ ev=$(printf '%s' "$payload" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space
 case "$ev" in ''|*[!A-Za-z0-9_-]*) ev="UserPromptSubmit" ;; esac   # only a clean event name; else default
 j() { printf '%s' "$1" | tr -d '"\\<>' | tr '\n\r\t' '   ' | tr -cd '\040-\176' | cut -c1-200; }
 host=$(j "$(hostname 2>/dev/null)"); who=$(j "$(whoami 2>/dev/null)")
-# CASE-12: this workspace's .git/config may be attacker-controlled (an adopted folder, a poisoned "starter
+# This workspace's .git/config may be attacker-controlled (an adopted folder, a poisoned "starter
 # template" zip) — never run `git` here unguarded. FAIL CLOSED: if the shared allowlist didn't stage
 # alongside us, skip the git calls entirely rather than run git without it (identity degrades to blank,
 # the injection surface does not open). Still MUST exit 0 either way.

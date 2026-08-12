@@ -1795,8 +1795,8 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
   const scope = (arg && arg.scope) || 'local';                              // 'local' (trash here) | 'everywhere' (also off GitHub)
   const ws = _wsById(arg && arg.wsId) || activeWorkspace;                   // the ROW's workspace (sidebar scope), not main's — they differ while a joined live tab is on screen
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
-  const force = !!(arg && arg.force);                                      // CASE-13: the renderer's second, explicit "delete anyway" confirm
-  // CASE-13 pre-flight: deleteSession re-points every owning tab and ends a live share BEFORE it can call this
+  const force = !!(arg && arg.force);                                      // the renderer's second, explicit "delete anyway" confirm
+  // Delete pre-flight: deleteSession re-points every owning tab and ends a live share BEFORE it can call this
   // handler, and none of that is undoable — so a needsForce refusal discovered afterwards is not a refusal, it's
   // damage with a modal on top. `check` runs delete-session.sh's guards with CLAUDIBLE_CHECK_ONLY=1: same
   // needsForce shape, nothing moved, nothing written. Never combined with force by any caller.
@@ -1808,8 +1808,8 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
   runner.runScript('delete-session.sh', `'${sid}'`, { ws, timeout: 30000, extraEnv: (force ? 'CLAUDIBLE_FORCE_DELETE=1 ' : '') + (check ? 'CLAUDIBLE_CHECK_ONLY=1 ' : '') }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let local = {}; try { local = JSON.parse((stdout || '').trim() || '{}'); } catch {}
-      if (check) return resolve(local);                                   // CASE-13: a probe deleted nothing — it must never fall through to the everywhere tombstone
-      if (local.ok === false && local.needsForce) return resolve(local);   // CASE-13: refused — surface needsForce so the renderer can re-confirm
+      if (check) return resolve(local);                                   // a probe deleted nothing — it must never fall through to the everywhere tombstone
+      if (local.ok === false && local.needsForce) return resolve(local);   // refused — surface needsForce so the renderer can re-confirm
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
       // also tombstone it on the shared sessions branch so a sync can never bring it back (for anyone)
       // R10: through the per-ws chain — racing a background sync could reset --hard the tombstone commit away
@@ -2307,7 +2307,7 @@ function ensureClone(ws) {
     // (their repoName IS their slug — Claudible minted those repos itself, so the two were always identical).
     const repoName = isGithubRepoName(ws.repoName) ? ws.repoName : slug;
     if (!slug || !owner || !repoName) return resolve({ ok: false, error: 'bad workspace' });
-    // CASE-24: workspaces.json is hand-editable — a stored ws.path that isn't a real, traversal-free absolute
+    // workspaces.json is hand-editable — a stored ws.path that isn't a real, traversal-free absolute
     // path must REFUSE rather than silently fall back to '' (default dir), which would let a hand-edited entry
     // walk clone-workspace.sh's target outside the folder it's meant to create.
     if (ws.path && !isContainedPath(ws.path)) return resolve({ ok: false, error: PATH_TRAVERSAL_MSG });
@@ -2527,7 +2527,7 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   // repo from it and rewrite ws.path to point there, orphaning the user's real project. (ws.path can only be
   // unsafe on a pre-existing/hand-edited registry; every creation path runs safePath up front.)
   let wsp = '';
-  // CASE-24: same hand-edited-registry belt as ensureClone — a stored ws.path that isn't a real, traversal-free
+  // Same hand-edited-registry belt as ensureClone — a stored ws.path that isn't a real, traversal-free
   // absolute path must REFUSE, not fall through to safePath's charset-only check.
   if (ws.path && !isContainedPath(ws.path)) return { ok: false, error: PATH_TRAVERSAL_MSG };
   if (ws.path) { wsp = safePath(runner.toGuestPath(ws.path)); if (!wsp) return { ok: false, error: PATH_UNSAFE_MSG }; }
@@ -2949,7 +2949,7 @@ function workspaceDeleteCore(id, force) { return new Promise((resolve) => {
   // project must never remove the folder. delete-workspace.sh prefers CLAUDIBLE_WS_DIR (wsEnv emits ws.path), so
   // shelling out here would `mv -f` their real source tree into ~/.claudible/trash. Unregister only.
   const willMoveFolder = APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo');
-  // CASE-13: everything below this point (respawning tabs, unregistering the workspace, tombstoning) is
+  // Everything below this point (respawning tabs, unregistering the workspace, tombstoning) is
   // irreversible from the user's point of view, so the REFUSE-with-explicit-override check must run BEFORE any
   // of it — a `needsForce` result must leave the workspace, its tabs, and the registry completely untouched, or
   // the renderer's re-confirm-with-force retry would hit "unknown workspace" against an id that's already gone.
@@ -3021,7 +3021,7 @@ function workspaceDeleteCore(id, force) { return new Promise((resolve) => {
     // actually named ("ws-local-E2E Overlay Proj.20260807-…") instead of the internal slug — delete-workspace.sh
     // sanitizes it for the filesystem itself; shq here is only the shell-interpolation guard (same pattern as
     // every other free-text value that rides into a runScript argStr, e.g. the presence-stamp calls above).
-    // CASE-13: force=true is the renderer's SECOND, explicit "delete anyway" confirm (only sent after the first
+    // force=true is the renderer's SECOND, explicit "delete anyway" confirm (only sent after the first
     // attempt came back needsForce:true) — extraEnv reaches the script exactly like trash:empty's EMPTY_ALL above.
     // Run BEFORE any mutation below — a needsForce refusal must leave the workspace registered and untouched.
     runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}' '${shq(ws.label || slug)}'`, { ws, timeout: 20000, extraEnv: force ? 'CLAUDIBLE_FORCE_DELETE=1 ' : '' }).then(({ err, stdout }) => {
@@ -3057,7 +3057,7 @@ ipcMain.handle('workspace:deleteFromGithub', async (e, payload) => {
   if (err) return { ok: false, error: 'could not run the delete script: ' + err.message };
   let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
   if (!r.ok) return { ok: false, error: r.error || 'gh repo delete failed' };
-  // CASE-13: force. The GitHub repo is ALREADY gone by this line, so a needsForce refusal here would be exactly
+  // Delete with force. The GitHub repo is ALREADY gone by this line, so a needsForce refusal here would be exactly
   // the "much worse surprise" the busy pre-check above exists to avoid: the remote deleted, the workspace still
   // registered, and a message telling the user to push to a repo that no longer exists. The typed-exact-repo-name
   // confirmation this path required IS the explicit override — stronger than the modal the local path asks for —
@@ -3083,8 +3083,8 @@ ipcMain.handle('effort:set', (e, level) => {
 });
 // "Plan big, execute small" (Anthropic cookbook pattern) — the main session plans/synthesizes on the user's
 // chosen model while SUBAGENTS (the token-heavy leg: bulk reading, sweeps, workflows) are nudged toward
-// Sonnet 5 via the context-hook text (see hooks/context-hook.js). DEFAULT OFF per R-22(b): CLAUDE_CODE_SUBAGENT_MODEL
-// was proven (API stamps, run wf_ee694f22-0ed) to override even explicitly-requested spawn models, so we no
+// Sonnet 5 via the context-hook text (see hooks/context-hook.js). DEFAULT OFF — a default only, never an
+// override: CLAUDE_CODE_SUBAGENT_MODEL was measured (API stamps) overriding explicit spawn-time models, so we no
 // longer hard-pin it — absent/unknown registry value means disabled; only explicit opt-in ('planBigExecSmall')
 // enables the nudge. Applies to the NEXT session each tab launches.
 function modelStrategyNow() { return registry.modelStrategy === 'planBigExecSmall' ? 'planBigExecSmall' : 'off'; }

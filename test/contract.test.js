@@ -991,7 +991,7 @@ none('renderer: orphanTab is never rendered',
   // C-3.6 refactored the inline ipcMain.handle callback into a named workspaceDeleteCore(id) (so the "Delete
   // from GitHub" path can call the exact same core after the repo itself is gone) — capture the FUNCTION now,
   // not the registration line, up to the point it hands back off to ipcMain.handle.
-  // CASE-13 gave it a second parameter (`force` — the user's explicit "delete anyway" for a dirty/unpushed
+  // The refuse-with-override work gave it a second parameter (`force` — the user's explicit "delete anyway" for a dirty/unpushed
   // clone), so the signature is matched loosely; the capture window is unchanged.
   const del = (MAIN.match(/function workspaceDeleteCore\([^)]*\) \{[\s\S]*?\nipcMain\.handle\('workspace:delete'/) || [''])[0];
   none('the workspaceDeleteCore capture went vacuous (every check in this block would pass on an empty string)',
@@ -2806,7 +2806,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and the hooks must still prefer the env over the baked argv, or setting it achieves nothing',
     [/process\.env\.CLAUDIBLE_HOOKS \|\| process\.argv\[2\]/.test(read('hooks/hook.js')) ? '' : 'hook.js no longer env-first',
      /process\.env\.CLAUDIBLE_STATUS \|\| process\.argv\[2\]/.test(read('hooks/statusline.js')) ? '' : 'statusline.js no longer env-first'].filter(Boolean));
-  // (c2) CASE-5: hook.js swallowed every failure (empty catch {}) — a broken CLAUDIBLE_HOOKS path (bad dir,
+  // (c2) hook.js used to swallow every failure (empty catch {}) — a broken CLAUDIBLE_HOOKS path (bad dir,
   //     permissions, disk full) went completely silent, so telemetry/agents/voice/sync just stopped with no
   //     trace anywhere. The hook must still always exit 0 (never break the user's session) but must now name
   //     the failure on stderr, which Claude Code captures without polluting the stdout hook protocol.
@@ -3408,12 +3408,12 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the gh delete_repo scope hint is gone from delete-repo.sh (C-3.6)',
     /gh auth refresh -h github\.com -s delete_repo/.test(fs.readFileSync(path.join(ROOT, 'wsl', 'delete-repo.sh'), 'utf8'))
       ? [] : ['delete-repo.sh no longer tells the user how to grant the missing scope']);
-  // CASE-13: the delegation now passes force=true, and MUST. The remote repo is already deleted by this point,
+  // The delegation now passes force=true, and MUST. The remote repo is already deleted by this point,
   // so the dirty/unpushed refusal cannot apply — there is nothing left to push to, and refusing would strand the
   // workspace registered against a repo that no longer exists. The typed-exact-name confirm IS the override.
   none('workspace:deleteFromGithub stopped delegating to workspaceDeleteCore on success (C-3.6)',
     /if \(!r\.ok\) return \{ ok: false, error: r\.error \|\| 'gh repo delete failed' \};[\s\S]{0,600}?\n\s*return workspaceDeleteCore\(id, true\);/.test(MAIN)
-      ? [] : ['a successful gh repo delete no longer falls through to the ordinary local delete — with force (CASE-13)']);
+      ? [] : ['a successful gh repo delete no longer falls through to the ordinary local delete — with force']);
 
   // (3) the trash icon sits in the settings drawer's head, left of the × close button, and opens the OS file
   //     manager on the trash folder (never a bare listing inside Claudible — "a basic function, nothing complex").
@@ -4354,7 +4354,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 114. CASE-20 — CHECKSUM PLUMBING FAILS CLOSED. A missing/TBD SHA-256 pin (or a missing hasher) used to WARN
+// 114. CHECKSUM PLUMBING FAILS CLOSED. A missing/TBD SHA-256 pin (or a missing hasher) used to WARN
 //   and let an unverified binary through anyway (setup.sh's verify_checksum, setup-win.ps1's Test-Checksum);
 //   both now REFUSE (exit 1 / return $false). The whisper.cpp clone was unpinned HEAD; it now pins a tag AND
 //   verifies the resolved commit (tags move, commits don't). setup-win.ps1's whisper zip download resolved a
@@ -4363,28 +4363,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 //   executables (node zip, PortableGit, cloudflared) and resolved floating "latest"/index.json URLs; it now
 //   has Fetch-Verified + pinned URLs. This block pins the PLUMBING itself (fail-closed branches, wiring);
 //   real pin VALUES are asserted separately below (test 115), where a PIN-COMPUTATION step has now filled
-//   every TBD-* placeholder with a hash/commit computed from the actual downloaded bytes per R-23.
+//   every TBD-* placeholder with a hash/commit computed from the actual downloaded bytes.
 // ---------------------------------------------------------------------------------------------------------
 {
   const PROVWIN = read('setup/provision-win.ps1');
-  none('setup.sh verify_checksum no longer fails closed on a missing/TBD pin or a missing hasher (CASE-20)',
+  none('setup.sh verify_checksum no longer fails closed on a missing/TBD pin or a missing hasher',
     [/''\|TBD-\*\) say "REFUSING: no verified SHA-256 pin for \$label[\s\S]{0,220}return 1 ;;/.test(SETUPSH)
        ? '' : "the TBD/empty case no longer says REFUSING and returns 1",
      /if \[ -z "\$actual" \]; then say "REFUSING: no sha256sum\/shasum on this system/.test(SETUPSH)
        ? '' : 'the no-hasher branch no longer refuses',
      /''\|TBD-\*\) say "REFUSING:[\s\S]{0,240}return 0 ;;/.test(SETUPSH)
        ? 'verify_checksum still has a return 0 warn-and-pass branch' : ''].filter(Boolean));
-  none('setup-win.ps1 Test-Checksum no longer fails closed on a missing/TBD pin (CASE-20)',
+  none('setup-win.ps1 Test-Checksum no longer fails closed on a missing/TBD pin',
     /if \(\(-not \$expected\) -or \(\$expected\.StartsWith\('TBD-'\)\)\) \{ Warn "REFUSING: no verified SHA-256 pin for \$key[\s\S]{0,240}return \$false \}/.test(SETUPWIN)
       ? [] : ['the TBD/missing-pin branch no longer Warns REFUSING and returns $false']);
-  none('setup.sh no longer pins the whisper.cpp clone to a tag + verified commit (CASE-20)',
+  none('setup.sh no longer pins the whisper.cpp clone to a tag + verified commit',
     [/WHISPER_PIN_TAG="v1\.9\.1"/.test(SETUPSH) ? '' : 'no WHISPER_PIN_TAG constant',
      /WHISPER_PIN_COMMIT="[0-9a-fA-F]{40}"/.test(SETUPSH) ? '' : 'no WHISPER_PIN_COMMIT constant (or it is not a 40-hex commit)',
      /git clone --depth 1 --branch "\$WHISPER_PIN_TAG" https:\/\/github\.com\/ggml-org\/whisper\.cpp/.test(SETUPSH)
        ? '' : 'the whisper.cpp clone no longer pins --branch "$WHISPER_PIN_TAG" (clones unpinned HEAD again)',
      /actual="\$\(git -C "\$VOICE\/whisper" rev-parse HEAD\)"/.test(SETUPSH) ? '' : 'the clone no longer rev-parses HEAD to verify the commit',
      /if \[ "\$actual" != "\$WHISPER_PIN_COMMIT" \]; then/.test(SETUPSH) ? '' : 'the clone no longer compares HEAD against WHISPER_PIN_COMMIT'].filter(Boolean));
-  none('provision-win.ps1 lost its Fetch-Verified checksum plumbing or a direct-download site regressed to a floating URL (CASE-20)',
+  none('provision-win.ps1 lost its Fetch-Verified checksum plumbing or a direct-download site regressed to a floating URL',
     [/function Fetch-Verified\(\$url, \$out, \$what, \$pinKey\)/.test(PROVWIN) ? '' : 'Fetch-Verified is gone from provision-win.ps1',
      /\$PINS = @\{/.test(PROVWIN) ? '' : 'no $PINS block in provision-win.ps1',
      /Invoke-RestMethod[\s\S]{0,80}releases\/latest/.test(PROVWIN) ? 'a live releases/latest API resolution is still present in a download path' : '',
@@ -4395,10 +4395,10 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 115. CASE-20 — PIN VALUES FILLED. CHECKSUM-PLUMBING (test 114) landed the fail-closed wiring with every
+// 115. PIN VALUES FILLED. CHECKSUM-PLUMBING (test 114) landed the fail-closed wiring with every
 //   real hash/commit left as a 'TBD-*' placeholder on purpose (a placeholder must never be mistaken for a
 //   verified pin, and the plumbing hard-refuses on one by construction). A separate PIN-COMPUTATION step,
-//   sanctioned once under R-23, downloaded each exact artifact from its official host, hashed the actual
+//   a one-time maintainer-verified download, took each exact artifact from its official host, hashed the actual
 //   bytes, and deleted the download; those computed values now replace every placeholder here. This is the
 //   closing pin: NO 'TBD-' placeholder may remain in any of the three scripts a live install runs.
 // ---------------------------------------------------------------------------------------------------------
@@ -4408,14 +4408,14 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // legitimately still compares against the 'TBD-' prefix (e.g. `''|TBD-*)`, `StartsWith('TBD-')`) nor the
   // prose comments explaining the convention -- neither of those puts an `=` directly before the quote.
   const TBD_PLACEHOLDER = /=\s*['"]TBD-/;
-  none('a TBD- placeholder pin still remains in one of the checksum-verified setup scripts (CASE-20)',
+  none('a TBD- placeholder pin still remains in one of the checksum-verified setup scripts',
     [TBD_PLACEHOLDER.test(SETUPSH) ? "setup.sh still has an unfilled TBD- pin assignment" : '',
      TBD_PLACEHOLDER.test(SETUPWIN) ? "setup-win.ps1 still has an unfilled TBD- pin assignment" : '',
      TBD_PLACEHOLDER.test(PROVWIN2) ? "provision-win.ps1 still has an unfilled TBD- pin assignment" : ''].filter(Boolean));
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// CASE-21: history:append used payload.wsId raw as the history-file key instead of resolving it through
+// history:append used payload.wsId raw as the history-file key instead of resolving it through
 // _wsById like its sibling handlers (checkpoint:revert/undo/undoExists just above it). A stale/garbage wsId
 // would mint a new runtime/history/<garbage>.json instead of falling back to activeWorkspace.
 // ---------------------------------------------------------------------------------------------------------
@@ -4426,7 +4426,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 })();
 
 // ---------------------------------------------------------------------------------------------------------
-// CASE-24: a hand-edited workspaces.json can hold a ws.path that round-trips fine (isSafePath) but is
+// A hand-edited workspaces.json can hold a ws.path that round-trips fine (isSafePath) but is
 // relative or contains a traversal segment. The two registry-sourced ws.path -> script sites (clone,
 // upgrade) must validate with the stricter isContainedPath before building the runScript command.
 // ---------------------------------------------------------------------------------------------------------
@@ -4442,7 +4442,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 })();
 
 // ---------------------------------------------------------------------------------------------------------
-// CASE-23 — porcelain `git diff` against a workspace repo must always suppress driver execution. Unlike the
+// Porcelain `git diff` against a workspace repo must always suppress driver execution. Unlike the
 // fixed config keys _git-safe.sh neutralizes via GIT_CONFIG_KEY_n, `diff.<driver>.textconv` is keyed by an
 // ATTACKER-CHOSEN driver name (set via .gitattributes), so it cannot be wildcarded by env — the only backstop
 // is passing --no-ext-diff --no-textconv at every porcelain diff call site. wsl/diff.sh runs three: the
@@ -4469,7 +4469,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   const KNOWN_MERGE_SITES = {
     // Runs against $WT, a linked worktree of $SDIR — so it reads $SDIR/.git/config, which IS attacker-controlled
     // for an adopted workspace. Left as-is deliberately: closing it means editing sessions-sync.sh, outside
-    // CASE-23's file list. ESCALATED to the planner as a follow-up case (merge-driver half of CASE-23).
+    // the textconv/ext-diff fix's file list. Tracked separately as follow-up work (the merge-driver half).
     'sessions-sync.sh': 'gitwt merge --no-edit / --abort on the sessions worktree (pull_branch)',
   };
   const mergeIsh = fs.readdirSync(wslDir).filter((f) => f.endsWith('.sh')).filter((f) => {
@@ -4486,8 +4486,8 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// CASE-28 / R-22(b) — the model-strategy env pin never overrides an explicit spawn-time model choice.
-//   CLAUDE_CODE_SUBAGENT_MODEL was proven (API stamps, run wf_ee694f22-0ed) to override even explicitly-
+// The model-strategy env pin never overrides an explicit spawn-time model choice.
+//   CLAUDE_CODE_SUBAGENT_MODEL was measured (API response stamps) overriding even explicitly-
 //   requested spawn models, so the app must never hard-set it: the cheap-tier default is carried by the
 //   context-hook nudge text instead, and modelStrategyNow() defaults OFF (opt-in only).
 // ---------------------------------------------------------------------------------------------------------
@@ -4498,9 +4498,9 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['modelStrategyNow does not gate on an explicit planBigExecSmall opt-in']);
   const SESSSH = read('wsl/session.sh');
   const WIN = read('runners/win.js');
-  none('wsl/session.sh: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (R-22(b))',
+  none('wsl/session.sh: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (a default must never override an explicit model choice)',
     /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(SESSSH) ? ['session.sh still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
-  none('runners/win.js: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (R-22(b))',
+  none('runners/win.js: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (a default must never override an explicit model choice)',
     /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(WIN) ? ['win.js still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
 }
 

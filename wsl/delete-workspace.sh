@@ -4,7 +4,7 @@
 # For a repo workspace this only removes the LOCAL clone — the GitHub repo is left intact. Never the legacy dir.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
-. "$HERE/_git-safe.sh"                                   # CASE-13: git now runs against $dir below — neutralize its config first
+. "$HERE/_git-safe.sh"                                   # git now runs against $dir below — neutralize its config first
 kind="${1:-}"
 slug="${2:-}"
 label="${3:-}"
@@ -37,7 +37,7 @@ label_clean="$(printf '%s' "$label" | tr -s ' \t\n' ' ' | sed "s/[^A-Za-z0-9 ._-
 #    link once the code dir moved, still holding every collaborator's exported transcripts.
 # Encoding matches sessions.sh/session.sh exactly; CLAUDIBLE_PROJ overrides on win-native (same contract).
 proj="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$dir" | sed 's#[^A-Za-z0-9]#-#g')}"
-# CASE-13: REFUSE-with-explicit-override — a repo workspace with uncommitted changes or commits never pushed
+# REFUSE-with-explicit-override — a repo workspace with uncommitted changes or commits never pushed
 # to its upstream is work that only lives in this folder. Default refuses; the renderer's second, explicit
 # "delete anyway" confirm re-calls with CLAUDIBLE_FORCE_DELETE=1, which is the only thing that skips this.
 if [ -d "$dir/.git" ] && [ "${CLAUDIBLE_FORCE_DELETE:-}" != 1 ]; then
