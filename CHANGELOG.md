@@ -4,6 +4,52 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.9] — 2026-08-12
+
+The hardening release. After 0.9.8's hardware session, two machine-driven audits swept the entire
+codebase — every claim checked against the running code, every fix reviewed independently before it
+landed. This build closes what they found: the theme is that Claudible now refuses, verifies, and
+reports honestly in the places it used to assume. Still a pre-release: the owners' re-test on real
+hardware is the last word.
+
+**Security**
+- **Deleting anything now refuses to destroy unsaved work.** Removing a project or session checks for
+  uncommitted or unpushed changes first and stops with a clear message; proceeding requires an explicit
+  override. Trash pruning got the same git-awareness — nothing is permanently discarded while it's the
+  only copy.
+- **The git-config execution shield is complete.** Every place Claudible runs git now neutralizes the
+  full family of config keys that could execute attacker-supplied commands (hooks path, diff/merge
+  drivers, signing programs) through one shared allowlist — the same guard in every layer, from
+  PowerShell to shell scripts to Node.
+- **Downloaded executables are checksum-verified, fail-closed.** Voice-model and helper downloads now
+  carry real SHA-256 pins computed from the official sources; a mismatch or a missing pin refuses to
+  install instead of warning and continuing.
+- **Self-update can no longer be walked backwards.** The updater verifies the incoming version is a
+  true descendant of what's installed before touching anything — a spoofed tag or forced downgrade is
+  refused with the reason named.
+- **Imported paths are contained.** Paths arriving from workspace registries are checked for traversal
+  and root containment, not just character set.
+
+**Fixed**
+- **The launcher no longer swallows startup failures** — a broken install says what broke instead of
+  exiting silently.
+- **Background hook errors are logged instead of discarded**, so a misbehaving integration is
+  diagnosable from its log rather than invisible.
+- **Continuing a shared session records its history to the right workspace** in every case, matching
+  the other session operations.
+- **Fresh clones run under the same git protections as everything else** — a gap that could leave the
+  first sync of a new machine unguarded is closed.
+- **Session lineage survives clearing.** Clearing a session records where it came from, and synced
+  projects now carry a generated index of their sessions — nothing orphaned, nothing untraceable.
+- **Windows checkouts can't fake test failures anymore** — line endings are pinned for every file type
+  the test suite reads.
+
+**Changed**
+- **Model selection is now literal.** The "plan big, execute small" strategy ships OFF by default, an
+  explicitly requested model is always honored exactly, and the Settings copy says precisely what the
+  toggle does.
+- In-code documentation was rewritten in plain product language throughout.
+
 ## [0.9.8] — 2026-08-07
 
 The build that answers the owners' first hardware session — and the first release tested by machines
