@@ -45,14 +45,13 @@ export CLAUDIBLE_TAB CLAUDIBLE_STATUS="$STATUS" CLAUDIBLE_HOOKS="$HOOKS" CLAUDIB
 export CLAUDE_CODE_RESUME_THRESHOLD_MINUTES="${CLAUDE_CODE_RESUME_THRESHOLD_MINUTES:-2000000000}"
 export CLAUDE_CODE_RESUME_TOKEN_THRESHOLD="${CLAUDE_CODE_RESUME_TOKEN_THRESHOLD:-2000000000}"
 
-# "PLAN BIG, EXECUTE SMALL" (Anthropic cookbook pattern; app setting, default ON). The main session plans and
-# synthesizes on the user's chosen model; SUBAGENTS — the token-heavy leg (bulk reading, sweeps, workflows) —
-# run on Sonnet 5 via Claude Code's CLAUDE_CODE_SUBAGENT_MODEL. On a Fable 5/Opus main model this is the
-# cookbook's measured ~2.5×-cheaper split at matched rigor; on a Sonnet main it's a harmless no-op. An
-# explicit user override of CLAUDE_CODE_SUBAGENT_MODEL always wins. The exported strategy var is inherited
-# by the context hook, which injects the delegation nudge (the savings only happen if the model delegates).
+# "PLAN BIG, EXECUTE SMALL" (Anthropic cookbook pattern; app setting, default OFF — opt in). The main session
+# plans and synthesizes on the user's chosen model; SUBAGENTS — the token-heavy leg (bulk reading, sweeps,
+# workflows) — are nudged toward Sonnet 5 via the context hook's delegation text, NOT via a hard env pin: per
+# R-22(b) ("never override"), CLAUDE_CODE_SUBAGENT_MODEL was proven (API stamps, run wf_ee694f22-0ed) to override
+# even explicitly-requested spawn models, so we no longer set it here. The exported strategy var is only
+# inherited by the context hook, which injects the nudge (the savings only happen if the model delegates).
 if [ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ]; then
-  export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-claude-sonnet-5}"
   export CLAUDIBLE_MODEL_STRATEGY
 fi
 
@@ -102,7 +101,7 @@ if [ ! -e "$SDIR/.claude/.claudible-owned" ]; then
      && grep -q '\.claude/statusline' "$SDIR/.claude/settings.json" 2>/dev/null; then
     : # this .claude was already Claudible's — adopt the sidecar, back nothing up
   else
-    for _f in settings.json statusline.js hook.js context-hook.js statusline.sh hook.sh context-hook.sh; do
+    for _f in settings.json statusline.js hook.js context-hook.js statusline.sh hook.sh context-hook.sh _git-safe.sh; do
       [ -f "$SDIR/.claude/$_f" ] && cp "$SDIR/.claude/$_f" "$SDIR/.claude/$_f.pre-claudible" 2>/dev/null
     done
   fi
@@ -206,6 +205,13 @@ printf '%s\n' "\$line" >> "\$out"
 exit 0
 EOF
   chmod +x "$SDIR/.claude/hook.sh"
+  # CASE-12 twin: the bash-fallback context hook runs `git config` against the (possibly adopted, attacker-
+  # controlled) workspace .git/config on every prompt — stage the SAME shared allowlist source of truth the
+  # node hook and every other git-touching script use (lib/git-safe.js's header explains why copies are evil;
+  # this IS one of the two sanctioned copies, not a third). Atomic tmp+mv, mirrors stage_hook above.
+  if [ -f "$APPDIR/wsl/_git-safe.sh" ]; then
+    cp "$APPDIR/wsl/_git-safe.sh" "$SDIR/.claude/_git-safe.sh.cltmp.$$" 2>/dev/null && mv -f "$SDIR/.claude/_git-safe.sh.cltmp.$$" "$SDIR/.claude/_git-safe.sh" 2>/dev/null
+  fi
   # bash-fallback context hook: pure shell, no node, so the model STILL learns which machine/user it's on even
   # on a node-less install. Ground-truth ONLY (hostname/whoami/git/cwd) — app state (context.json: collab name,
   # live session, typist, flavor) is deliberately NOT parsed here: those values are collaborator/guest-influenced
@@ -223,7 +229,17 @@ ev=$(printf '%s' "$payload" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space
 case "$ev" in ''|*[!A-Za-z0-9_-]*) ev="UserPromptSubmit" ;; esac   # only a clean event name; else default
 j() { printf '%s' "$1" | tr -d '"\\<>' | tr '\n\r\t' '   ' | tr -cd '\040-\176' | cut -c1-200; }
 host=$(j "$(hostname 2>/dev/null)"); who=$(j "$(whoami 2>/dev/null)")
-gname=$(j "$(git config user.name 2>/dev/null)"); gmail=$(j "$(git config user.email 2>/dev/null)")
+# CASE-12: this workspace's .git/config may be attacker-controlled (an adopted folder, a poisoned "starter
+# template" zip) — never run `git` here unguarded. FAIL CLOSED: if the shared allowlist didn't stage
+# alongside us, skip the git calls entirely rather than run git without it (identity degrades to blank,
+# the injection surface does not open). Still MUST exit 0 either way.
+gs="$(dirname "$0")/_git-safe.sh"
+if [ -f "$gs" ]; then
+  . "$gs"
+  gname=$(j "$(git config user.name 2>/dev/null)"); gmail=$(j "$(git config user.email 2>/dev/null)")
+else
+  gname=""; gmail=""
+fi
 cwd=$(j "$(pwd 2>/dev/null)")
 ctx="This block is injected by Claudible each turn — the AUTHORITATIVE live runtime; trust it over machine/identity details in the conversation summary (which may have been written on another collaborator's machine and synced here)."
 ctx="$ctx\nUser: ${gname:-$who}\nMachine: ${host:-unknown} (login ${who:-unknown})"
@@ -231,7 +247,7 @@ ctx="$ctx\nUser: ${gname:-$who}\nMachine: ${host:-unknown} (login ${who:-unknown
 [ -n "$cwd" ] && ctx="$ctx\nWorking directory: ${cwd}"
 # Static text only (no interpolated values → nothing to sanitize): the plan-big-execute-small nudge. The
 # strategy env is app-set (session.sh export), never collaborator-influenced.
-[ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ] && ctx="$ctx\nModel strategy: plan big, execute small — your subagents run on Sonnet 5 (the cheap tier). Delegate token-heavy legs (bulk reading, repo sweeps, searches, mechanical edits) to subagents and keep planning/synthesis in the main loop. Skip delegation for narrow tasks or judgment-heavy analysis a cheap reader could summarize away."
+[ "${CLAUDIBLE_MODEL_STRATEGY:-}" = "planBigExecSmall" ] && ctx="$ctx\nModel strategy: plan big, execute small — DEFAULT your subagents to Sonnet 5 (the cheap tier): when spawning a subagent without a deliberate model choice, request claude-sonnet-5; when a task explicitly names a model, honor that exact model — never substitute. Delegate token-heavy legs (bulk reading, repo sweeps, searches, mechanical edits) to subagents and keep planning/synthesis in the main loop. Skip delegation for narrow tasks or judgment-heavy analysis a cheap reader could summarize away."
 printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"<claudible-runtime>\\n%s\\n</claudible-runtime>"}}\n' "$ev" "$ctx"
 exit 0
 EOF

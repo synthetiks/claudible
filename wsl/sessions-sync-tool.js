@@ -6,6 +6,10 @@
 //       Decodes a base64 display name, sanitizes it, and merges {id:{title,ts}} into CL_FILE.
 //   subcommand "title-read":  env CL_WT, CL_BR            (was the title-list python block)
 //       Reads every meta/<author>.json straight off origin/<br> and prints the newest title per id.
+//   subcommand "lineage-write": env CL_ID, CL_FROM, CL_FILE   (CLEAR-DRIFT-PATCH-PLAN FIX C1)
+//       Merges {newId: {..., continuesFrom: oldId}} last-writer-wins into the same CL_FILE title-write uses.
+//   subcommand "index-write": env CL_META, CL_SESSDIR, CL_OUT  (CLEAR-DRIFT-PATCH-PLAN FIX C2)
+//       Generates a human-readable Markdown session index (title + lineage) for one author's transcripts.
 //
 // CommonJS on purpose (the repo's package.json has no "type":"module").
 
@@ -336,7 +340,10 @@ function titleWrite() {
     pairs = [];
   }
 
-  // d[i] = {"title": n, "ts": now}  — update in place if key exists, else append.
+  // d[i] = {"title": n, "ts": now}  — update in place if key exists, else append. Fields OTHER than
+  // title/ts already present on the entry (e.g. "continuesFrom", written by lineage-write below) are
+  // preserved rather than clobbered — this file is additive-merge by design (CLEAR-DRIFT-PATCH-PLAN
+  // :91-94: lineage costs no new plumbing precisely because it rides this same merge).
   // ts is MILLISECONDS now (was int(time.time()) seconds): two collaborators renaming inside the same
   // wall-clock second used to tie, and the tie-break (file order at read + each side preferring its own
   // local name) let the two machines disagree FOREVER. titleRead normalizes old second-stamps up to ms,
@@ -344,21 +351,159 @@ function titleWrite() {
   // on an OLD build compares raw magnitudes, so any ms entry out-ranks their seconds entries until they
   // upgrade — bounded, self-healing (their next rename after upgrading stamps ms), and better than keeping
   // the permanent same-second split.
-  const entry = obj([['title', n], ['ts', Date.now()]]);
-  let found = false;
-  for (const p of pairs) {
-    if (p[0] === i) {
-      p[1] = entry;
-      found = true;
-      break;
-    }
-  }
-  if (!found) pairs.push([i, entry]);
+  let idx = -1;
+  for (let k = 0; k < pairs.length; k++) { if (pairs[k][0] === i) { idx = k; break; } }
+  const entryPairs = (idx !== -1 && pairs[idx][1] && typeof pairs[idx][1] === 'object' && pairs[idx][1].__pairs)
+    ? pairs[idx][1].__pairs.slice()
+    : [];
+  setPair(entryPairs, 'title', n);
+  setPair(entryPairs, 'ts', Date.now());
+  const entry = obj(entryPairs);
+  if (idx !== -1) pairs[idx][1] = entry; else pairs.push([i, entry]);
 
   const outStr = encVal(obj(pairs), /*ensureAscii=*/ false);
   const tmp = f + '.tmp';
   fs.writeFileSync(tmp, outStr); // json.dump writes no trailing newline
   fs.renameSync(tmp, f); // os.replace == atomic rename
+}
+
+// Replace-in-place-or-append a [key, value] pair inside an ordered __pairs array (mutates + returns nothing).
+function setPair(pairs, key, val) {
+  for (const p of pairs) { if (p[0] === key) { p[1] = val; return; } }
+  pairs.push([key, val]);
+}
+
+// subcommand "lineage-write": env CL_ID (the NEW session id), CL_FROM (the OLD id it continues), CL_FILE
+// (same meta/<author>.json title-write merges into). CLEAR-DRIFT-PATCH-PLAN FIX C1 (:91-94): additive —
+// merges {newId: {..., continuesFrom: oldId}} last-writer-wins into the existing {id:{title,ts}} map,
+// preserving whatever title/ts a title-write already put there (and vice versa: titleWrite above now
+// preserves continuesFrom the same way), so calling both ops on the same id in either order never loses data.
+function lineageWrite() {
+  const f = process.env.CL_FILE;
+  const nid = process.env.CL_ID;
+  const oid = process.env.CL_FROM;
+
+  let pairs = [];
+  try {
+    const raw = fs.readFileSync(f, 'utf8');
+    const parsed = parseJsonOrdered(raw);
+    if (parsed !== null && typeof parsed === 'object' && parsed.__pairs) pairs = parsed.__pairs;
+  } catch (e) {
+    pairs = [];
+  }
+
+  let idx = -1;
+  for (let k = 0; k < pairs.length; k++) { if (pairs[k][0] === nid) { idx = k; break; } }
+  const entryPairs = (idx !== -1 && pairs[idx][1] && typeof pairs[idx][1] === 'object' && pairs[idx][1].__pairs)
+    ? pairs[idx][1].__pairs.slice()
+    : [];
+  setPair(entryPairs, 'continuesFrom', oid);
+  const entry = obj(entryPairs);
+  if (idx !== -1) pairs[idx][1] = entry; else pairs.push([nid, entry]);
+
+  const outStr = encVal(obj(pairs), /*ensureAscii=*/ false);
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, outStr);
+  fs.renameSync(tmp, f);
+}
+
+// --- index-write: a generated, human-readable per-author session index -------------------------
+const IDX_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function idxShort(id) { return String(id || '').slice(0, 8); }
+function idxDate(ms) {
+  if (!ms || !Number.isFinite(ms)) return '';
+  const d = new Date(ms);
+  return IDX_MON[d.getUTCMonth()] + ' ' + d.getUTCDate();
+}
+function idxDateTime(ms) {
+  if (!ms || !Number.isFinite(ms)) return '';
+  const d = new Date(ms);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return idxDate(ms) + ' ' + hh + ':' + mm;
+}
+
+// subcommand "index-write": env CL_META (meta/<author>.json), CL_SESSDIR (sessions/<author>/, the dir whose
+// *.jsonl transcripts we're indexing), CL_OUT (path to write, e.g. sessions/<author>/INDEX.md).
+// CLEAR-DRIFT-PATCH-PLAN FIX C2 (:96-104). Fully DERIVED — regenerable from its two inputs, so it is safe to
+// regenerate on every sync and nothing may ever depend on its content (only humans reading it on GitHub).
+// Never renames or touches a transcript file (C3, :106-113).
+function indexWrite() {
+  const metaFile = process.env.CL_META;
+  const sessDir = process.env.CL_SESSDIR;
+  const out = process.env.CL_OUT;
+
+  const meta = Object.create(null); // id -> {title, continuesFrom}
+  try {
+    const raw = fs.readFileSync(metaFile, 'utf8');
+    const parsed = parseJsonOrdered(raw);
+    if (parsed && typeof parsed === 'object' && parsed.__pairs) {
+      for (const [id, v] of parsed.__pairs) {
+        if (!v || typeof v !== 'object' || !v.__pairs) continue;
+        let title = '', continuesFrom = null;
+        for (const [k, vv] of v.__pairs) {
+          if (k === 'title' && typeof vv === 'string') title = vv;
+          else if (k === 'continuesFrom' && typeof vv === 'string' && vv) continuesFrom = vv;
+        }
+        meta[id] = { title, continuesFrom };
+      }
+    }
+  } catch (e) { /* no meta yet → every row falls back to its short id as the name */ }
+
+  let names = [];
+  try { names = fs.readdirSync(sessDir); } catch (e) { names = []; }
+  const ids = [];
+  const stats = Object.create(null); // id -> {started, lastActive} (ms)
+  for (const n of names) {
+    if (!n.endsWith('.jsonl')) continue;
+    const id = n.slice(0, -'.jsonl'.length);
+    if (!id || /[^A-Za-z0-9-]/.test(id)) continue; // same id charset every other op enforces
+    let st;
+    try { st = fs.statSync(sessDir + '/' + n); } catch (e) { continue; }
+    const started = (st.birthtimeMs && st.birthtimeMs > 0) ? st.birthtimeMs : st.mtimeMs; // some filesystems don't track birthtime → fall back to mtime rather than emit a blank column
+    stats[id] = { started, lastActive: st.mtimeMs };
+    ids.push(id);
+  }
+
+  const idSet = new Set(ids);
+  const children = new Map(); // parent id -> [child id, ...], only for parents that themselves have a transcript here
+  for (const id of ids) {
+    const from = meta[id] && meta[id].continuesFrom;
+    if (from && idSet.has(from)) {
+      if (!children.has(from)) children.set(from, []);
+      children.get(from).push(id);
+    }
+  }
+  for (const [, kids] of children) kids.sort((a, b) => stats[a].started - stats[b].started); // a chain of clears renders oldest-child-first
+  const isChild = new Set();
+  for (const [, kids] of children) for (const k of kids) isChild.add(k);
+  // Roots = every transcript NOT claimed as someone's continuation. A continuesFrom cycle (never produced by
+  // the real drift path — ids are minted forward-only) would leave both sides mutually "claimed" and simply
+  // drop out of the listing rather than recurse forever; a safe degradation, not a crash.
+  const roots = ids.filter((id) => !isChild.has(id));
+  roots.sort((a, b) => stats[b].lastActive - stats[a].lastActive); // most recently active conversation first
+
+  const lines = [];
+  lines.push('<!-- Generated by wsl/sessions-sync-tool.js index-write on every sync/push.');
+  lines.push('     DERIVED — regenerated from meta/<author>.json and this directory\'s transcripts.');
+  lines.push('     Nothing reads this file back; it exists only for humans browsing the sessions branch. -->');
+  lines.push('');
+  lines.push('| Session | Started | Last active | Id |');
+  lines.push('|---|---|---|---|');
+
+  const emitRow = (id, label) => {
+    const s = stats[id];
+    const m = meta[id] || { title: '', continuesFrom: null };
+    const name = label || (m.title || ('`' + idxShort(id) + '`'));
+    lines.push('| ' + name + ' | ' + idxDate(s.started) + ' | ' + idxDateTime(s.lastActive) + ' | `' + idxShort(id) + '` |');
+    for (const k of (children.get(id) || [])) emitRow(k, '↳ continued after /clear');
+  };
+  for (const r of roots) emitRow(r, null);
+
+  const outStr = lines.join('\n') + '\n';
+  const tmp = out + '.tmp';
+  fs.writeFileSync(tmp, outStr);
+  fs.renameSync(tmp, out);
 }
 
 function titleRead() {
@@ -513,6 +658,10 @@ if (sub === 'title-write') {
   titleWrite();
 } else if (sub === 'title-read') {
   titleRead();
+} else if (sub === 'lineage-write') {
+  lineageWrite();
+} else if (sub === 'index-write') {
+  indexWrite();
 } else if (sub === 'presence-filter') {
   presenceFilter();
 } else if (sub === 'live-holder') {

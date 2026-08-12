@@ -14,6 +14,25 @@ esac
 PROJ="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$SDIR" | sed 's#[^A-Za-z0-9]#-#g')}"
 src="$PROJ/$id.jsonl"
 [ -f "$src" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
+# CASE-13: sync-awareness only (this is a REPO workspace's shared-session sync worktree, never the workspace's
+# own .git — soft-delete already keeps the transcript recoverable, so this is not the dirty-repo check above).
+# If sync is on for this workspace and no synced copy of this session exists yet, deleting now would delete
+# the ONLY copy anywhere. Default refuses; CLAUDIBLE_FORCE_DELETE=1 (the renderer's explicit re-confirm) skips it.
+if [ "${CLAUDIBLE_FORCE_DELETE:-}" != 1 ] && [ -n "${WS_SLUG:-}" ] && [ -d "$HOME/.claudible/sessions-sync/$WS_SLUG" ]; then
+  synced=""
+  for f in "$HOME/.claudible/sessions-sync/$WS_SLUG"/sessions/*/"$id.jsonl"; do
+    [ -e "$f" ] && { synced=1; break; }
+  done
+  if [ -z "$synced" ]; then
+    printf '{"ok":false,"needsForce":true,"error":"this conversation has not synced to GitHub yet — sync first, or confirm delete anyway"}'
+    exit 0
+  fi
+fi
+# CASE-13 pre-flight: the renderer must know whether this delete WOULD be refused BEFORE it re-points the tabs
+# holding this session and ends a live share on it — none of which is undoable, so a refusal discovered after
+# them is no refusal at all. CHECK_ONLY answers with the same shape as a real run (the needsForce branch above
+# has already exited if it applies) and stops here: nothing is moved, nothing is written, no marker is touched.
+if [ "${CLAUDIBLE_CHECK_ONLY:-}" = 1 ]; then printf '{"ok":true,"needsForce":false,"check":true}'; exit 0; fi
 trash="$HOME/.claudible/trash"
 mkdir -p "$trash" 2>/dev/null
 ts="$(date +%Y%m%d-%H%M%S)"

@@ -523,10 +523,10 @@ function spawnEnv(runtimeId, base, modelStrategy) {
     CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '2000000000',
   };
   // "Plan big, execute small" (Anthropic cookbook pattern, parity with wsl/session.sh): the main session
-  // plans/synthesizes on the user's chosen model; SUBAGENTS â€” the token-heavy leg â€” run on Sonnet 5.
-  // Defaults-first layering means an explicit user env override of either var still wins.
+  // plans/synthesizes on the user's chosen model; SUBAGENTS are nudged toward Sonnet 5 via the context hook's
+  // delegation text, NOT via a hard env pin: per R-22(b) ("never override"), CLAUDE_CODE_SUBAGENT_MODEL was
+  // proven (API stamps, run wf_ee694f22-0ed) to override even explicitly-requested spawn models.
   if (modelStrategy === 'planBigExecSmall') {
-    defaults.CLAUDE_CODE_SUBAGENT_MODEL = 'claude-sonnet-5';
     defaults.CLAUDIBLE_MODEL_STRATEGY = 'planBigExecSmall';   // read by the context hook for the delegation nudge
   }
   return Object.assign(defaults, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });

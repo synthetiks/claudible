@@ -704,6 +704,16 @@ claudible.onStatus((s) => {
         }
       }
     }
+    // RECORD THE LINEAGE (CLEAR-DRIFT-PATCH-PLAN FIX C1). This is the only place in the app that knows BOTH
+    // the old and the new id, so it is the only place that can write the link. Unlike the name carry-over
+    // above this is NOT gated on an explicit title: an unnamed cleared session still needs its continuation
+    // recorded, otherwise the two transcripts read as unrelated conversations forever. Additive `continuesFrom`
+    // on the new id in the same meta/<login>.json map title-set merges into — the generated INDEX.md is its
+    // only consumer, so a failure here is cosmetic and must never toast or block the drift handling.
+    if (driftFrom) {
+      const _lw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace (same rule as the carry-over above)
+      if (_lw && _lw.kind === 'repo') { try { claudible.lineageSet(s.sessionId, driftFrom, t.wsId).catch(() => {}); } catch (e) {} }
+    }
     // The share is welded to a session ID but streams a pinned TAB, and until now nothing kept the two in
     // agreement. Re-weld to what is actually running, then re-advertise so the LIVE badge and Join point at the
     // live conversation instead of one nobody is in. updateAdvertise() stays keyed on the SHARED session (never
@@ -2678,18 +2688,21 @@ if ($('voice-setup-rescan')) $('voice-setup-rescan').addEventListener('click', v
     else toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
   }));
 })();
-// model-strategy selector — "plan big, execute small" (Anthropic cookbook): main session on the user's chosen
-// model, subagents on Sonnet 5. Ships ON (absent registry value = on); 'off' is the explicit opt-out.
+// model-strategy selector — "plan big, execute small" (Anthropic cookbook, R-22): OFF by default — only an explicit
+// 'planBigExecSmall' enables it. When on, Sonnet 5 is only the DEFAULT for subagents that request no model — an
+// explicitly requested model always wins (advisory nudge, never an env override).
 (async () => {
   const row = $('strategy-row'); if (!row) return;
-  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.strategy || 'planBigExecSmall') === (v || 'planBigExecSmall')));
-  let cur = 'planBigExecSmall'; try { cur = await claudible.modelStrategyGet(); } catch {}
-  paint(cur || 'planBigExecSmall');
+  // Every fallback here is 'off' — the main-process default is OFF (R-22), so an unreadable/failed IPC must
+  // NOT paint the opt-in pill as active or the UI would claim a strategy the session never got.
+  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.strategy || 'off') === (v || 'off')));
+  let cur = 'off'; try { cur = await claudible.modelStrategyGet(); } catch {}
+  paint(cur || 'off');
   row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
-    const v = b.dataset.strategy || 'planBigExecSmall';
+    const v = b.dataset.strategy || 'off';
     let r = null; try { r = await claudible.modelStrategySet(v); } catch {}
     const set = (r && r.modelStrategy) ? r.modelStrategy : v; paint(set);
-    const lbl = set === 'off' ? 'off — subagents inherit your main model' : 'plan big, execute small — subagents run on Sonnet 5';
+    const lbl = set === 'off' ? 'off — subagents inherit your main model' : 'plan big, execute small — subagents default to Sonnet 5';
     if (r && r.ok === false) toast('Model strategy: ' + lbl + ' — set for THIS run, but SAVING FAILED (' + (r.error || 'disk error') + ')');
     else toast('Model strategy: ' + lbl + ' — applies to new sessions');
   }));
@@ -4645,10 +4658,26 @@ function onSessPointerUp() {
   }
 }
 const deletingIds = new Set();                                                     // hide rows mid-delete so they can't flash back as "fresh"
-async function deleteSession(id, scope) {
+async function deleteSession(id, scope, force) {
   if (deletingIds.has(id)) return;
   deletingIds.add(id);
   const myWs = activeWsId;   // the deleted row's workspace, captured NOW — the awaits below (and a joined live tab being on screen) can leave main's active ws pointing elsewhere
+  // CASE-13 — ask the sync-awareness question FIRST, for the same reason the busy pre-flight below runs first:
+  // everything between here and the delete call (re-pointing every owning tab, respawning their ptys, ending the
+  // live share) is irreversible, so a needsForce refusal that came back AFTER it would leave the user with the
+  // session still on disk, their guests disconnected and their tab moved — a refusal that damaged more than the
+  // delete would have. `check:true` runs delete-session.sh's guards and deletes nothing. Only a repo workspace
+  // can own a sessions-sync worktree, so no other project pays for the extra round trip.
+  if (!force && (workspaces.find((w) => w.id === myWs) || {}).kind === 'repo') {
+    let pre = null; try { pre = await claudible.sessionDelete(id, scope || 'local', myWs, false, true); } catch {}
+    if (pre && pre.ok === false && pre.needsForce) {
+      deletingIds.delete(id);   // the modal can outlive this call and the forced retry re-adds it — holding the id here would make that retry a silent no-op
+      const again = await confirmModal('“' + sessTitle(sessIndex[id] || { id }) + '” has not synced to GitHub yet',
+        'If you delete it now, it may not exist anywhere else once it’s gone.', 'Delete anyway — I understand this work is not on GitHub');
+      if (again) return deleteSession(id, scope, true);
+      return;   // nothing was touched: no tab moved, no share ended, no order rewritten
+    }
+  }
   // Any tab resuming this session must switch OFF it BEFORE the file is deleted (else it holds the file
   // open). If an owning tab is BUSY, the switch is refused (never kill a mid-turn Claude) — so the delete
   // itself must ABORT: proceeding would trash the transcript out from under the still-running pty (audit
@@ -4704,7 +4733,18 @@ async function deleteSession(id, scope) {
     toast('That session was shared — the live session ended with it');
   }
   setOrder(order);
-  let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs); } catch {} finally { deletingIds.delete(id); }
+  let r = null; try { r = await claudible.sessionDelete(id, scope || 'local', myWs, force); } catch {} finally { deletingIds.delete(id); }
+  // CASE-13, residual race only: the pre-flight above already answered this question before anything was torn
+  // down, so reaching here means the sync worktree changed under us mid-delete (or the workspace stopped being
+  // kind:'repo'). Handle it rather than reporting a generic failure — but the teardown has happened, so this is
+  // the degraded path, not the designed one.
+  if (r && r.ok === false && r.needsForce) {
+    const again = await confirmModal('“' + sessTitle(sessIndex[id] || { id }) + '” has not synced to GitHub yet',
+      'If you delete it now, it may not exist anywhere else once it’s gone.', 'Delete anyway — I understand this work is not on GitHub');
+    refreshSessions();
+    if (again) return deleteSession(id, scope, true);
+    return;
+  }
   // Forget the title only once the LOCAL transcript is actually gone (r.ok, or r.localDone for an everywhere
   // delete whose GitHub half failed). If the delete threw or the script failed (r null / {ok:false,error:'exec'}),
   // the session is STILL on disk under this id — wiping its custom name would silently drop back to the auto
@@ -5830,10 +5870,23 @@ async function applyWorkspaceDeleteResult(w, r, busyToast, okToast) {
   } else if (r && r.error === 'busy') { busyToast(); }     // a turn started between the local check and main's authoritative one
   else toast('Delete failed' + (r && r.error ? ': ' + humanError(r.error) : ''));
 }
-async function deleteWorkspace(w) {
+async function deleteWorkspace(w, force) {
   const busyToast = () => toast('A session in this project is still running — stop it before deleting');
   if (wsBusy(w.id)) { busyToast(); return; }               // fast local check; main re-checks against its authoritative rec.busy
-  let r = null; try { r = await claudible.workspaceDelete(w.id); } catch {}
+  let r = null; try { r = await claudible.workspaceDelete(w.id, force); } catch {}
+  // CASE-13: REFUSE-with-explicit-override — the workspace was NOT touched (main's dirty check runs before any
+  // mutation), so this is a true refusal: nothing to reconcile here, just ask for the second, explicit confirm.
+  if (r && r.ok === false && r.needsForce) {
+    const counts = [
+      r.uncommitted ? r.uncommitted + ' uncommitted change' + (r.uncommitted === 1 ? '' : 's') : '',
+      r.unpushed ? r.unpushed + ' commit' + (r.unpushed === 1 ? '' : 's') + ' not pushed' : '',
+    ].filter(Boolean).join(' and ');
+    const again = await confirmModal('“' + (w.label || w.slug) + '” has work not on GitHub',
+      (counts ? counts + '. ' : '') + 'If you delete this project now, that work is gone for good.',
+      'Delete anyway — I understand this work is not on GitHub');
+    if (again) return deleteWorkspace(w, true);
+    return;
+  }
   await applyWorkspaceDeleteResult(w, r, busyToast);
 }
 // C-3.6 (shared project's "Delete from GitHub" option): confirmDeleteFromGithub already made the user type the

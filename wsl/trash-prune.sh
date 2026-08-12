@@ -15,6 +15,8 @@
 # CLAUDIBLE_TRASH_EMPTY_ALL (C-3.6's "Delete trash" settings button — skip the age/size floor, remove everything
 # now; the renderer already confirmed this via the modal, stating it is permanent).
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the trash
+. "$HERE/_git-safe.sh"                                   # CASE-13: a trashed entry's .git/config is attacker-controlled same as any adopted project's
 
 MAX_AGE_DAYS="${CLAUDIBLE_TRASH_MAX_AGE_DAYS:-30}"
 MAX_MB="${CLAUDIBLE_TRASH_MAX_MB:-2048}"
@@ -38,13 +40,30 @@ kb_of() { du -sk "$1" 2>/dev/null | awk '{print $1}'; }   # a directory's size i
 
 removed=0
 freed_kb=0
+kept_dirty=0
 
 # Remove one direct child, by exact path. Symlinks are unlinked, never followed.
 zap() {
-  local p="$1" sz
+  local p="$1" sz g dirty ahead
   case "$p" in "$REAL"/*) ;; *) return 0 ;; esac        # GUARD 2 (again, per-entry): must be inside the trash
   case "$p" in *"/.."*) return 0 ;; esac                 # paranoia: no traversal components
   if [ -L "$p" ]; then rm -f -- "$p" 2>/dev/null && removed=$((removed+1)); return 0; fi   # GUARD 3
+  # CASE-13: a trashed repo (ws-* entries hold their .git at the top level; proj-*/syncwt-* entries hold no
+  # repo, so a top-level check alone suffices) that still has uncommitted work or commits never pushed to its
+  # upstream outlives the age AND size caps — only the user-confirmed "Delete trash" (EMPTY_ALL, below) is the
+  # override. This is a RETENTION rule, not a refusal: the caller (boot-time sweep) never sees an error either way.
+  if [ -d "$p" ] && [ -z "$EMPTY_ALL" ]; then
+    g="$p"; [ -d "$p/.git" ] || g=""
+    if [ -n "$g" ]; then
+      dirty="$(git -C "$g" status --porcelain 2>/dev/null)"
+      ahead="$(git -C "$g" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+      case "$ahead" in ''|*[!0-9]*) ahead=0 ;; esac
+      if [ -n "$dirty" ] || [ "$ahead" -gt 0 ]; then
+        kept_dirty=$((kept_dirty+1))
+        return 0
+      fi
+    fi
+  fi
   sz="$(kb_of "$p")"; [ -n "$sz" ] || sz=0
   if rm -rf -- "$p" 2>/dev/null; then removed=$((removed+1)); freed_kb=$((freed_kb + sz)); fi
 }
@@ -80,5 +99,5 @@ EOF
 fi
 
 remaining_kb="$(kb_of "$REAL")"; [ -n "$remaining_kb" ] || remaining_kb=0
-printf '{"ok":true,"removed":%d,"freedKb":%d,"remainingKb":%d,"maxAgeDays":%d,"maxMb":%d}' \
-  "$removed" "$freed_kb" "$remaining_kb" "$MAX_AGE_DAYS" "$MAX_MB"
+printf '{"ok":true,"removed":%d,"freedKb":%d,"remainingKb":%d,"maxAgeDays":%d,"maxMb":%d,"keptDirty":%d}' \
+  "$removed" "$freed_kb" "$remaining_kb" "$MAX_AGE_DAYS" "$MAX_MB" "$kept_dirty"

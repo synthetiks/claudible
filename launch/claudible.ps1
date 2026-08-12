@@ -12,4 +12,9 @@ $app = Split-Path -Parent $PSScriptRoot           # repo root (this script lives
 
 # Launch the Electron cockpit (detached so it lives independently of this script).
 Set-Location $app
-Start-Process -FilePath "cmd.exe" -ArgumentList '/c','npm','start' -WorkingDirectory $app -WindowStyle Hidden
+$proc = Start-Process -FilePath "cmd.exe" -ArgumentList '/c','npm','start' -WorkingDirectory $app -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 3   # a hidden fire-and-forget launch used to print success even if the app instantly died; catch an immediate crash
+if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+  Write-Host "[!] Claudible exited immediately (code $($proc.ExitCode)). Launch manually to see the error:" -ForegroundColor Yellow
+  Write-Host "    cd `"$app`"; npm start" -ForegroundColor Yellow
+}

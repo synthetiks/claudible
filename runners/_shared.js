@@ -44,8 +44,9 @@ function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy
   // prompting default. session.sh ALWAYS sandboxes a foreign session regardless of this.
   const perm = ['bypass', 'acceptEdits'].includes(permMode) ? ` CLAUDIBLE_PERMISSION_MODE='${permMode}'` : '';
   // "Plan big, execute small" (Anthropic cookbook pattern): the main session plans/synthesizes on the user's
-  // chosen model while SUBAGENTS — the token-heavy leg — run on Sonnet 5. session.sh translates this into
-  // CLAUDE_CODE_SUBAGENT_MODEL. Allowlist inline: only the one known value ever reaches the bash string.
+  // chosen model while SUBAGENTS are nudged toward Sonnet 5 via the context hook's delegation text (session.sh
+  // no longer hard-pins CLAUDE_CODE_SUBAGENT_MODEL — see R-22(b)). Allowlist inline: only the one known value
+  // ever reaches the bash string.
   const strat = modelStrategy === 'planBigExecSmall' ? ` CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall'` : '';
   const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + strat + ' ' + wsEnv(ws) + ' ';
   return `${prefix}bash '${shq(appdir)}/wsl/session.sh' '${shq(appdir)}'`;

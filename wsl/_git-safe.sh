@@ -13,14 +13,24 @@
 # On older git these vars are simply ignored (no error), so this degrades to a no-op rather than breaking anything.
 # `protocol.file` is deliberately left at git's default: a local-path origin is a legitimate (if rare) setup, and
 # the `file` transport runs no remote-side code — only `ext` is an execution vector.
+#
+# NOT COVERED HERE, ON PURPOSE: `diff.<driver>.textconv` and `merge.<driver>.driver` are keyed by an
+# ATTACKER-CHOSEN driver name (picked via .gitattributes, e.g. `*.bin diff=evil`), so GIT_CONFIG_KEY_n
+# cannot wildcard the key family the way it does for the fixed keys above — env neutralization is
+# structurally impossible for these. Any caller running PORCELAIN `git diff`/`git show`/`git log -p`
+# against a workspace dir MUST pass `--no-ext-diff --no-textconv` itself (see wsl/diff.sh) — sourcing
+# this file alone does not close that hole.
 git_safe_env() {
-  export GIT_CONFIG_COUNT=6
+  export GIT_CONFIG_COUNT=9
   export GIT_CONFIG_KEY_0='core.fsmonitor';           export GIT_CONFIG_VALUE_0=''       # index-refresh hook command
   export GIT_CONFIG_KEY_1='core.sshCommand';          export GIT_CONFIG_VALUE_1='ssh'    # per-repo ssh command (RCE, verified)
   export GIT_CONFIG_KEY_2='core.alternateRefsCommand'; export GIT_CONFIG_VALUE_2=''      # alternate-refs enumeration command
   export GIT_CONFIG_KEY_3='core.gitProxy';            export GIT_CONFIG_VALUE_3=''       # git:// proxy command
   export GIT_CONFIG_KEY_4='protocol.ext.allow';       export GIT_CONFIG_VALUE_4='never'  # `ext` transport = arbitrary command
   export GIT_CONFIG_KEY_5='protocol.git.allow';       export GIT_CONFIG_VALUE_5='never'  # unauthenticated git:// has no place here
+  export GIT_CONFIG_KEY_6='gpg.program';              export GIT_CONFIG_VALUE_6=''       # runs on show_signature — context-hook.js:83 does `git log -1` per prompt against an adopted repo
+  export GIT_CONFIG_KEY_7='log.showSignature';        export GIT_CONFIG_VALUE_7='false'  # forces the show_signature path (and gpg.program) off outright
+  export GIT_CONFIG_KEY_8='core.hooksPath';           export GIT_CONFIG_VALUE_8='/dev/null'  # redirects git's own hook dir to an inert path
   # …and the ssh command itself may not escalate to a GUI passphrase dialog if it ever does run.
   export GIT_TERMINAL_PROMPT=0 SSH_ASKPASS_REQUIRE=never
   unset GIT_ASKPASS SSH_ASKPASS 2>/dev/null || true

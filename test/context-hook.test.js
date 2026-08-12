@@ -156,7 +156,7 @@ function run(payload, appState, extraEnv) {
 {
   const on = run({ hook_event_name: 'UserPromptSubmit' }, undefined, { CLAUDIBLE_MODEL_STRATEGY: 'planBigExecSmall' });
   ok('strategy on → nudge line present', /Model strategy: plan big, execute small/.test(on.ctx));
-  ok('nudge names the cheap tier', /subagents run on Sonnet 5/.test(on.ctx));
+  ok('nudge defaults subagents to the cheap tier but never substitutes an explicit model', /DEFAULT your subagents to Sonnet 5 \(the cheap tier\).*never substitute/.test(on.ctx));
   const off = run({ hook_event_name: 'UserPromptSubmit' });
   ok('strategy absent → no nudge', !/Model strategy:/.test(off.ctx));
   const bogus = run({ hook_event_name: 'UserPromptSubmit' }, undefined, { CLAUDIBLE_MODEL_STRATEGY: 'hax' });

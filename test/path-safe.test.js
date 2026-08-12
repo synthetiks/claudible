@@ -6,7 +6,7 @@
 // quote, a backslash or a raw control byte must fail — those corrupt the shell arg or the JSON, and by the time
 // the app notices, the folder is already on disk. Run: node test/path-safe.test.js
 'use strict';
-const { isSafePath, safePath, PATH_UNSAFE_MSG } = require('../lib/pathSafe.js');
+const { isSafePath, safePath, PATH_UNSAFE_MSG, isContainedPath, PATH_TRAVERSAL_MSG } = require('../lib/pathSafe.js');
 
 let pass = 0, fail = 0;
 function is(label, got, want) { if (got === want) pass++; else { fail++; console.error(`  FAIL ${label}\n    got: ${got}  want: ${want}`); } }
@@ -74,6 +74,15 @@ for (const p of ["/home/a'b", '/home/a"b', '/home/a\\b', '/home/a' + CTRL(10) + 
 is('the double quote genuinely breaks the round-trip', roundTrips('/home/a"b'), false);
 is('the newline genuinely breaks the round-trip', roundTrips('/home/a' + CTRL(10) + 'b'), false);
 is('the backslash silently CORRUPTS the round-trip (no throw)', roundTrips('/home/a\\b'), false);
+
+// ---- isContainedPath (CASE-24) — isSafePath AND absolute AND no '.'/'..' segment --------------------------
+// Defense-in-depth against a hand-edited workspaces.json. Custom save locations are a real feature: this is
+// NOT "under a fixed root" — it's "a real absolute path with no traversal segments".
+for (const p of ['C:/work/proj', '/home/u/proj']) is(`isContainedPath allows ${JSON.stringify(p)}`, isContainedPath(p), true);
+for (const p of ['relative/x', 'C:/a/../b', '../x', '/a/./b']) is(`isContainedPath rejects ${JSON.stringify(p)}`, isContainedPath(p), false);
+// existing isSafePath behavior is untouched by isContainedPath's existence
+for (const p of ALLOWED) is(`isSafePath unaffected by CASE-24 for ${JSON.stringify(p)}`, isSafePath(p), true);
+is('PATH_TRAVERSAL_MSG is a sentence', /\s/.test(PATH_TRAVERSAL_MSG), true);
 
 console.log(`\npath-safe: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

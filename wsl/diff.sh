@@ -18,7 +18,7 @@ cd "$SDIR" 2>/dev/null || { printf '{"ok":true,"repo":false,"files":[],"untracke
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '{"ok":true,"repo":false,"files":[],"untracked":[],"committed":[],"commits":[]}'; exit 0; }
 
 # Uncommitted: raw unified diff of the whole working tree vs HEAD (python skips binary).
-diff_text="$(git -c core.quotepath=false diff HEAD --no-color 2>/dev/null)"
+diff_text="$(git -c core.quotepath=false diff HEAD --no-color --no-ext-diff --no-textconv 2>/dev/null)"
 # Bounded at the source: an un-ignored node_modules/dist/vendor tree yields tens of thousands of paths, and this
 # whole string is passed as ONE env var to node below — over ~128KB (MAX_ARG_STRLEN) the exec dies with "Argument
 # list too long", taking the commit list down with it. diff-tool.js only ever renders the first 200 anyway.
@@ -81,7 +81,7 @@ if [ "${rcount:-0}" -gt 0 ]; then
   clog="$(git log --no-color --since='7 days ago' -n 50 --format='%h%x1f%s%x1f%an%x1f%cd%x1f%H' --date=short HEAD 2>/dev/null)"
   base="$(git rev-list -1 --before='7 days ago' HEAD 2>/dev/null)"   # newest commit OLDER than the window (may be empty)
   [ -z "$base" ] && base="$EMPTY_TREE"                               # whole history is inside the window → diff from nothing
-  cdiff_text="$(git -c core.quotepath=false diff "$base" HEAD --no-color 2>/dev/null)"
+  cdiff_text="$(git -c core.quotepath=false diff "$base" HEAD --no-color --no-ext-diff --no-textconv 2>/dev/null)"
 elif [ "${ccount:-0}" -gt 0 ]; then
   window=latest
   clog="$(git log --no-color -n 20 --format='%h%x1f%s%x1f%an%x1f%cd%x1f%H' --date=short HEAD 2>/dev/null)"
@@ -90,7 +90,7 @@ elif [ "${ccount:-0}" -gt 0 ]; then
   oldest="$(git log --no-color -n 20 --format='%H' HEAD 2>/dev/null | tail -n 1)"
   base="$(git rev-parse --verify --quiet "${oldest}^" 2>/dev/null || printf '')"   # --quiet: a ROOT commit has no ^ → exit 1, no output
   [ -z "$base" ] && base="$EMPTY_TREE"
-  cdiff_text="$(git -c core.quotepath=false diff "$base" HEAD --no-color 2>/dev/null)"
+  cdiff_text="$(git -c core.quotepath=false diff "$base" HEAD --no-color --no-ext-diff --no-textconv 2>/dev/null)"
 fi
 
 # A single env var > ~128KB (Linux MAX_ARG_STRLEN) makes the node exec below fail ("Argument list too long").

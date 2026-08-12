@@ -23,6 +23,42 @@
 param([Parameter(Mandatory = $true)][ValidateSet('node', 'git', 'claude', 'uv', 'cloudflared', 'gh', 'ffmpeg')][string]$Dep)
 $ErrorActionPreference = 'Stop'
 
+# ---- C-7.4 known-good checksums (SHA-256), verified against the ACTUAL files fetched below -----------
+# Same discipline as setup.sh/setup-win.ps1's checksum blocks: computed by downloading each URL directly
+# and hashing the real bytes (Get-FileHash -Algorithm SHA256) -- never guessed, never copied from an
+# upstream page. A value starting with 'TBD-' means nobody has verified it yet, and Fetch-Verified below
+# FAILS CLOSED on a TBD/missing pin or a mismatch: an unverified binary is never extracted or executed.
+# Re-verify by hand and update this block (see also R-23's refresh rule) before trusting a new value.
+#
+# Computed 2026-08-12 under R-23 (owner-granted, one-time network sanction for THIS pin-fill only):
+# each URL below was downloaded to a scratch dir, hashed with Get-FileHash -Algorithm SHA256, the bytes
+# deleted immediately after, and the hash lowercased to match Fetch-Verified's comparison. None of these
+# values were copied from a webpage.
+#   node-v22.12.0-win-x64.zip   -- https://nodejs.org/dist/v22.12.0/node-v22.12.0-win-x64.zip
+#     34872043 bytes observed. Cross-checked against https://nodejs.org/dist/v22.12.0/SHASUMS256.txt
+#     (published by nodejs.org itself) -- MATCH. Cross-check is a tiebreak aid only; the pin below is the
+#     value this session computed from the downloaded bytes, not the value copied from that file.
+#   node-v22.12.0-win-arm64.zip -- https://nodejs.org/dist/v22.12.0/node-v22.12.0-win-arm64.zip
+#     30538928 bytes observed. Cross-checked against the same SHASUMS256.txt -- MATCH.
+#   PortableGit -- github.com/git-for-windows/git releases/latest resolved (at pin time) to tag
+#     v2.55.0.windows.4; its single asset matching ^PortableGit-.*-64-bit\.7z\.exe$ is
+#     PortableGit-2.55.0.4-64-bit.7z.exe, browser_download_url frozen into $GIT_PORTABLE_URL below.
+#     58915456 bytes observed, hashed from those exact bytes.
+#   cloudflared -- github.com/cloudflare/cloudflared releases/latest resolved (at pin time) to tag
+#     2026.7.3; asset cloudflared-windows-amd64.exe, browser_download_url frozen into $CLOUDFLARED_URL
+#     below. 54213360 bytes observed, hashed from those exact bytes.
+$PINS = @{
+  'node-x64'    = '2b8f2256382f97ad51e29ff71f702961af466c4616393f767455501e6aece9b8'
+  'node-arm64'  = '17401720af48976e3f67c41e8968a135fb49ca1f88103a92e0e8c70605763854'
+  'PortableGit' = '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5'
+  'cloudflared' = '8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841'
+}
+$NODE_PIN = 'v22.12.0'
+# Frozen at pin time (2026-08-12) from releases/latest tag v2.55.0.windows.4 -- see the pin comment above.
+$GIT_PORTABLE_URL = 'https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.4/PortableGit-2.55.0.4-64-bit.7z.exe'
+# Frozen at pin time (2026-08-12) from releases/latest tag 2026.7.3 -- see the pin comment above.
+$CLOUDFLARED_URL = 'https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-windows-amd64.exe'
+
 function Emit($phase, $msg) { Write-Host "$phase|$msg"; try { [Console]::Out.Flush() } catch {} }
 function EmitEnv($k, $v) { Write-Host "env|$k=$v"; try { [Console]::Out.Flush() } catch {} }
 function Tool($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
@@ -54,6 +90,24 @@ function Fetch($url, $out, $what) {
     exit 1
   }
 }
+# Fetch, then verify against $PINS[$pinKey] before the caller extracts/executes anything. Fails CLOSED:
+# a missing/TBD pin or a hash mismatch deletes the download and exits, same discipline as setup.sh/
+# setup-win.ps1's verify_checksum / Test-Checksum.
+function Fetch-Verified($url, $out, $what, $pinKey) {
+  Fetch $url $out $what
+  $expected = $PINS[$pinKey]
+  if ((-not $expected) -or ($expected.StartsWith('TBD-'))) {
+    Remove-Item $out -ErrorAction SilentlyContinue
+    Emit 'error' "REFUSING: $what failed SHA-256 verification (or has no pin) - not extracting/executing an unverified binary."
+    exit 1
+  }
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $out).Hash.ToLower()
+  if ($actual -ne $expected.ToLower()) {
+    Remove-Item $out -ErrorAction SilentlyContinue
+    Emit 'error' "REFUSING: $what failed SHA-256 verification (or has no pin) - not extracting/executing an unverified binary."
+    exit 1
+  }
+}
 
 try {
   switch ($Dep) {
@@ -65,15 +119,12 @@ try {
         Emit 'progress' 'winget unavailable - downloading the Node.js zip (no admin needed)...'
         Ensure-Bin
         $a = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
-        $url = $null
-        try {
-          $idx = Invoke-RestMethod -UseBasicParsing -TimeoutSec 30 'https://nodejs.org/dist/index.json'
-          $lts = ($idx | Where-Object { $_.lts } | Select-Object -First 1).version
-          if ($lts) { $url = "https://nodejs.org/dist/$lts/node-$lts-win-$a.zip" }
-        } catch {}
-        if (-not $url) { $url = "https://nodejs.org/dist/v22.12.0/node-v22.12.0-win-$a.zip" }   # pinned LTS fallback
+        # PINNED version only -- a floating index.json "latest LTS" resolution is unverifiable by
+        # construction (the SHA-256 pins above are for THIS exact version; a moving target would make
+        # those pins meaningless).
+        $url = "https://nodejs.org/dist/$NODE_PIN/node-$NODE_PIN-win-$a.zip"
         $zip = Join-Path $env:TEMP 'node-claudible.zip'
-        Fetch $url $zip 'Node.js'
+        Fetch-Verified $url $zip 'Node.js' "node-$a"
         $dest = Join-Path $BIN 'node'
         Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
         Expand-Archive -Path $zip -DestinationPath $dest -Force
@@ -93,14 +144,11 @@ try {
       if (-not (Tool 'git')) {
         Emit 'progress' 'winget unavailable - downloading PortableGit (no admin needed)...'
         Ensure-Bin
-        $sfxUrl = $null
-        try {
-          $rel = Invoke-RestMethod -UseBasicParsing -TimeoutSec 30 -Headers @{ 'User-Agent' = 'claudible' } 'https://api.github.com/repos/git-for-windows/git/releases/latest'
-          $sfxUrl = ($rel.assets | Where-Object { $_.name -match 'PortableGit-.*-64-bit\.7z\.exe' } | Select-Object -First 1).browser_download_url
-        } catch {}
-        if (-not $sfxUrl) { Emit 'error' 'Could not resolve PortableGit (network/proxy?). Install Git from https://git-scm.com/download/win and reopen.'; exit 1 }
+        # PINNED URL only -- a floating releases/latest API resolution is unverifiable by construction
+        # (the SHA-256 pin above is for THIS exact asset; a moving target would make that pin meaningless).
+        $sfxUrl = $GIT_PORTABLE_URL
         $sfx = Join-Path $env:TEMP 'PortableGit.7z.exe'
-        Fetch $sfxUrl $sfx 'PortableGit'
+        Fetch-Verified $sfxUrl $sfx 'PortableGit' 'PortableGit'
         $dest = Join-Path $BIN 'git'
         Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -145,7 +193,9 @@ try {
         Emit 'progress' 'Downloading the cloudflared binary...'
         Ensure-Bin
         $exe = Join-Path $BIN 'cloudflared.exe'
-        Fetch 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' $exe 'cloudflared'
+        # PINNED URL only -- a floating releases/latest/download resolution is unverifiable by construction
+        # (the SHA-256 pin above is for THIS exact asset; a moving target would make that pin meaningless).
+        Fetch-Verified $CLOUDFLARED_URL $exe 'cloudflared' 'cloudflared'
         if (-not (Test-Path $exe)) { Emit 'error' 'cloudflared download failed.'; exit 1 }
         EmitEnv 'CLAUDIBLE_CLOUDFLARED' $exe
       }

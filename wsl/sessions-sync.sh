@@ -26,7 +26,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|relay-cred|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|relay-cred|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list|lineage-set) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -526,6 +526,21 @@ commit_and_push() {
 
 count_synced() { ls "$WT"/sessions/*/*.jsonl 2>/dev/null | wc -l | tr -d ' '; }
 
+# CLEAR-DRIFT-PATCH-PLAN FIX C2 (:96-104): a per-author, GENERATED index of session names + /clear lineage —
+# a plain-text convenience for humans browsing the sessions branch on GitHub. Fully DERIVED from
+# meta/<author>.json + this pass's transcript filenames/mtimes: always regenerable, and nothing may depend on
+# it (the app never reads it — title-list/title-read remain the only source of truth for names). Run AFTER
+# export_sessions so the file list reflects what THIS pass just published; the meta file may be a sync or two
+# behind (title-set/lineage-set are their own ops) — harmless, it just regenerates fresher next pass. It is
+# plain text, not *.jsonl, so .gitattributes' `sessions/**/*.jsonl binary` (:320) never touches it and no
+# transcript is renamed to produce it (C3).
+write_index() {
+  [ -d "$WT/sessions/$author" ] || return 0
+  # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+  (unset MSYS_NO_PATHCONV; CL_META="$WT/meta/$author.json" CL_SESSDIR="$WT/sessions/$author" CL_OUT="$WT/sessions/$author/INDEX.md" node "$HERE/sessions-sync-tool.js" index-write) >/dev/null 2>&1
+  gitwt add -- "sessions/$author/INDEX.md" >/dev/null 2>&1
+}
+
 # JSON array of the session ids import_sessions changed on disk this run. Safe to interpolate raw:
 # every id passed the strict [A-Za-z0-9-] filter above. The app uses this to reload any OPEN tab
 # whose transcript was just replaced — the "out of sync doesn't refresh the open session" fix.
@@ -550,6 +565,7 @@ case "$op" in
     ensure_worktree || fail "could not set up the sessions branch"
     pull_branch || fail "pull failed"
     export_sessions
+    write_index
     commit_and_push || fail "push failed (no access, or network)"
     emit "{\"ok\":true,\"op\":\"push\",\"pushed\":$PUSHED}"
     ;;
@@ -558,6 +574,7 @@ case "$op" in
     pull_branch || fail "pull failed"
     import_sessions
     export_sessions
+    write_index
     # R25: the push failing must not swallow the IMPORT's results — main uses `ids` to reload any open tab
     # whose transcript was just replaced; a bare fail() here left those tabs silently stale until the next
     # successful pass ("out of sync doesn't refresh the open session", the flaky-network edition).
@@ -765,6 +782,26 @@ case "$op" in
     git -C "$WT" fetch "$SREM" "$BR" >/dev/null 2>&1
     # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
     (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" CL_TS=1 node "$HERE/sessions-sync-tool.js" title-read) || fail "title read failed"
+    ;;
+  lineage-set)
+    # CLEAR-DRIFT-PATCH-PLAN FIX C1 (:91-94): record that $2 (the NEW session id, minted by /clear) continues
+    # $3 (the OLD id it replaced) — additive to the SAME {id:{title,ts}} map title-set already merges
+    # last-writer-wins into my OWN meta/<author>.json (disjoint per-author paths => conflict-free, same as
+    # title-set above). This is the receiving end of Fix A's drift signal: the drift handler (renderer/app.js
+    # onStatus, the site that already carries the title across a clear — see the KEEP THE NAME comment there)
+    # knows both ids the instant they diverge and is meant to call this alongside its title-set carry-over.
+    ensure_worktree || fail "could not set up the sessions branch"
+    nid="${2:-}"; oid="${3:-}"
+    case "$nid" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    case "$oid" in '' | -* | *- | *[!A-Za-z0-9-]*) fail "bad id" ;; esac
+    pull_branch || fail "pull failed"
+    mkdir -p "$WT/meta" 2>/dev/null
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path
+    (unset MSYS_NO_PATHCONV; CL_ID="$nid" CL_FROM="$oid" CL_FILE="$WT/meta/$author.json" node "$HERE/sessions-sync-tool.js" lineage-write) || fail "lineage write failed"
+    gitwt add -- "meta/$author.json" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: lineage $author" >/dev/null 2>&1
+    pushed=0; for i in 1 2 3; do gitwt push "$SREM" "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"lineage-set\"}" || emit "{\"ok\":false,\"op\":\"lineage-set\",\"error\":\"push failed\"}"
     ;;
   status)
     if [ -d "$WT" ] && git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

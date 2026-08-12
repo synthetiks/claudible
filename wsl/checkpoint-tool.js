@@ -13,13 +13,19 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const ck = require('../lib/checkpoint.js');
+const gitSafe = require('../lib/git-safe.js');
 
 const repo = process.cwd();   // checkpoint.sh cd'd into the workspace repo before invoking node
+// CASE-22/B-25: checkpoint-tool runs against a possibly-adopted workspace repo whose .git/config is not ours to
+// trust — neutralize the same command-executing keys the shell sites already do. GIT_ASKPASS/SSH_ASKPASS are
+// deleted once here (not by buildEnv, which only returns an additive object) so no inherited value survives.
+delete process.env.GIT_ASKPASS;
+delete process.env.SSH_ASKPASS;
 // git runner bound to the repo; returns { code, stdout } and merges any env (e.g. GIT_INDEX_FILE) — matches
 // the contract lib/checkpoint.js + its test expect.
 function git(args, env) {
   try {
-    const stdout = cp.execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, env || {}), stdio: ['ignore', 'pipe', 'ignore'] });
+    const stdout = cp.execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, gitSafe.buildEnv(), env || {}), stdio: ['ignore', 'pipe', 'ignore'] });
     return { code: 0, stdout };
   } catch (e) { return { code: e.status || 1, stdout: e.stdout ? String(e.stdout) : '' }; }
 }

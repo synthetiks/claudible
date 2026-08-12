@@ -11,3 +11,9 @@
 # extension). Same *.sh reasoning above applies verbatim: a CRLF checkout breaks the shebang under git-bash.
 # Not covered by the *.sh glob because it deliberately has no extension, so it needs its own line.
 test/e2e/fake-gh/gh text eol=lf
+# every file type the contract suite reads stays LF under core.autocrlf=true — unpinned .ps1/.md/.yml/.json made
+# the suite's multi-line regexes checkout-dependent.
+*.ps1  text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf

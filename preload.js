@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld('claudible', {
   // endShare: this tab is the LIVE-SHARED one and the session it holds is being deleted. Main freezes the mirror
   // and allows the re-point — every other attempt to move the pinned tab off its session is refused outright.
   sessionOpen: (tabId, id, endShare) => ipcRenderer.invoke('session:open', { tabId, id, endShare: !!endShare }),
-  sessionDelete: (id, scope, wsId) => ipcRenderer.invoke('session:delete', { id, scope, wsId }),
+  sessionDelete: (id, scope, wsId, force, check) => ipcRenderer.invoke('session:delete', { id, scope, wsId, force: !!force, check: !!check }),   // force: CASE-13's second, explicit "delete anyway" re-confirm after needsForce. check: CASE-13's pre-flight — run the refusal guards, delete nothing
   sessionKeep: (id, wsId) => ipcRenderer.invoke('session:keep', { id, wsId }),   // "keep locally" a session deleted on GitHub
   resolveDiverged: (id, strategy, wsId) => ipcRenderer.invoke('session:resolveDiverged', { id, strategy, wsId }),   // out-of-sync fork → 'remote' (take theirs) | 'local' (keep mine)
   exportSession: (id, wsId) => ipcRenderer.invoke('session:export', { id, wsId }),   // → shareable self-contained HTML replay
@@ -77,7 +77,7 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceAcceptInvite: (id, useDefault) => ipcRenderer.invoke('workspace:acceptInvite', { id, useDefault: !!useDefault }),   // choose clone dir + clone
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   workspaceRename: (id, label) => ipcRenderer.invoke('workspace:rename', { id, label }),
-  workspaceDelete: (id) => ipcRenderer.invoke('workspace:delete', id),
+  workspaceDelete: (id, force) => ipcRenderer.invoke('workspace:delete', id, !!force),   // force: CASE-13's second, explicit "delete anyway" re-confirm after needsForce
   workspaceDeleteFromGithub: (id, confirmName) => ipcRenderer.invoke('workspace:deleteFromGithub', { id, confirmName }),   // C-3.6 — the typed-name-confirmed GitHub delete
   workspaceReorder: (ids) => ipcRenderer.invoke('workspace:reorder', ids),
   // C-3.6 — the trash icon (left of the settings X) and the settings drawer's Open trash / Delete trash buttons
@@ -88,7 +88,7 @@ contextBridge.exposeInMainWorld('claudible', {
   permissionModeGet: () => ipcRenderer.invoke('permissionMode:get'),
   permissionModeSet: (mode) => ipcRenderer.invoke('permissionMode:set', mode),   // 'default' | 'acceptEdits' | 'bypass'
   modelStrategyGet: () => ipcRenderer.invoke('modelStrategy:get'),
-  modelStrategySet: (v) => ipcRenderer.invoke('modelStrategy:set', v),           // 'planBigExecSmall' (default) | 'off'
+  modelStrategySet: (v) => ipcRenderer.invoke('modelStrategy:set', v),           // 'planBigExecSmall' (opt-in) | 'off' (default)
   repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsSet: (name, state) => ipcRenderer.invoke('skills:set', { name, state }),
@@ -190,6 +190,8 @@ contextBridge.exposeInMainWorld('claudible', {
   // shared session names — publish my rename + read the merged map (everyone in the workspace sees the same title)
   titleSet: (id, name, wsId) => ipcRenderer.invoke('title:set', { id, name, wsId }),
   titleList: (wsId) => ipcRenderer.invoke('title:list', wsId),
+  // /clear lineage — record that a NEW session id continues an OLD one, in the same meta/<login>.json map
+  lineageSet: (id, from, wsId) => ipcRenderer.invoke('lineage:set', { id, from, wsId }),
   // meta
   endpoints: () => ipcRenderer.invoke('endpoints'),
   // clipboard (handled in main so it works regardless of web clipboard permissions)

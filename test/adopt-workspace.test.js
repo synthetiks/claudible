@@ -249,6 +249,56 @@ ok('_git-safe.sh: neutralizes core.fsmonitor (fires on git diff → the 4s poll)
 ok('_git-safe.sh: blocks the ext transport (arbitrary command)', /protocol\.ext\.allow[^\n]*never/.test(GITSAFE));
 ok('_git-safe.sh: uses git\'s env-var config so it applies to EVERY git call in the process',
   /GIT_CONFIG_COUNT=/.test(GITSAFE) && /GIT_CONFIG_KEY_0/.test(GITSAFE));
+
+// CASE-12/22/23 + B-25: lib/git-safe.js is the ONE shared source of truth for the allowlist. _git-safe.sh and
+// context-hook.js each carry their own hand-written copy (a bash script cannot require(), and context-hook.js is
+// staged as a standalone file — see its own header). This parity pin requires lib/git-safe.js's SAFE_KEYS and
+// asserts BOTH copies contain every key=value pair, in order, with the same total count — a key added to one
+// place without the others fails the build.
+const { SAFE_KEYS } = require(path.join(ROOT, 'lib/git-safe.js'));
+const CONTEXT_HOOK = fs.readFileSync(path.join(ROOT, 'hooks/context-hook.js'), 'utf8');
+ok('lib/git-safe.js: exports the 9-key SAFE_KEYS allowlist (6 original + gpg.program + log.showSignature + core.hooksPath)',
+  Array.isArray(SAFE_KEYS) && SAFE_KEYS.length === 9);
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+SAFE_KEYS.forEach((k, i) => {
+  const shPair = new RegExp(`GIT_CONFIG_KEY_${i}='${reEscape(k.key)}';\\s*export GIT_CONFIG_VALUE_${i}='${reEscape(k.value)}'`);
+  ok(`_git-safe.sh: index ${i} (${k.key}=${JSON.stringify(k.value)}) matches lib/git-safe.js SAFE_KEYS`, shPair.test(GITSAFE));
+  const jsPair = new RegExp(`GIT_CONFIG_KEY_${i}: '${reEscape(k.key)}', GIT_CONFIG_VALUE_${i}: '${reEscape(k.value)}'`);
+  ok(`context-hook.js: index ${i} (${k.key}=${JSON.stringify(k.value)}) matches lib/git-safe.js SAFE_KEYS`, jsPair.test(CONTEXT_HOOK));
+});
+// CASE-22 (node edition of the tree-wide sweep): the two node-layer git call sites must go through the shared
+// lib/git-safe.js module rather than reimplementing (or omitting) the allowlist.
+const CKPT_TOOL = fs.readFileSync(path.join(ROOT, 'wsl/checkpoint-tool.js'), 'utf8');
+const SELF_UPDATE = fs.readFileSync(path.join(ROOT, 'lib/selfUpdate.js'), 'utf8');
+const REQUIRES_GIT_SAFE = /require\(['"]\.\.\/lib\/git-safe(\.js)?['"]\)/;
+ok('wsl/checkpoint-tool.js: requires the shared lib/git-safe.js module', REQUIRES_GIT_SAFE.test(CKPT_TOOL));
+ok('lib/selfUpdate.js: requires the shared ./git-safe.js module', /require\(['"]\.\/git-safe(\.js)?['"]\)/.test(SELF_UPDATE));
+// core.hooksPath is the ONE allowlist key that is also an ANSWER git gives back: `git rev-parse --git-path
+// hooks` returns core.hooksPath when it is set. coauthor-hook.sh sources _git-safe.sh, so coauthor-tool.js
+// inherits '/dev/null' and would resolve the C-10.6 hooks dir to a non-directory — install() fails, uninstall()
+// strands an already-installed prepare-commit-msg. It must therefore ask git under the allowlist MINUS that key
+// (never under the raw environment: the other eight still apply). Both rev-parse calls must carry that env.
+const COAUTHOR_TOOL = fs.readFileSync(path.join(ROOT, 'wsl/coauthor-tool.js'), 'utf8');
+ok('wsl/coauthor-tool.js: resolves the hooks dir with core.hooksPath excluded from the allowlist (else C-10.6 installs into /dev/null)',
+  REQUIRES_GIT_SAFE.test(COAUTHOR_TOOL) && /buildEnvWithout\(\['core\.hooksPath'\]\)/.test(COAUTHOR_TOOL) && /stripConfigEnv\(process\.env\)/.test(COAUTHOR_TOOL));
+{
+  const revParseLines = COAUTHOR_TOOL.split('\n').filter((l) => /execFileSync\('git', \['rev-parse'/.test(l));
+  ok('wsl/coauthor-tool.js: has both git rev-parse resolution calls (this pin would go vacuous)', revParseLines.length === 2);
+  ok('wsl/coauthor-tool.js: every git rev-parse resolution call runs under RESOLVE_ENV',
+    revParseLines.length === 2 && revParseLines.every((l) => /env: RESOLVE_ENV/.test(l)));
+}
+ok('lib/git-safe.js: buildEnvWithout renumbers contiguously (git only reads KEY_0..COUNT-1, a hole drops keys)',
+  (() => { const e = require(path.join(ROOT, 'lib/git-safe.js')).buildEnvWithout(['core.hooksPath']);
+    return e.GIT_CONFIG_COUNT === String(SAFE_KEYS.length - 1)
+      && !Object.keys(e).some((k) => k === 'GIT_CONFIG_KEY_' + (SAFE_KEYS.length - 1))
+      && !Object.keys(e).some((k) => /^GIT_CONFIG_KEY_/.test(k) && e[k] === 'core.hooksPath'); })());
+ok('_git-safe.sh: GIT_CONFIG_COUNT matches SAFE_KEYS.length', new RegExp(`GIT_CONFIG_COUNT=${SAFE_KEYS.length}\\b`).test(GITSAFE));
+ok('context-hook.js: GIT_CONFIG_COUNT matches SAFE_KEYS.length', new RegExp(`GIT_CONFIG_COUNT: '${SAFE_KEYS.length}'`).test(CONTEXT_HOOK));
+ok('_git-safe.sh: carries no key beyond SAFE_KEYS.length (an addition to one place without the others must fail)',
+  !new RegExp(`GIT_CONFIG_KEY_${SAFE_KEYS.length}\\b`).test(GITSAFE));
+ok('context-hook.js: carries no key beyond SAFE_KEYS.length',
+  !new RegExp(`GIT_CONFIG_KEY_${SAFE_KEYS.length}\\b`).test(CONTEXT_HOOK));
+
 // TREE-WIDE, not an allowlist. The previous version of this guard named three scripts BY HAND — and that is exactly
 // how adopt-workspace.sh, the single most exposed script in the app (SEVEN git commands against a folder the user
 // just picked in a native dialog, whose .git/config is entirely attacker-controlled), went a whole release without
@@ -286,8 +336,41 @@ for (const s of shFiles) {
     /^\s*\.\s+"\$HERE\/_git-safe\.sh"/m.test(raw));
 }
 // Non-vacuity: if the detector regex ever stops matching, every check above passes by finding nothing to check.
-// 10 today = 9 that must source the neutralizer + 1 written exemption (session.sh).
-ok('…and the sweep actually reached the git-touching scripts (10 today: 9 guarded + 1 exempt)', swept >= 10);
+// A FLOOR, not a census — the number only ever goes up as scripts learn to run git. CASE-13 raised it by two:
+// delete-workspace.sh (the dirty/unpushed refusal) and trash-prune.sh (a trashed .git/config is attacker-class
+// exactly like an adopted one) both invoke git now, and both source the neutralizer.
+ok('…and the sweep actually reached the git-touching scripts (12+ today, incl. CASE-13\'s two)', swept >= 12);
+// session.sh's own exemption above is deliberately narrow: it covers session.sh's TOP-LEVEL shell (which execs
+// claude, so sourcing the neutralizer there would leak GIT_CONFIG_* into the user's own git). It does NOT cover
+// the bash-fallback context-hook.sh that session.sh WRITES via heredoc — that generated script is a separate
+// process (invoked per-prompt as its own hook, never exec'd into the user's session) and runs `git config`
+// against a possibly-adopted, attacker-controlled workspace .git/config, so it must guard itself (CASE-12 twin).
+// Pin the heredoc region directly so a future edit can't silently drop the guard while the outer sweep above
+// keeps passing on the strength of an exemption that was never meant to cover this inner script.
+{
+  const heredocMatch = SESSION_SH.match(/cat > "\$SDIR\/\.claude\/context-hook\.sh" <<'EOF'([\s\S]*?)\nEOF/);
+  ok('wsl/session.sh: the bash-fallback context-hook.sh heredoc is findable', !!heredocMatch);
+  const heredoc = heredocMatch ? heredocMatch[1] : '';
+  const gitConfigIdx = heredoc.search(/git config/);
+  const sourceIdx = heredoc.search(/\.\s+"\$gs"/);
+  ok('wsl/session.sh: the generated context-hook.sh sources _git-safe.sh BEFORE its git config calls (fail-closed guard, CASE-12 twin)',
+    gitConfigIdx !== -1 && sourceIdx !== -1 && sourceIdx < gitConfigIdx);
+  // …and FAIL-CLOSED, not merely ordered. "Source line comes first" is satisfied by a script that sources the
+  // neutralizer when it exists and then runs git ANYWAY when it doesn't — which is the exact hole this case is
+  // about. Pin the shape: the git calls must sit INSIDE the `[ -f "$gs" ]` branch (no `fi` may close it between
+  // the source line and the git call), and the else-branch must degrade identity to empty rather than run git.
+  const guardIdx = heredoc.search(/if \[ -f "\$gs" \]/);
+  const between = gitConfigIdx > sourceIdx && sourceIdx > -1 ? heredoc.slice(sourceIdx, gitConfigIdx) : 'fi';
+  ok('wsl/session.sh: …and the git calls sit INSIDE that guard, so a missing _git-safe.sh runs no git at all',
+    guardIdx !== -1 && guardIdx < sourceIdx && !/(^|\s)fi(\s|$)/.test(between));
+  ok('wsl/session.sh: …with the else-branch degrading identity to empty (never an unguarded fallback git call)',
+    /else\s*\n\s*gname="";\s*gmail="";?\s*\n\s*fi/.test(heredoc));
+  const iStage = SESSION_SH.indexOf('cp "$APPDIR/wsl/_git-safe.sh"');
+  const iHeredoc = SESSION_SH.indexOf('cat > "$SDIR/.claude/context-hook.sh"');
+  ok('wsl/session.sh: stages _git-safe.sh into $SDIR/.claude before writing the heredoc that sources it',
+    /cp "\$APPDIR\/wsl\/_git-safe\.sh"[\s\S]{0,200}?mv -f[\s\S]{0,80}?_git-safe\.sh"/.test(SESSION_SH)
+    && iStage > -1 && iHeredoc > -1 && iStage < iHeredoc);
+}
 // The SAME sweep, hooks/*.js edition (R5). The shell sweep above is how the most exposed script in the app was
 // once missed by a hand-written list — and then the CLASS repeated: hooks/context-hook.js ran `git -C <cwd>` on
 // every prompt with no neutralization, invisible to a wsl/*.sh glob. Any hooks JS that invokes git must carry

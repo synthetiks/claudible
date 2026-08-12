@@ -991,7 +991,11 @@ none('renderer: orphanTab is never rendered',
   // C-3.6 refactored the inline ipcMain.handle callback into a named workspaceDeleteCore(id) (so the "Delete
   // from GitHub" path can call the exact same core after the repo itself is gone) — capture the FUNCTION now,
   // not the registration line, up to the point it hands back off to ipcMain.handle.
-  const del = (MAIN.match(/function workspaceDeleteCore\(id\) \{[\s\S]*?\nipcMain\.handle\('workspace:delete'/) || [''])[0];
+  // CASE-13 gave it a second parameter (`force` — the user's explicit "delete anyway" for a dirty/unpushed
+  // clone), so the signature is matched loosely; the capture window is unchanged.
+  const del = (MAIN.match(/function workspaceDeleteCore\([^)]*\) \{[\s\S]*?\nipcMain\.handle\('workspace:delete'/) || [''])[0];
+  none('the workspaceDeleteCore capture went vacuous (every check in this block would pass on an empty string)',
+    del ? [] : ['workspaceDeleteCore(...) → ipcMain.handle(\'workspace:delete\') no longer matches — fix the pin, do not let it match nothing']);
   none('the delete tombstone regrew its kind gate (adopted repos become phantoms again)',
     /const keys = repoTombstoneKeys\(ws\);\s*\n\s*if \(keys\.length\)/.test(del) && !/ws\.kind === 'repo' && ws\.owner && ws\.slug\) \{\s*\n\s*registry\.dismissedRepos/.test(del) ? [] : ['kind-agnostic tombstone missing']);
   none('the background gh-key backfill on delete is gone (external renames resurrect deleted projects)',
@@ -2802,6 +2806,24 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and the hooks must still prefer the env over the baked argv, or setting it achieves nothing',
     [/process\.env\.CLAUDIBLE_HOOKS \|\| process\.argv\[2\]/.test(read('hooks/hook.js')) ? '' : 'hook.js no longer env-first',
      /process\.env\.CLAUDIBLE_STATUS \|\| process\.argv\[2\]/.test(read('hooks/statusline.js')) ? '' : 'statusline.js no longer env-first'].filter(Boolean));
+  // (c2) CASE-5: hook.js swallowed every failure (empty catch {}) — a broken CLAUDIBLE_HOOKS path (bad dir,
+  //     permissions, disk full) went completely silent, so telemetry/agents/voice/sync just stopped with no
+  //     trace anywhere. The hook must still always exit 0 (never break the user's session) but must now name
+  //     the failure on stderr, which Claude Code captures without polluting the stdout hook protocol.
+  none('hooks/hook.js went back to swallowing failures with an empty catch {} instead of reporting to stderr',
+    (() => {
+      const HOOK = read('hooks/hook.js');
+      const bad = [];
+      // The two TRY SITES must each name their failure. A blanket /catch\s*\{\s*\}/ scan cannot be used here:
+      // the reporting itself is wrapped in `try { …stderr… } catch {}` (a closed stderr must not throw out of
+      // a hook that is contractually required to exit 0), so an empty catch legitimately exists inside them.
+      if (!/try \{ buf = fs\.readFileSync\(0[^\n]*catch \(e\) \{[^\n]*process\.stderr\.write/.test(HOOK)) bad.push('hook.js stdin-read failure is swallowed again (no stderr report)');
+      if (!/appendFileSync\(out[^\n]*catch \(e\) \{[^\n]*process\.stderr\.write/.test(HOOK)) bad.push('hook.js append failure is swallowed again (no stderr report)');
+      if (!/process\.stderr\.write/.test(HOOK)) bad.push('hook.js no longer writes failures to process.stderr');
+      if (!/no output path/.test(HOOK)) bad.push('hook.js no longer reports a falsy CLAUDIBLE_HOOKS/argv path');
+      if (!/process\.exit\(0\)/.test(HOOK)) bad.push('hook.js no longer always exits 0');
+      return bad;
+    })());
   // (d) respawnPty defers the spawn on win having already dropped the ptys entry; tab:close inside that window
   //     killed nothing and doSpawn then spawned a pty for a tab that no longer exists — invisible, polled
   //     forever, and able to become fgTabId.
@@ -2911,7 +2933,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   //     phantom failures naming plausible regressions (467/6 observed at ecb0424, incl. pin 84a itself).
   none('.gitattributes stopped pinning the contract-read files to LF (Windows clones see phantom failures)',
     [/^\*\.js\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.js not pinned',
-     /^\*\.html\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.html not pinned'].filter(Boolean));
+     /^\*\.html\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.html not pinned',
+     /^\*\.ps1\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.ps1 not pinned',
+     /^\*\.md\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.md not pinned',
+     /^\*\.yml\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.yml not pinned',
+     /^\*\.json\s+text eol=lf/m.test(read('.gitattributes')) ? '' : '*.json not pinned'].filter(Boolean));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -3382,9 +3408,12 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the gh delete_repo scope hint is gone from delete-repo.sh (C-3.6)',
     /gh auth refresh -h github\.com -s delete_repo/.test(fs.readFileSync(path.join(ROOT, 'wsl', 'delete-repo.sh'), 'utf8'))
       ? [] : ['delete-repo.sh no longer tells the user how to grant the missing scope']);
+  // CASE-13: the delegation now passes force=true, and MUST. The remote repo is already deleted by this point,
+  // so the dirty/unpushed refusal cannot apply — there is nothing left to push to, and refusing would strand the
+  // workspace registered against a repo that no longer exists. The typed-exact-name confirm IS the override.
   none('workspace:deleteFromGithub stopped delegating to workspaceDeleteCore on success (C-3.6)',
-    /if \(!r\.ok\) return \{ ok: false, error: r\.error \|\| 'gh repo delete failed' \};\s*\n\s*return workspaceDeleteCore\(id\);/.test(MAIN)
-      ? [] : ['a successful gh repo delete no longer falls through to the ordinary local delete']);
+    /if \(!r\.ok\) return \{ ok: false, error: r\.error \|\| 'gh repo delete failed' \};[\s\S]{0,600}?\n\s*return workspaceDeleteCore\(id, true\);/.test(MAIN)
+      ? [] : ['a successful gh repo delete no longer falls through to the ordinary local delete — with force (CASE-13)']);
 
   // (3) the trash icon sits in the settings drawer's head, left of the × close button, and opens the OS file
   //     manager on the trash folder (never a bare listing inside Claudible — "a basic function, nothing complex").
@@ -4322,6 +4351,157 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the drift notice can pause, kick or end the share (it must stay advisory)',
     /share:session-changed[\s\S]{0,600}?(setSharePaused|kickGuest|share\.stop)/.test(M)
       ? ['the session-changed handler mutates share state'] : []);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 114. CASE-20 — CHECKSUM PLUMBING FAILS CLOSED. A missing/TBD SHA-256 pin (or a missing hasher) used to WARN
+//   and let an unverified binary through anyway (setup.sh's verify_checksum, setup-win.ps1's Test-Checksum);
+//   both now REFUSE (exit 1 / return $false). The whisper.cpp clone was unpinned HEAD; it now pins a tag AND
+//   verifies the resolved commit (tags move, commits don't). setup-win.ps1's whisper zip download resolved a
+//   floating "latest release" and extracted before any hash check; it now uses only the pinned URL and verifies
+//   BEFORE Expand-Archive. provision-win.ps1 had no hash infrastructure at all for its three direct-download
+//   executables (node zip, PortableGit, cloudflared) and resolved floating "latest"/index.json URLs; it now
+//   has Fetch-Verified + pinned URLs. This block pins the PLUMBING itself (fail-closed branches, wiring);
+//   real pin VALUES are asserted separately below (test 115), where a PIN-COMPUTATION step has now filled
+//   every TBD-* placeholder with a hash/commit computed from the actual downloaded bytes per R-23.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const PROVWIN = read('setup/provision-win.ps1');
+  none('setup.sh verify_checksum no longer fails closed on a missing/TBD pin or a missing hasher (CASE-20)',
+    [/''\|TBD-\*\) say "REFUSING: no verified SHA-256 pin for \$label[\s\S]{0,220}return 1 ;;/.test(SETUPSH)
+       ? '' : "the TBD/empty case no longer says REFUSING and returns 1",
+     /if \[ -z "\$actual" \]; then say "REFUSING: no sha256sum\/shasum on this system/.test(SETUPSH)
+       ? '' : 'the no-hasher branch no longer refuses',
+     /''\|TBD-\*\) say "REFUSING:[\s\S]{0,240}return 0 ;;/.test(SETUPSH)
+       ? 'verify_checksum still has a return 0 warn-and-pass branch' : ''].filter(Boolean));
+  none('setup-win.ps1 Test-Checksum no longer fails closed on a missing/TBD pin (CASE-20)',
+    /if \(\(-not \$expected\) -or \(\$expected\.StartsWith\('TBD-'\)\)\) \{ Warn "REFUSING: no verified SHA-256 pin for \$key[\s\S]{0,240}return \$false \}/.test(SETUPWIN)
+      ? [] : ['the TBD/missing-pin branch no longer Warns REFUSING and returns $false']);
+  none('setup.sh no longer pins the whisper.cpp clone to a tag + verified commit (CASE-20)',
+    [/WHISPER_PIN_TAG="v1\.9\.1"/.test(SETUPSH) ? '' : 'no WHISPER_PIN_TAG constant',
+     /WHISPER_PIN_COMMIT="[0-9a-fA-F]{40}"/.test(SETUPSH) ? '' : 'no WHISPER_PIN_COMMIT constant (or it is not a 40-hex commit)',
+     /git clone --depth 1 --branch "\$WHISPER_PIN_TAG" https:\/\/github\.com\/ggml-org\/whisper\.cpp/.test(SETUPSH)
+       ? '' : 'the whisper.cpp clone no longer pins --branch "$WHISPER_PIN_TAG" (clones unpinned HEAD again)',
+     /actual="\$\(git -C "\$VOICE\/whisper" rev-parse HEAD\)"/.test(SETUPSH) ? '' : 'the clone no longer rev-parses HEAD to verify the commit',
+     /if \[ "\$actual" != "\$WHISPER_PIN_COMMIT" \]; then/.test(SETUPSH) ? '' : 'the clone no longer compares HEAD against WHISPER_PIN_COMMIT'].filter(Boolean));
+  none('provision-win.ps1 lost its Fetch-Verified checksum plumbing or a direct-download site regressed to a floating URL (CASE-20)',
+    [/function Fetch-Verified\(\$url, \$out, \$what, \$pinKey\)/.test(PROVWIN) ? '' : 'Fetch-Verified is gone from provision-win.ps1',
+     /\$PINS = @\{/.test(PROVWIN) ? '' : 'no $PINS block in provision-win.ps1',
+     /Invoke-RestMethod[\s\S]{0,80}releases\/latest/.test(PROVWIN) ? 'a live releases/latest API resolution is still present in a download path' : '',
+     /Invoke-RestMethod[\s\S]{0,80}index\.json/.test(PROVWIN) ? 'the nodejs.org index.json "latest LTS" resolution is still present' : '',
+     /Fetch-Verified \$url \$zip 'Node\.js' "node-\$a"/.test(PROVWIN) ? '' : 'the node.js zip download is no longer routed through Fetch-Verified',
+     /Fetch-Verified \$sfxUrl \$sfx 'PortableGit' 'PortableGit'/.test(PROVWIN) ? '' : 'the PortableGit download is no longer routed through Fetch-Verified',
+     /Fetch-Verified \$CLOUDFLARED_URL \$exe 'cloudflared' 'cloudflared'/.test(PROVWIN) ? '' : 'the cloudflared download is no longer routed through Fetch-Verified'].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 115. CASE-20 — PIN VALUES FILLED. CHECKSUM-PLUMBING (test 114) landed the fail-closed wiring with every
+//   real hash/commit left as a 'TBD-*' placeholder on purpose (a placeholder must never be mistaken for a
+//   verified pin, and the plumbing hard-refuses on one by construction). A separate PIN-COMPUTATION step,
+//   sanctioned once under R-23, downloaded each exact artifact from its official host, hashed the actual
+//   bytes, and deleted the download; those computed values now replace every placeholder here. This is the
+//   closing pin: NO 'TBD-' placeholder may remain in any of the three scripts a live install runs.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const PROVWIN2 = read('setup/provision-win.ps1');
+  // Matches an ASSIGNMENT of a TBD- value ( ="TBD- / = 'TBD- ), not the fail-closed detection logic that
+  // legitimately still compares against the 'TBD-' prefix (e.g. `''|TBD-*)`, `StartsWith('TBD-')`) nor the
+  // prose comments explaining the convention -- neither of those puts an `=` directly before the quote.
+  const TBD_PLACEHOLDER = /=\s*['"]TBD-/;
+  none('a TBD- placeholder pin still remains in one of the checksum-verified setup scripts (CASE-20)',
+    [TBD_PLACEHOLDER.test(SETUPSH) ? "setup.sh still has an unfilled TBD- pin assignment" : '',
+     TBD_PLACEHOLDER.test(SETUPWIN) ? "setup-win.ps1 still has an unfilled TBD- pin assignment" : '',
+     TBD_PLACEHOLDER.test(PROVWIN2) ? "provision-win.ps1 still has an unfilled TBD- pin assignment" : ''].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// CASE-21: history:append used payload.wsId raw as the history-file key instead of resolving it through
+// _wsById like its sibling handlers (checkpoint:revert/undo/undoExists just above it). A stale/garbage wsId
+// would mint a new runtime/history/<garbage>.json instead of falling back to activeWorkspace.
+// ---------------------------------------------------------------------------------------------------------
+(function () {
+  const handler = (MAIN.match(/ipcMain\.handle\('history:append', \(e, payload\) => \{[\s\S]*?\n\}\);/) || [''])[0];
+  none('history:append no longer resolves wsId through _wsById (a stale id would mint a garbage history file)',
+    /_wsById\(payload && payload\.wsId\)/.test(handler) ? [] : ['history:append handler missing _wsById resolution']);
+})();
+
+// ---------------------------------------------------------------------------------------------------------
+// CASE-24: a hand-edited workspaces.json can hold a ws.path that round-trips fine (isSafePath) but is
+// relative or contains a traversal segment. The two registry-sourced ws.path -> script sites (clone,
+// upgrade) must validate with the stricter isContainedPath before building the runScript command.
+// ---------------------------------------------------------------------------------------------------------
+(function () {
+  none('main.js no longer imports isContainedPath from lib/pathSafe',
+    /require\('\.\/lib\/pathSafe'\)/.test(MAIN) && /isContainedPath/.test(MAIN) ? [] : ['isContainedPath not imported']);
+  const cloneSite = (MAIN.match(/function ensureClone\(ws\) \{[\s\S]*?\n  \}\)\;/) || [''])[0];
+  none('ensureClone (clone-workspace.sh site) no longer guards ws.path with isContainedPath',
+    /isContainedPath\(ws\.path\)/.test(cloneSite) ? [] : ['ensureClone missing isContainedPath guard']);
+  const upgradeSite = (MAIN.match(/ipcMain\.handle\('workspace:upgrade', async \(e, id\) => \{[\s\S]*?\n\}\);/) || [''])[0];
+  none('workspace:upgrade (upgrade-workspace.sh site) no longer guards ws.path with isContainedPath',
+    /isContainedPath\(ws\.path\)/.test(upgradeSite) ? [] : ['workspace:upgrade missing isContainedPath guard']);
+})();
+
+// ---------------------------------------------------------------------------------------------------------
+// CASE-23 — porcelain `git diff` against a workspace repo must always suppress driver execution. Unlike the
+// fixed config keys _git-safe.sh neutralizes via GIT_CONFIG_KEY_n, `diff.<driver>.textconv` is keyed by an
+// ATTACKER-CHOSEN driver name (set via .gitattributes), so it cannot be wildcarded by env — the only backstop
+// is passing --no-ext-diff --no-textconv at every porcelain diff call site. wsl/diff.sh runs three: the
+// uncommitted `diff HEAD` and both `diff <base> HEAD` (week-window and latest-window) net-diffs.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const diffSh = fs.readFileSync(path.join(wslDir, 'diff.sh'), 'utf8');
+  // Matched narrowly on the ACTUAL invocation prefix diff.sh uses (`git -c core.quotepath=false diff`), not a
+  // bare /git.*diff/ scan — line 15's comment ("core.fsmonitor fires on `git diff HEAD`") mentions git diff in
+  // prose and would otherwise false-positive as an unflagged call site.
+  const diffInvocations = diffSh.split('\n').filter((l) => /git -c core\.quotepath=false diff\b/.test(l) && !/^\s*#/.test(l));
+  none('diff.sh has fewer porcelain `git … diff …` call sites than expected (this pin would go vacuous)',
+    diffInvocations.length >= 3 ? [] : [`only ${diffInvocations.length} found: ${JSON.stringify(diffInvocations)}`]);
+  none('a `git … diff …` call in diff.sh is missing --no-ext-diff and/or --no-textconv (textconv/ext-diff RCE — driver names are attacker-chosen, so env cannot neutralize this; see _git-safe.sh header)',
+    diffInvocations.filter((l) => !/--no-ext-diff/.test(l) || !/--no-textconv/.test(l)));
+  // Merge-driver half of the same RCE class (merge.<driver>.driver, also attacker-named via .gitattributes, so
+  // also un-neutralizable by env). It is NOT absent from this tree — sessions-sync.sh:344/:350 really do run
+  // `merge`, through the `gitwt()` wrapper — so this pin is an EXPLICIT-EXEMPTION sweep, not an absence claim:
+  // every merge/rebase/cherry-pick site must be a KNOWN one, and a new file (or a new wrapper) fails the build.
+  // Subcommand-anchored, and wrapper-aware: any function this file defines whose body calls git counts as a git
+  // invocation, because a bare /\bgit\s+merge/ scan is blind to `gitwt merge` — the only form actually used
+  // here. Still no false positives on `git config --get branch.$b.merge` (git-fetch.sh): `config` is not a flag,
+  // so the subcommand slot does not match.
+  const KNOWN_MERGE_SITES = {
+    // Runs against $WT, a linked worktree of $SDIR — so it reads $SDIR/.git/config, which IS attacker-controlled
+    // for an adopted workspace. Left as-is deliberately: closing it means editing sessions-sync.sh, outside
+    // CASE-23's file list. ESCALATED to the planner as a follow-up case (merge-driver half of CASE-23).
+    'sessions-sync.sh': 'gitwt merge --no-edit / --abort on the sessions worktree (pull_branch)',
+  };
+  const mergeIsh = fs.readdirSync(wslDir).filter((f) => f.endsWith('.sh')).filter((f) => {
+    const src = stripComments(fs.readFileSync(path.join(wslDir, f), 'utf8'));
+    const callers = new Set(['git']);
+    for (const m of src.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{[^\n]*\bgit\b/gm)) callers.add(m[1]);
+    const re = new RegExp(`\\b(?:${[...callers].join('|')})(?:\\s+-{1,2}\\S+|\\s+-C\\s+\\S+|\\s+[A-Za-z_][A-Za-z0-9_]*=\\S+)*\\s+(?:merge|rebase|cherry-pick)\\b`);
+    return re.test(src);
+  });
+  none('a NEW wsl script runs merge/rebase/cherry-pick against a workspace repo — merge.<driver>.driver is the same attacker-chosen-key RCE class as textconv and no flag suppresses it; escalate before adding one',
+    mergeIsh.filter((f) => !Object.prototype.hasOwnProperty.call(KNOWN_MERGE_SITES, f)));
+  none('a KNOWN_MERGE_SITES entry no longer matches — the exemption has rotted; delete the entry (and the escalation with it)',
+    Object.keys(KNOWN_MERGE_SITES).filter((f) => !mergeIsh.includes(f)));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// CASE-28 / R-22(b) — the model-strategy env pin never overrides an explicit spawn-time model choice.
+//   CLAUDE_CODE_SUBAGENT_MODEL was proven (API stamps, run wf_ee694f22-0ed) to override even explicitly-
+//   requested spawn models, so the app must never hard-set it: the cheap-tier default is carried by the
+//   context-hook nudge text instead, and modelStrategyNow() defaults OFF (opt-in only).
+// ---------------------------------------------------------------------------------------------------------
+{
+  // (reinstated with the fix/modelstrategy reapply; renumbering dropped — the checksums branch claims 114/115)
+  none('main.js: modelStrategyNow no longer defaults OFF (must require exact opt-in "planBigExecSmall")',
+    /function modelStrategyNow\(\) \{ return registry\.modelStrategy === 'planBigExecSmall' \? 'planBigExecSmall' : 'off'; \}/.test(MAIN)
+      ? [] : ['modelStrategyNow does not gate on an explicit planBigExecSmall opt-in']);
+  const SESSSH = read('wsl/session.sh');
+  const WIN = read('runners/win.js');
+  none('wsl/session.sh: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (R-22(b))',
+    /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(SESSSH) ? ['session.sh still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
+  none('runners/win.js: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (R-22(b))',
+    /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(WIN) ? ['win.js still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

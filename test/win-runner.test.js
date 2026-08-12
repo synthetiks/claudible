@@ -133,12 +133,14 @@ eq('spawnEnv missing runtimeId -> default tab', spawnEnv('', be).CLAUDIBLE_TAB, 
 // an explicit user override in the real env WINS (we only supply a default) — never fight a deliberate setting
 eq('spawnEnv honors a user override of the threshold',
   spawnEnv('t', { CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '5' }).CLAUDE_CODE_RESUME_THRESHOLD_MINUTES, '5');
-// "plan big, execute small": strategy on → subagents pinned to Sonnet 5 + the hook-nudge env var; off/absent → neither
-eq('spawnEnv strategy on pins the subagent model', spawnEnv('t', be, 'planBigExecSmall').CLAUDE_CODE_SUBAGENT_MODEL, 'claude-sonnet-5');
+// "plan big, execute small": strategy on → hook-nudge env var only, NEVER the subagent-model env pin (R-22(b):
+// CLAUDE_CODE_SUBAGENT_MODEL was proven, API stamps, run wf_ee694f22-0ed, to override even explicitly-requested
+// spawn models, so the app must never set it).
+eq('spawnEnv strategy on does NOT pin the subagent model', spawnEnv('t', be, 'planBigExecSmall').CLAUDE_CODE_SUBAGENT_MODEL, undefined);
 eq('spawnEnv strategy on exports the nudge var', spawnEnv('t', be, 'planBigExecSmall').CLAUDIBLE_MODEL_STRATEGY, 'planBigExecSmall');
 ok('spawnEnv strategy off sets neither var', (() => { const e = spawnEnv('t', be, 'off'); return e.CLAUDE_CODE_SUBAGENT_MODEL === undefined && e.CLAUDIBLE_MODEL_STRATEGY === undefined; })());
 ok('spawnEnv strategy absent sets neither var', (() => { const e = spawnEnv('t', be); return e.CLAUDE_CODE_SUBAGENT_MODEL === undefined && e.CLAUDIBLE_MODEL_STRATEGY === undefined; })());
-eq('spawnEnv user override of subagent model wins',
+eq('a user env CLAUDE_CODE_SUBAGENT_MODEL passes through untouched',
   spawnEnv('t', { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-haiku-4-5' }, 'planBigExecSmall').CLAUDE_CODE_SUBAGENT_MODEL, 'claude-haiku-4-5');
 
 // ---- dependency detection (buildDepReport — the self-bootstrap provisioner's pure core) ----

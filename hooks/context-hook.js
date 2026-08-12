@@ -31,13 +31,18 @@ function readStdin() { try { return fs.readFileSync(0, 'utf8'); } catch { return
 // keys — same list, same values as the shell neutralizer. Unlike the scripts, this process execs nothing of the
 // user's afterwards, so a per-child env (never process.env mutation) can't leak into their own git.
 const GIT_SAFE_ENV = Object.assign({}, process.env, {
-  GIT_CONFIG_COUNT: '6',
+  GIT_CONFIG_COUNT: '9',
   GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'core.sshCommand', GIT_CONFIG_VALUE_1: 'ssh',
   GIT_CONFIG_KEY_2: 'core.alternateRefsCommand', GIT_CONFIG_VALUE_2: '',
   GIT_CONFIG_KEY_3: 'core.gitProxy', GIT_CONFIG_VALUE_3: '',
   GIT_CONFIG_KEY_4: 'protocol.ext.allow', GIT_CONFIG_VALUE_4: 'never',
   GIT_CONFIG_KEY_5: 'protocol.git.allow', GIT_CONFIG_VALUE_5: 'never',
+  // gpg.program/log.showSignature: git's show_signature path runs gpg.program on any log/show of a gpgsig
+  // commit — the `git log -1` below runs against an adopted (attacker-controlled) repo on EVERY prompt.
+  GIT_CONFIG_KEY_6: 'gpg.program', GIT_CONFIG_VALUE_6: '',
+  GIT_CONFIG_KEY_7: 'log.showSignature', GIT_CONFIG_VALUE_7: 'false',
+  GIT_CONFIG_KEY_8: 'core.hooksPath', GIT_CONFIG_VALUE_8: '/dev/null',
   GIT_TERMINAL_PROMPT: '0', SSH_ASKPASS_REQUIRE: 'never',
 });
 delete GIT_SAFE_ENV.GIT_ASKPASS; delete GIT_SAFE_ENV.SSH_ASKPASS;
@@ -202,10 +207,11 @@ function main() {
   // (exported by session.sh / injected by win.js — never collaborator data); the pushed text is a static
   // string with zero interpolated values, so there is nothing for the sanitizer to sanitize.
   if (process.env.CLAUDIBLE_MODEL_STRATEGY === 'planBigExecSmall') {
-    lines.push('Model strategy: plan big, execute small — your subagents run on Sonnet 5 (the cheap tier).'
-      + ' Delegate token-heavy legs (bulk reading, repo sweeps, searches, mechanical edits) to subagents and'
-      + ' keep planning/synthesis in the main loop. Skip delegation for narrow tasks or judgment-heavy'
-      + ' analysis a cheap reader could summarize away.');
+    lines.push('Model strategy: plan big, execute small — DEFAULT your subagents to Sonnet 5 (the cheap tier):'
+      + ' when spawning a subagent without a deliberate model choice, request claude-sonnet-5; when a task'
+      + ' explicitly names a model, honor that exact model — never substitute. Delegate token-heavy legs (bulk'
+      + ' reading, repo sweeps, searches, mechanical edits) to subagents and keep planning/synthesis in the main'
+      + ' loop. Skip delegation for narrow tasks or judgment-heavy analysis a cheap reader could summarize away.');
   }
 
   // Live-session state — the "am I hosting / joined / did it end, and who's here" half of the ask.

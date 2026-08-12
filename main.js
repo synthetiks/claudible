@@ -9,7 +9,7 @@ const { app, BrowserWindow, ipcMain, session, dialog, clipboard, Menu, shell } =
 const path = require('path');
 const fs = require('fs');
 const { atomicWriteJson } = require('./lib/atomicWrite');          // every JSON file this process owns is written tmp+rename; every reader of one treats a parse error as "empty"
-const { safePath, PATH_UNSAFE_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
+const { safePath, PATH_UNSAFE_MSG, isContainedPath, PATH_TRAVERSAL_MSG } = require('./lib/pathSafe');   // ONE charset for every path that crosses into a bash arg and back through JSON
 const { makeKeyedQueue } = require('./lib/keyedQueue');             // serializes the three code paths that mutate a workspace's git worktree
 const { findExistingWorkspace, reconcileWorkspace } = require('./lib/discovery');   // rename-safe discovery dedup (unit-tested in test/discovery.test.js)
 const { createShareServer, sanitizePaste, isTypingBytes } = require('./share/server');
@@ -1734,6 +1734,17 @@ ipcMain.handle('title:set', (e, { id, name, wsId }) => new Promise((resolve) => 
   runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }), _wsById(wsId) || activeWorkspace);   // the RENAMED row's workspace — while a joined live tab is on screen, activeWorkspace is a different ws and the title would publish to the wrong repo's branch
 }));
 ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {}), _wsById(wsId) || activeWorkspace); }));   // titles for the workspace the SIDEBAR shows, not whatever main is on
+// CLEAR-DRIFT-PATCH-PLAN FIX C1: /clear mints a new session id, and the renderer's drift handler is the only
+// place that ever sees BOTH ids. Record the link as an additive `continuesFrom` field on the NEW id's entry in
+// the SAME meta/<login>.json map title:set merges into — no new branch layout, no new file. Same workspace rule
+// as title:set (the drifting TAB's ws, never whatever main happens to be on) and the same id sanitizing, so the
+// two ids can never break out of the shell command.
+ipcMain.handle('lineage:set', (e, { id, from, wsId }) => new Promise((resolve) => {
+  const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
+  const oid = String(from || '').replace(/[^A-Za-z0-9-]/g, '');
+  if (!sid || !oid || sid === oid) return resolve({ ok: false });
+  runPresence(`lineage-set '${sid}' '${oid}'`, (r) => resolve(r || { ok: false }), _wsById(wsId) || activeWorkspace);
+}));
 
 // ---- sessions (list / switch) ----
 // There is deliberately NO ambient "list the active workspace" handler: the renderer's active workspace and
@@ -1784,13 +1795,21 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
   const scope = (arg && arg.scope) || 'local';                              // 'local' (trash here) | 'everywhere' (also off GitHub)
   const ws = _wsById(arg && arg.wsId) || activeWorkspace;                   // the ROW's workspace (sidebar scope), not main's — they differ while a joined live tab is on screen
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');               // mirror the script's allowlist
+  const force = !!(arg && arg.force);                                      // CASE-13: the renderer's second, explicit "delete anyway" confirm
+  // CASE-13 pre-flight: deleteSession re-points every owning tab and ends a live share BEFORE it can call this
+  // handler, and none of that is undoable — so a needsForce refusal discovered afterwards is not a refusal, it's
+  // damage with a modal on top. `check` runs delete-session.sh's guards with CLAUDIBLE_CHECK_ONLY=1: same
+  // needsForce shape, nothing moved, nothing written. Never combined with force by any caller.
+  const check = !!(arg && arg.check);
   if (!sid || !APPDIR_WSL) return resolve({ ok: false, error: 'bad id' });
   // timeout: execFile has NO default. Without one a hung script never resolves this IPC call — and the renderer's
   // deleteSession holds its `deletingIds` entry across the await, so that row could never be deleted or retried
   // again for the life of the app, with no error shown. (Same for session-keep.sh and `skills.sh set` below.)
-  runner.runScript('delete-session.sh', `'${sid}'`, { ws, timeout: 30000 }).then(({ err, stdout }) => {
+  runner.runScript('delete-session.sh', `'${sid}'`, { ws, timeout: 30000, extraEnv: (force ? 'CLAUDIBLE_FORCE_DELETE=1 ' : '') + (check ? 'CLAUDIBLE_CHECK_ONLY=1 ' : '') }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-session:', err.message); return resolve({ ok: false, error: 'exec' }); }
       let local = {}; try { local = JSON.parse((stdout || '').trim() || '{}'); } catch {}
+      if (check) return resolve(local);                                   // CASE-13: a probe deleted nothing — it must never fall through to the everywhere tombstone
+      if (local.ok === false && local.needsForce) return resolve(local);   // CASE-13: refused — surface needsForce so the renderer can re-confirm
       if (scope !== 'everywhere') return resolve(local.ok ? local : { ok: true });
       // also tombstone it on the shared sessions branch so a sync can never bring it back (for anyone)
       // R10: through the per-ws chain — racing a background sync could reset --hard the tombstone commit away
@@ -2288,6 +2307,10 @@ function ensureClone(ws) {
     // (their repoName IS their slug — Claudible minted those repos itself, so the two were always identical).
     const repoName = isGithubRepoName(ws.repoName) ? ws.repoName : slug;
     if (!slug || !owner || !repoName) return resolve({ ok: false, error: 'bad workspace' });
+    // CASE-24: workspaces.json is hand-editable — a stored ws.path that isn't a real, traversal-free absolute
+    // path must REFUSE rather than silently fall back to '' (default dir), which would let a hand-edited entry
+    // walk clone-workspace.sh's target outside the folder it's meant to create.
+    if (ws.path && !isContainedPath(ws.path)) return resolve({ ok: false, error: PATH_TRAVERSAL_MSG });
     const wsp = safePath(ws.path);   // the invitee's chosen clone dir (else the script's default). A path that can't round-trip was never storable — but workspaces.json is hand-editable
     const dirArg = wsp ? ` '${wsp}'` : '';
     runner.runScript('clone-workspace.sh', `'${owner}' '${repoName}' '${slug}'${dirArg}`, { timeout: 300000 }).then(({ err, stdout }) => {
@@ -2504,6 +2527,9 @@ ipcMain.handle('workspace:upgrade', async (e, id) => {
   // repo from it and rewrite ws.path to point there, orphaning the user's real project. (ws.path can only be
   // unsafe on a pre-existing/hand-edited registry; every creation path runs safePath up front.)
   let wsp = '';
+  // CASE-24: same hand-edited-registry belt as ensureClone — a stored ws.path that isn't a real, traversal-free
+  // absolute path must REFUSE, not fall through to safePath's charset-only check.
+  if (ws.path && !isContainedPath(ws.path)) return { ok: false, error: PATH_TRAVERSAL_MSG };
   if (ws.path) { wsp = safePath(runner.toGuestPath(ws.path)); if (!wsp) return { ok: false, error: PATH_UNSAFE_MSG }; }
   const dirArg = wsp ? ` '${wsp}'` : '';
   const { err, stdout } = await runner.runScript('upgrade-workspace.sh', `'${slug}'${dirArg}`, { timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
@@ -2901,7 +2927,7 @@ ipcMain.handle('workspace:rename', async (e, payload) => {
 // Named (not an inline ipcMain.handle callback) so C-3.6's "Delete from GitHub" path can call it AFTER the repo
 // itself is gone — same core, same result shape, same reconciliation on the renderer side (see app.js's
 // applyWorkspaceDeleteResult). Do not fork this logic; extend it here so both callers stay in sync.
-function workspaceDeleteCore(id) { return new Promise((resolve) => {
+function workspaceDeleteCore(id, force) { return new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return resolve({ ok: false, error: 'unknown workspace' });
   // Mirrors the renderer's isLastLocal(). An ADOPTED entry only POINTS at a folder the user already owned —
@@ -2918,85 +2944,96 @@ function workspaceDeleteCore(id) { return new Promise((resolve) => {
   // to it — doing that under a mid-turn Claude kills the turn and trashes the directory it's writing into.
   // Same contract as session delete: refuse, let the renderer toast, user stops the turn first.
   for (const rec of ptys.values()) { if (rec.ws && rec.ws.id === id && rec.busy) return resolve({ ok: false, error: 'busy' }); }
-  const fallback = registry.workspaces.find((w) => w.kind === 'local' && w.id !== id) || registry.workspaces.find((w) => w.id !== id) || registry.workspaces[0];
-  openGen++;   // supersede any in-flight workspace:open clone for the workspace being deleted (mirrors create/switch)
-  const moved = [];   // EVERY tab that lived here gets repointed AND respawned — not just the foreground one. A background tab left un-respawned kept its Claude silently running inside the trashed directory while sync/checkpoint bookkeeping targeted the fallback ws.
-  for (const [tid, rec] of ptys) { if (rec.ws && rec.ws.id === id) { rec.ws = fallback; moved.push(tid); } }
-  const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
-  _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id); _lastPeers.delete(id);   // drop the deleted ws's leftover per-workspace state (incl. its last-pushed peers)
-  _lastFetch.delete(id); fetchLock.delete(id);                                         // …incl. the background-fetch throttle (a re-added project must fetch immediately, not wait out a stale 90s window)
-  // NOT the worktree-write chain: a checkpoint snapshot from the just-ended turn may still be in flight, and this
-  // id can recur (it's `${kind}-${slug}`) — so force-dropping the key would let a re-created same-name workspace's
-  // writes race the orphaned chain. The queue self-drains and self-bounds; letting it finish is the safe path.
-  if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
-  registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
-  // TOMBSTONE a deleted GitHub-identified workspace (per-machine, in the registry): discoverWorkspaces would
-  // otherwise re-register it as a fresh invite on the very next launch — 'deleted workspaces come back' —
-  // because the GitHub repo (intentionally) still exists. Deliberately re-adding it clears it.
-  // R15, two gaps closed: (a) KIND-AGNOSTIC — an ADOPTED project is kind:'local' but its Claudible-tagged repo
-  // is re-surfaced by discovery all the same; the old kind==='repo' gate meant deleting it never tombstoned
-  // (repoTombstoneKeys is empty-safe, so a plain local project without GitHub identity still skips cleanly).
-  // (b) A delete BEFORE the ghId backfill ran tombstoned by name only, so a repo renamed outside Claudible
-  // resurrected as a phantom — the stable gh: key is now resolved in the BACKGROUND on a snapshot (ws leaves
-  // the registry below) and appended when it lands. Residual: a discovery pass racing that window can briefly
-  // re-add the phantom once; the appended key stops every pass after.
-  {
-    const keys = repoTombstoneKeys(ws);
-    if (keys.length) registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ...keys]));
-    if (!Number.isFinite(ws.ghId) && ws.owner && (ws.repoName || ws.slug)) {
-      const snap = { owner: ws.owner, repoName: ws.repoName, slug: ws.slug, ghId: ws.ghId };
-      backfillRepoIdentity(snap).then((got) => {
-        if (!got || !Number.isFinite(snap.ghId)) return;
-        registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), 'gh:' + snap.ghId]));
-        saveRegistry();
-      }).catch(() => {});
-    }
-  }
-  saveRegistry();
-  // Deleting the workspace the LIVE session runs in is the one navigation a share cannot survive: its folder is
-  // about to be trashed, so its pty must be re-pointed. Say so honestly instead of leaving guests on a frozen
-  // mirror — endShare lets respawnPty through (pausing + wiping the ring first) and the renderer tears the
-  // tunnel down for real. Every other caller is refused outright. (deleteSession does the same for a session.)
-  const sharedHere = sharedTabId != null && moved.includes(sharedTabId);
-  if (sharedHere) {
-    // Pause HERE, not only inside respawnPty's movesShared branch: a manual web-share pins whatever tab was in
-    // the foreground, and that tab's session may be '' (resume-latest, never resolved) — which makes movesShared
-    // false. And syncShare() must NOT run: every tab bound to this workspace already points at `fallback`, so it
-    // would re-derive the pause from a project the guests were never granted and cheerfully un-freeze the mirror.
-    // (Nothing can interleave before the freeze today — JS is single-threaded and there's no await — but the
-    // ordering must not depend on that.) The renderer's force-end drops the tunnel a beat later.
-    _liveTiming('share: FORCE-END — the project owning the pinned tab (' + sharedTabId + ') was deleted; the live link dies with it');
-    try { setSharePaused(true); share.resetRing(); share.resetStatus(); } catch {}
-    stopAdvertising();                                                 // stop re-stamping + clear presence NOW (parity with tab-close) rather than waiting on the renderer's force-end round-trip
-    try { winSend('share:force-end', { reason: 'workspace-deleted' }); } catch {}
-  } else {
-    syncShare();   // refresh the granted library for guests (the deleted ws drops out of grantedList)
-  }
-  for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true, endShare: tid === sharedTabId }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
-  // `folderError` is honest reporting, not a failure: the registry entry IS gone (saveRegistry already ran), so the
-  // delete succeeded from the user's point of view. But the FOLDER move can still fail — permission denied, a file
-  // locked by another process, disk full — and this used to be `.then(() => finish())`, discarding the result
-  // entirely and resolving `{ok:true}` regardless. The folder would sit orphaned on disk, unreferenced by any
-  // workspace, and the user was never told.
-  const finish = (folderError) => resolve({ ok: true, activeId: registry.activeId, folderError: folderError || undefined, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
   const slug = String(ws.slug || '').replace(/[^A-Za-z0-9-]/g, '');
   // ADOPTED workspaces point at a folder the USER already owned — Claudible never created it, so removing the
   // project must never remove the folder. delete-workspace.sh prefers CLAUDIBLE_WS_DIR (wsEnv emits ws.path), so
   // shelling out here would `mv -f` their real source tree into ~/.claudible/trash. Unregister only.
-  if (APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo')) {
+  const willMoveFolder = APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo');
+  // CASE-13: everything below this point (respawning tabs, unregistering the workspace, tombstoning) is
+  // irreversible from the user's point of view, so the REFUSE-with-explicit-override check must run BEFORE any
+  // of it — a `needsForce` result must leave the workspace, its tabs, and the registry completely untouched, or
+  // the renderer's re-confirm-with-force retry would hit "unknown workspace" against an id that's already gone.
+  const proceedWithMutation = (preFolderError) => {
+    const fallback = registry.workspaces.find((w) => w.kind === 'local' && w.id !== id) || registry.workspaces.find((w) => w.id !== id) || registry.workspaces[0];
+    openGen++;   // supersede any in-flight workspace:open clone for the workspace being deleted (mirrors create/switch)
+    const moved = [];   // EVERY tab that lived here gets repointed AND respawned — not just the foreground one. A background tab left un-respawned kept its Claude silently running inside the trashed directory while sync/checkpoint bookkeeping targeted the fallback ws.
+    for (const [tid, rec] of ptys) { if (rec.ws && rec.ws.id === id) { rec.ws = fallback; moved.push(tid); } }
+    const pt = pushTimers.get(id); if (pt) { clearTimeout(pt); pushTimers.delete(id); }   // cancel any debounced push armed for this ws — else it fires against the just-deleted (still kind:'repo', syncSessions:true) object
+    _pendingCkpt.delete(id); _syncDivSeen.delete(id); syncLock.delete(id); _lastPeers.delete(id);   // drop the deleted ws's leftover per-workspace state (incl. its last-pushed peers)
+    _lastFetch.delete(id); fetchLock.delete(id);                                         // …incl. the background-fetch throttle (a re-added project must fetch immediately, not wait out a stale 90s window)
+    // NOT the worktree-write chain: a checkpoint snapshot from the just-ended turn may still be in flight, and this
+    // id can recur (it's `${kind}-${slug}`) — so force-dropping the key would let a re-created same-name workspace's
+    // writes race the orphaned chain. The queue self-drains and self-bounds; letting it finish is the safe path.
+    if (activeWorkspace && activeWorkspace.id === id) { activeWorkspace = fallback; registry.activeId = fallback.id; }
+    registry.workspaces = registry.workspaces.filter((w) => w.id !== id);
+    // TOMBSTONE a deleted GitHub-identified workspace (per-machine, in the registry): discoverWorkspaces would
+    // otherwise re-register it as a fresh invite on the very next launch — 'deleted workspaces come back' —
+    // because the GitHub repo (intentionally) still exists. Deliberately re-adding it clears it.
+    // R15, two gaps closed: (a) KIND-AGNOSTIC — an ADOPTED project is kind:'local' but its Claudible-tagged repo
+    // is re-surfaced by discovery all the same; the old kind==='repo' gate meant deleting it never tombstoned
+    // (repoTombstoneKeys is empty-safe, so a plain local project without GitHub identity still skips cleanly).
+    // (b) A delete BEFORE the ghId backfill ran tombstoned by name only, so a repo renamed outside Claudible
+    // resurrected as a phantom — the stable gh: key is now resolved in the BACKGROUND on a snapshot (ws leaves
+    // the registry below) and appended when it lands. Residual: a discovery pass racing that window can briefly
+    // re-add the phantom once; the appended key stops every pass after.
+    {
+      const keys = repoTombstoneKeys(ws);
+      if (keys.length) registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ...keys]));
+      if (!Number.isFinite(ws.ghId) && ws.owner && (ws.repoName || ws.slug)) {
+        const snap = { owner: ws.owner, repoName: ws.repoName, slug: ws.slug, ghId: ws.ghId };
+        backfillRepoIdentity(snap).then((got) => {
+          if (!got || !Number.isFinite(snap.ghId)) return;
+          registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), 'gh:' + snap.ghId]));
+          saveRegistry();
+        }).catch(() => {});
+      }
+    }
+    saveRegistry();
+    // Deleting the workspace the LIVE session runs in is the one navigation a share cannot survive: its folder is
+    // about to be trashed, so its pty must be re-pointed. Say so honestly instead of leaving guests on a frozen
+    // mirror — endShare lets respawnPty through (pausing + wiping the ring first) and the renderer tears the
+    // tunnel down for real. Every other caller is refused outright. (deleteSession does the same for a session.)
+    const sharedHere = sharedTabId != null && moved.includes(sharedTabId);
+    if (sharedHere) {
+      // Pause HERE, not only inside respawnPty's movesShared branch: a manual web-share pins whatever tab was in
+      // the foreground, and that tab's session may be '' (resume-latest, never resolved) — which makes movesShared
+      // false. And syncShare() must NOT run: every tab bound to this workspace already points at `fallback`, so it
+      // would re-derive the pause from a project the guests were never granted and cheerfully un-freeze the mirror.
+      // (Nothing can interleave before the freeze today — JS is single-threaded and there's no await — but the
+      // ordering must not depend on that.) The renderer's force-end drops the tunnel a beat later.
+      _liveTiming('share: FORCE-END — the project owning the pinned tab (' + sharedTabId + ') was deleted; the live link dies with it');
+      try { setSharePaused(true); share.resetRing(); share.resetStatus(); } catch {}
+      stopAdvertising();                                                 // stop re-stamping + clear presence NOW (parity with tab-close) rather than waiting on the renderer's force-end round-trip
+      try { winSend('share:force-end', { reason: 'workspace-deleted' }); } catch {}
+    } else {
+      syncShare();   // refresh the granted library for guests (the deleted ws drops out of grantedList)
+    }
+    for (const tid of moved) { try { respawnPty(tid, '', { guardBusy: true, endShare: tid === sharedTabId }); } catch {} }   // guardBusy = belt for a turn that started in the ms since the check above
+    // `folderError` is honest reporting, not a failure: the registry entry IS gone (saveRegistry already ran), so the
+    // delete succeeded from the user's point of view. But the FOLDER move can still fail — permission denied, a file
+    // locked by another process, disk full — and this used to be `.then(() => finish())`, discarding the result
+    // entirely and resolving `{ok:true}` regardless. The folder would sit orphaned on disk, unreferenced by any
+    // workspace, and the user was never told.
+    resolve({ ok: true, activeId: registry.activeId, folderError: preFolderError || undefined, moved: moved.map((tid) => ({ tabId: tid, wsId: fallback.id })) });
+  };
+  if (willMoveFolder) {
     // Owners' note: pass the human project LABEL through as $3 so the trash entry reads as the project the user
     // actually named ("ws-local-E2E Overlay Proj.20260807-…") instead of the internal slug — delete-workspace.sh
     // sanitizes it for the filesystem itself; shq here is only the shell-interpolation guard (same pattern as
     // every other free-text value that rides into a runScript argStr, e.g. the presence-stamp calls above).
-    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}' '${shq(ws.label || slug)}'`, { ws, timeout: 20000 }).then(({ err, stdout }) => {
-      if (err) { console.error('[claudible] delete-workspace:', err.message); return finish('the project was removed, but its folder could not be moved to trash'); }
+    // CASE-13: force=true is the renderer's SECOND, explicit "delete anyway" confirm (only sent after the first
+    // attempt came back needsForce:true) — extraEnv reaches the script exactly like trash:empty's EMPTY_ALL above.
+    // Run BEFORE any mutation below — a needsForce refusal must leave the workspace registered and untouched.
+    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}' '${shq(ws.label || slug)}'`, { ws, timeout: 20000, extraEnv: force ? 'CLAUDIBLE_FORCE_DELETE=1 ' : '' }).then(({ err, stdout }) => {
+      if (err) { console.error('[claudible] delete-workspace:', err.message); return proceedWithMutation('the project was removed, but its folder could not be moved to trash'); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
-      if (r.ok === false) { console.error('[claudible] delete-workspace refused:', r.error); return finish('the project was removed, but its folder is still on disk' + (r.error && /\s/.test(r.error) ? ': ' + r.error : '')); }   // R41: only append the script's reason when it's a sentence — a bare code stapled to a good message reads as gibberish (the console keeps the raw one)
-      finish();
+      if (r.ok === false && r.needsForce) { console.error('[claudible] delete-workspace refused (needsForce):', r.error); return resolve({ ok: false, needsForce: true, uncommitted: r.uncommitted, unpushed: r.unpushed, error: r.error || 'this project has work not on GitHub' }); }
+      if (r.ok === false) { console.error('[claudible] delete-workspace refused:', r.error); return proceedWithMutation('the project was removed, but its folder is still on disk' + (r.error && /\s/.test(r.error) ? ': ' + r.error : '')); }   // R41: only append the script's reason when it's a sentence — a bare code stapled to a good message reads as gibberish (the console keeps the raw one)
+      proceedWithMutation();
     });
-  } else finish();
+  } else proceedWithMutation();
 }); }
-ipcMain.handle('workspace:delete', (e, id) => workspaceDeleteCore(id));
+ipcMain.handle('workspace:delete', (e, id, force) => workspaceDeleteCore(id, !!force));
 // C-3.6 — the ONE truly irreversible option in the delete modal: also removes the GitHub repo itself. The
 // renderer already made the user type the exact repo name (confirmDeleteFromGithub); re-checked here too, since
 // a destructive cross-account action must never trust the renderer alone. `gh repo delete` needs the delete_repo
@@ -3020,7 +3057,12 @@ ipcMain.handle('workspace:deleteFromGithub', async (e, payload) => {
   if (err) return { ok: false, error: 'could not run the delete script: ' + err.message };
   let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
   if (!r.ok) return { ok: false, error: r.error || 'gh repo delete failed' };
-  return workspaceDeleteCore(id);
+  // CASE-13: force. The GitHub repo is ALREADY gone by this line, so a needsForce refusal here would be exactly
+  // the "much worse surprise" the busy pre-check above exists to avoid: the remote deleted, the workspace still
+  // registered, and a message telling the user to push to a repo that no longer exists. The typed-exact-repo-name
+  // confirmation this path required IS the explicit override — stronger than the modal the local path asks for —
+  // and the folder still goes to the recoverable trash, not to /dev/null.
+  return workspaceDeleteCore(id, true);
 });
 // Reorder the workspace chips (drag). Accepts the new id order; any ids not listed keep their place at the end.
 ipcMain.handle('workspace:reorder', (e, ids) => {
@@ -3040,14 +3082,15 @@ ipcMain.handle('effort:set', (e, level) => {
   return { ok: true, effort: registry.effort };
 });
 // "Plan big, execute small" (Anthropic cookbook pattern) — the main session plans/synthesizes on the user's
-// chosen model while SUBAGENTS (the token-heavy leg: bulk reading, sweeps, workflows) run on Sonnet 5 via
-// CLAUDE_CODE_SUBAGENT_MODEL. DEFAULT ON: absent/unknown registry value means enabled; only an explicit
-// 'off' disables. On a Fable 5 / Opus main model this is the cookbook's measured 2.5×-cheaper split; on a
-// Sonnet main model it's a harmless no-op. Applies to the NEXT session each tab launches.
-function modelStrategyNow() { return registry.modelStrategy === 'off' ? 'off' : 'planBigExecSmall'; }
+// chosen model while SUBAGENTS (the token-heavy leg: bulk reading, sweeps, workflows) are nudged toward
+// Sonnet 5 via the context-hook text (see hooks/context-hook.js). DEFAULT OFF per R-22(b): CLAUDE_CODE_SUBAGENT_MODEL
+// was proven (API stamps, run wf_ee694f22-0ed) to override even explicitly-requested spawn models, so we no
+// longer hard-pin it — absent/unknown registry value means disabled; only explicit opt-in ('planBigExecSmall')
+// enables the nudge. Applies to the NEXT session each tab launches.
+function modelStrategyNow() { return registry.modelStrategy === 'planBigExecSmall' ? 'planBigExecSmall' : 'off'; }
 ipcMain.handle('modelStrategy:get', () => modelStrategyNow());
 ipcMain.handle('modelStrategy:set', (e, v) => {
-  registry.modelStrategy = v === 'off' ? 'off' : 'planBigExecSmall';
+  registry.modelStrategy = v === 'planBigExecSmall' ? 'planBigExecSmall' : 'off';
   const persisted = saveRegistry();
   if (!persisted) return { ok: false, error: 'could not write workspaces.json — applies to THIS run only', modelStrategy: modelStrategyNow() };
   return { ok: true, modelStrategy: modelStrategyNow() };
@@ -3201,7 +3244,10 @@ ipcMain.handle('update:run', () => {
         // upstream tip instead of handing them a manual chore.
         prog('pulling', 'History diverged — resetting to the latest…');
         _liveTiming('update: non-ff — resetting clean checkout to upstream');
-        const rr = await selfUpdate.resetToUpstream(__dirname, _authEnv);
+        const rr = await selfUpdate.resetToUpstream(__dirname, _authEnv, before);
+        if (!rr.ok && rr.kind === 'downgrade') {
+          return { ok: false, error: 'the update points at an OLDER build than the one you are running — refusing to downgrade. If this rollback is intentional, update manually with git.' };
+        }
         if (!rr.ok) return { ok: false, error: 'this checkout has diverged and could not be reset automatically: ' + String(rr.detail || '') };
       } else if (!pr.ok) {
         const msg = pr.kind === 'offline' ? 'could not reach GitHub — check your connection and retry'
@@ -4238,7 +4284,7 @@ ipcMain.handle('history:append', (e, payload) => {
     if (!_histEnabled()) return { ok: false, disabled: true };
     const prompt = (payload && typeof payload.prompt === 'string' ? payload.prompt : '').slice(0, 8000);   // cap stored prompt: ring caps count (10) but not bytes; bounds a huge paste
     if (!prompt.trim()) return { ok: false, error: 'empty' };
-    const wsId = (payload && payload.wsId) ? String(payload.wsId) : ((activeWorkspace && activeWorkspace.id) || 'default');   // the SUBMITTING tab's workspace, not global active — avoids a workspace-switch race writing to the wrong file (_histFile sanitizes the key)
+    const ws = _wsById(payload && payload.wsId); const wsId = (ws && ws.id) || ((activeWorkspace && activeWorkspace.id) || 'default');   // the SUBMITTING tab's workspace, not global active — avoids a workspace-switch race writing to the wrong file (_histFile sanitizes the key); an id naming no registered workspace falls back instead of minting runtime/history/<garbage>.json
     const file = _histFile(wsId);
     const log = _histStore.load(fs, file);
     const seq = log.reduce((m, x) => Math.max(m, x.seq | 0), 0) + 1;

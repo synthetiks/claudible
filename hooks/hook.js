@@ -7,9 +7,10 @@
 const fs = require('fs');
 
 let buf = '';
-try { buf = fs.readFileSync(0, 'utf8'); } catch {}   // fd 0 = stdin (the hook payload from Claude Code)
+try { buf = fs.readFileSync(0, 'utf8'); } catch (e) { try { process.stderr.write('[claudible hook] stdin read failed: ' + (e && e.message) + '\n'); } catch {} }   // fd 0 = stdin (the hook payload from Claude Code)
 const line = buf.replace(/\n+$/, '');                // bash `line=$(cat)` strips trailing newlines
 
 const out = process.env.CLAUDIBLE_HOOKS || process.argv[2];   // per-tab path: inherited env (routing), baked argv = fallback (matches bash ${CLAUDIBLE_HOOKS:-$HOOKS})
-try { if (out) fs.appendFileSync(out, line + '\n'); } catch {}   // bash `printf '%s\n' "$line" >> "$out"`
+if (!out) { try { process.stderr.write('[claudible hook] no output path: CLAUDIBLE_HOOKS unset and no argv fallback\n'); } catch {} }
+try { if (out) fs.appendFileSync(out, line + '\n'); } catch (e) { try { process.stderr.write('[claudible hook] append to ' + out + ' failed: ' + (e && e.message) + '\n'); } catch {} }   // bash `printf '%s\n' "$line" >> "$out"`
 process.exit(0);

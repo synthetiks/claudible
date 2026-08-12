@@ -16,6 +16,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const su = require('../lib/selfUpdate.js');
+const gitSafe = require('../lib/git-safe.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -122,14 +123,93 @@ function mkrepo(files) {
     fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
   }
 
+  // ---- resetToUpstream(cwd, authEnv, beforeSha): monotonicity guard against downgrades/rollbacks ----
+  // Directionality: after a non-ff, `before` is NEVER an ancestor of the new origin tip (that's what non-ff
+  // means) — so "require ancestry" would dead-end every legitimate force-push recovery. The correct check
+  // is the inverse: is the NEW tip an ancestor of `before`? If so it's a rollback (or a spoofed older tag).
+  {
+    // (a) origin force-rewound to an ancestor of HEAD → refused as a downgrade, HEAD unchanged
+    const origin = mkrepo({ 'f.txt': 'v1\n' });
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-selfupd-dg-'));
+    execFileSync('git', ['clone', '-q', origin, clone]);
+    fs.writeFileSync(path.join(origin, 'f.txt'), 'v2\n');
+    sh(origin, 'add', '-A');
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@x', 'commit', '-qm', 'c2'], { cwd: origin });
+    const beforeDg = await su.currentSha(clone); // clone still at v1, hasn't pulled v2 yet
+    await su.pull(clone); // now at v2
+    const atV2 = await su.currentSha(clone);
+    ok('setup: clone advanced to v2 before the rollback test', atV2 !== beforeDg);
+    // force-rewind origin BACK to the v1 commit (an ancestor of the clone's current HEAD) — this is what an
+    // intentional rollback / tag-spoof looks like from the clone's perspective.
+    const originBranch = sh(origin, 'rev-parse', '--abbrev-ref', 'HEAD');
+    execFileSync('git', ['update-ref', 'refs/heads/' + originBranch, beforeDg], { cwd: origin });
+    const rrDown = await su.resetToUpstream(clone, undefined, atV2);
+    ok('(a) origin rewound to an ancestor of HEAD → ok:false, kind:downgrade', rrDown.ok === false && rrDown.kind === 'downgrade');
+    ok('(a) …and HEAD is left unchanged (no reset performed)', (await su.currentSha(clone)) === atV2);
+    fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
+  }
+  {
+    // (b) origin rewritten to a divergent (non-ancestor) tip → ok:true, HEAD moves to the new tip
+    const origin = mkrepo({ 'f.txt': 'v1\n' });
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-selfupd-dg2-'));
+    execFileSync('git', ['clone', '-q', origin, clone]);
+    const beforeDiv = await su.currentSha(clone);
+    fs.writeFileSync(path.join(origin, 'f.txt'), 'rewritten\n');
+    sh(origin, 'add', '-A');
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@x', 'commit', '-q', '--amend', '-m', 'rewritten'], { cwd: origin });
+    const newTip = await su.currentSha(origin);
+    const rrDiv = await su.resetToUpstream(clone, undefined, beforeDiv);
+    ok('(b) origin rewritten to a divergent tip → ok:true', rrDiv.ok === true && !rrDiv.kind);
+    ok('(b) …and HEAD now equals the new (divergent) tip', (await su.currentSha(clone)) === newTip);
+    fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
+  }
+  {
+    // (c) origin tip === before → ok:true, noop:true
+    const origin = mkrepo({ 'f.txt': 'v1\n' });
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-selfupd-dg3-'));
+    execFileSync('git', ['clone', '-q', origin, clone]);
+    const same = await su.currentSha(clone);
+    const rrNoop = await su.resetToUpstream(clone, undefined, same);
+    ok('(c) origin tip equals before → ok:true, noop:true', rrNoop.ok === true && rrNoop.noop === true);
+    fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(clone, { recursive: true, force: true });
+  }
+
   // ---- authEnvFor: the gh token becomes git auth WITHOUT a second login, and stays out of argv ----
   {
     ok('authEnvFor: no token → empty (public repo / no gh needs nothing; falls back to today)', Object.keys(su.authEnvFor('')).length === 0 && Object.keys(su.authEnvFor(null)).length === 0);
     const e = su.authEnvFor('ghp_SECRETtoken123');
     const b64 = Buffer.from('x-access-token:ghp_SECRETtoken123').toString('base64');
     ok('authEnvFor: never prompts (GIT_TERMINAL_PROMPT=0)', e.GIT_TERMINAL_PROMPT === '0');
-    ok('authEnvFor: token rides the github extraheader as Basic x-access-token', e.GIT_CONFIG_VALUE_0 === 'Authorization: Basic ' + b64 && /extraheader$/.test(e.GIT_CONFIG_KEY_0));
-    ok('authEnvFor: credential.helper is reset so GCM is never consulted', e.GIT_CONFIG_KEY_1 === 'credential.helper' && e.GIT_CONFIG_VALUE_1 === '');
+    // authEnvFor = gitSafe.buildEnv([extraheader-pair, credential.helper-pair]): SAFE_KEYS occupy indices
+    // 0..SAFE_KEYS.length-1 and the token pair lands at the two indices after — scan by key name (not a
+    // hardcoded index) so this pin survives SAFE_KEYS growing, and so a hole in the numbering (which git
+    // silently ignores, ending config enumeration early) is itself caught by the count check below.
+    const map = {};
+    let scanned = 0;
+    for (const k of Object.keys(e)) {
+      const m = /^GIT_CONFIG_KEY_(\d+)$/.exec(k);
+      if (!m) continue;
+      scanned++;
+      map[e[k]] = e['GIT_CONFIG_VALUE_' + m[1]];
+    }
+    // "scanned === COUNT" alone does not prove contiguity (keys 0,1,3 with COUNT=3 scans 3 and passes while git
+    // stops reading at the hole) — so also require every index 0..COUNT-1 to exist as a KEY/VALUE pair.
+    const count = Number(e.GIT_CONFIG_COUNT);
+    let contiguous = count > 0;
+    for (let i = 0; i < count; i++) {
+      if (!Object.prototype.hasOwnProperty.call(e, 'GIT_CONFIG_KEY_' + i)
+        || !Object.prototype.hasOwnProperty.call(e, 'GIT_CONFIG_VALUE_' + i)) contiguous = false;
+    }
+    ok('authEnvFor: GIT_CONFIG_COUNT is SAFE_KEYS + the 2 auth pairs, with no numbering hole',
+      count === gitSafe.SAFE_KEYS.length + 2 && scanned === count && contiguous);
+    ok('authEnvFor: token rides the github extraheader as Basic x-access-token',
+      map['http.https://github.com/.extraheader'] === 'Authorization: Basic ' + b64);
+    ok('authEnvFor: credential.helper is reset so GCM is never consulted',
+      map['credential.helper'] === '');
+    ok('authEnvFor: the neutralization keys (gpg/signature/hooksPath) ride along in the auth env too',
+      map['gpg.program'] === '' && map['log.showSignature'] === 'false' && map['core.hooksPath'] === '/dev/null');
+    ok('authEnvFor: every SAFE_KEYS entry is present with its exact value',
+      gitSafe.SAFE_KEYS.every((p) => map[p.key] === p.value));
     ok('authEnvFor: the raw token never appears in a value (only its base64 form)',
       !Object.values(e).some((v) => String(v).includes('ghp_SECRETtoken123')));
     // A real ff pull still succeeds when handed an authEnv (the github extraheader is inert against a file:// origin).
@@ -165,7 +245,9 @@ function mkrepo(files) {
     /presence-clear ' \+ how/.test(MAIN));
   ok('main: single-flight lock on update:run', /updateInFlight/.test(MAIN));
   ok('main: a diverged checkout self-heals instead of telling the user to run git',
-    /pr\.kind === 'non-ff'/.test(MAIN) && /resetToUpstream\(__dirname, _authEnv\)/.test(MAIN));
+    /pr\.kind === 'non-ff'/.test(MAIN) && /resetToUpstream\(__dirname, _authEnv, before\)/.test(MAIN));
+  ok('main: a downgrade/rollback target is refused, not silently reset',
+    /rr\.kind === 'downgrade'/.test(MAIN) && /refusing to downgrade/.test(MAIN));
   // Reuse the gh login the app already has, so a PRIVATE repo doesn't pop Windows GCM on an already-signed-in
   // machine. The token must reach BOTH network ops (pull + the reset's fetch), sourced from _relayGetCred.
   ok('main: update:run authenticates the pull with the existing gh token (no second GitHub login)',

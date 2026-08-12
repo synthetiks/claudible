@@ -12,18 +12,28 @@
 const cp = require('child_process');
 const path = require('path');
 const ch = require('../lib/coauthorHook.js');
+const gitSafe = require('../lib/git-safe.js');
 
 const repo = process.cwd();   // coauthor-hook.sh cd'd into the workspace repo before invoking node
+
+// The env the two RESOLUTION calls below run under. coauthor-hook.sh:9 sources _git-safe.sh, whose allowlist
+// pins core.hooksPath='/dev/null' — and `git rev-parse --git-path hooks` ANSWERS with core.hooksPath when it is
+// set (that is exactly why gitDirs() asks git instead of guessing '.git/hooks'). Inheriting those exports would
+// make this tool resolve hooksDir='/dev/null', so install() would fail on a non-directory and uninstall() would
+// read nothing and strand an already-installed hook — C-10.6 dead on every workspace, adopted or not. So: same
+// allowlist, minus that ONE key, over a base with the inherited (differently-numbered) GIT_CONFIG_* removed.
+const RESOLVE_ENV = Object.assign(gitSafe.stripConfigEnv(process.env), gitSafe.buildEnvWithout(['core.hooksPath']));
+delete RESOLVE_ENV.GIT_ASKPASS; delete RESOLVE_ENV.SSH_ASKPASS;
 const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 
 // Resolve the git dir + hooks dir FOR THIS REPO via git plumbing — not a hardcoded `.git/hooks` guess, so a
 // repo with core.hooksPath pointed elsewhere (or a worktree, whose git dir is a file, not a folder) still
 // gets the real paths.
 function gitDirs() {
-  const gitDirRaw = cp.execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repo, encoding: 'utf8' }).trim();
+  const gitDirRaw = cp.execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repo, encoding: 'utf8', env: RESOLVE_ENV }).trim();
   const gitDirAbs = path.isAbsolute(gitDirRaw) ? gitDirRaw : path.join(repo, gitDirRaw);
   let hooksRel = '';
-  try { hooksRel = cp.execFileSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd: repo, encoding: 'utf8' }).trim(); } catch {}
+  try { hooksRel = cp.execFileSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd: repo, encoding: 'utf8', env: RESOLVE_ENV }).trim(); } catch {}
   const hooksDir = hooksRel ? (path.isAbsolute(hooksRel) ? hooksRel : path.join(repo, hooksRel)) : path.join(gitDirAbs, 'hooks');
   return { gitDirAbs, hooksDir };
 }

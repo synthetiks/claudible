@@ -18,27 +18,38 @@ say() { printf '\n\033[1m[claudible setup]\033[0m %s\n' "$*"; }
 # not copied from an upstream page. If either artifact is ever replaced at the same URL (a model
 # re-upload, a corrected release asset) this check will legitimately start failing; re-verify by hand
 # and update BOTH this block and setup-win.ps1's matching block before trusting a new value. A value
-# starting with "TBD-" means nobody has verified it yet: the check WARNS instead of failing, loudly, so
-# a placeholder can never be mistaken for a real pin.
+# starting with "TBD-" means nobody has verified it yet: the check now FAILS CLOSED (exit 1) instead of
+# warning-and-passing, loudly, so a placeholder can never be mistaken for a real pin and never lets an
+# unverified binary through.
 WHISPER_MODEL_SHA256="60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"   # ggml-base.bin -- https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin (~148MB)
 KOKORO_MODEL_SHA256="496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"     # kokoro-v1_0.pth -- https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4/kokoro-v1_0.pth (~327MB)
 # Kokoro-FastAPI is git-cloned below -- pin the SAME tag the model weights above come from, not HEAD.
 # Git itself integrity-tracks a pinned tag (its commit hash), unlike a bare branch clone.
 KOKORO_PIN_TAG="v0.1.4"
+# whisper.cpp is git-cloned below -- pin a TAG (for a readable clone command) AND the COMMIT it resolves to
+# (tags are movable refs; a commit is not). A value starting with "TBD-" means nobody has verified it yet.
+WHISPER_PIN_TAG="v1.9.1"
+# Computed 2026-08-12 under R-23 (owner-granted, one-time sanction): GET
+# https://api.github.com/repos/ggml-org/whisper.cpp/git/ref/tags/v1.9.1 -- object.type came back "commit"
+# (a lightweight tag, not annotated), so object.sha IS the commit already; no second dereference through
+# object.url was needed (an annotated tag would have required following object.url and taking ITS
+# object.sha instead). Not copied from a page render -- read straight off the GitHub API response.
+WHISPER_PIN_COMMIT="f049fff95a089aa9969deb009cdd4892b3e74916"
 sha256_of() {   # portable: sha256sum (Linux) first, shasum -a 256 (macOS) as fallback
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
   else echo ""; fi
 }
-# $1=path $2=expected-hex $3=label -- returns 1 (only) on a REAL mismatch; a missing pin or a missing
-# hasher WARNS and returns 0, so this never turns into a hard fail on a box without sha256sum/shasum.
+# $1=path $2=expected-hex $3=label -- returns 1 on a REAL mismatch OR a missing/TBD pin OR a missing hasher.
+# Fail CLOSED: a binary this script would go on to execute/extract with no verified fingerprint must never
+# be treated as good just because nobody has pinned it yet, or because this box lacks a hasher.
 verify_checksum() {
   local path="$1" expected="$2" label="$3" actual
   case "$expected" in
-    ''|TBD-*) say "No verified checksum pinned for $label yet -- skipping integrity check (see setup.sh's *_SHA256 block)."; return 0 ;;
+    ''|TBD-*) say "REFUSING: no verified SHA-256 pin for $label -- a binary this script would execute/extract has no fingerprint (see the *_SHA256 block; pins require an R-23-sanctioned refresh)."; return 1 ;;
   esac
   actual="$(sha256_of "$path")"
-  if [ -z "$actual" ]; then say "No sha256sum/shasum on this system -- skipping integrity check for $label."; return 0; fi
+  if [ -z "$actual" ]; then say "REFUSING: no sha256sum/shasum on this system -- cannot verify $label; install coreutils (sha256sum) and re-run."; return 1; fi
   if [ "$actual" != "$expected" ]; then
     say "CHECKSUM MISMATCH for $label -- the download does not match the pinned SHA-256."
     echo "  expected: $expected"
@@ -124,7 +135,19 @@ if [ ! -x "$VOICE/whisper/build/bin/whisper-server" ]; then
   # Curated failure branches (not just `set -e`'s bare exit): provision.sh's `voice` case captures this whole
   # script's log and tails its LAST few lines as the wizard's error message - without these, that tail is git's or
   # cmake's raw output instead of an actionable one. The clone is the FIRST network op `npm run setup` performs.
-  git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$VOICE/whisper" || { say "Couldn't download Whisper (whisper.cpp) - check your network, then re-run \`npm run setup\`."; exit 1; }
+  git clone --depth 1 --branch "$WHISPER_PIN_TAG" https://github.com/ggml-org/whisper.cpp "$VOICE/whisper" || { say "Couldn't download Whisper (whisper.cpp) - check your network, then re-run \`npm run setup\`."; exit 1; }
+  # Tags are movable refs -- verify the COMMIT the clone actually resolved to, not just the tag name.
+  actual="$(git -C "$VOICE/whisper" rev-parse HEAD)"
+  case "$WHISPER_PIN_COMMIT" in
+    ''|TBD-*) rm -rf "$VOICE/whisper"; say "REFUSING: no verified commit pin for whisper.cpp $WHISPER_PIN_TAG -- a repo this script would build has no fingerprint (see WHISPER_PIN_COMMIT; pins require an R-23-sanctioned refresh)."; exit 1 ;;
+  esac
+  if [ "$actual" != "$WHISPER_PIN_COMMIT" ]; then
+    rm -rf "$VOICE/whisper"
+    say "CHECKSUM MISMATCH for whisper.cpp $WHISPER_PIN_TAG -- the clone does not match the pinned commit."
+    echo "  expected: $WHISPER_PIN_COMMIT"
+    echo "  actual:   $actual"
+    exit 1
+  fi
   cmake -B "$VOICE/whisper/build" -S "$VOICE/whisper" -DWHISPER_BUILD_SERVER=ON || { say "Whisper configure failed (is cmake installed?) - check the log above, then re-run \`npm run setup\`."; exit 1; }
   cmake --build "$VOICE/whisper/build" --config Release -j || { say "Whisper build failed - check the log above, then re-run \`npm run setup\`."; exit 1; }
 else

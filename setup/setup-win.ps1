@@ -18,20 +18,26 @@ function Warn($m) { Write-Host "  $m" -ForegroundColor Yellow }
 # SHA256) -- not guessed, not copied from an upstream page. If either artifact is ever replaced at the
 # same URL (a model re-upload, a corrected release asset) this check will legitimately start failing;
 # re-verify by hand and update BOTH this block and setup.sh's matching block before trusting a new value.
-# A value starting with 'TBD-' means nobody has verified it yet: the check WARNS instead of failing, loudly,
-# so a placeholder can never be mistaken for a real pin.
+# A value starting with 'TBD-' means nobody has verified it yet: the check FAILS CLOSED (returns $false)
+# instead of warning-and-passing, loudly, so a placeholder can never be mistaken for a real pin and never
+# lets an unverified binary through.
 $KNOWN_HASHES = @{
   # ggml-base.bin -- https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin (~148MB)
   'ggml-base.bin'   = '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe'
   # kokoro-v1_0.pth -- https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4/kokoro-v1_0.pth (~327MB)
   'kokoro-v1_0.pth' = '496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4'
+  # whisper-bin-x64.zip -- https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip
+  # Computed 2026-08-12 under R-23 (owner-granted, one-time sanction): downloaded the URL above directly,
+  # 7982101 bytes observed, hashed with Get-FileHash -Algorithm SHA256 against the downloaded bytes (not
+  # copied from a page), bytes deleted immediately after.
+  'whisper-bin-x64.zip' = '7d8be46ecd31828e1eb7a2ecdd0d6b314feafd82163038ab6092594b0a063539'
 }
 # Kokoro-FastAPI is git-cloned below -- pin the SAME tag the model weights above come from, not HEAD.
 # Git itself integrity-tracks a pinned tag (its commit hash), unlike a bare branch clone.
 $KOKORO_PIN_TAG = 'v0.1.4'
 function Test-Checksum($path, $key) {
   $expected = $KNOWN_HASHES[$key]
-  if ((-not $expected) -or ($expected.StartsWith('TBD-'))) { Warn "No verified checksum pinned for $key yet -- skipping integrity check (see setup-win.ps1's KNOWN_HASHES block)."; return $true }
+  if ((-not $expected) -or ($expected.StartsWith('TBD-'))) { Warn "REFUSING: no verified SHA-256 pin for $key -- a binary this script would execute/extract has no fingerprint (see setup-win.ps1's KNOWN_HASHES block; pins require an R-23-sanctioned refresh)."; return $false }
   $actual = (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLower()
   if ($actual -ne $expected) {
     Warn "CHECKSUM MISMATCH for $key -- the download does not match the pinned SHA-256."
@@ -107,14 +113,9 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
 $whisperExe = Join-Path $VOICE 'whisper\Release\whisper-server.exe'
 if (-not (Test-Path $whisperExe)) {
   Say 'Installing Whisper (prebuilt whisper.cpp server - no compiler needed)...'
-  # Resolve the latest release's whisper-bin-x64.zip; fall back to the pinned, verified v1.9.1 asset.
-  $zipUrl = $null
-  try {
-    $rel = Invoke-RestMethod -UseBasicParsing -TimeoutSec 30 'https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest'
-    $asset = $rel.assets | Where-Object { $_.name -eq 'whisper-bin-x64.zip' } | Select-Object -First 1
-    if ($asset) { $zipUrl = $asset.browser_download_url }
-  } catch { }
-  if (-not $zipUrl) { $zipUrl = 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip' }
+  # PINNED asset only -- a floating "latest release" resolution is unverifiable by construction (the SHA-256
+  # pin above is for THIS exact asset; a moving target would make that pin meaningless).
+  $zipUrl = 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip'
   $tmpZip = Join-Path $env:TEMP 'whisper-bin-x64.zip'
   # try/catch + a size floor around the download/extract: with $ErrorActionPreference='Stop', a network blip in
   # Invoke-WebRequest/Expand-Archive otherwise throws a raw .NET stack trace instead of the friendly Warn pattern
@@ -123,6 +124,7 @@ if (-not (Test-Path $whisperExe)) {
   try {
     Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -OutFile $tmpZip
     if ((-not (Test-Path $tmpZip)) -or ((Get-Item $tmpZip).Length -lt 100KB)) { throw 'download was truncated' }
+    if (-not (Test-Checksum $tmpZip 'whisper-bin-x64.zip')) { Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue; exit 1 }
     # The zip contains Release\whisper-server.exe + the ggml CPU DLLs (verified). Extract so the exe lands
     # at $VOICE\whisper\Release\whisper-server.exe with its DLLs alongside.
     Remove-Item -Recurse -Force (Join-Path $VOICE 'whisper\Release') -ErrorAction SilentlyContinue

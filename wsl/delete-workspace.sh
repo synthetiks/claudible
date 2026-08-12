@@ -3,6 +3,8 @@
 # $3=label (optional, the human project name shown in the UI — see main.js's workspace:delete, shq-escaped).
 # For a repo workspace this only removes the LOCAL clone — the GitHub repo is left intact. Never the legacy dir.
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"                   # ABSOLUTE script dir, resolved BEFORE any cd into the workspace
+. "$HERE/_git-safe.sh"                                   # CASE-13: git now runs against $dir below — neutralize its config first
 kind="${1:-}"
 slug="${2:-}"
 label="${3:-}"
@@ -35,6 +37,19 @@ label_clean="$(printf '%s' "$label" | tr -s ' \t\n' ' ' | sed "s/[^A-Za-z0-9 ._-
 #    link once the code dir moved, still holding every collaborator's exported transcripts.
 # Encoding matches sessions.sh/session.sh exactly; CLAUDIBLE_PROJ overrides on win-native (same contract).
 proj="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$dir" | sed 's#[^A-Za-z0-9]#-#g')}"
+# CASE-13: REFUSE-with-explicit-override — a repo workspace with uncommitted changes or commits never pushed
+# to its upstream is work that only lives in this folder. Default refuses; the renderer's second, explicit
+# "delete anyway" confirm re-calls with CLAUDIBLE_FORCE_DELETE=1, which is the only thing that skips this.
+if [ -d "$dir/.git" ] && [ "${CLAUDIBLE_FORCE_DELETE:-}" != 1 ]; then
+  u=$(git -C "$dir" status --porcelain 2>/dev/null | grep -c .)
+  a=$(git -C "$dir" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+  case "$u" in ''|*[!0-9]*) u=0 ;; esac
+  case "$a" in ''|*[!0-9]*) a=0 ;; esac
+  if [ "$u" -gt 0 ] || [ "$a" -gt 0 ]; then
+    printf '{"ok":false,"needsForce":true,"uncommitted":%s,"unpushed":%s,"error":"this project has work not on GitHub — push it first, or confirm delete anyway"}' "$u" "$a"
+    exit 0
+  fi
+fi
 if mv -f "$dir" "$trash/ws-$kind-$label_clean.$ts" 2>/dev/null; then
   [ -d "$proj" ] && mv -f "$proj" "$trash/proj-$kind-$label_clean.$ts" 2>/dev/null
   if [ "$kind" = "repo" ] && [ -d "$HOME/.claudible/sessions-sync/$slug" ]; then
