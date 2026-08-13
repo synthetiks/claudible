@@ -4,6 +4,38 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.11] — 2026-08-13
+
+The update-safety release. Installing 0.9.10 on real hardware surfaced two ways Claudible could
+quietly break the thing it depends on most: updating the Claude Code CLI could leave it unable to
+start, and deleting a session could leave the app trying to reopen it at the next launch. Both are
+fixed here. Still a pre-release: hardware confirmation is the last word.
+
+**Fixed**
+- **Updating Claude Code no longer breaks Claude Code.** Updating the CLI from inside the app
+  while sessions were running it could leave a version that wouldn't start — every session then
+  died instantly with no explanation. Now: if an update needs your sessions closed first,
+  Claudible offers to close them instead of failing halfway; every install is verified before
+  it's called successful — a freshly installed CLI that won't start is reported as a failed
+  install carrying its real error; and the installer's output is kept and logged, with the last
+  lines shown when something goes wrong, instead of a silent failure or a generic message.
+- **A session that dies instantly now says why.** A conversation that ended within moments of
+  starting used to print only "session ended". It now reports the exit code, re-checks whether
+  the CLI is actually present and runnable, and points at the fix when it isn't.
+- **Reopening a session that no longer exists.** If you deleted a session and then quit the app,
+  the next launch could try to reopen that session. Claude Code would refuse it, and the tab came
+  up on a conversation it could never open — with new work recorded as a continuation of
+  something already gone. Deleting a session now also clears the record of "this is where I was"
+  in that project, so a delete followed by a quit can no longer leave the next launch reaching
+  for a conversation that is gone. When Claudible does have a current list of a project's
+  conversations, it checks the remembered one against it before reopening. The check is
+  deliberately one-sided: if Claudible cannot confirm one way or the other — a project it has
+  not loaded yet, a list a sync has just made out of date — it trusts your record and opens what
+  you had. "I could not check" is never treated as "it is gone."
+
+A note on process: the session-reopening fix reached the main branch ahead of this release rather
+than through it. It has since been independently reviewed as part of 0.9.11, and it ships here.
+
 ## [0.9.10] — 2026-08-13
 
 The responsiveness-and-truth release. The owners' first hands-on session on 0.9.9 surfaced seven
