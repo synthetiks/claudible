@@ -4830,5 +4830,35 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? [] : ['the deliberate close is not distinguished from a dead spawn']);
 }
 
+// ---- a launcher that resolves is not a program that runs -------------------------------------------------
+// The pre-spawn guard asked only whether a launcher EXISTS. Claude Code's updater renames its binary aside
+// before writing the replacement, so an interrupted update leaves the launcher resolving and the program gone:
+// the guard passed, the session spawned, and it died with nothing but the shell's raw error. These pin the
+// three parts of the answer — diagnose before spawning, refuse to spawn, and offer the rename back.
+{
+  none('a session is still spawned when the resolved launcher points at nothing',
+    [/runner\.claudeHealthNow === 'function'/.test(MAIN) ? '' : 'no pre-spawn health check',
+     /health\.state !== 'ok'/.test(MAIN) ? '' : 'the health answer does not gate the spawn',
+     /interrupted-update/.test(MAIN) ? '' : 'the interrupted-update case is not named to the user'].filter(Boolean));
+  {
+    // The refusal must come BEFORE the pty is created, or it is a post-mortem like the dead-spawn line.
+    const iHealth = MAIN.indexOf('runner.claudeHealthNow'), iSpawn = MAIN.indexOf('const runtimeId = nextRuntimeId(tabId)');
+    none('the health check runs after the pty has already been created',
+      iHealth > -1 && iSpawn > -1 && iHealth < iSpawn ? [] : ['the health gate does not precede the spawn']);
+  }
+  const WINRUN = read('runners/win.js');
+  none('the repair is claimed on the strength of a rename alone',
+    /renameSync\(h\.oldFile, h\.target\)[\s\S]{0,240}?verifyClaudeRuns\(\)/.test(WINRUN)
+      ? [] : ['repairClaude does not prove the restored program starts']);
+  none('the popup cannot offer the repair (the one button that fixes the machine)',
+    [/claudeRepair/.test(PRELOAD) ? '' : 'no repair bridge in preload',
+     /claudeHealth/.test(PRELOAD) ? '' : 'no health bridge in preload',
+     /Put the previous version back/.test(APP) ? '' : 'no repair button in the popup',
+     /loadHealth\(\)\.then\(\(\) => \{ open\(\)/.test(APP) ? '' : 'the popup opens before it knows whether to offer the repair'].filter(Boolean));
+  none('a machine with a healthy install pays a directory read on every spawn',
+    /_claudeHealth = undefined;/.test(WINRUN) && /if \(_claudeHealth !== undefined\) return _claudeHealth;/.test(WINRUN)
+      ? [] : ['the health answer is not memoized, or resetCaches does not clear it']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

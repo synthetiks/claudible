@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('claudible', {
   onClaudeNeeded: (cb) => ipcRenderer.on('claude:needed', () => cb()),
   claudeConnected: () => ipcRenderer.invoke('claude:connected'),   // bring the terminal up after connecting
   claudeState: () => ipcRenderer.invoke('claude:state'),           // cheap claude-only {installed,signedIn} for the dot/popup
+  claudeHealth: () => ipcRenderer.invoke('claude:health'),         // {state:'ok'|'interrupted-update'|'target-missing', target, oldFile} — does the launcher still point at a program?
+  claudeRepair: () => ipcRenderer.invoke('claude:repair'),         // put back the version an interrupted update renamed aside, then prove it starts
   ghState: () => ipcRenderer.invoke('gh:state'),                   // cheap {ghInstalled,ghSignedIn,ghAccount} for the Settings row (C-9.1: answers from cache, never awaits gh's network)
   onGhStateChanged: (cb) => ipcRenderer.on('gh:state-changed', (_e, s) => cb(s)),   // fires when gh:state's background probe lands fresh data
   // diff review (what Claude changed in the workspace's git repo)

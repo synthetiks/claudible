@@ -237,5 +237,55 @@ ok('3999ms is still fast (a refusal)', shouldFallbackToFresh(T0, T0 + 3999, 1, u
   ok('a clean exit that printed no version is a failure too (the skipped-program case)', silent.ok === false && /no version/.test(silent.error));
 }
 
+// ---- the launcher points at a program that is GONE ------------------------------------------------------
+// Claude Code's own updater renames its binary aside and writes the replacement. Interrupted between those
+// two steps, the shim resolves perfectly and its target does not exist — the state that made every session
+// die instantly with only the shell's raw "is not recognized". All fixture-driven: no install to break.
+{
+  const { claudeShimTarget, claudeHealth, claudeOldSiblings, pickHealthyClaudeBin } = win._internals;
+  const NPM = 'C:\\Users\\X\\AppData\\Roaming\\npm';
+  const SHIM = NPM + '\\claude.cmd';
+  const TARGET = NPM + '\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe';
+  const BIN_DIR = NPM + '\\node_modules\\@anthropic-ai\\claude-code\\bin';
+  // The real generated shim, verbatim in shape: %dp0% already ends in a separator, hence the doubled one.
+  const shimBody = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n'
+    + '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*\r\n';
+  const read = (p) => (p === SHIM ? shimBody : (() => { throw new Error('ENOENT') })());
+
+  eq('the shim tells us which program it runs', claudeShimTarget(SHIM, read), TARGET);
+  eq('a real .exe has no shim to read — no opinion', claudeShimTarget(NPM + '\\claude.exe', read), '');
+  eq('an unreadable shim is not an accusation', claudeShimTarget('C:\\nope\\claude.cmd', read), '');
+  eq('a shim that runs something else entirely is not ours to judge',
+    claudeShimTarget(SHIM, () => '@echo off\r\nnode "%dp0%\\cli.js" %*\r\n'), '');
+
+  const io = (exists, names) => ({ bin: SHIM, exists, listDir: () => names || [], readText: read });
+  eq('program present -> ok', claudeHealth(io(() => true)).state, 'ok');
+  eq('program gone, previous version renamed aside -> the update was interrupted',
+    claudeHealth(io(() => false, ['claude.exe.old.1770000000000'])).state, 'interrupted-update');
+  eq('…and it names the file it would put back',
+    claudeHealth(io(() => false, ['claude.exe.old.1770000000000'])).oldFile, BIN_DIR + '\\claude.exe.old.1770000000000');
+  eq('program gone with nothing to restore -> simply missing',
+    claudeHealth(io(() => false, ['README.md'])).state, 'target-missing');
+  eq('newest aside-copy wins when an update was interrupted twice',
+    claudeOldSiblings(TARGET, () => ['claude.exe.old.1770000000000', 'claude.exe.old.1780000000000'])[0], 'claude.exe.old.1780000000000');
+  ok('a directory we cannot read is never called broken',
+    claudeHealth({ bin: SHIM, exists: () => false, listDir: () => { throw new Error('EPERM') }, readText: read }).state === 'target-missing');
+  ok('a stat that throws is never called broken',
+    claudeHealth({ bin: SHIM, exists: () => { throw new Error('EPERM') }, listDir: () => [], readText: read }).state === 'ok');
+  eq('nothing resolvable to check -> ok', claudeHealth({ bin: '', exists: () => false, listDir: () => [], readText: read }).state, 'ok');
+
+  // PATH order is not health order.
+  const OTHER = 'C:\\Program Files\\claude\\claude.exe';
+  eq('a broken launcher is skipped for a working one further down PATH',
+    pickHealthyClaudeBin([SHIM, OTHER], { exists: (p) => p === OTHER, readText: read, home: 'C:\\Users\\X' }), OTHER);
+  eq('all broken -> the native install location is tried before giving up',
+    pickHealthyClaudeBin([SHIM], { exists: (p) => p === 'C:\\Users\\X\\.local\\bin\\claude.exe', readText: read, home: 'C:\\Users\\X' }),
+    'C:\\Users\\X\\.local\\bin\\claude.exe');
+  eq('nothing healthy anywhere -> the old answer, unchanged',
+    pickHealthyClaudeBin([SHIM], { exists: () => false, readText: read, home: 'C:\\Users\\X' }), SHIM);
+  eq('a healthy machine still picks exactly what it always did',
+    pickHealthyClaudeBin([NPM + '\\claude', SHIM], { exists: () => true, readText: read, home: 'C:\\Users\\X' }), SHIM);
+}
+
 console.log(`\nwin-runner (pure core): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

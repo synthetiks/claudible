@@ -7586,7 +7586,10 @@ async function askCloseSessions(id, r) {
   const msg = $('cc-msg'), act = $('cc-action'), busy = $('cc-busy'), doneBtn = $('cc-done'), dot = $('claude-dot');
   let poll = null, pollSince = 0, lastState = '', userDismissed = false;
   const head = pop.querySelector('.cc-head h3'), center = $('cc-center');
-  let ccVer = '', ccLatest = '', ccStale = false;
+  let ccVer = '', ccLatest = '', ccStale = false, ccHealth = null;
+  // Does the resolved launcher still point at a program? Cheap on a healthy machine (main memoizes one stat),
+  // and never blocks the popup: an unanswerable check leaves the popup exactly as it was.
+  async function loadHealth() { try { ccHealth = await claudible.claudeHealth(); } catch { ccHealth = null; } return ccHealth; }
   async function loadVer() { if (ccVer) return ccVer; try { ccVer = (await claudible.claudeVersion()) || ''; } catch {} return ccVer; }
   async function loadVerForce() { try { ccVer = (await claudible.claudeVersion(true)) || ''; } catch {} return ccVer; }   // after an in-app update, re-read past main's app-lifetime cache
   function verLt(a, b) {   // a < b, numeric-dotted (missing parts = 0)
@@ -7703,11 +7706,41 @@ async function askCloseSessions(id, r) {
       ub.addEventListener('click', () => update(ub));
       actions.appendChild(note); actions.appendChild(ub);
     }
+    // An interrupted self-update leaves the previous version renamed aside on disk. That is one rename from
+    // working, so offer THAT before a several-hundred-megabyte reinstall — and say what happened, because the
+    // alternative the user otherwise gets is a session that dies with a raw shell error.
+    if (ccHealth && ccHealth.state === 'interrupted-update') {
+      const note = document.createElement('div'); note.className = 'cc-update';
+      note.textContent = 'Claude Code’s update didn’t finish — its program file is missing.';
+      const fb = document.createElement('button'); fb.className = 'cc-btn upd'; fb.textContent = 'Put the previous version back';
+      fb.title = 'Restores the version saved before the interrupted update, then checks that it starts';
+      fb.addEventListener('click', () => repair(fb));
+      actions.appendChild(note); actions.appendChild(fb);
+    } else if (ccHealth && ccHealth.state === 'target-missing') {
+      const note = document.createElement('div'); note.className = 'cc-update';
+      note.textContent = 'Claude Code is installed but its program file is missing — reinstall it below.';
+      actions.appendChild(note);
+    }
     const rb = document.createElement('button'); rb.className = 'cc-btn'; rb.textContent = 'Refresh session';
     rb.title = 'Restart this session on the latest Claude Code — your history is kept';
     rb.addEventListener('click', () => refresh(rb));
     actions.appendChild(rb);
     center.appendChild(actions);
+  }
+  // Restore the aside-renamed binary. main proves it starts before answering ok, so a green message here is
+  // never just "the rename worked".
+  async function repair(b) {
+    b.disabled = true; busy.classList.remove('err'); busy.textContent = 'Putting the previous version back…';
+    let r; try { r = await claudible.claudeRepair(); } catch (e) { r = { ok: false, error: e && e.message }; }
+    b.disabled = false;
+    if (r && r.ok) {
+      ccHealth = { state: 'ok' }; ccVer = ''; await loadVerForce(); await checkStale();
+      busy.textContent = 'Claude Code is working again' + (r.version ? ' (' + r.version + ')' : '') + ' — open a session.';
+      setDot(lastState); renderCenter();
+    } else {
+      busy.classList.add('err');
+      busy.textContent = 'Couldn’t restore it: ' + ((r && r.error) || 'unknown error') + ' — use Update Claude Code to reinstall.';
+    }
   }
   // Update the CLI in place (npm -g latest, via the same install path), then re-read the version and re-evaluate
   // the amber dot — so it clears to green the moment the machine is current.
@@ -7765,9 +7798,12 @@ async function askCloseSessions(id, r) {
     try { if (!loadPrefs().onboardingDone) return; } catch {}
     if (wizEl && wizEl.classList.contains('show')) return;
     if (pop.classList.contains('show') || userDismissed) return;
-    open();
+    // A spawn refused for a missing program file pops this dialog to OFFER the repair, so the health answer
+    // must be loaded before it paints — otherwise the one button that fixes the machine is the one not shown.
+    loadHealth().then(() => { open(); renderCenter(); });
   });
   getState().then((s) => setDot(toState(s)));   // initialize the dot (cheap, claude-only)
   loadVer().then(() => { if (lastState) setDot(lastState); });   // prefetch version so the tooltip shows it; refresh the title once known
   checkStale().then(() => { if (lastState === 'ready') setDot(lastState); });   // async, fail-silent → the dot goes gold at rest only if a newer version is actually published
+  loadHealth();   // so a popup opened by hand already knows whether to offer the repair
 })();

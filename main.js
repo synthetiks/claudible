@@ -728,6 +728,23 @@ function spawnPty(tabId, cols, rows, ws, session) {
     try { win && win.webContents.send('claude:needed'); } catch {}
     return;
   }
+  // RESOLVING IS NOT THE SAME AS RUNNING. The guard above asks whether a launcher exists; it does not ask
+  // whether that launcher still points at a program. Claude Code's own updater swaps its binary by renaming it
+  // aside and writing the replacement, so an interrupted update leaves the launcher resolving perfectly and the
+  // program gone — the check above passes, the pty spawns, and the session dies instantly with nothing but the
+  // shell's raw "is not recognized". Diagnose it BEFORE spawning and say which of the two it is: an update that
+  // did not finish (one rename away from working) or a program that is simply absent.
+  const health = (typeof runner.claudeHealthNow === 'function') ? runner.claudeHealthNow() : { state: 'ok' };
+  if (health.state !== 'ok') {
+    const lines = health.state === 'interrupted-update'
+      ? ['[claudible] Claude Code’s update didn’t finish — its program file is missing:', '  ' + health.target,
+         '[claudible] Claudible can put the previous version back: click the Claude button (top bar).']
+      : ['[claudible] Claude Code is installed but its program file is missing:', '  ' + health.target,
+         '[claudible] Reinstall it from the Claude button (top bar).'];
+    winSend('pty:data', { tabId, data: '\r\n' + lines.join('\r\n') + '\r\n' });
+    try { win && win.webContents.send('claude:needed', { health: health.state }); } catch {}
+    return;                                              // never spawn a pty that can only die
+  }
   ws = ws || activeWorkspace;
   try {
     const runtimeId = nextRuntimeId(tabId);
@@ -3905,6 +3922,20 @@ ipcMain.handle('claude:state', async () => {
     const c = (d.deps || []).find((x) => x.id === 'claude') || {};
     return { installed: c.state !== 'missing', signedIn: c.state === 'ready' };
   } catch { return { installed: false, signedIn: false }; }
+});
+// Is the resolved Claude Code launcher still pointing at a program? Cheap (one memoized stat on a healthy
+// machine) so the popup can ask on every open. {state:'ok'} on any runner that does not answer the question.
+ipcMain.handle('claude:health', () => {
+  try { return (typeof runner.claudeHealthNow === 'function') ? runner.claudeHealthNow() : { state: 'ok' }; }
+  catch { return { state: 'ok' }; }
+});
+// Put back the version an interrupted update renamed aside. A rename, then the SAME post-install proof an
+// install goes through — so a repair is never reported on the strength of the rename alone.
+ipcMain.handle('claude:repair', async () => {
+  try {
+    if (typeof runner.repairClaude !== 'function') return { ok: false, error: 'not available on this system' };
+    return await runner.repairClaude();   // caller re-reads the version itself; a rename moves no PATH, so no cache beyond the runner's own needs clearing
+  } catch (e) { return { ok: false, error: (e && e.message) || 'repair failed' }; }
 });
 // C-9.1 — cheap GitHub-only state for the settings drawer, modeled on claude:state above. There's no win-side
 // shortcut for gh the way runner.claudeState() is for claude, so the "cheap" part is a module-level cache: the

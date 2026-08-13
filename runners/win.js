@@ -339,6 +339,25 @@ function pickClaudeBin(hits) {
   const list = (hits || []).map((s) => String(s).trim()).filter(Boolean);
   return list.find((h) => /\.(cmd|exe|bat)$/i.test(h)) || list[0] || 'claude';
 }
+// …and prefer one whose LAUNCHER STILL POINTS AT A PROGRAM. PATH order is not health order: a machine can
+// carry a broken npm shim ahead of a perfectly good native install, and preferring the first hit sends every
+// session into a launcher that cannot start. Falls through to the native installer's own location before
+// giving up, then to pickClaudeBin's answer so behaviour is unchanged when nothing is verifiable — this
+// narrows WHICH runnable hit is chosen, it never returns something pickClaudeBin would have refused.
+function pickHealthyClaudeBin(hits, io) {
+  const { exists, readText, home } = io || {};
+  const list = (hits || []).map((s) => String(s).trim()).filter(Boolean).filter((h) => /\.(cmd|exe|bat)$/i.test(h));
+  const healthy = (h) => {
+    const t = claudeShimTarget(h, readText);
+    if (!t) return true;                                   // not one of ours to judge — treat as usable
+    try { return !!exists(t); } catch { return true }
+  };
+  const good = list.find(healthy);
+  if (good) return good;
+  const native = home ? path.win32.join(home, '.local', 'bin', 'claude.exe') : '';
+  try { if (native && exists(native)) return native; } catch {}
+  return pickClaudeBin(hits);
+}
 // MEMOIZED, like _bash above and _claudePresent below â€” these two sit on the hot path of EVERY pty spawn
 // (whichNode from installHooks, whichClaude from spawnClaude), and each `where` is a whole OS process spawned
 // and waited on synchronously, on the main thread. Measured on a real machine: ~31ms + ~34ms = ~65ms added to
@@ -349,8 +368,10 @@ let _claudeBin = undefined, _nodeBin = undefined;
 function whichClaude() {
   if (process.env.CLAUDIBLE_CLAUDE) return process.env.CLAUDIBLE_CLAUDE;   // env override wins and is free â€” never cache around it
   if (_claudeBin !== undefined) return _claudeBin;
-  try { _claudeBin = pickClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/)); }
-  catch { _claudeBin = 'claude'; }
+  try {
+    _claudeBin = pickHealthyClaudeBin(cp.execFileSync('where', ['claude'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/),
+      { exists: (p) => fs.existsSync(p), readText: (p) => fs.readFileSync(p, 'utf8'), home: HOME() });
+  } catch { _claudeBin = 'claude'; }
   return _claudeBin;
 }
 // A real Windows node.exe for the hook commands (NEVER process.execPath = electron.exe).
@@ -400,11 +421,77 @@ function verifyClaudeRuns() {
   });
 }
 
+// ---- is the resolved launcher actually pointing at a program? ---------------------------------------
+// `where claude` answering is not proof Claude Code can run. npm installs a .cmd shim next to the package and
+// the shim EXECUTES a separate binary; Claude Code's own updater swaps that binary by renaming it aside
+// (`claude.exe` -> `claude.exe.old.<timestamp>`) and writing the replacement. Interrupted between those two
+// steps it leaves the shim resolving perfectly and its target gone — every session then dies the instant it
+// spawns, with only the shell's raw "is not recognized" to show for it. Two pure halves, injected IO, so the
+// whole diagnosis is provable from fixtures without an install to break.
+//   shimTarget — what the launcher runs, or '' when there is nothing of ours to check (a real .exe, the
+//                native installer, a future layout). '' means "no opinion", NEVER "broken".
+//   health     — what that proves. Only a target we RESOLVED and found missing is ever called broken.
+const SHIM_TARGET_RE = /"%(?:~)?dp0%\\?([^"]+\.exe)"/i;
+function claudeShimTarget(shimPath, readText) {
+  const p = String(shimPath || '');
+  if (!/\.(cmd|bat)$/i.test(p)) return '';
+  let body = '';
+  try { body = String(readText(p) || ''); } catch { return '' }
+  const m = SHIM_TARGET_RE.exec(body);
+  if (!m) return '';
+  const rel = m[1].replace(/^[\\/]+/, '');
+  return path.win32.join(path.win32.dirname(p), rel);
+}
+// The '.old' sibling is the fingerprint of an interrupted self-update, and it is also the repair: putting the
+// newest one back is a rename, not a 300MB download. Sorted so the newest timestamp wins.
+function claudeOldSiblings(target, listDir) {
+  const dir = path.win32.dirname(target), base = path.win32.basename(target);
+  let names = [];
+  try { names = listDir(dir) || []; } catch { return [] }
+  return names.filter((n) => String(n).toLowerCase().startsWith(base.toLowerCase() + '.old')).sort().reverse();
+}
+function claudeHealth(io) {
+  const { bin, exists, listDir, readText } = io || {};
+  const target = claudeShimTarget(bin, readText);
+  if (!target) return { state: 'ok', target: '', oldFile: '' };          // nothing of ours to verify
+  let there = false;
+  try { there = !!exists(target); } catch { there = true }               // cannot look -> never accuse
+  if (there) return { state: 'ok', target, oldFile: '' };
+  const old = claudeOldSiblings(target, listDir);
+  return old.length
+    ? { state: 'interrupted-update', target, oldFile: path.win32.join(path.win32.dirname(target), old[0]) }
+    : { state: 'target-missing', target, oldFile: '' };
+}
+// Live wrapper over the pure half, memoized like every other resolution on the spawn hot path: a healthy
+// machine pays one existsSync per app run, and the directory read happens only when something is wrong.
+let _claudeHealth;
+function claudeHealthNow() {
+  if (_claudeHealth !== undefined) return _claudeHealth;
+  _claudeHealth = claudeHealth({
+    bin: whichClaude(),
+    exists: (p) => fs.existsSync(p),
+    listDir: (d) => fs.readdirSync(d),
+    readText: (p) => fs.readFileSync(p, 'utf8'),
+  });
+  return _claudeHealth;
+}
+// Put the previous version back. A rename is the whole repair — then PROVE it by running the thing, reusing
+// the same post-install check an install goes through, so "repaired" can never be a claim we did not verify.
+async function repairClaude() {
+  const h = claudeHealthNow();
+  if (h.state !== 'interrupted-update') return { ok: false, error: 'nothing to put back — reinstall Claude Code instead' };
+  try { fs.renameSync(h.oldFile, h.target); }
+  catch (e) { return { ok: false, error: 'could not restore it: ' + ((e && e.message) || 'rename failed') }; }
+  resetCaches();
+  const v = await verifyClaudeRuns();
+  return v.ok ? { ok: true, version: v.version } : { ok: false, error: v.error };
+}
+
 // Drop the memoized git-bash / app-dir resolutions so a later runtime Git install can be picked up without a
 // process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
 // _claudeBin/_nodeBin ride along for the same reason: preflight:install calls this after installing a dep, so
 // a claude or node that arrived mid-session is picked up on the next spawn rather than staying stale.
-function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; _whichMemo.clear(); _guestPathMemo.clear(); _hostPathMemo.clear(); }
+function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; _claudeHealth = undefined; _whichMemo.clear(); _guestPathMemo.clear(); _hostPathMemo.clear(); }
 
 // ---- dependency detection (pure-Node; NO git-bash) ----------------------------------------------
 // The self-bootstrapping provisioner needs to know, on a possibly-bare Windows box, which deps are present.
@@ -783,10 +870,10 @@ function detect() { return process.platform === 'win32' && whichClaude() !== 'cl
 
 module.exports = {
   id: 'win',
-  detect, detectDeps, resetCaches, claudePresent, claudeState, verifyClaudeRuns,
+  detect, detectDeps, resetCaches, claudePresent, claudeState, verifyClaudeRuns, claudeHealthNow, repairClaude,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks, claudeVerifyArgv, claudeVerifyOutcome },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks, claudeVerifyArgv, claudeVerifyOutcome, claudeShimTarget, claudeHealth, claudeOldSiblings, pickHealthyClaudeBin },
 };
