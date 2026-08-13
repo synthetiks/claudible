@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('claudible', {
   ghGrantDelete: () => ipcRenderer.invoke('workspace:ghGrantDelete'),    // → { ok, code } — starts the approval; success lands via the ghDeleteScope poll, not here
   // self-bootstrapping dependency provisioner (the "System check" wizard step)
   preflightStatus: () => ipcRenderer.invoke('preflight:status'),        // { runner, gitBash, deps: [{ id, label, hint, state, version, account, required, auth, authSoft, installable, restartOnInstall, requires }] }
-  preflightInstall: (depId) => ipcRenderer.invoke('preflight:install', depId),   // → { ok, error, restartRequired }; progress streams via onProvision({dep,phase,msg})
+  preflightInstall: (depId, opts) => ipcRenderer.invoke('preflight:install', depId, opts),   // → { ok, error, restartRequired } or { needsSessionsClosed, sessions, busy } when running sessions must be closed first ({ closeSessions: true } is that consent); progress streams via onProvision({dep,phase,msg})
   preflightRestart: () => ipcRenderer.invoke('preflight:restart'),
   // C-7.3 manual path: the failure chip's "see how to fix it" panel + the settings voice row's Rescan button
   voiceManualInfo: () => ipcRenderer.invoke('voice:manualInfo'),   // { voiceDir, logPath, items:[{name,path,url}] } — same paths voiceProvisioned() actually checks

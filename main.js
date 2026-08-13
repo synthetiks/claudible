@@ -774,7 +774,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
       winSend('settings:backup-notice', { tabId, files });
     }
     const rec = { proc, cols: cols || 120, rows: rows || 32, trustDone: false, ws, session: session || '',
-      runtimeId, busy: false, busyTimer: null, lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
+      runtimeId, busy: false, busyTimer: null, spawnTs: Date.now(), lastData: Date.now(), sawData: false, ultraDone: false, ultraTimer: null };
     ptys.set(tabId, rec);
     _writeContext(tabId);                                 // seed this tab's identity/live-state file before Claude's first prompt fires the context hook
     _seedCkpt(ws);                                        // repo ws + history on → snapshot now so even the FIRST prompt gets a Revert target
@@ -824,13 +824,29 @@ function spawnPty(tabId, cols, rows, ws, session) {
           + String(d).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 400));
       }
     });
-    proc.onExit(() => {
+    proc.onExit((ev) => {
       if (ptys.get(tabId)?.proc !== proc) return;          // an intentional switch already replaced us
       const r = ptys.get(tabId); const rws = r && r.ws;
       if (r && r.ultraTimer) { try { clearInterval(r.ultraTimer); } catch {} }
       if (r && r.quietTimer) { try { clearTimeout(r.quietTimer); } catch {} }   // the pty is gone — never print "still waiting" into a tab that just ended
+      // A SESSION THAT NEVER RENDERED A BYTE DID NOT "END" — Claude never started. "session ended" alone is a
+      // lie in that case, and the not-connected hint below reads a memo taken before this spawn (so a binary
+      // that has just been replaced or removed still answers "present"). Re-resolve FIRST, then say what
+      // happened: ConPTY folds the child's stderr into this stream, so no output means nothing was captured
+      // at all, and the exit code is the only fact left to report. A session Claudible closed ON PURPOSE (to
+      // free the program before replacing it) is never that, however new and blank it happened to be — it
+      // carries a mark, and without honouring it the one line that means "your install is broken" would fire
+      // during a perfectly normal update and stop meaning anything.
+      const code = (ev && typeof ev.exitCode === 'number') ? ev.exitCode : (typeof ev === 'number' ? ev : null);
+      const deadSpawn = !!(r && !r.closing && !r.sawData && Date.now() - (r.spawnTs || r.lastData || 0) < 10000);
+      if (deadSpawn && typeof runner.resetCaches === 'function') runner.resetCaches();
       const msg = '\r\n[claudible] session ended\r\n';
       winSend('pty:data', { tabId, data: msg });
+      if (deadSpawn) {
+        const line = '[claudible] Claude exited immediately (exit code ' + (code === null ? 'unknown' : code) + ') with no output\r\n';
+        console.error('[claudible] dead spawn on tab ' + tabId + ' — ' + line.trim());
+        winSend('pty:data', { tabId, data: line });
+      }
       // If claude vanished (uninstalled, or a first-launch spawn that beat detection), point at the fix instead
       // of leaving a dead pane. Cheap sync check; win runner only.
       if (typeof runner.claudePresent === 'function' && runner.claudePresent() === false) {
@@ -3784,8 +3800,22 @@ ipcMain.handle('preflight:status', async () => {
 // routing wsl/posix through it used to silently do nothing: a wizard button that reported success without
 // installing anything. On success we persist any portable-fallback env, apply it + refresh PATH live, and
 // report whether a restart is needed (Git on win, whose app-dir resolves at require-time).
-ipcMain.handle('preflight:install', async (_e, depId) => {
+ipcMain.handle('preflight:install', async (_e, depId, opts) => {
   const id = String(depId || '').replace(/[^a-z]/g, '');
+  // NEVER REPLACE THE PROGRAM WE ARE CURRENTLY RUNNING. On Windows every local session IS a running claude.exe,
+  // and npm cannot overwrite a locked binary: the install "succeeds" against a half-written tree and the next
+  // spawn dies with no output. So the update is OFFERED, not refused — the renderer asks whether to close the
+  // running sessions, and only a caller carrying that consent gets past this gate.
+  if (id === 'claude' && runner.id === 'win' && ptys.size > 0 && !(opts && opts.closeSessions)) {
+    let busy = 0; for (const rec of ptys.values()) if (rec && rec.busy) busy++;
+    return { ok: false, needsSessionsClosed: true, sessions: ptys.size, busy, error: '', restartRequired: false };
+  }
+  if (id === 'claude' && runner.id === 'win' && opts && opts.closeSessions && ptys.size) {
+    for (const rec of Array.from(ptys.values())) { rec.closing = true; try { rec.proc.kill(); } catch {} }   // the existing onExit handler does the cleanup; the mark says these ended by OUR hand, not by crashing
+    // Wait for the handles to actually go, bounded: a kill returns immediately but Windows keeps the file locked
+    // until the process is really gone, which is exactly the lock that corrupts the install.
+    for (let i = 0; i < 30 && ptys.size; i++) await new Promise((r) => setTimeout(r, 100));
+  }
   // 2a(1) — the silent false was the whole bug. ensureVoiceProvisioned has five separate reasons to decline and
   // all five arrived here as a bare {ok:false} with no error, so the row snapped back to "install" and the user
   // clicked it forever. Same gates, same order — now each one says which it was.
@@ -3813,6 +3843,19 @@ ipcMain.handle('preflight:install', async (_e, depId) => {
     }
     await refreshWindowsPath();   // async: never block the main process (pty I/O + every poller) on a PowerShell spawn
     if (runner.id === 'win' && typeof runner.resetCaches === 'function') runner.resetCaches();   // re-resolve git-bash/app-dir next call
+    // NEVER CALL AN INSTALL SUCCESSFUL WITHOUT PROVING THE RESULT STARTS. npm exits 0 even when the Windows
+    // binary package was skipped, leaving a shim that cannot run — the wizard then goes green and the very
+    // next session dies blank. Run the freshly-resolved binary once (caches were just cleared above) and
+    // report a FAILED install carrying the real reason instead.
+    if (id === 'claude' && runner.id === 'win' && typeof runner.verifyClaudeRuns === 'function') {
+      let v; try { v = await runner.verifyClaudeRuns(); } catch (e) { v = { ok: false, error: (e && e.message) || 'verification failed' }; }
+      if (!v || !v.ok) {
+        const detail = (v && v.error) || 'it did not report a version';
+        console.error('[claudible] claude install verification failed:', detail);
+        refreshGhStateCache();   // C-9.1: unlike every other failure return here, the install DID run and PATH DID move — the drawer's cached gh row must not go stale just because the result will not start
+        return { ok: false, error: 'Claude Code installed but will not start: ' + detail, restartRequired: false };
+      }
+    }
     refreshGhStateCache();   // C-9.1: an install here can be gh itself (or PATH moving broadly) — the drawer's cached gh row must not go stale across it
     // A cloudflared installed MID-SHARE must not wait out the 45s retry cadence: its env/path is applied just
     // above, so the very next candidates() read can see it — bring the tunnel (and with it, presence) up now.

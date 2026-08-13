@@ -4738,5 +4738,97 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /s\.session \|\| 'live session'/.test(GUEST_JS) ? [] : ['the status path no longer falls back for a genuinely unnamed session']);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// UPDATING CLAUDE CODE MUST NOT BREAK CLAUDE CODE. Two independent ways the old flow shipped a dead CLI:
+//   1. it replaced the program while sessions were still running it (Windows holds the file open, npm writes
+//      a half-tree), and
+//   2. it trusted npm's exit code, which is 0 even when the Windows program was skipped as an optional piece.
+// So: offer to close the running sessions first (never a bare refusal, never a silent kill), and prove the
+// installed binary actually starts before anything is allowed to report success.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const pf = (MAIN.match(/ipcMain\.handle\('preflight:install'[\s\S]*?\n\}\);/) || [''])[0];
+  none('the install handler cannot receive the caller consent flag at all',
+    /ipcMain\.handle\('preflight:install', async \(_e, depId, opts\)/.test(pf)
+      ? [] : ['preflight:install does not take an options argument']);
+  none('installing Claude Code no longer stops while local sessions are running it',
+    /id === 'claude' && runner\.id === 'win' && ptys\.size > 0 && !\(opts && opts\.closeSessions\)[\s\S]{0,300}?needsSessionsClosed: true/.test(pf)
+      ? [] : ['no running-sessions gate on the claude install path']);
+  none('...and the gate reports the counts the question needs (how many, how many mid-turn)',
+    /sessions: ptys\.size, busy/.test(pf) && /if \(rec && rec\.busy\) busy\+\+/.test(pf)
+      ? [] : ['the gate does not report the session/mid-turn counts']);
+  {
+    const iGate = pf.indexOf('needsSessionsClosed: true'), iInstall = pf.indexOf('deps.install(');
+    none('the gate is reached AFTER the install has already run (it would guard nothing)',
+      iGate > -1 && iInstall > -1 && iGate < iInstall ? [] : ['the running-sessions gate does not precede deps.install']);
+  }
+  none('consent no longer closes the sessions before installing',
+    /opts && opts\.closeSessions && ptys\.size[\s\S]{0,300}?rec\.proc\.kill\(\)/.test(pf)
+      ? [] : ['the consent path does not kill the local ptys first']);
+  none('...and it starts the install before the closed sessions have actually let go of the binary',
+    /for \(let i = 0; i < 30 && ptys\.size; i\+\+\) await new Promise/.test(pf)
+      ? [] : ['no bounded wait for the ptys to drain before installing']);
+  // The post-install proof. Order is the whole point: the caches must be cleared FIRST, or the check runs
+  // against the path resolved before the install and proves nothing.
+  {
+    const iReset = pf.indexOf('runner.resetCaches()'), iVerify = pf.indexOf('runner.verifyClaudeRuns()');
+    none('a Claude Code install is still reported successful without ever running the result',
+      iVerify > -1 ? [] : ['preflight:install never verifies that claude starts']);
+    none('the verification runs against the stale resolved path (caches not cleared first)',
+      iReset > -1 && iVerify > -1 && iReset < iVerify ? [] : ['verifyClaudeRuns is not called after resetCaches']);
+  }
+  none('a binary that will not start still reports a green install',
+    /return \{ ok: false, error: 'Claude Code installed but will not start: ' \+ detail/.test(pf)
+      ? [] : ['a failed verification does not fail the install with the real reason']);
+  // …and that early return still has to do the housekeeping the normal end of the success path does: the
+  // install really ran and really moved PATH, so the settings drawer's cached GitHub row is stale from here on.
+  none('the failed-verification exit leaves the settings drawer holding a stale GitHub row',
+    /refreshGhStateCache\(\);[\s\S]{0,200}?return \{ ok: false, error: 'Claude Code installed but will not start/.test(pf)
+      ? [] : ['the failed-verification return skips the gh state refresh after a PATH move']);
+  none('the consent flag is not carried across the preload bridge',
+    /preflightInstall: \(depId, opts\) => ipcRenderer\.invoke\('preflight:install', depId, opts\)/.test(PRELOAD)
+      ? [] : ['preload drops the options argument']);
+  none('a renderer install button ignores the "close your sessions?" answer',
+    [/async function askCloseSessions\(id, r\)/.test(APP) ? '' : 'no shared close-sessions helper in the renderer',
+     /claudible\.preflightInstall\(id, \{ closeSessions: true \}\)/.test(APP) ? '' : 'the helper never retries with consent',
+     (APP.match(/if \(r && r\.needsSessionsClosed\) r = await askCloseSessions\(/g) || []).length >= 3
+       ? '' : 'fewer than three install call sites route through the helper',
+     /cancelled: true/.test(APP) ? '' : 'a declined close is not reported as a plain cancel'].filter(Boolean));
+}
+{
+  const PROVCC = (read('setup/provision-win.ps1').match(/'claude' \{[\s\S]*?\n    \}/) || [''])[0];
+  none('the claude case of provision-win.ps1 was not found (this pin would go vacuous)',
+    PROVCC ? [] : ['could not isolate the claude case']);
+  none('the npm install throws its own output away again',
+    [/Out-Null/.test(PROVCC.split('\n').filter((l) => /npm install -g/.test(l)).join('\n')) ? 'the npm line still pipes to Out-Null' : '',
+     /--include=optional/.test(PROVCC) ? '' : 'the optional Windows program is not requested',
+     /--foreground-scripts/.test(PROVCC) ? '' : 'install scripts are still hidden',
+     /Out-File -FilePath \$log/.test(PROVCC) ? '' : 'the output is not written to a log',
+     /\$tail/.test(PROVCC) ? '' : 'the failure message carries none of the output'].filter(Boolean));
+  none('an npm success with a Claude Code that will not start is still treated as a success',
+    /claude --version[\s\S]{0,300}?npm reported success but Claude Code will not start/.test(PROVCC)
+      && /exit 1/.test(PROVCC) ? [] : ['no post-install run check in the claude case']);
+}
+{
+  const ex = (MAIN.match(/proc\.onExit\(\(ev\)[\s\S]*?\n    \}\);/) || [''])[0];
+  none('the session-exit handler no longer receives the exit information',
+    ex ? [] : ['proc.onExit does not take the exit event']);
+  none('a session that died without ever rendering anything is reported as a plain "session ended"',
+    [/const deadSpawn = !!\(r && !r\.closing && !r\.sawData/.test(ex) ? '' : 'no dead-spawn detection',
+     /Claude exited immediately \(exit code /.test(ex) ? '' : 'no exit-code diagnostic',
+     /spawnTs: Date\.now\(\)/.test(MAIN) ? '' : 'the pty record carries no spawn timestamp'].filter(Boolean));
+  {
+    const iReset = ex.indexOf('runner.resetCaches()'), iPresent = ex.indexOf('runner.claudePresent()');
+    none('the not-connected hint is still decided by a memo taken before the spawn',
+      iReset > -1 && iPresent > -1 && iReset < iPresent ? [] : ['the dead-spawn branch does not re-resolve before claudePresent']);
+  }
+  // The sessions Claudible closes ITSELF to free the program are the one case that looks exactly like a dead
+  // spawn (blank, seconds old) and is not one. Unmarked, every update with a just-opened tab would print the
+  // broken-install line, which is how a diagnostic stops being believed.
+  none('a session Claudible closed on purpose is accused of having crashed',
+    /rec\.closing = true;[\s\S]{0,120}?rec\.proc\.kill\(\)/.test(MAIN) && /!r\.closing/.test(ex)
+      ? [] : ['the deliberate close is not distinguished from a dead spawn']);
+}
+
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

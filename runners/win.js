@@ -362,6 +362,44 @@ function whichNode() {
   return _nodeBin;
 }
 
+// ---- post-install proof: the CLI must actually START ------------------------------------------------
+// An "npm exited 0" is not a working install. The Windows binary package is an OPTIONAL dependency, and when
+// npm skips it the tree still installs cleanly, leaving a shim that resolves on PATH and dies the moment it
+// is spawned — a green wizard row followed by a blank terminal. So after installing, run the thing once.
+// Two pure halves so this is testable without spawning anything:
+//   argv  — what to execute. The resolved path is usually npm's claude.cmd shim, which CANNOT be execFile'd
+//           (CreateProcess 193); a shim, or a bare name with no extension, goes through cmd.exe.
+//   outcome — what the run proved. Anything other than a clean exit with a version-looking line is a failure,
+//           and the message carries the real exit code plus the last output the binary managed to print.
+function claudeVerifyArgv(bin) {
+  const b = String(bin || 'claude');
+  const direct = /\.exe$/i.test(b);
+  return direct ? { file: b, args: ['--version'] }
+    : { file: process.env.COMSPEC || 'cmd.exe', args: ['/d', '/s', '/c', b, '--version'] };
+}
+function claudeVerifyOutcome(err, stdout, stderr) {
+  const tail = (s) => String(s || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(-3).join(' | ');
+  const out = tail(stdout), errOut = tail(stderr);
+  if (err) {
+    const code = (err && typeof err.code !== 'undefined') ? err.code : 'no exit code';
+    return { ok: false, version: '', error: 'exit ' + code + (errOut || out ? ': ' + (errOut || out) : '') };
+  }
+  const version = String(stdout || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean)[0] || '';
+  if (!version) return { ok: false, version: '', error: 'exit 0 but it printed no version' + (errOut ? ': ' + errOut : '') };
+  return { ok: true, version, error: '' };
+}
+// Resolve FRESH (callers clear the memos first) and run it once. Async on purpose: this sits behind an
+// install click and must never block the main thread for its whole timeout.
+function verifyClaudeRuns() {
+  const { file, args } = claudeVerifyArgv(whichClaude());
+  return new Promise((resolve) => {
+    try {
+      cp.execFile(file, args, { encoding: 'utf8', timeout: 15000, windowsHide: true },
+        (err, stdout, stderr) => resolve(claudeVerifyOutcome(err, stdout, stderr)));
+    } catch (e) { resolve({ ok: false, version: '', error: (e && e.message) || 'could not run it at all' }); }
+  });
+}
+
 // Drop the memoized git-bash / app-dir resolutions so a later runtime Git install can be picked up without a
 // process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
 // _claudeBin/_nodeBin ride along for the same reason: preflight:install calls this after installing a dep, so
@@ -745,10 +783,10 @@ function detect() { return process.platform === 'win32' && whichClaude() !== 'cl
 
 module.exports = {
   id: 'win',
-  detect, detectDeps, resetCaches, claudePresent, claudeState,
+  detect, detectDeps, resetCaches, claudePresent, claudeState, verifyClaudeRuns,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks, claudeVerifyArgv, claudeVerifyOutcome },
 };

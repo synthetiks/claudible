@@ -211,5 +211,31 @@ ok('signal exit -> false', shouldFallbackToFresh(T0, T0 + 500, null, 15, false, 
 ok('exactly-4000ms boundary counts as slow (not a refusal)', shouldFallbackToFresh(T0, T0 + 4000, 1, undefined, false, true) === false);
 ok('3999ms is still fast (a refusal)', shouldFallbackToFresh(T0, T0 + 3999, 1, undefined, false, true) === true);
 
+// ---- the post-install proof: an installed Claude Code must be RUN once before anyone reports success ----
+// npm exits 0 even when the Windows program is skipped (it ships as an optional piece), leaving a launcher
+// that resolves on PATH and dies on spawn. Both halves are pure so this test never executes anything: what to
+// run (a launcher script cannot be executed directly on Windows - it goes through the command processor), and
+// what the run proved.
+{
+  const { claudeVerifyArgv, claudeVerifyOutcome } = win._internals;
+  ok('the runner exposes the post-install check', typeof win.verifyClaudeRuns === 'function');
+  ok('the check resolves the binary through the same resolver every spawn uses',
+    /function verifyClaudeRuns\(\)[\s\S]{0,200}?whichClaude\(\)/.test(require('fs').readFileSync(path.join(__dirname, '..', 'runners', 'win.js'), 'utf8')));
+  const shim = claudeVerifyArgv('C:\\Users\\X\\AppData\\Roaming\\npm\\claude.cmd');
+  ok('a launcher script runs through the command processor, never directly (it would fail to start at all)',
+    /cmd\.exe$/i.test(shim.file) && shim.args[0] === '/d' && shim.args[1] === '/s' && shim.args[2] === '/c'
+      && shim.args[3] === 'C:\\Users\\X\\AppData\\Roaming\\npm\\claude.cmd' && shim.args[4] === '--version');
+  const bare = claudeVerifyArgv('claude');
+  ok('a bare name (nothing resolved) also goes through the command processor', /cmd\.exe$/i.test(bare.file) && bare.args.includes('--version'));
+  eq('a real program is run directly', claudeVerifyArgv('C:\\x\\claude.exe'), { file: 'C:\\x\\claude.exe', args: ['--version'] });
+  const good = claudeVerifyOutcome(null, '2.1.7 (Claude Code)\n', '');
+  ok('a clean run reporting a version passes', good.ok === true && good.version === '2.1.7 (Claude Code)' && good.error === '');
+  const dead = claudeVerifyOutcome(Object.assign(new Error('Command failed'), { code: 1 }), '', 'Cannot find module\nnot recognized\n');
+  ok('a program that will not start fails, carrying the exit code and what it printed',
+    dead.ok === false && dead.version === '' && /exit 1/.test(dead.error) && /not recognized/.test(dead.error));
+  const silent = claudeVerifyOutcome(null, '   \n', '');
+  ok('a clean exit that printed no version is a failure too (the skipped-program case)', silent.ok === false && /no version/.test(silent.error));
+}
+
 console.log(`\nwin-runner (pure core): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

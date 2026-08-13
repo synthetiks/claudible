@@ -180,9 +180,27 @@ try {
       if (-not (Tool 'npm')) { Refresh-Path }
       if (-not (Tool 'npm')) { Emit 'error' 'npm not found - install Node first.'; exit 1 }
       Emit 'progress' 'npm install -g @anthropic-ai/claude-code ...'
-      & cmd /c 'npm install -g @anthropic-ai/claude-code 2>&1' | Out-Null   # cmd /c sidesteps PowerShell native-stderr quirks
-      if ($LASTEXITCODE -ne 0) { Emit 'error' 'npm install of Claude Code failed (see %USERPROFILE%\.claudible\logs).'; exit 1 }
+      # KEEP THE REASON. This used to throw npm's entire output away and judge the install by the exit code
+      # alone, so the two failures that actually happen were both invisible: a plain install error nobody could
+      # read, and - worse - an install that exits 0 with the Windows program skipped (it ships as an optional
+      # piece; npm skips it quietly and leaves a launcher that cannot start). Ask for the optional piece,
+      # keep every line in a log, and prove the result RUNS before reporting success.
+      $logDir = Join-Path $env:USERPROFILE '.claudible\logs'
+      New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+      $log = Join-Path $logDir 'claude-install.log'
+      $out = & cmd /c 'npm install -g @anthropic-ai/claude-code --include=optional --foreground-scripts 2>&1'   # cmd /c sidesteps PowerShell native-stderr quirks
+      $code = $LASTEXITCODE
+      $out | Out-File -FilePath $log -Encoding ascii
+      $tail = (($out | Select-Object -Last 3) -join ' ') -replace '[\r\n]+', ' '   # one line: the report channel is line-based
+      if ($code -ne 0) { Emit 'error' "npm install of Claude Code failed - $tail (full log: $log)"; exit 1 }
       Refresh-Path
+      $verOut = & cmd /c 'claude --version 2>&1'
+      $verCode = $LASTEXITCODE
+      if (($verCode -ne 0) -or (-not (Tool 'claude'))) {
+        $vt = (($verOut | Select-Object -Last 2) -join ' ') -replace '[\r\n]+', ' '
+        Emit 'error' "npm reported success but Claude Code will not start - $vt $tail (full log: $log)"
+        exit 1
+      }
       Emit 'done' 'Claude Code installed - sign in next.'
     }
 

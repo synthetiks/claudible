@@ -7460,7 +7460,9 @@ window.addEventListener('keydown', (e) => {
   async function installDep(id) {
     setSysPill(id, 'installing', 'installing…'); disableSysActs(true); setDepMsg(id, '');
     let r; try { r = await claudible.preflightInstall(id); } catch (e) { r = { ok: false, error: e && e.message }; }
+    if (r && r.needsSessionsClosed) r = await askCloseSessions(id, r);
     disableSysActs(false);
+    if (r && r.cancelled) { await refreshSystem(); setDepMsg(id, 'Left your sessions running — Claude Code was not changed.'); return; }   // re-render first, then say it: a fresh render drops row messages
     if (r && r.restartRequired) { restartNeeded = true; setSysPill(id, 'ready', 'installed'); setDepMsg(id, 'Installed. Claudible needs a quick restart to finish.'); const n = $('wiz-sys-next'); n.disabled = false; n.textContent = 'Restart now'; return; }
     if (!r || !r.ok) {
       setSysPill(id, 'error', 'failed');
@@ -7551,6 +7553,25 @@ window.addEventListener('keydown', (e) => {
   } catch {}
 })();
 
+// Installing or updating Claude Code replaces the very program every running session is using, and Windows
+// will not let that happen while those sessions hold it open — so main refuses and reports how many are
+// running instead of quietly producing a broken install. Ask, then retry carrying the answer. Shared by all
+// three buttons that install Claude Code (the System-check row, Install, Update); each still makes its own
+// first attempt, and this only handles the "close them first?" reply.
+// Returns the install result, or { ok:false, cancelled:true } when the person said no — a plain notice, not
+// an error: nothing failed and nothing was touched.
+async function askCloseSessions(id, r) {
+  const n = Number(r && r.sessions) || 0, busy = Number(r && r.busy) || 0;
+  const body = 'You have ' + (n === 1 ? '1 session running' : n + ' sessions running') + '. Claudible has to end '
+    + (n === 1 ? 'it' : 'them') + ' to replace Claude Code, then you can start again where you left off.'
+    + (busy ? ('\n\n' + (busy === 1 ? 'One of them is mid-turn — that turn stops.' : busy + ' of them are mid-turn — those turns stop.')) : '');
+  let go = false;
+  try { go = await confirmModal('Claudible needs to close your running sessions to update Claude Code', body, 'Close and update'); } catch { go = false; }
+  if (!go) return { ok: false, cancelled: true, error: '' };
+  try { return await claudible.preflightInstall(id, { closeSessions: true }); }
+  catch (e) { return { ok: false, error: (e && e.message) || 'install failed' }; }
+}
+
 // ---------- Connect Claude Code (topbar mascot button + auto-pop when a terminal finds no claude) ----------
 // Detect → install (preflight) → sign in (onboard:claude-login) → bring the terminal up (claude:connected).
 // Status via the FOCUSED claude:state probe (cheap — no gh network / 6-tool scan on every launch or poll tick).
@@ -7620,7 +7641,9 @@ window.addEventListener('keydown', (e) => {
   async function install() {
     act.disabled = true; busy.classList.remove('err'); busy.textContent = 'Installing Claude Code… (a minute or two)';
     let r; try { r = await claudible.preflightInstall('claude'); } catch (e) { r = { ok: false, error: e && e.message }; }
+    if (r && r.needsSessionsClosed) r = await askCloseSessions('claude', r);
     act.disabled = false;
+    if (r && r.cancelled) { busy.textContent = 'Left your sessions running — Claude Code was not changed.'; return; }
     if (r && r.ok) { busy.textContent = ''; render(); }
     else { busy.classList.add('err'); busy.textContent = 'Install failed: ' + installErrText(r && r.error) + ' — retry, or install it manually.'; }   // shared filter (R18): the third surface that used to show the raw exec-crash string
   }
@@ -7691,8 +7714,10 @@ window.addEventListener('keydown', (e) => {
   async function update(b) {
     b.disabled = true; busy.classList.remove('err'); busy.textContent = 'Updating Claude Code… (a minute or two)';
     let r; try { r = await claudible.preflightInstall('claude'); } catch (e) { r = { ok: false, error: e && e.message }; }
+    if (r && r.needsSessionsClosed) r = await askCloseSessions('claude', r);
     b.disabled = false;
     if (r && r.ok) { ccVer = ''; await loadVerForce(); await checkStale(); busy.textContent = ''; setDot(lastState); renderCenter(); }
+    else if (r && r.cancelled) { busy.textContent = 'Left your sessions running — Claude Code was not changed.'; }
     else { busy.classList.add('err'); busy.textContent = 'Update failed: ' + installErrText(r && r.error) + ' — retry, or update it manually.'; }
   }
   // Restart the foreground session on the current binary (resume → history kept). Guards: confirm if mid-turn,
