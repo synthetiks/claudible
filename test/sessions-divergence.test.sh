@@ -179,5 +179,40 @@ run_tag_case() (
 r=$(LOCAL_C="$LOCAL_C" run_tag_case)
 ok "$r" "1" "export stamps the exporting machine's tag (R11)"
 
+# --- Scenario 8: stale-identity self-heal. A reinstall mints a NEW machine identity, so this machine's own
+# earlier exports still carry the OLD one. When the branch copy under our own login is byte-identical to the
+# local transcript there is no fork to report — import must quietly re-stamp the row with the current identity,
+# or every one of the user's own sessions reads as "another of my machines" forever.
+run_restamp_case() (
+  TMP="$(mktemp -d)"
+  export HOME="$TMP"
+  mkdir -p "$TMP/bin"
+  printf '#!/usr/bin/env bash\necho tester\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
+  export PATH="$TMP/bin:$PATH"
+  export CLAUDIBLE_WS_KIND=repo CLAUDIBLE_WS_SLUG=testws CLAUDIBLE_PROJ=testproj
+  export CLAUDIBLE_SYNC_MIN_AGE=0 CLAUDIBLE_MACHINE_ID=machine-B
+  mkdir -p "$TMP/.claudible/repos/testws/.git"
+  # shellcheck disable=SC1090
+  source "$SCRIPT" status >/dev/null 2>&1
+  mkdir -p "$PROJ" "$WT/sessions/tester"
+  printf %s "$LOCAL_C" > "$PROJ/ID.jsonl"
+  [ -n "${MARK_FOREIGN:-}" ] && printf 'ID\n' > "$FSET"      # scenario 9: this transcript arrived from the branch
+  printf %s "$LOCAL_C" > "$WT/sessions/tester/ID.jsonl"      # identical content, so this is NOT a fork
+  printf "ID machine-A\n" > "$WT/sessions/tester/.machine-tags"   # stamped by our pre-reinstall identity
+  import_sessions >/dev/null 2>&1
+  d="CLEAR"; grep -qxF "ID" "$DDSET" 2>/dev/null && d="FLAGGED"
+  t="$(cut -d' ' -f2 < "$WT/sessions/tester/.machine-tags" 2>/dev/null)"
+  echo "$d $t"
+)
+r=$(LOCAL_C="$LOCAL_C" run_restamp_case)
+ok "$r" "CLEAR machine-B" "own-dir identical copy with a stale machine stamp is re-stamped, not nagged"
+
+# --- Scenario 9: the same layout, except the transcript ARRIVED from the branch (it is in the foreign set —
+# another of the user's machines wrote it and this one merely imported it). The stamp then names a machine that
+# is still alive, and claiming it would make a later rewrite here resolve as this machine's own compaction —
+# a real two-device fork silently swallowed. The stamp must be left exactly as it is.
+r=$(LOCAL_C="$LOCAL_C" MARK_FOREIGN=1 run_restamp_case)
+ok "$r" "CLEAR machine-A" "an imported copy keeps the stamp of the machine that actually exported it"
+
 echo "sessions-divergence: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

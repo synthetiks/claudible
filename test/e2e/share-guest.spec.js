@@ -72,6 +72,30 @@ test('host shares a live link; a real browser guest connects, is approved, and m
     // ---- guest: a REAL Playwright browser context (not another Electron window) navigating to that URL ----
     const guestContext = await guestBrowser.newContext();
     guestPage = await guestContext.newPage();
+
+    // Record what the session chip reads at the moment each server message ARRIVES — i.e. before the page's
+    // own handler processes it. A listener attached from a wrapped constructor is registered ahead of the
+    // page's onmessage, so the label captured alongside the first tracker push is the label the join
+    // actually displayed for the whole gap between admission and the host sending any session details.
+    await guestPage.addInitScript(() => {
+      window.__chipTrace = [];
+      const Native = window.WebSocket;
+      function Traced(url, protocols) {
+        const sock = protocols === undefined ? new Native(url) : new Native(url, protocols);
+        sock.addEventListener('message', (ev) => {
+          if (typeof ev.data !== 'string') return;
+          let kind = '';
+          try { kind = (JSON.parse(ev.data) || {}).type || ''; } catch (e) { return; }
+          const el = document.getElementById('sess-chip-text');
+          window.__chipTrace.push({ kind, label: el ? el.textContent : null });
+        });
+        return sock;
+      }
+      Traced.prototype = Native.prototype;
+      ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach((k) => { Traced[k] = Native[k]; });
+      window.WebSocket = Traced;
+    });
+
     await guestPage.goto(url);
 
     // name gate (share/guest.html #name-overlay / #name-in / #name-go)
@@ -90,6 +114,38 @@ test('host shares a live link; a real browser guest connects, is approved, and m
     await expect(guestPage.locator('#overlay')).not.toHaveClass(/show/, { timeout: 15000 });
     await expect(guestPage.locator('body')).toHaveClass(/connected/, { timeout: 10000 });
     await expect(guestPage.locator('#stxt')).toHaveText(/connected/i, { timeout: 10000 });
+
+    // The host pushes its tracker as soon as a viewer joins; until that lands the guest knows nothing about
+    // the session, so the chip must not have shown anything a viewer would read as the session's name.
+    await expect
+      .poll(async () => guestPage.evaluate(() => window.__chipTrace.some((e) => e.kind === 'status')), { timeout: 20000 })
+      .toBe(true);
+    const chipTrace = await guestPage.evaluate(() => window.__chipTrace);
+    const untilFirstStatus = chipTrace.slice(0, chipTrace.findIndex((e) => e.kind === 'status') + 1).map((e) => e.label);
+    expect(untilFirstStatus, 'the session chip showed a name-shaped label before the host sent any session details')
+      .not.toContain('live session');
+
+    // ---- guest: the session chip must never invent a name while it waits. The chip is painted the moment the
+    // socket is admitted, ~1s before the first status push carries the real session name; during that gap it
+    // must read as a wait state, never as a session called "live session". Sample it tightly from the instant
+    // we are connected until a real name lands (or the budget runs out), and fail on the first bad sample. ----
+    {
+      const chipText = guestPage.locator('#sess-chip-text');
+      const seen = [];
+      const chipDeadline = Date.now() + 10000;
+      let named = false;
+      while (Date.now() < chipDeadline && !named) {
+        const t = ((await chipText.textContent()) || '').trim();
+        // The first status push has landed once the chip is neither empty nor the neutral loading label. That
+        // sample is the FINAL label (a genuinely unnamed session legitimately settles on "live session" there),
+        // so it ends the sampling window rather than joining it — only the pre-push samples are judged.
+        if (t && t !== 'loading…') { named = true; break; }
+        if (t) seen.push(t);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(seen.filter((t) => t === 'live session'),
+        'the session chip showed a name-like placeholder before the first status push — samples: ' + JSON.stringify(seen)).toEqual([]);
+    }
 
     // The scrollback ring buffer replays on hello (share/server.js:398 `if (!paused && ring.length) ws.send
     // (ring)`) — the fake-claude shim's own boot banner should already be in it by the time we got here, so a

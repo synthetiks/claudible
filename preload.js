@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('claudible', {
   onboardInstallClaude: () => ipcRenderer.invoke('onboard:install-claude'),
   onboardClaudeLogin: () => ipcRenderer.invoke('onboard:claude-login'),
   onboardGhLogin: () => ipcRenderer.invoke('onboard:gh-login'),          // → { ok, code } — code shown in the wizard; success lands via the onboardStatus poll
+  // the one-time extra GitHub permission that repository deletion needs (GitHub keeps it separate from sign-in)
+  ghDeleteScope: () => ipcRenderer.invoke('workspace:ghDeleteScope'),    // → { ok, hasScope } — asked before the delete confirmation, and polled while the approval page is open
+  ghGrantDelete: () => ipcRenderer.invoke('workspace:ghGrantDelete'),    // → { ok, code } — starts the approval; success lands via the ghDeleteScope poll, not here
   // self-bootstrapping dependency provisioner (the "System check" wizard step)
   preflightStatus: () => ipcRenderer.invoke('preflight:status'),        // { runner, gitBash, deps: [{ id, label, hint, state, version, account, required, auth, authSoft, installable, restartOnInstall, requires }] }
   preflightInstall: (depId) => ipcRenderer.invoke('preflight:install', depId),   // → { ok, error, restartRequired }; progress streams via onProvision({dep,phase,msg})
@@ -130,9 +133,8 @@ contextBridge.exposeInMainWorld('claudible', {
   shareNewLink: () => ipcRenderer.invoke('share:newlink'),
   shareKick: (name) => ipcRenderer.invoke('share:kick', { name }),   // host removes one guest by name
   shareApprove: (id, ok) => ipcRenderer.invoke('share:approve', { id, ok }),
-  sharePause: (paused) => ipcRenderer.invoke('share:pause', { paused: !!paused }),   // B10/C-5.6: host Pause/Resume control
   shareSessionChanged: () => ipcRenderer.invoke('share:session-changed'),   // the shared conversation was cleared (/clear, /compact) — tell guests in their own chat instead of moving them silently
-  onSharePaused: (cb) => ipcRenderer.on('share:paused', (_e, p) => cb(p)),           // { paused, manual } — fires on EVERY pause transition, host-triggered or auto (private workspace)
+  onSharePaused: (cb) => ipcRenderer.on('share:paused', (_e, p) => cb(p)),           // { paused } — fires on every pause transition (the host moved into, or out of, a workspace that isn't shared)
   shareTracker: (s) => ipcRenderer.send('share:tracker', s),
   shareSendChat: (text) => ipcRenderer.send('share:chat-send', text),
   onShareChat: (cb) => ipcRenderer.on('share:chat', (_e, m) => cb(m)),

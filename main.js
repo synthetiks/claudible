@@ -60,11 +60,6 @@ function fgRec() { return ptys.get(fgTabId) || null; }
 // attribution) — but everything guests can see or drive gates on the PIN, so the host can open and work in
 // any other session without a byte of it reaching a guest, while the shared session keeps streaming.
 let sharedTabId = null;
-// B10/C-5.6: the host's own explicit Pause control (share bar). Independent of isShareable(mirrorWs()) — a
-// manual pause must survive the host merely switching foreground tabs / workspaces (syncShare and respawnPty's
-// auto-derive both defer to this when it's set, via setSharePaused/derivePaused below), and clears on its own
-// only when the host clicks Resume or the share itself starts/stops.
-let manualPause = false;
 const _typUi = { name: '', ts: 0 };   // throttle for the host cockpit's "guest is typing" chip (share:typist)
 let _typHostTs = 0;                   // throttle for telling guests "the host is typing" (share.broadcastTypist)
 function mirrorTabId() { return sharedTabId || fgTabId; }   // pinned while sharing; follows focus otherwise (keeps the replay ring warm pre-share)
@@ -852,18 +847,16 @@ function spawnPty(tabId, cols, rows, ws, session) {
 // Claudible collaborator can watch the synced session live). The browsable LIBRARY below stays shared-only, so
 // turning on Sync never exposes your other synced workspaces to a web guest you handed a link to.
 function isShareable(ws) { return !!(ws && (ws.shared || ws.syncSessions)); }
-// B10/C-5.6: every auto-derived pause decision (syncShare, respawnPty, setForegroundTab) routes through this
-// instead of raw `!isShareable(ws)`, so a host's explicit manual Pause always wins over "this workspace happens
-// to be shareable" — otherwise the very next tab focus / workspace sync would silently un-pause behind the
-// host's back.
-function derivePaused(ws) { return manualPause || !isShareable(ws); }
-// The ONE place that calls share.setPaused — every call site (auto-derive AND the forced teardown freezes)
-// routes through here so the host's own Pause control always reflects reality, including transitions the
-// control didn't cause itself (e.g. the host tabbing into a private workspace auto-pauses the mirror).
+// Every pause decision (syncShare, respawnPty, setForegroundTab) routes through this one helper instead of a
+// raw `!isShareable(ws)`, so the rule stays in a single place: the mirror is frozen exactly while the workspace
+// on screen is not one the host shares.
+function derivePaused(ws) { return !isShareable(ws); }
+// The ONE place that calls share.setPaused — every call site (the derivation above AND the forced teardown
+// freezes) routes through here, so the host's cockpit always shows what the share server is really doing.
 function setSharePaused(p) {
   const v = !!p;
   try { share.setPaused(v); } catch {}
-  try { winSend('share:paused', { paused: v, manual: manualPause }); } catch {}
+  try { winSend('share:paused', { paused: v }); } catch {}
 }
 // The granted workspace library a guest is allowed to see (paths/urls stripped); marks which is live.
 function grantedList() {
@@ -875,7 +868,7 @@ function grantedList() {
 // and refresh the visible library. No-op when not sharing.
 function syncShare() {
   if (!share.status().running) return;
-  try { setSharePaused(derivePaused(mirrorWs())); } catch {}   // pause tracks the SHARED tab's workspace (or the host's manual override), so the host focusing a private tab can't pause (or unpause) the mirror
+  try { setSharePaused(derivePaused(mirrorWs())); } catch {}   // pause tracks the SHARED tab's workspace, so the host merely focusing a private tab can't pause (or unpause) the mirror
   try { share.setWorkspaces(grantedList()); } catch {}
   try { _pushHistoryToShare(); } catch {}                  // guests' Session-History feed follows the live workspace (share start / foreground / ws switches all route through here)
 }
@@ -1382,7 +1375,6 @@ ipcMain.handle('share:start', (e, opts) => {
       const { port, token } = await share.start({ readOnly: !!(opts && opts.readOnly), name: opts && opts.name });
       sharedTabId = fgTabId;                              // PIN: the tab being viewed at start IS the live session; the host is free to roam afterwards
       try { winSend('share:pinned', { tabId: sharedTabId }); } catch {}   // renderer mirrors THIS tab's tracker to guests from now on
-      manualPause = false;                                // a fresh share always starts unpaused/auto (B10) — share.start() itself already reset the server's own `paused`
       const fr0 = ptys.get(sharedTabId) || fgRec(); share.setSize(fr0 ? fr0.cols : 120, fr0 ? fr0.rows : 32);
       syncShare();                                        // tell guests the granted library + pause if the live ws is private
       let base = `http://127.0.0.1:${port}`, remote = false, note = null, localDns = true, reason = null;
@@ -1428,21 +1420,10 @@ ipcMain.handle('share:stop', async () => {
   // nulls it — that ordering (and the whole teardown) lives in stopLiveSharing(), shared with the quit path.
   stopLiveSharing();
   sharedTabId = null;                                    // UN-PIN: no live session → the idle mirror plumbing follows focus again
-  manualPause = false;                                   // B10: a manual pause must not outlive the share it belonged to
   try { winSend('share:pinned', { tabId: null }); } catch {}
   _lastRoster = [];
   _writeAllContexts();                                   // sharing ended → the hosting tab's context drops the "hosting" block (back to solo)
   return { ok: true };
-});
-// B10/C-5.6: the host's explicit Pause/Resume control. Toggling flips `manualPause` and re-derives the real
-// pause state through the SAME helper every other pause decision uses — so a host who pauses while already on
-// a private workspace, or resumes while still on one, gets the correct combined result (and the share bar's
-// notify below fires either way, whatever the actual resulting state turns out to be).
-ipcMain.handle('share:pause', (e, arg) => {
-  if (!share.status().running) return { ok: false, error: 'not sharing' };
-  manualPause = !!(arg && arg.paused);
-  try { setSharePaused(derivePaused(mirrorWs())); } catch {}
-  return { ok: true, paused: share.status().paused };
 });
 // The shared conversation was cleared out from under the mirror (`/clear`, `/compact`, or any in-pty command
 // that starts a fresh session). The guests' terminal keeps streaming — the pty never changed — so without a
@@ -3702,6 +3683,91 @@ ipcMain.handle('onboard:gh-login', async () => {
   // 'gh:state-changed' (or its next open) picks up the real sign-in once gh finishes polling GitHub itself.
   if (r.ok) refreshGhStateCache();
   return r;
+});
+
+// ---- the one-time extra GitHub permission that repository deletion needs ---------------------------
+// GitHub deliberately keeps "delete a repository" behind its own separate permission, which a normal sign-in
+// does NOT grant — so the very first time someone deletes a repo from Claudible, the deletion would simply be
+// refused by GitHub with a message most people can do nothing with. These two handlers turn that dead end into
+// a guided step: check first, and if it's missing, run the same device-code approval the sign-in step uses.
+//
+// Read the permission scopes GitHub granted the signed-in CLI. The API echoes them back in a response header,
+// which is the cheapest and most exact source; if a token type doesn't carry that header, fall back to the
+// CLI's own account summary, which prints the same list. gh runs where the deps probe found it — inside WSL on
+// the wsl flavor (wsl.exe pass-through), on PATH otherwise (same idiom as the sign-in above).
+// An empty list, or the CLI's literal "none", is NOT "no permissions" — it is a sign-in that doesn't describe
+// itself this way at all (a fine-grained token, or one supplied through the environment). Those accounts can
+// hold repository-deletion rights that simply aren't listed here, so this answers "couldn't read it" rather
+// than inventing a "no": the difference decides whether the caller may block the delete.
+function ghScopeText() {
+  const usable = (v) => { const s = String(v || '').trim(); return (!s || /^none$/i.test(s)) ? '' : s; };
+  const run = (args) => new Promise((resolve) => {
+    const [cmd, argv] = runner.id === 'wsl' ? ['wsl.exe', ['--', 'gh', ...args]] : [process.platform === 'win32' ? 'gh.exe' : 'gh', args];
+    let child;
+    try { child = require('child_process').spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+    catch (e) { return resolve(''); }
+    let out = '';
+    const killTimer = setTimeout(() => { try { child.kill(); } catch {} }, 20000);
+    killTimer.unref && killTimer.unref();
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });   // the account summary prints to stderr; the header response to stdout — read both, decide on the text
+    child.on('error', () => { clearTimeout(killTimer); resolve(''); });
+    child.on('exit', () => { clearTimeout(killTimer); resolve(out); });
+  });
+  return run(['api', '-i', 'user']).then((t) => {
+    const m = /^x-oauth-scopes:\s*(.*)$/im.exec(t);
+    if (m && usable(m[1])) return usable(m[1]);
+    return run(['auth', 'status']).then((s) => { const n = /scopes:\s*(.*)$/im.exec(s); return n ? usable(n[1]) : ''; });
+  });
+}
+// Pre-flight, asked BEFORE the delete confirmation and again while the approval page is open (the renderer
+// polls this). Three answers, not two: granted, definitely missing, or UNREADABLE (`checked: false`) — the
+// last one must never be reported as "missing". Some sign-ins can delete repositories without ever listing it
+// here, and pushing those through an approval step they cannot complete would block a deletion that would
+// otherwise have worked. When we can't tell, the caller lets the deletion proceed and GitHub's own answer —
+// which the delete step already turns into a plain-language message — is the authority.
+ipcMain.handle('workspace:ghDeleteScope', async () => {
+  try {
+    const text = await ghScopeText();
+    return { ok: true, checked: !!text, hasScope: /\bdelete_repo\b/.test(text) };
+  } catch (e) { return { ok: false, checked: false, hasScope: false, error: (e && e.message) || 'could not check the GitHub permission' }; }
+});
+// The grant step itself — the same fire-and-watch device-code flow the GitHub sign-in uses: a non-TTY child
+// prints the one-time code up front and then polls GitHub in the background until the browser approval lands.
+// We show the code, pop the device page, and the child needs no input at all. Success is NOT detected here —
+// the renderer polls workspace:ghDeleteScope until the permission actually appears.
+let ghGrantProc = null;   // one in-flight grant child, ever — a second click while one polls is a no-op
+ipcMain.handle('workspace:ghGrantDelete', async () => {
+  if (ghGrantProc) return { ok: true, code: '' };                    // already waiting on the browser — renderer keeps its code on screen
+  const args = ['auth', 'refresh', '-h', 'github.com', '-s', 'delete_repo'];
+  const [cmd, argv] = runner.id === 'wsl' ? ['wsl.exe', ['--', 'gh', ...args]] : [process.platform === 'win32' ? 'gh.exe' : 'gh', args];
+  let child;
+  try { child = require('child_process').spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+  catch (e) { return { ok: false, error: (e && e.message) || 'could not start gh' }; }
+  ghGrantProc = child;
+  const drop = () => { if (ghGrantProc === child) ghGrantProc = null; };
+  child.on('exit', drop); child.on('error', drop);
+  const killTimer = setTimeout(() => { try { child.kill(); } catch {} }, 360000);   // same 6-min abandon budget as the sign-in step
+  killTimer.unref && killTimer.unref();
+  return await new Promise((resolve) => {
+    let out = '', err = '', done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    // Both streams are scanned: the permission step is chattier than the sign-in and puts its prompt text on
+    // whichever stream it considers "not output". The code is the only thing we take from that text.
+    const scan = () => {
+      const m = /one-time code:?\s*([A-Z0-9-]{6,})/i.exec(out + '\n' + err);
+      if (!m) return;
+      // ALWAYS the fixed, known device URL — never a URL parsed out of child output (a compromised PATH gh
+      // must not get to choose what we open).
+      try { require('electron').shell.openExternal('https://github.com/login/device'); } catch {}
+      finish({ ok: true, code: m[1] });
+    };
+    child.stdout.on('data', (d) => { out += d; scan(); });
+    child.stderr.on('data', (d) => { err += d; scan(); });
+    child.on('error', (e) => finish({ ok: false, error: (e && e.message) || 'could not start gh' }));
+    child.on('exit', (codeN) => finish(codeN === 0 ? { ok: true, code: '' } : { ok: false, error: (err || out || 'gh exited ' + codeN).trim().split('\n').slice(-2).join(' ').slice(0, 300) }));
+    setTimeout(() => finish({ ok: false, error: (err || out || 'gh printed no approval code in 20s').trim().split('\n').slice(-2).join(' ').slice(0, 300) }), 20000);
+  });
 });
 
 // ---- self-bootstrapping dependency provisioner (the System-check wizard step) ----------------------

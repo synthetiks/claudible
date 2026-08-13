@@ -27,11 +27,13 @@ function placeToast(t) {
   t.style.top = Math.round(r.top + 8) + 'px';
   t.style.maxWidth = Math.max(220, Math.round(Math.min(420, r.width - 24))) + 'px';   // never wider than the terminal it sits on
 }
-function toast(msg) {
+// `ms` overrides how long the message stays up. The default is deliberately long: the old 2.2s was gone before a
+// user who was looking at the terminal (not at the toast) could finish reading a full error sentence.
+function toast(msg, ms) {
   let t = $('toast');
   if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
   t.textContent = msg; placeToast(t); t.classList.add('show');
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms || 7200);
 }
 // a resize (or a panel opening) while a toast is up would strand it off the terminal's edge
 window.addEventListener('resize', () => { const t = $('toast'); if (t && t.classList.contains('show')) placeToast(t); });
@@ -172,6 +174,9 @@ const titleVal = (v) => (v && typeof v === 'object') ? (v.n || '') : (v || '');
 // Branch entries stamp SECONDS (python int(time.time()) parity); local renames stamp Date.now() ms.
 // Normalize everything to ms here so newest-wins comparisons are unit-safe.
 const titleTs = (v) => { const t = (v && typeof v === 'object') ? Number(v.ts) : 0; return t > 0 ? (t < 1e12 ? t * 1000 : t) : 0; };
+// The fields of a shared entry OTHER than the name/stamp (today: the continuation link) — returned only for a
+// real entry object, because a legacy bare string would spread into character-indexed keys and poison the map.
+const titleExtra = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : null;
 let workspaces = [], activeWsId = 'legacy';     // the sidebar library = the active tab's workspace
 let sidebarReady = false;                        // set true once the sessions/workspace section has initialized (TDZ guard for the boot tab)
 function AT() { return tabs.get(activeTabId) || null; }
@@ -680,7 +685,7 @@ claudible.onStatus((s) => {
       const tstamps = Object.assign({}, _pp.sessionTitleTs || {}); tstamps[s.sessionId] = Date.now();   // stamp the rename so global newest-wins can compare it against collaborators'
       saveSessionTitles(titles, tstamps);   // copy → mutable (cached map may be a frozen contextBridge object); bounded + evictable
       const _aw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace, not the sidebar's — a background tab resolving while you view another ws must gate + publish against ITS OWN repo
-      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = { n: nm, ts: tstamps[s.sessionId] }; try { claudible.titleSet(s.sessionId, nm, t.wsId).then((r) => { if (r && r.ok === false) toast('Named here — sharing the name failed, will keep retrying'); pollTitles(true); }).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators. R38: a failed publish was silent (the rename path already toasts this same line); the inverse reconciler keeps retrying either way
+      if (_aw && _aw.kind === 'repo') { remoteTitles[s.sessionId] = Object.assign({}, titleExtra(remoteTitles[s.sessionId]), { n: nm, ts: tstamps[s.sessionId] }); try { claudible.titleSet(s.sessionId, nm, t.wsId).then((r) => { if (r && r.ok === false) toast('Named here — sharing the name failed, will keep retrying'); pollTitles(true); }).catch(() => {}); } catch (e) {} }   // repo project → share the name with collaborators. R38: a failed publish was silent (the rename path already toasts this same line); the inverse reconciler keeps retrying either way
     }
     // KEEP THE NAME ACROSS A CLEAR. `/clear` mints a new session id, but to the person looking at it this is
     // the same window with its context emptied — they named that window, and dropping the name on every clear
@@ -699,7 +704,7 @@ claudible.onStatus((s) => {
         saveSessionTitles(ctitles, cts);
         const _cw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace (same rule as the rename path) — a background tab must publish against ITS OWN repo
         if (_cw && _cw.kind === 'repo') {
-          remoteTitles[s.sessionId] = { n: carried, ts: cts[s.sessionId] };
+          remoteTitles[s.sessionId] = Object.assign({}, titleExtra(remoteTitles[s.sessionId]), { n: carried, ts: cts[s.sessionId] });   // MERGE, don't replace: the shared entry also carries this session's continuation link, and clobbering it here would un-fold the superseded row until the next poll rebuilds it
           try { claudible.titleSet(s.sessionId, carried, t.wsId).then(() => pollTitles(true)).catch(() => {}); } catch (e) {}
         }
       }
@@ -711,6 +716,7 @@ claudible.onStatus((s) => {
     // on the new id in the same meta/<login>.json map title-set merges into — the generated INDEX.md is its
     // only consumer, so a failure here is cosmetic and must never toast or block the drift handling.
     if (driftFrom) {
+      saveSessionLineage(s.sessionId, driftFrom);   // LOCAL copy, deliberately ungated on workspace kind: a plain folder has no shared meta file to publish to, yet its sidebar must fold the emptied conversation away just the same — and this copy is on disk, so it still holds after a restart
       const _lw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace (same rule as the carry-over above)
       if (_lw && _lw.kind === 'repo') { try { claudible.lineageSet(s.sessionId, driftFrom, t.wsId).catch(() => {}); } catch (e) {} }
     }
@@ -1891,30 +1897,15 @@ function updateSessionCtrlBtn() {
   else if (amHostingLive()) { btn.style.display = ''; btn.textContent = 'End Session'; btn.title = 'End the live session for everyone'; }
   else { btn.style.display = 'none'; }
 }
-// B10/C-5.6: the host's Pause/Resume control — the missing entry point to the paused-mirror privacy feature.
-// Only the HOST of a live session sees it (a joiner never gets to pause someone else's mirror); the label and
-// aria-pressed state are the single source of truth for "am I paused right now", driven entirely by main's
-// share:paused pushes (claudible.onSharePaused below) — never guessed locally, since the pause can also flip
-// automatically (the host tabbing into a private workspace) without this control being clicked at all.
+// Is my outgoing mirror frozen right now? Never guessed locally — assigned only from main's share:paused push
+// (claudible.onSharePaused below), because the pause is automatic: it flips when the host tabs into a workspace
+// that isn't shareable, and back when they return. The live bar reads this to say "Paused" instead of "Live".
 let sharePaused = false;
-function updatePauseBtn() {
-  const btn = $('pause-btn'); if (!btn) return;
-  const show = amHostingLive();
-  btn.style.display = show ? '' : 'none';
-  if (!show) return;
-  btn.classList.toggle('active', sharePaused);
-  btn.textContent = sharePaused ? 'Resume' : 'Pause';
-  btn.title = sharePaused
-    ? 'Resume the live mirror — guests will see your terminal again'
-    : 'Pause the live mirror — nothing you type, and nothing a guest sends, will reach the other side until you resume';
-  btn.setAttribute('aria-pressed', sharePaused ? 'true' : 'false');
-}
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
   const hosting = amHostingLive();
   updateSessionCtrlBtn();                                            // host: "End Session" · joiner: "Leave Session" (mutually exclusive)
-  updatePauseBtn();                                                  // host only: Pause/Resume (B10/C-5.6)
   const you = document.createElement('span'); you.className = 'rmember you';
   you.dataset.name = youName();                                       // voice-state projection matches pills by this (textContent also holds the ✕ kick glyph)
   const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
@@ -1980,7 +1971,7 @@ async function terminateLive() {
 function endLiveNow(msg) {
   if (sharedSessionId) { sharedSessionId = null; sharedWsId = null; }
   if (webShare) { webShare = false; webShareUI(false); }
-  sharePaused = false; updatePauseBtn();                          // B10: a manual pause must not outlive the share it belonged to (mirrors main's manualPause reset on share:stop)
+  sharePaused = false;                                            // a pause must not outlive the share it belonged to (mirrors main's own reset when a share stops)
   try { if (hostVoice && hostVoice.isJoined && hostVoice.isJoined()) hostVoice.leave(); } catch {}   // R20: the host's own voice-room membership outlived the share — mic stayed hot and the next share inherited a ghost member; every guest path already drops voice on leave, the HOST's end paths never did
   guestCount = 0; lastRoster = []; hostChat.length = 0;            // drop viewers + WIPE the chat buffer so the panel/roster/live-bar clear AND a future share never revives this ended session's chat
   updateCollab(); updateAdvertise(); refreshCollabSurfaces(); refreshSessions(); refreshExpandedTrees();   // updateCollab→ensureTunnel drops the tunnel (closes guests). refreshSessions is ACTIVE-LIST-ONLY — without refreshExpandedTrees the ended session keeps its green rail + Live badge in any other project's open tree
@@ -2012,8 +2003,8 @@ function renderLiveBar() {
   // lands, match by session.)
   const onSharedTab = !!(t && t.kind !== 'live' && ((sharedTabIdR != null && t.tabId === sharedTabIdR) || (sharedSessionId && t.session === sharedSessionId)));
   bar.classList.remove('elsewhere');
-  // B10/C-5.6: sharePaused only ever reflects MY OWN outgoing share (never set on a joined/liveTab), so the
-  // control's state is obvious here too, not just on the #pause-btn label — same rule as the co-drive badge.
+  // sharePaused only ever reflects MY OWN outgoing share (never set on a joined/liveTab), so the live bar is
+  // where the host learns their mirror is frozen — same rule as the co-drive badge.
   bar.classList.toggle('paused', !liveTab && sharePaused);
   const liveTxt = $('live-txt'); if (liveTxt) liveTxt.textContent = (!liveTab && sharePaused) ? 'Paused' : 'Live';
   // …but a host browsing another session must still SEE that their live session is running. Hiding the bar
@@ -2056,10 +2047,10 @@ function renderLiveBar() {
   });
 }
 claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
-// B10/C-5.6: fires on EVERY pause transition — a manual click of #pause-btn, but just as often the host simply
-// tabbing into a private workspace (main's syncShare/respawnPty auto-derive it). Either way this is the ONLY
-// place sharePaused is assigned, so the control can never drift from what the share server is actually doing.
-if (claudible.onSharePaused) claudible.onSharePaused((p) => { sharePaused = !!(p && p.paused); updatePauseBtn(); renderLiveBar(); });
+// Fires on EVERY pause transition — the host tabbing into a private workspace and back (main's syncShare and
+// respawnPty derive it). This is the ONLY place sharePaused is assigned, so the live bar can never drift from
+// what the share server is actually doing.
+if (claudible.onSharePaused) claudible.onSharePaused((p) => { sharePaused = !!(p && p.paused); renderLiveBar(); });
 claudible.onCoauthorSkipped((p) => {   // C-10.6: a visible note instead of a silently fabricated Co-authored-by email
   const names = (p && Array.isArray(p.names)) ? p.names.filter(Boolean) : [];
   if (names.length) toast(`No known email/GitHub login for ${names.join(', ')} — left off commit co-authors`);
@@ -3293,15 +3284,6 @@ if (chatLog) chatLog.addEventListener('click', async (e) => {
   toast((r && r.ok) ? 'Message copied' : 'Could not copy — ' + humanError('clipboard'));
 });
 { const _term = $('chat-terminate'); if (_term) _term.addEventListener('click', () => { const t = AT(); if (t && t.kind === 'live') closeTab(t.tabId); else terminateLive(); }); }   // host → End Session (terminate for all); joiner → Leave Session (close the joined tab → back to single-person view)
-// B10/C-5.6: click just asks main to flip it — sharePaused itself is never set here, only from the
-// claudible.onSharePaused push below, so the button never claims a state main hasn't confirmed.
-{ const _pause = $('pause-btn'); if (_pause) _pause.addEventListener('click', () => {
-  _pause.disabled = true;
-  claudible.sharePause(!sharePaused)
-    .then((r) => { if (!r || !r.ok) toast('Could not change the pause state'); })
-    .catch(() => toast('Could not change the pause state'))
-    .finally(() => { _pause.disabled = false; });
-}); }
 // Append to a SPECIFIC buffer; only repaint if that buffer is the one currently on screen.
 function chatAppend(buf, entry, onScreen) { buf.push(entry); if (buf.length > 400) buf.shift(); if (onScreen) renderChatLog(); }
 function sendChat() {
@@ -3395,6 +3377,23 @@ function saveSessionTitles(titles, tstamps) {
     for (const id of ids.slice(MAX_TITLE_PREFS)) { delete titles[id]; delete tstamps[id]; }
   }
   savePrefs({ sessionTitles: titles, sessionTitleTs: tstamps });
+}
+// ---- bounded, evictable continuation links ------------------------------------------------------------
+// `sessionLineage` maps a continuation's id to the id it continued from. The shared meta file already carries
+// the same link, but ONLY for projects backed by a repo — a plain local folder has nowhere to publish it, and
+// even on a repo project the link would be unavailable until the next shared-name poll lands. Keeping a local
+// copy is what lets the sidebar fold an emptied conversation away immediately, and again after a restart.
+// Same unbounded-growth risk as the title maps, so the same treatment: keep the newest links, drop the rest.
+// Insertion order IS recency here — a link is written once, when the continuation is born, and never rewritten.
+const MAX_LINEAGE_PREFS = 500;
+function saveSessionLineage(childId, parentId) {
+  if (!childId || !parentId || childId === parentId) return;   // a self-link would make the sidebar hide a row because of itself
+  const m = Object.assign({}, loadPrefs().sessionLineage || {});   // copy: the cached prefs object may be frozen
+  if (m[childId] === parentId) return;                             // no write when nothing changed
+  delete m[childId]; m[childId] = parentId;                        // re-insert last so the cap below treats it as the newest
+  const ids = Object.keys(m);
+  if (ids.length > MAX_LINEAGE_PREFS) for (const id of ids.slice(0, ids.length - MAX_LINEAGE_PREFS)) delete m[id];
+  savePrefs({ sessionLineage: m });
 }
 // A deleted session's id can never recur — drop its name so settings.json doesn't carry it forever.
 function forgetSessionTitle(id) {
@@ -3998,7 +3997,7 @@ async function pollTitles(force) {
   if (!m || typeof m !== 'object') m = {};
   const sig = JSON.stringify(Object.entries(m).sort());
   if (sig === titlesSig) return;
-  titlesSig = sig; remoteTitles = m;
+  titlesSig = sig; remoteTitles = m;   // the whole per-id entry is kept, not just name+stamp — that is how a continuation link recorded on ANOTHER machine reaches this sidebar's fold
   try { const c = Object.assign({}, loadPrefs().remoteTitlesCache || {}); c[myWs] = m; savePrefs({ remoteTitlesCache: c }); } catch (e) {}   // warm cache → next open shows these shared names instantly (sessTitle reads it before pollTitles lands)
   // GLOBAL newest-wins reconcile: a collaborator's NEWER rename (branch ts beats my local rename's ts)
   // replaces my local override, so every machine converges on the same name — the old behavior kept each
@@ -4869,6 +4868,11 @@ async function openDivergedInfo(s) {
   refreshSessions();
 }
 let _sessSig = '';
+// "The list came back empty" is only believed on the SECOND answer when the sidebar is currently showing real
+// rows — see the empty-list branch below. One timer for the whole app (a re-check can never stack), plus the set
+// of workspaces whose re-check is already pending/spent, so a project that truly emptied still paints its notice.
+let _sessRecheckTimer = null;
+const _sessEmptyRechecked = new Set();
 async function refreshSessions() {
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;              // a rename input is focused → defer the whole refresh so a background poll can't wipe the in-progress edit; commit() re-runs refreshSessions when done
   if (sdrag && sdrag.moved) return;                                                // a row drag is in progress → defer: a mid-drag rebuild would orphan the dragged row's DOM node and reinsert a stale (pre-refresh) element into the fresh list; onSessPointerUp re-runs refreshSessions
@@ -4902,6 +4906,35 @@ async function refreshSessions() {
   // its clean "New session" draft row to an ugly saved "(empty session)" row (the "new project shows an
   // (empty session)" bug). Such a tab renders as its own DRAFT · UNSAVED row via `liveTabs` instead.
   list = list.filter((s) => (s.msgs || 0) > 0 || hasExplicitTitle(s.id));   // a NAMED session always shows — naming is deliberate, stub-hiding is for accidental fork artifacts (the "my new session zzz never appeared for him" bug: it synced fine, this filter ate it)
+  // FOLD AWAY A CONVERSATION THAT HAS BEEN CONTINUED. `/clear` mints a new session id, so a window the user
+  // named once ends up as TWO rows wearing the same name: the emptied-out original sitting next to the one
+  // they are actually in. Each continuation records the id it continued from — locally for every project, and
+  // in the shared entry for repo projects, so the other machine folds too — so walk each row's chain of
+  // ancestors and drop them. Two hard rules. An ancestor is dropped ONLY when the row that continues it is
+  // itself in this list: never hide a parent whose continuation isn't on screen, or the conversation would
+  // disappear entirely. And a visited set bounds the walk, so a corrupted self- or circular link can't spin
+  // the sidebar forever. Folding is a LIST decision only: the transcript stays on disk and keeps syncing.
+  // Done BEFORE the cache write below so what is cached is exactly what is painted.
+  {
+    const lineage = loadPrefs().sessionLineage || {};
+    const present = new Set(list.map((s) => s.id));
+    const superseded = new Set();
+    for (const s of list) {
+      const seen = new Set([s.id]);
+      let cur = s.id;
+      for (;;) {
+        const shared = titleExtra(remoteTitles[cur]);
+        const parent = lineage[cur] || (shared ? shared.cf : null);
+        if (typeof parent !== 'string' || !parent || seen.has(parent)) break;
+        seen.add(parent);
+        if (present.has(parent)) superseded.add(parent);
+        cur = parent;
+      }
+    }
+    if (superseded.size) list = list.filter((s) => !superseded.has(s.id));
+  }
+  const lastGood = _wsSessCache.get(myWs);                                          // what this project last listed successfully — READ BEFORE the overwrite below, because the empty-list branch needs to know whether a populated list preceded this answer
+  if (list.length) _sessEmptyRechecked.delete(myWs);                                // rows are back → a future blank answer earns its own single re-check
   _wsSessCache.set(myWs, { list, ts: Date.now() });                                 // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash) — keyed by the SAME id the fetch was scoped to, so it can never hold another workspace's rows
   const savedIds = new Set(list.map((s) => s.id));
   // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row — but ONLY for a session
@@ -4932,6 +4965,22 @@ async function refreshSessions() {
     return t;
   })();
   if (!list.length && !liveTabs.length && !joinedLive.length && !orphanTab) {
+    // KEEP THE LAST GOOD LIST PAINTED THROUGH A REFRESH. A blank answer that lands while real rows are on screen,
+    // for a project we already know has sessions, is nearly always a read taken mid-rewrite (a sync just replaced
+    // the store on disk) — not a project that emptied. Painting the empty notice over a full sidebar was the
+    // "all my sessions disappeared for a second" flash. Same shape as the typed-failure guard above: keep what's
+    // painted, re-check ONCE quietly, and believe the second answer either way. A genuinely cold list (no cached
+    // rows, nothing rendered) still paints the notice immediately.
+    const hadRows = !!(lastGood && Array.isArray(lastGood.list) && lastGood.list.length);
+    const painted = !!(sessListEl && sessListEl.querySelector('.sess'));
+    if (hadRows && painted && !_sessEmptyRechecked.has(myWs)) {
+      _wsSessCache.set(myWs, lastGood);                                             // don't let the blank answer evict the last good list — the switch pre-fill and the project tree paint from it
+      _sessEmptyRechecked.add(myWs);                                                // the re-check's answer is final for this project
+      if (!_sessRecheckTimer) _sessRecheckTimer = setTimeout(() => { _sessRecheckTimer = null; refreshSessions(); }, 1500);   // exactly one re-check in flight, ever — re-checks must never stack
+      return;
+    }
+    _sessEmptyRechecked.delete(myWs);
+    _wsSessCache.delete(myWs);                                                      // believed: this project really is empty, so nothing should keep serving its old rows
     sessListEl.innerHTML = '<div class="sess-empty">No saved sessions yet. Start working and it’ll show up here.</div>';
     return;
   }
@@ -5437,7 +5486,7 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
   };
   const c = _wsSessCache.get(w.id);
   if (c) fill(c.list); else if (!kids.querySelector('.sess')) { const l = document.createElement('div'); l.className = 'sess-empty'; l.textContent = 'loading…'; kids.appendChild(l); }   // no "loading…" flash over rows we're merely refreshing (busted cache but the list is still on screen)
-  if ((!c || Date.now() - c.ts > 4000) && !_wsSessFetching.has(w.id)) {   // skip if a fetch for this ws is already in flight
+  if ((!c || c.stale || Date.now() - c.ts > 4000) && !_wsSessFetching.has(w.id)) {   // a cache marked out-of-date by a sync must refetch NOW even if it was written seconds ago — its rows are painted only to avoid a blank tree while the fresh list lands. Skip if a fetch for this ws is already in flight
     _wsSessFetching.add(w.id);
     claudible.sessionListWs(w.id)
       .then((list) => {
@@ -6233,16 +6282,93 @@ async function confirmDeleteWorkspace(w) {
   });
   if (choice === 'delete' || choice === 'trash') deleteWorkspace(w);
 }
-// The one truly irreversible option: deletes the GitHub repo itself (needs the gh CLI's delete_repo scope, which
-// most tokens don't carry by default). Guarded by typing the exact repo name — the same "type to confirm" bar
-// GitHub's own UI sets for this action — checked here AND again by main (workspace:deleteFromGithub) before it
-// ever shells out to `gh repo delete`.
+// GitHub keeps "delete a repository" behind its own separate permission that an ordinary sign-in does NOT
+// grant, so the first delete used to die on GitHub's own refusal with nothing the user could act on. This
+// modal asks for that permission at the moment it's needed: Grant starts the approval, the one-time code is
+// shown large with a Copy button, and the browser page opens on github.com. Nothing here confirms the
+// deletion — it only resolves true once the permission is really in place (we keep re-checking, rather than
+// trusting the approval page), or false if the user cancels or walks away.
+function grantGithubDeletePermission() {
+  if (pttCapturing) stopCapture();                                   // a modal cancels any in-progress PTT rebind — else the capture-phase keydown eats the modal's Escape/keys
+  return new Promise((resolve) => {
+    const back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+    const box = document.createElement('div');
+    box.style.cssText = 'min-width:330px;max-width:440px;padding:20px;border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 24px 64px rgba(0,0,0,.6);color:#e7eaef;font-family:inherit';
+    const h = document.createElement('div'); h.textContent = 'One-time GitHub permission'; h.style.cssText = 'font-size:15px;font-weight:650;margin-bottom:8px';
+    const bd = document.createElement('div');
+    bd.textContent = 'Deleting a GitHub repo needs a one-time extra permission. Click Grant — you’ll approve it on github.com.';
+    bd.style.cssText = 'font-size:12.5px;line-height:1.5;color:#aab2bd;margin-bottom:14px;white-space:pre-wrap';
+    const codeRow = document.createElement('div'); codeRow.style.cssText = 'display:none;align-items:center;gap:10px;margin-bottom:12px';
+    const code = document.createElement('div'); code.style.cssText = 'font-size:24px;font-weight:700;letter-spacing:3px;color:#e7eaef;font-family:ui-monospace,Menlo,Consolas,monospace';
+    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy';
+    copy.style.cssText = 'font:inherit;font-size:12px;padding:6px 12px;border:1px solid var(--hairline);border-radius:9px;cursor:pointer;color:#cfd6df;background:#191c22';
+    codeRow.appendChild(code); codeRow.appendChild(copy);
+    const status = document.createElement('div'); status.style.cssText = 'font-size:12px;line-height:1.5;color:#8a929d;margin-bottom:14px;min-height:16px';
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+    cancel.style.cssText = 'font:inherit;font-size:12.5px;padding:8px 14px;border:1px solid var(--hairline);border-radius:9px;cursor:pointer;color:#cfd6df;background:#191c22';
+    const grant = document.createElement('button'); grant.type = 'button'; grant.textContent = 'Grant';
+    grant.style.cssText = 'font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #3a6b52;border-radius:9px;cursor:pointer;color:#dff3e8;background:rgba(95,180,135,.18)';
+    row.appendChild(cancel); row.appendChild(grant);
+    box.appendChild(h); box.appendChild(bd); box.appendChild(codeRow); box.appendChild(status); box.appendChild(row);
+    let poll = null, deadline = null, flight = false;
+    const close = (v) => {
+      if (poll) { clearInterval(poll); poll = null; }
+      try { back.remove(); } catch {}
+      document.removeEventListener('keydown', onKey, true);
+      resolve(v);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
+    copy.addEventListener('click', () => {
+      try { navigator.clipboard.writeText(code.textContent); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1500); } catch (err) {}
+    });
+    cancel.addEventListener('click', () => close(false));
+    grant.addEventListener('click', async () => {
+      if (flight) return;                                             // one approval in flight — a double-click must not start a second
+      flight = true; grant.disabled = true; status.textContent = 'Starting…';
+      let r; try { r = await claudible.ghGrantDelete(); } catch (e) { r = { ok: false, error: e && e.message }; }
+      if (!r || !r.ok) { flight = false; grant.disabled = false; status.textContent = 'Couldn’t start the approval: ' + ((r && r.error) || 'unknown') + ' — try again, or Cancel.'; return; }
+      if (r.code) { code.textContent = r.code; codeRow.style.display = 'flex'; }
+      status.textContent = 'Enter this code on the GitHub page that just opened. Waiting for your approval…';
+      // Poll for the permission itself rather than believing the browser step finished — the approval can be
+      // abandoned, retried in another tab, or granted to a different account, and only this answer is truth.
+      deadline = Date.now() + 360000;                                  // the same 6-minute budget the approval child gets
+      poll = setInterval(async () => {
+        let s = null; try { s = await claudible.ghDeleteScope(); } catch (e) {}
+        if (s && s.hasScope) return close(true);
+        if (Date.now() > deadline) {
+          clearInterval(poll); poll = null; flight = false; grant.disabled = false;
+          status.textContent = 'The approval didn’t come through. Try Grant again, or Cancel.';
+        }
+      }, 3000);
+    });
+    back.addEventListener('mousedown', (e) => { if (e.target === back) close(false); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(back); back.appendChild(box);
+  });
+}
+// The one truly irreversible option: deletes the GitHub repo itself. GitHub requires a separate permission for
+// this that a normal sign-in doesn't include, so the flow is: check for it up front → offer the one-time grant
+// if it's missing → only then the final, second warning, guarded by typing the exact repo name (the same
+// "type to confirm" bar GitHub's own UI sets) — checked here AND again by main (workspace:deleteFromGithub)
+// before it ever shells out to the delete.
+// The permission check runs FIRST, before any confirmation: asking someone to type a repo name and only THEN
+// failing on a missing permission is the dead end this whole flow exists to remove.
+// Only a DEFINITE "it's missing" opens the grant step. If the permission state can't be read at all, we carry
+// on to the confirmation instead: some sign-ins hold the right to delete without ever listing it (a
+// fine-grained token, or one supplied through the environment) and cannot complete the approval step at all,
+// so treating "don't know" as "missing" would lock those users out of a deletion that used to work. In that
+// case GitHub itself has the final say, and the delete step already turns its refusal into a message that
+// names the exact fix.
 async function confirmDeleteFromGithub(w) {
   const repoName = w.repoName || w.slug || w.label;
   const owner = w.owner || '';
+  let scope = null; try { scope = await claudible.ghDeleteScope(); } catch (e) {}
+  if (scope && scope.checked && !scope.hasScope) { const granted = await grantGithubDeletePermission(); if (!granted) return; }
   const typed = await modalPrompt({
     title: 'Delete "' + repoName + '" from GitHub',
-    body: 'This permanently deletes ' + (owner ? owner + '/' + repoName : repoName) + ' on GitHub for everyone, then removes the local copy too. This cannot be undone.\n\nType the repo name to confirm: ' + repoName,
+    body: 'This will delete this repository from GitHub — are you sure?\n\nIt permanently removes ' + (owner ? owner + '/' + repoName : repoName) + ' on GitHub for everyone, then removes the local copy too. This cannot be undone.\n\nType the repo name to confirm: ' + repoName,
     placeholder: repoName,
     ok: 'Delete from GitHub',
   });
@@ -6342,7 +6468,7 @@ async function sessionToOpenFor(wsId, targetSession, out) {
   // helper exists to prevent. One IPC on the cold path only; the result is cached, so the very repaint that
   // follows a switch gets real rows out of it instead of skeletons.
   let c = _wsSessCache.get(wsId);
-  if (!c || !Array.isArray(c.list) || !c.list.length) {
+  if (!c || c.stale || !Array.isArray(c.list) || !c.list.length) {   // `stale` = a sync landed changes since this list was read: resolve "what should this project open" from fresh rows, never from the pre-sync ones
     try {
       const list = await claudible.sessionListWs(wsId);
       if (Array.isArray(list)) { c = { list, ts: Date.now() }; _wsSessCache.set(wsId, c); }
@@ -6817,7 +6943,7 @@ claudible.onSyncState((s) => {
 });
 claudible.onSyncChanged((s) => {
   if (!s || !s.id) return;
-  _wsSessCache.delete(s.id);                                          // pulled changes are on disk now → any cached session list for this ws is stale; drop it so the switch-away pre-fill + non-active tree can't serve pre-sync rows
+  { const c = _wsSessCache.get(s.id); if (c) c.stale = true; }         // pulled changes are on disk now → this ws's cached list is out of date. MARK it instead of dropping it: it is still the last GOOD list, and the refresh that follows takes a second or more to answer — dropping it left the pre-fill and the non-active tree with nothing to paint but "loading…" over a sidebar that was full a moment ago. Every fetch path below treats a stale entry as needing a refetch and overwrites it, which clears the mark.
   if (s.id === activeWsId) { refreshSessions(); try { pollTitles(true); } catch (e) {} }   // a pull that changed anything also refreshes shared titles immediately (renames land on the next sync, not the next 20s poll)
   else {
     refreshWsSubtree(s.id);                                           // a non-active but EXPANDED project must update in place too — not only when you next switch into it

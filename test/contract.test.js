@@ -616,8 +616,26 @@ none('renderer: orphanTab is never rendered',
   // Scoped to toast()'s OWN body: `placeToast(t)` also appears in the resize listener, so a loose search for it
   // passes even when toast() has stopped calling it (it did, on first write of this check).
   none('the toast is no longer anchored to the terminal at show time',
-    /function placeToast[\s\S]{0,400}?getBoundingClientRect/.test(APP) && /function toast\(msg\)[\s\S]{0,300}?placeToast\(/.test(APP)
+    /function placeToast[\s\S]{0,400}?getBoundingClientRect/.test(APP) && /function toast\(msg[^)]*\)[\s\S]{0,300}?placeToast\(/.test(APP)
       ? [] : ['placeToast is missing, or toast() no longer calls it']);
+  // A toast is often the ONLY place an error sentence is ever shown, and the reader is usually looking at the
+  // terminal, not at the toast. 2.2s was gone before a full sentence could be read; the default is now ~7s, with
+  // a per-call override for anything that needs to be shorter or longer.
+  none('the toast dismisses too fast to finish reading an error sentence',
+    /setTimeout\([^;]*?remove\('show'\),\s*ms \|\| 7200\)/.test(APP) && !/remove\('show'\),\s*2200\)/.test(APP)
+      ? [] : ['toast() does not dismiss on `ms || 7200`']);
+  // The toast floats over the terminal, so its edge must be SEEN, not merely felt — the faint seam token is for
+  // regions that separate by background step, and on a floating box it read as no border at all.
+  none('the toast border went back to the felt-not-seen seam (it floats — its edge must be visible)',
+    /var\(--hairline\)/.test(toastRule) ? ['.toast borders with var(--hairline)'] : []);
+  // Stepped off the body token (+8%), not written as a raw px: a literal here would re-open the ad-hoc type
+  // sizes the scale replaced, and the raw-px check above would fail.
+  none('the toast text dropped back to body size (error wording reads a notch larger)',
+    /font-size:calc\(var\(--fs-sm\) \* 1\.08\)/.test(toastRule) ? [] : ['.toast is not stepped up off --fs-sm']);
+  // …and the fix must stay SCOPED to the toast: widening the shared seam token would put a hard line around
+  // every region in the app.
+  none('the shared seam token was widened instead of the toast being fixed in place',
+    /--hairline:rgba\(255,255,255,\.05\);/.test(HTML) ? [] : ['the --hairline token is no longer rgba(255,255,255,.05)']);
 
   // ── SELECTION IS NEUTRAL ────────────────────────────────────────────────────────────────────────────────
   // Selected ≠ alert. Projects were Claude-orange and sessions were --live red; both now read from --sel.
@@ -979,6 +997,21 @@ none('renderer: orphanTab is never rendered',
     /&& tag_write "\$id"/.test(SYNC) ? [] : ['tag_write not called on export']);
   none('the own-compaction gate ignores the machine tag again (R11 — own-device forks masked)',
     /\[ "\$_own" -eq 1 \] && \{ _tid="\$\(tag_of "\$id"\)"; \[ -z "\$_tid" \] \|\| \[ "\$_tid" = "\$MID" \]; \}/.test(SYNC) ? [] : ['the _own gate must consult tag_of vs MID']);
+  // Reinstalling mints a new machine identity, so this machine's own earlier exports carry a dead one. Where the
+  // branch copy under our own login is byte-identical there is no fork to report, and import must re-claim the
+  // row for this machine — otherwise every self-authored session reads as another device's copy forever.
+  none('the identical own-dir branch no longer re-claims a stale machine stamp (self-authored sessions read as another device forever)',
+    /if cmp -s "\$f" "\$dest"; then\s*\n\s*\[ "\$_own" -eq 1 \] && tag_heal "\$id"/.test(SYNC) && /^tag_heal\(\) \{/m.test(SYNC)
+      ? [] : ['tag_heal must be defined and called in the identical own-dir branch']);
+  // The re-claim is only ever safe for a transcript this machine wrote itself. An id that arrived from the
+  // branch keeps its exporter's stamp: claiming it would make the own-compaction gate above read a genuine
+  // second-device fork as this machine's own rewrite and resolve it silently, which is the exact masking the
+  // stamp exists to prevent. So: exactly one call site, and the foreign-set guard inside.
+  const HEAL = SYNC.slice(SYNC.indexOf('tag_heal() {'), SYNC.indexOf('# --- ensure the sessions worktree'));
+  none('the stale-stamp re-claim escaped its own-transcript limits (a live second device\'s copy could be claimed)',
+    [(SYNC.match(/tag_heal "\$id"/g) || []).length === 1 ? '' : 'tag_heal must be called from exactly one branch (the identical own-dir one)',
+     /grep -qxF -- "\$1" "\$FSET" 2>\/dev\/null && return 0/.test(HEAL) ? '' : 'tag_heal must refuse ids recorded in the foreign set',
+     HEAL.indexOf('"$FSET"') < HEAL.indexOf('tag_write') ? '' : 'the foreign-set guard must run before the re-stamp'].filter(Boolean));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1822,6 +1855,17 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the vertical frame around the terminal was not tightened / re-balanced',
     /\.wrap\{[^}]*padding:11px 14px 3px/.test(gflat) && /#terminal\{[^}]*padding:5px 12px/.test(gflat)
       ? [] : ['the .wrap / #terminal vertical padding is not the tightened, top-weighted pair']);
+  // A just-admitted guest has no session details yet — the host's first tracker push is ~1s behind the
+  // admission. Whatever fills the chip in that gap must read as plainly temporary; a generic name-shaped
+  // label settles like a real session name and then changes under the viewer. Scoped to the admission
+  // branch so the settled-state fallback below keeps its own generic wording.
+  const helloBranch = (GUEST_JS.match(/msg\.type === 'hello'[\s\S]*?msg\.type === 'pending'/) || [''])[0];
+  none('the just-admitted session chip paints a name-shaped placeholder instead of a loading label',
+    /ct\.textContent = 'loading…'/.test(helloBranch) && !/live session/.test(helloBranch)
+      ? [] : ['the admission path does not set a neutral loading label on the empty session chip']);
+  none('…and the settled label lost its fallback for a genuinely unnamed session',
+    /s\.session \|\| 'live session'/.test(GUEST_JS)
+      ? [] : ['the status handler no longer falls back to a generic label for an unnamed session']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -3408,6 +3452,51 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('the gh delete_repo scope hint is gone from delete-repo.sh (C-3.6)',
     /gh auth refresh -h github\.com -s delete_repo/.test(fs.readFileSync(path.join(ROOT, 'wsl', 'delete-repo.sh'), 'utf8'))
       ? [] : ['delete-repo.sh no longer tells the user how to grant the missing scope']);
+
+  // (2c-i) THE DEAD END: GitHub keeps repository deletion behind a separate permission that an ordinary
+  // sign-in does not grant, so the first delete always failed — after the user had already typed the repo
+  // name — on a refusal they could do nothing with. The flow now asks for the permission BEFORE it asks for
+  // any confirmation, and offers a one-click grant. Order is the whole fix: a pre-flight that runs after the
+  // typed-name prompt would restore the exact dead end.
+  const cdfg = (APP.match(/async function confirmDeleteFromGithub\(w\) \{[\s\S]*?\n\}\n/) || [''])[0];
+  none('confirmDeleteFromGithub is gone (C-3.6)', cdfg ? [] : ['confirmDeleteFromGithub not found']);
+  none('the GitHub delete-permission check no longer runs BEFORE the typed-name prompt (C-3.6)',
+    cdfg && cdfg.includes('claudible.ghDeleteScope(') && cdfg.indexOf('claudible.ghDeleteScope(') < cdfg.indexOf('modalPrompt(')
+      ? [] : ['the permission pre-flight is missing, or no longer precedes the typed-name prompt']);
+  none('the grant step is gone from the delete flow (C-3.6)',
+    /function grantGithubDeletePermission\(\)/.test(APP) && /claudible\.ghGrantDelete\(\)/.test(APP) && /claudible\.ghDeleteScope\(\)/.test(APP)
+      ? [] : ['no grant modal, or it no longer polls the permission it asked for']);
+  // ...and the OTHER half of that order fix: "couldn't read the permission" is not "the permission is
+  // missing". A sign-in that never lists its permissions (a fine-grained token, or one handed over through the
+  // environment) can still be allowed to delete, and cannot complete the approval step at all — so a check
+  // that can't tell must let the deletion continue to GitHub's own answer, not stand in front of it. Reading
+  // "unknown" as "missing" would turn this fix into a NEW dead end for those accounts.
+  none('an unreadable permission answer now blocks the delete instead of letting GitHub answer (C-3.6)',
+    cdfg && /scope\.checked && !scope\.hasScope/.test(cdfg)
+      ? [] : ['the grant step is offered even when the permission state could not be read']);
+  const scopeH = (MAIN.match(/ipcMain\.handle\('workspace:ghDeleteScope'[\s\S]*?\n\}\);\n/) || [''])[0];
+  none('the permission check stopped saying whether it could read the answer at all (C-3.6)',
+    scopeH && /checked: !!/.test(scopeH)
+      ? [] : ['workspace:ghDeleteScope no longer distinguishes "missing" from "could not read"']);
+  // (2c-ii) SECOND WARNING: the choice modal's "Delete from GitHub" option is warning #1; the typed-name
+  // prompt must lead with the second, in plain words, before it asks for the name.
+  none('the second delete-from-GitHub warning no longer precedes the typed-name confirm (C-3.6)',
+    cdfg && cdfg.includes('delete this repository from GitHub')
+      && cdfg.indexOf('delete this repository from GitHub') < cdfg.indexOf('Type the repo name to confirm')
+      ? [] : ['the second warning sentence is missing, or no longer comes before the typed-name line']);
+  // (2c-iii) Same security rule the sign-in device flow is pinned to above: the grant child prints text we
+  // read a CODE out of, and NOTHING else — the page we open is always the fixed device URL, never a URL the
+  // child chose. Exactly one openExternal in that handler, and it is the literal.
+  const grantH = (MAIN.match(/ipcMain\.handle\('workspace:ghGrantDelete'[\s\S]*?\n\}\);\n/) || [''])[0];
+  none('the delete-permission grant handler is gone (C-3.6)', grantH ? [] : ['workspace:ghGrantDelete not found']);
+  none('the delete-permission grant opens a child-supplied URL (must be the fixed device page)',
+    grantH && grantH.includes("shell.openExternal('https://github.com/login/device')") && (grantH.match(/openExternal\(/g) || []).length === 1
+      ? [] : ['ghGrantDelete does not open exactly the one fixed device URL']);
+  none('preload: the delete-permission bridges are missing (C-3.6)',
+    /ghDeleteScope: \(\) => ipcRenderer\.invoke\('workspace:ghDeleteScope'\)/.test(PRELOAD)
+      && /ghGrantDelete: \(\) => ipcRenderer\.invoke\('workspace:ghGrantDelete'\)/.test(PRELOAD)
+      ? [] : ['ghDeleteScope/ghGrantDelete are not bridged']);
+
   // The delegation now passes force=true, and MUST. The remote repo is already deleted by this point,
   // so the dirty/unpushed refusal cannot apply — there is nothing left to push to, and refusing would strand the
   // workspace registered against a repo that no longer exists. The typed-exact-name confirm IS the override.
@@ -4502,6 +4591,151 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(SESSSH) ? ['session.sh still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
   none('runners/win.js: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (a default must never override an explicit model choice)',
     /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(WIN) ? ['win.js still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// The sidebar keeps its last good session list painted through a refresh.
+//   Two ways a populated sidebar used to go blank for a second or more: (a) a sync dropped the cached list
+//   outright, so the pre-fill and the project tree had nothing to paint while the fresh list was being fetched
+//   (a shell + node round trip, not instant); (b) a list read taken while the store was being rewritten came
+//   back empty and painted the "no sessions" notice straight over real rows. The cache entry is now MARKED
+//   out of date instead of dropped, and an empty answer is only believed on a second, quiet re-check.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const handler = (APP.match(/claudible\.onSyncChanged\(\(s\) => \{[\s\S]*?\n\}\);/) || [''])[0];
+  none('renderer: the sync-changed handler could not be located (the two pins below would go vacuous)',
+    handler ? [] : ['onSyncChanged((s) => { ... }) not found in renderer/app.js']);
+  none('renderer: a sync DROPS the cached session list instead of marking it out of date (the sidebar blanks for the whole refresh)',
+    /_wsSessCache\.delete\(/.test(handler) ? ['onSyncChanged still calls _wsSessCache.delete('] : []);
+  none('renderer: the sync-changed handler no longer marks the cached session list as out of date',
+    /_wsSessCache\.get\(s\.id\)[\s\S]{0,200}?\.stale = true/.test(handler) ? [] : ['onSyncChanged does not set .stale = true on the cached entry']);
+  // The mark is only useful if every fetch path treats it as "refetch now" — otherwise a just-written cache
+  // entry would keep serving pre-sync rows to the non-active project tree until its age threshold expired.
+  none('renderer: the non-active project tree ignores the out-of-date mark (it would keep serving pre-sync rows)',
+    /if \(\(!c \|\| c\.stale \|\| Date\.now\(\) - c\.ts > \d+\)/.test(APP) ? [] : ['the subtree refetch condition does not consider c.stale']);
+
+  const fnAt = APP.indexOf('async function refreshSessions()');
+  const branchAt = APP.indexOf('if (!list.length && !liveTabs.length', fnAt);
+  const noticeAt = APP.indexOf('No saved sessions yet', branchAt);
+  none('renderer: refreshSessions / its empty-list branch / the empty notice could not be located (the pins below would go vacuous)',
+    fnAt > 0 && branchAt > fnAt && noticeAt > branchAt ? [] : [`fnAt=${fnAt} branchAt=${branchAt} noticeAt=${noticeAt}`]);
+  const body = APP.slice(fnAt, noticeAt);       // everything in refreshSessions BEFORE the notice is painted
+  const branch = APP.slice(branchAt, noticeAt); // the empty-list branch itself, up to the notice
+  none('renderer: refreshSessions no longer reads the previously cached list before overwriting it',
+    /const lastGood = _wsSessCache\.get\(myWs\);/.test(body) ? [] : ['no `const lastGood = _wsSessCache.get(myWs)` read ahead of the cache write']);
+  none('renderer: the empty-list branch paints its notice without consulting the last good cached list',
+    /lastGood/.test(branch) ? [] : ['the empty-list branch never references the last good cached list']);
+  none('renderer: the empty-list branch no longer requires rendered rows before keeping the current paint',
+    /sessListEl\.querySelector\('\.sess'\)/.test(branch) ? [] : ['the empty-list guard does not check for rendered .sess rows']);
+  none('renderer: the empty-list branch no longer schedules exactly one quiet re-check before believing an empty answer',
+    /setTimeout\(\(\) => \{[^\n]*refreshSessions\(\);[^\n]*\}, 1500\)/.test(branch) ? [] : ['no single delayed refreshSessions re-check found in the empty-list branch']);
+  none('renderer: the single-re-check flag can stack (the guard must skip scheduling while one is already pending)',
+    /if \(!_sessRecheckTimer\) _sessRecheckTimer = setTimeout\(/.test(branch) ? [] : ['the re-check is scheduled without a pending-timer guard']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 116. A CONTINUED CONVERSATION LEAVES ITS PREDECESSOR IN THE LIST. `/clear` mints a new session id, so the
+//   window the user named once becomes TWO sidebar rows wearing the same name — the emptied original beside
+//   the one they are actually in, indistinguishable and both clickable. The continuation link already exists;
+//   the sidebar just never used it. These pins hold the three pieces that make the fold work and keep it safe:
+//   the link is recorded LOCALLY (so a project with no repo behind it folds too, and the fold survives a
+//   restart), it travels with the shared names for the OTHER machine (strictly inside the opt-in branch, or
+//   test/port-parity.sh's byte comparison of the plain output breaks), and the list is folded BEFORE it is
+//   cached (or the warm cache and the paint disagree). Two guards are load-bearing and pinned individually:
+//   a predecessor is hidden only when its continuation is itself visible, and the ancestor walk is bounded.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const TOOL = read('wsl/sessions-sync-tool.js');
+  const fnAt = APP.indexOf('async function refreshSessions()');
+  const cacheAt = APP.indexOf('_wsSessCache.set(myWs,', fnAt);
+  none('renderer: refreshSessions / its list-cache write could not be located (the pins below would go vacuous)',
+    fnAt > 0 && cacheAt > fnAt ? [] : [`fnAt=${fnAt} cacheAt=${cacheAt}`]);
+  const pre = APP.slice(fnAt, cacheAt);   // everything refreshSessions does BEFORE it caches the list
+  none('renderer: the list is cached before superseded conversations are folded out (cache and paint would disagree)',
+    /const superseded = new Set\(\);/.test(pre) && /list = list\.filter\(\(s\) => !superseded\.has\(s\.id\)\);/.test(pre)
+      ? [] : ['no superseded set is built and filtered ahead of the _wsSessCache write']);
+  none('renderer: the fold reads only one source of the continuation link (local-only, or shared-only)',
+    /lineage\[cur\]/.test(pre) && /shared\.cf/.test(pre)
+      ? [] : ['the ancestor walk does not consult both the local map and the shared entry']);
+  none('renderer: a predecessor is hidden even when the row continuing it is not in the list (it would vanish outright)',
+    /if \(present\.has\(parent\)\) superseded\.add\(parent\);/.test(pre)
+      ? [] : ['no visibility guard before marking a predecessor superseded']);
+  none('renderer: the ancestor walk lost its cycle guard (a self- or circular link would hang the sidebar)',
+    /seen\.has\(parent\)/.test(pre) ? [] : ['no visited-set guard in the ancestor walk']);
+  // The link must be stored locally and UNGATED on workspace kind — the repo-only publish alone leaves every
+  // plain local project unfolded, and leaves even a repo project unfolded until the next shared-name poll.
+  none('renderer: the continuation link is no longer recorded locally (a project with no repo would never fold)',
+    /function saveSessionLineage\(/.test(APP) && /saveSessionLineage\(s\.sessionId, driftFrom\);/.test(APP)
+      ? [] : ['the drift handler does not persist the link outside the repo-gated publish']);
+  none('renderer: the local link map is unbounded (settings.json would carry every clear ever)',
+    /MAX_LINEAGE_PREFS/.test(APP) ? [] : ['no cap on the stored continuation links']);
+  // An optimistic name write must MERGE into the shared entry: replacing it drops the link and un-folds the
+  // predecessor row until the next poll. It must also survive a legacy bare-string entry (spreading a string
+  // would produce character-indexed keys).
+  none('renderer: an optimistic name write replaces the shared entry instead of merging (the link would be dropped)',
+    /remoteTitles\[s\.sessionId\] = Object\.assign\(\{\}, titleExtra\(remoteTitles\[s\.sessionId\]\)/.test(APP)
+      ? [] : ['a remoteTitles write still clobbers the whole entry']);
+  none('renderer: the merge helper accepts a legacy bare-string entry (it would spread into character keys)',
+    /const titleExtra = \(v\) => \(v && typeof v === 'object' && !Array\.isArray\(v\)\) \? v : null;/.test(APP)
+      ? [] : ['titleExtra does not restrict itself to real entry objects']);
+  // The shared read: `cf` inside the opt-in branch ONLY.
+  const trAt = TOOL.indexOf('function titleRead()');
+  const optInAt = TOOL.indexOf("if (process.env.CL_TS === '1') {", trAt);
+  const elseAt = TOOL.indexOf('} else {', optInAt);
+  const resAt = TOOL.indexOf('const result = obj([', elseAt);
+  none('the shared title read / its opt-in branch could not be located (the pins below would go vacuous)',
+    trAt > 0 && optInAt > trAt && elseAt > optInAt && resAt > elseAt ? [] : [`trAt=${trAt} optInAt=${optInAt} elseAt=${elseAt} resAt=${resAt}`]);
+  none('the opt-in shared title read no longer carries the continuation link (the other machine could never fold)',
+    /'cf'/.test(TOOL.slice(optInAt, elseAt)) ? [] : ['no cf key emitted in the opt-in branch']);
+  none('the continuation link leaked into the plain title read (its output must stay byte-identical)',
+    /cf/.test(TOOL.slice(elseAt, resAt)) ? ['the no-env branch emits a continuation link'] : []);
+  // One winner per id: the link has to be decided by the SAME newest-entry rule as the name, or a name from
+  // one author's file could be paired with a link from another's.
+  none('the continuation link is not decided by the same newest-entry rule as the name',
+    /best\.set\(i, \[ts, t, cf\]\);/.test(TOOL) ? [] : ['cf is not carried in the per-id winner tuple']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// THE PRIVACY PAUSE IS AUTOMATIC ONLY. There is no host-side Pause/Resume button and no renderer-driven way to
+// freeze the mirror: the mirror pauses exactly when the host moves onto a workspace that isn't shared, derived
+// in main. This block pins BOTH halves — the manual control stays gone (button, its IPC handler, its preload
+// bridge), and the automatic machinery it was bolted onto is still standing (the setSharePaused wrapper in
+// main, the share server's own `paused` gate). Deleting the button must never take the auto-pause with it.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const H = read('renderer/index.html'), A = read('renderer/app.js'), M = read('main.js'), PL = read('preload.js'), SRV = read('share/server.js');
+  none('a host-side pause button is back in the cockpit (the pause is automatic — a manual override would out-rank it)',
+    [/pause-btn/.test(H) ? 'renderer/index.html still references pause-btn' : '',
+     /pause-btn/.test(A) ? 'renderer/app.js still references pause-btn' : ''].filter(Boolean));
+  none('main.js accepts a renderer request to flip the pause state again',
+    /ipcMain\.handle\(\s*'share:pause'/.test(M) ? ['main.js still handles share:pause'] : []);
+  none('preload.js still bridges a manual pause call into main',
+    /sharePause\s*:/.test(PL) ? ['preload.js still exposes a sharePause bridge'] : []);
+  // …and the automatic half must survive: without these the removal above would have deleted the feature.
+  none('the automatic privacy pause was removed along with the button',
+    [/function setSharePaused\(/.test(M) ? '' : 'main.js no longer defines setSharePaused',
+     /setSharePaused\(/.test(M) ? '' : 'nothing in main.js calls setSharePaused',
+     /paused/.test(SRV) ? '' : "share/server.js no longer has a `paused` gate"].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// THE SESSION CHIP MUST NOT INVENT A NAME WHILE IT WAITS. On join, the guest paints the chip the moment the
+// socket is admitted, roughly a second before the first status push carries the real session name. That gap
+// used to be filled with the literal "live session", which reads like an actual session name rather than a
+// wait state, so a guest could screenshot a chip naming a session that does not exist. The admission handler
+// now paints a neutral loading label; the status path keeps its own unnamed-session fallback, which is a
+// FINAL state (a session that genuinely has no name) and is deliberately left alone.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const helloHandler = (GUEST_JS.match(/if \(msg\.type === 'hello'\) \{[\s\S]*?\} else if \(msg\.type === 'pending'\)/) || [''])[0];
+  none('the guest join handler was not found (this pin would go vacuous)',
+    helloHandler ? [] : ['could not isolate the hello branch of share/guest.js']);
+  none('the session chip still shows a name-like placeholder during the wait for the first status push',
+    [/ct\.textContent = 'loading…'/.test(helloHandler) ? '' : 'the join handler does not paint the neutral loading label',
+     /'live session'/.test(helloHandler) ? 'the join handler still assigns the literal "live session"' : ''].filter(Boolean));
+  // The final-state fallback is a separate code path and must survive untouched.
+  none('the unnamed-session fallback on the status path was removed along with it',
+    /s\.session \|\| 'live session'/.test(GUEST_JS) ? [] : ['the status path no longer falls back for a genuinely unnamed session']);
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

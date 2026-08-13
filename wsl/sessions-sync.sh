@@ -267,6 +267,21 @@ tag_write() {   # $1=id — record/replace this id's exporter as THIS machine
   { grep -v "^$1 " "$TAGF" 2>/dev/null || true; printf '%s %s\n' "$1" "$MID"; } > "$TAGF.tmp.$$" && mv -f "$TAGF.tmp.$$" "$TAGF" 2>/dev/null
 }
 tag_of() { grep -m1 "^$1 " "$TAGF" 2>/dev/null | cut -d' ' -f2; }
+tag_heal() {   # $1=id — our OWN author dir carries a stale stamp (another machine id) on a copy this machine
+  # agrees with: claim it now instead of letting it rot. Reinstalling mints a brand-new machine identity (the
+  # uninstaller used to wipe the identity file), and every session this user exported under the OLD id then read
+  # as "another of my machines" forever — a permanent false out-of-sync chip on the user's own transcripts.
+  # STRICTLY limited to transcripts this machine wrote itself: any id that ever arrived from the branch is
+  # recorded foreign for good, and re-claiming one of THOSE would assert "this machine exported it last" about
+  # another live machine's copy — which disarms the own-compaction gate below, so a genuine two-device fork
+  # would later resolve as silent self-compaction with no badge. Only called where the two copies are not a
+  # fork, so nothing in conflict is ever claimed. The rewritten tag file rides the pass's normal commit.
+  [ -n "$MID" ] || return 0
+  grep -qxF -- "$1" "$FSET" 2>/dev/null && return 0   # arrived from the branch → the stamp names its real exporter, leave it
+  local _t; _t="$(tag_of "$1")"
+  [ -n "$_t" ] && [ "$_t" != "$MID" ] && tag_write "$1"
+  return 0
+}
 
 # --- ensure the sessions worktree exists and tracks origin/claudible/sessions -----------------------------
 # R9: an interrupted git write — the runner SIGTERM-kills the wsl.exe wrapper on timeout (which never reaches
@@ -439,9 +454,14 @@ import_sessions() {
     if [ ! -e "$dest" ]; then                                       # new on the branch → import (untrusted, atomic)
       import_file "$f" "$dest" "$id" && { IMPORTED=$((IMPORTED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }; continue
     fi
-    if cmp -s "$f" "$dest"; then clear_diverged_run "$id"; continue; fi  # identical → leave trust status unchanged, resolve any fork flag
+    if cmp -s "$f" "$dest"; then
+      [ "$_own" -eq 1 ] && tag_heal "$id"                              # same bytes under our own login, never imported: a stale stamp is just a retired identity of ours → re-claim it
+      clear_diverged_run "$id"; continue                               # identical → leave trust status unchanged, resolve any fork flag
+    fi
     dsz="$(wc -c < "$dest" 2>/dev/null || echo 0)"
     if [ "$(wc -c < "$f")" -gt "$dsz" ] && head -c "$dsz" "$f" | cmp -s - "$dest"; then
+      # No stamp re-claim here on purpose: a branch copy that GREW past ours was extended somewhere else, so the
+      # stamp already names its true exporter — overwriting it would hand a live second machine's turns to this one.
       import_file "$f" "$dest" "$id" && { UPDATED=$((UPDATED+1)); CHANGED_IDS="$CHANGED_IDS $id"; clear_diverged_run "$id"; }   # remote = local + more turns → ff (now foreign)
     elif head -c "$(wc -c < "$f")" "$dest" | cmp -s - "$f"; then
       clear_diverged_run "$id"                                       # local is ahead of remote → our push handles it

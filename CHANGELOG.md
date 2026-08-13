@@ -4,6 +4,43 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.10] — 2026-08-13
+
+The responsiveness-and-truth release. The owners' first hands-on session on 0.9.9 surfaced seven
+issues in real daily use; each was diagnosed under the automated test harness — root cause named,
+fix reviewed independently, full suite green after every merge — before landing here. Still a
+pre-release: hardware confirmation of each fix is the last word.
+
+**Fixed**
+- **The sidebar no longer blanks while refreshing.** The session list used to vanish into a
+  "loading" state for several seconds every time a background refresh fired — the app was
+  discarding what it already knew, then repainting only after a slow fetch chain returned. The
+  last known list now stays on screen through every refresh, and an unexpectedly empty result is
+  re-checked before it is allowed to replace real rows.
+- **`/clear` no longer leaves a duplicate session in the sidebar.** Clearing a session carries its
+  name onto the fresh continuation; the superseded entry now folds away promptly instead of
+  sitting beside its successor with the same name — for the host and for collaborators alike.
+- **Guests never see a placeholder session name.** Joining a live session could briefly show a
+  literal "live session" label if the name arrived a beat after the connection. The guest view now
+  holds a neutral loading label until the real name lands.
+- **Your own sessions no longer show "out of sync" after a reinstall.** Reinstalling minted a new
+  identity for the computer, which made every session it had previously synced look like another
+  machine's copy — permanently flagged. Copies that are identical or simply behind are now
+  recognized as this computer's own and quietly reclaimed; only genuine content conflicts warn.
+  Identity tagging on native Windows, which silently failed to stamp exports, is fixed as part of
+  the same repair.
+- **Deleting a GitHub repository now walks you through the one-time permission it needs.** The
+  app checks your GitHub token up front; if the delete permission is missing, an in-app step runs
+  the grant for you — showing the one-time code with a copy button and opening the approval page —
+  then asks one final, explicit "this will delete the repository from GitHub — are you sure?" with
+  the existing type-the-name confirmation before anything runs. Collaborators keep the separate
+  "delete only locally" option, which needs no permission at all.
+- **Error messages are readable now.** They stay on screen more than three times longer, carry a
+  visible outline so they no longer blend into the terminal, and their text is proportionally
+  larger on every surface where errors appear.
+- **The redundant pause button is gone from live sessions.** Hosts keep the voice and end-session
+  controls; the automatic pause that protects private projects during tab switches is untouched.
+
 ## [0.9.9] — 2026-08-12
 
 The hardening release. After 0.9.8's hardware session, two machine-driven audits swept the entire

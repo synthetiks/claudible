@@ -524,7 +524,7 @@ function titleRead() {
     return dflt;
   };
 
-  // best: id -> [ts, title]; iteration order preserved via Map (== file/path order, like python)
+  // best: id -> [ts, title, continuation]; iteration order preserved via Map (== file/path order, like python)
   const best = new Map();
   for (const p of paths) {
     let d;
@@ -538,6 +538,11 @@ function titleRead() {
       if (v === null || typeof v !== 'object' || !v.__pairs) continue; // not a dict -> skip
       let ts = getKey(v, 'ts', 0);
       const t = getKey(v, 'title', '');
+      // The id this session continued from, when the entry records one. Carried alongside the name so it is
+      // decided by the SAME newest-entry-wins rule below — one winner per id, never a name from one author's
+      // file paired with a link from another's. A non-string (or absent) value is simply no link.
+      let cf = getKey(v, 'continuesFrom', null);
+      if (typeof cf !== 'string' || !cf) cf = null;
       // python: isinstance(ts,(int,float)) — bool is an int subclass there, so booleans pass too
       // (True acts as 1, False as 0 in the > comparison). Mirror that exactly.
       if (typeof ts === 'boolean') ts = ts ? 1 : 0;
@@ -547,17 +552,20 @@ function titleRead() {
       // seconds. Normalize seconds→ms before comparing (and emitting), or every new-format rename would
       // beat a genuinely newer old-format one purely on magnitude. (Epoch seconds < 1e12 < epoch ms.)
       if (ts > 0 && ts < 1e12) ts = ts * 1000;
-      if (!best.has(i) || ts > best.get(i)[0]) best.set(i, [ts, t]);
+      if (!best.has(i) || ts > best.get(i)[0]) best.set(i, [ts, t, cf]);
     }
   }
 
   // CL_TS=1 (opt-in, set by sessions-sync.sh) emits {id:{n,ts}} instead of {id:title} — the winning
   // timestamp lets each machine's UI apply GLOBAL newest-wins against its own local rename (without it,
-  // a machine's stale local rename shadowed a collaborator's newer one forever). Opt-in ONLY:
+  // a machine's stale local rename shadowed a collaborator's newer one forever). The same entry carries `cf`,
+  // the id this session continued from, when one was recorded — that is how a machine that never saw the
+  // clear happen still knows the older conversation has been superseded, and can fold it out of its sidebar.
+  // `cf` is omitted entirely when there is no link, so an ordinary session's entry is unchanged. Opt-in ONLY:
   // test/port-parity.sh runs this tool without the env and must stay byte-identical.
   const titlePairs = [];
   if (process.env.CL_TS === '1') {
-    for (const [i, [ts, t]] of best) titlePairs.push([i, obj([['n', t], ['ts', ts]])]);
+    for (const [i, [ts, t, cf]] of best) titlePairs.push([i, obj(cf ? [['n', t], ['ts', ts], ['cf', cf]] : [['n', t], ['ts', ts]])]);
   } else {
     for (const [i, [, t]] of best) titlePairs.push([i, t]);
   }

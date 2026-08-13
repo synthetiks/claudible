@@ -606,7 +606,9 @@ function connect() {
         showOverlay(false);
         document.body.classList.add('connected');             // reveal the phone zoom control only once actually viewing
         var chip = $('sess-chip');                            // reveal the session chip — it carries the connection dot
-        if (chip) { chip.style.display = ''; var ct = $('sess-chip-text'); if (ct && !ct.textContent) ct.textContent = 'live session'; }
+        // Until the host's first tracker push lands (~1s) there is no session name yet — say so plainly rather
+        // than painting a generic label that reads like a name and then silently changes under the viewer.
+        if (chip) { chip.style.display = ''; var ct = $('sess-chip-text'); if (ct && !ct.textContent) ct.textContent = 'loading…'; }
         setStatus('connected', 'ok');
         sendPresence(document.hidden ? 'idle' : 'active', true);   // tell the host we're here (green) / AFK (amber)
         applySize(msg.cols, msg.rows);

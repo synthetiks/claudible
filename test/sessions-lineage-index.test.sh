@@ -101,5 +101,28 @@ ok "$NEW" "INDEX.md" "index-write only ADDS INDEX.md to the directory — no tra
 GONE="$(grep -vFxf "$TMP/after-listing.txt" "$TMP/before-listing.txt")"
 ok "$GONE" "" "index-write never removes/renames-away an existing transcript filename (C3)"
 
+# --- (e) the shared title read carries the continuation link — opt-in only -------------------------------
+# A collaborator's machine never witnessed the /clear, so the only way it can learn that one conversation
+# supersedes another is for the link to travel with the shared names. It may appear ONLY under the opt-in
+# env: the plain output is byte-compared against the reference implementation by test/port-parity.sh, so a
+# new field there breaks parity. Fixture matches port-parity's: meta/*.json on a faked origin/<branch>.
+EGR="$TMP/e-repo"; mkdir -p "$EGR/meta"
+EPARENT="65735b71-aaaa-bbbb-cccc-000000000011"
+ECHILD="116e8abc-aaaa-bbbb-cccc-000000000012"
+( cd "$EGR" && git init -q && git config user.email t@t && git config user.name t \
+  && printf '{"%s": {"title": "MK-Sessions", "ts": 1000}, "%s": {"title": "MK-Sessions", "ts": 2000, "continuesFrom": "%s"}}' \
+       "$EPARENT" "$ECHILD" "$EPARENT" > meta/alice.json \
+  && git add -A && git commit -qm x \
+  && git update-ref refs/remotes/origin/work HEAD ) >/dev/null 2>&1
+RD_OPTIN="$(CL_WT="$EGR" CL_BR="work" CL_TS=1 node "$TOOL" title-read 2>/dev/null)"
+contains "$RD_OPTIN" "\"cf\": \"$EPARENT\"" "the opt-in title read carries the continuation link for the continuing id"
+contains "$RD_OPTIN" '"n": "MK-Sessions"' "the opt-in title read still carries the shared name"
+# the parent has no link of its own — its entry must NOT grow one
+PARENT_ENTRY="$(printf '%s' "$RD_OPTIN" | sed "s/.*\"$EPARENT\": {\([^}]*\)}.*/\1/")"
+not_contains "$PARENT_ENTRY" 'cf' "a session that continues nothing gets no continuation link"
+RD_PLAIN="$(CL_WT="$EGR" CL_BR="work" node "$TOOL" title-read 2>/dev/null)"
+ok "$RD_PLAIN" "{\"ok\": true, \"op\": \"title-list\", \"titles\": {\"$EPARENT\": \"MK-Sessions\", \"$ECHILD\": \"MK-Sessions\"}}" \
+  "the no-env title read output is unchanged (port-parity stays green)"
+
 echo "sessions-lineage-index: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
