@@ -4,6 +4,42 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.12] — 2026-08-14
+
+The recovery release. Two ways the app could fail without explaining itself — a Claude Code install
+that had been left half-replaced, and a deleted conversation that kept coming back — now say what
+happened and, where possible, offer the fix. Still a pre-release: hardware confirmation is the last
+word.
+
+**Fixed**
+- **A Claude Code that can't start now says so, before your session dies.** Claude Code replaces
+  itself by renaming its program file aside and writing the new one; interrupted between those two
+  steps, it leaves a launcher pointing at nothing. Claudible used to spawn into that anyway, and
+  every session died instantly with only the shell's raw error. It now checks the launcher before
+  starting a session, names the missing file, and recognizes the interrupted-update case for what
+  it is — offering to put the previous version back, which is a rename rather than a fresh
+  download, and verifying it actually starts before saying it worked. If one launcher is broken,
+  others are tried: the next match on your PATH, then the official installer's location.
+- **A conversation that no longer exists is no longer reopened.** Claudible checks its own list
+  before asking Claude Code to reopen a conversation, so one deleted from another machine can't
+  produce a session that fails the moment it opens.
+- **Clearing a session no longer links it to a conversation that is gone.** The check reads what
+  exists rather than what the sidebar happens to be showing, and stays quiet when it can't be sure
+  — a project it hasn't listed yet, a list a sync just made out of date, an answer too old to
+  trust. "I couldn't check" is never treated as "it's gone."
+- **Deleting a conversation everywhere now removes its name too**, locally and on the shared
+  branch, along with the links that referred to it. Where a conversation sat in the middle of a
+  chain of cleared sessions, the chain is re-pointed rather than cut, so an older conversation no
+  longer reappears beside its own continuation. Deleting only from this machine leaves all of that
+  untouched — the conversation still exists for everyone else and can come back.
+
+**Changed**
+- **Deleting a repository from GitHub now asks whether to keep your local folder.** The repository
+  is removed for everyone either way and the project leaves Claudible; unticking the new box leaves
+  your files exactly where they are. The project's conversations go to trash regardless — kept 30
+  days — because leaving them behind would hand them to whatever project later occupies that
+  folder.
+
 ## [0.9.11] — 2026-08-13
 
 The update-safety release. Installing 0.9.10 on real hardware surfaced two ways Claudible could
