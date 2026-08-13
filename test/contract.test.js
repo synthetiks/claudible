@@ -1328,7 +1328,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…and it must NOT also be written from onStatus, which reintroduces the loop',
     /rememberLastSession\([^)]*s\.sessionId\)/.test(APP) ? ['onStatus still records on presence'] : []);
   none('a deleted session stays recorded and keeps losing the boot race',
-    /if \(remembered && !still\) forgetLastSession\(activeWsId\)/.test(APP) && /function forgetLastSession/.test(APP) ? [] : ['a stale recorded id is never cleared']);
+    /if \(remembered && !still && !rawIds\.includes\(remembered\)\) forgetLastSession\(activeWsId\)/.test(APP) && /function forgetLastSession/.test(APP) ? [] : ['a stale recorded id is never cleared']);
   // main interpolates this id into a shell command via spawnPty -> session.sh, so it must be charset-gated.
   none('the recorded session id reaches the shell without a charset gate',
     /function rememberedSessionFor[\s\S]{0,300}?\/\^\[A-Za-z0-9-\]\+\$\/\.test\(id\)/.test(MAIN) ? [] : ['rememberedSessionFor does not validate the id']);
@@ -2085,7 +2085,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 {
   const flat = HTML.replace(/\s*\n\s*/g, '');
   none('the naming dialog OK button has no click handler (only Enter commits)',
-    /okb\.addEventListener\('click', \(\) => close\(inp\.value\.trim\(\)\)\)/.test(APP)
+    /okb\.addEventListener\('click', \(\) => close\(answer\(\)\)\)/.test(APP) && /const answer = \(\) => \(chk \? \{ value: inp\.value\.trim\(\)/.test(APP)
       ? [] : ['modalPrompt okb is not wired to close/commit']);
   none('…and Cancel is still wired (guard against removing the wrong one)',
     /cancel\.addEventListener\('click', \(\) => close\(null\)\)/.test(APP)
@@ -2155,8 +2155,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('…or the dedupe gate is keyed on truthiness again (\'\' would skip it)',
     /if \(sess !== 'new'\) \{[\s\S]{0,400}?rec\.session === sess\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
       ? [] : ['the normal-path dedupe is not keyed on the resolved id']);
+  // The window is a proxy for "still inside this function", not a size budget — it was widened from 1500 when
+  // the remembered-id guard grew a second question (exists vs. is-shown). It still fails the moment the fetch
+  // leaves the function, which is the regression this pins; if it needs widening again, check that first.
   none('the cold-cache fetch is gone (a never-visited shared project resolves to a phantom draft again)',
-    /async function sessionToOpenFor\(wsId, targetSession(?:, \w+)?\)[\s\S]{0,1500}?claudible\.sessionListWs\(wsId\)/.test(APP)
+    /async function sessionToOpenFor\(wsId, targetSession(?:, \w+)?\)[\s\S]{0,2200}?claudible\.sessionListWs\(wsId\)/.test(APP)
       ? [] : ['sessionToOpenFor no longer fetches on a cold cache']);
   none('the kept-tab rollback path lost its dedupe (main may have refused BECAUSE the session is live elsewhere)',
     /Object\.assign\(t, prev\);[\s\S]{0,900}?const want = await sessionToOpenFor\(id, targetSession(?:, \w+)?\);[\s\S]{0,700}?rec\.session === want\) \{ setActiveTab\(rec\.tabId\); return; \}/.test(APP)
@@ -3444,7 +3447,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 
   // (2c) 'Delete from GitHub' is guarded by typing the exact repo name, client AND server side.
   none('confirmDeleteFromGithub stopped requiring the typed repo name to match (C-3.6)',
-    /async function confirmDeleteFromGithub\(w\)[\s\S]{0,900}?if \(typed !== repoName\)/.test(APP)
+    /async function confirmDeleteFromGithub\(w\)[\s\S]{0,1600}?if \(typed !== repoName\)/.test(APP)
       ? [] : ['confirmDeleteFromGithub no longer compares the typed value against repoName']);
   none('main no longer re-validates the typed repo name server-side (C-3.6)',
     /if \(!repoName \|\| String\(confirmName \|\| ''\) !== repoName\)/.test(MAIN)
@@ -3501,7 +3504,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // so the dirty/unpushed refusal cannot apply — there is nothing left to push to, and refusing would strand the
   // workspace registered against a repo that no longer exists. The typed-exact-name confirm IS the override.
   none('workspace:deleteFromGithub stopped delegating to workspaceDeleteCore on success (C-3.6)',
-    /if \(!r\.ok\) return \{ ok: false, error: r\.error \|\| 'gh repo delete failed' \};[\s\S]{0,600}?\n\s*return workspaceDeleteCore\(id, true\);/.test(MAIN)
+    /if \(!r\.ok\) return \{ ok: false, error: r\.error \|\| 'gh repo delete failed' \};[\s\S]{0,900}?\n\s*return workspaceDeleteCore\(id, true, !!keepLocal\);/.test(MAIN)
       ? [] : ['a successful gh repo delete no longer falls through to the ordinary local delete — with force']);
 
   // (3) the trash icon sits in the settings drawer's head, left of the × close button, and opens the OS file
@@ -3699,7 +3702,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   //   modal's OTHER caller, must NOT (it types back an existing repo name verbatim), so this checks the wiring
   //   exists rather than making it unconditional.
   none('modalPrompt lost its session-name validation opt-in, or stopped wiring it through (C-3.4)',
-    [/function modalPrompt\(\{ title, body, placeholder, value, ok, validateNames \}\)/.test(APP) ? '' : 'modalPrompt no longer accepts a validateNames option',
+    [/function modalPrompt\(\{ title, body, placeholder, value, ok, validateNames, checkbox \}\)/.test(APP) ? '' : 'modalPrompt no longer accepts a validateNames option',
      /if \(validateNames\) wireNameValidator\(inp, \(\) => okb, \{ charRe: SESSION_NAME_CHAR_RE, note: SESSION_NAME_NOTE \}\);/.test(APP) ? '' : 'modalPrompt does not wire SESSION_NAME_CHAR_RE to its input when validateNames is set'].filter(Boolean));
   none('promptNewSession / createSessionFromOverlay stopped asking their "Name this session" modalPrompt to validate (C-3.4)',
     (APP.match(/title: 'Name this session'[\s\S]{0,180}?validateNames: true/g) || []).length >= 2
@@ -4858,6 +4861,73 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('a machine with a healthy install pays a directory read on every spawn',
     /_claudeHealth = undefined;/.test(WINRUN) && /if \(_claudeHealth !== undefined\) return _claudeHealth;/.test(WINRUN)
       ? [] : ['the health answer is not memoized, or resetCaches does not clear it']);
+}
+
+// ---- a deleted conversation leaves nothing behind that can name it ---------------------------------------
+{
+  const SSYNC = read('wsl/sessions-sync.sh');
+  const STOOL = read('wsl/sessions-sync-tool.js');
+  none('deleting a conversation leaves its name on the shared branch',
+    [/meta-evict/.test(STOOL) ? '' : 'the tool cannot evict a meta entry',
+     /meta-evict/.test(SSYNC) ? '' : 'the delete never calls it',
+     /tag_drop/.test(SSYNC) ? '' : 'no way to drop the exporter stamp of a deleted conversation'].filter(Boolean));
+  none('a link claiming to continue a deleted conversation survives the delete',
+    /continuesFrom/.test(STOOL) && /cf\[1\] === gone/.test(STOOL) ? [] : ['meta-evict drops the entry but not links pointing at it']);
+  // DETECTING the link is not repairing it: cutting it strands everything above the deleted one, and the live
+  // conversation at the top of that chain reappears beside its own continuation. The renderer half is pinned
+  // separately (lnNext[child] = grandparent) — this is its shared-branch twin.
+  none('the shared half cuts the chain instead of re-pointing it',
+    /rest\.push\(\['continuesFrom', grandparent\]\)/.test(STOOL) && /grandparent !== p\[0\]/.test(STOOL)
+      ? [] : ['meta-evict does not re-point a continuation onto what the deleted entry itself continued']);
+  none('the local name maps keep a deleted conversation addressable',
+    [/function forgetSessionTitle\(id, wsId, gone\)/.test(APP) ? '' : 'forgetSessionTitle cannot scope to a project',
+     /if \(!gone\) \{ if \(Object\.keys\(patch\)\.length\) savePrefs\(patch\); return; \}/.test(APP) ? '' : 'a local-only delete still evicts the shared name of a session collaborators still have',
+     /lnNext\[child\] = grandparent/.test(APP) ? '' : 'a deleted middle link is cut instead of re-pointed, stranding the chain above it',
+     /patch\.remoteTitlesCache = rcNext/.test(APP) ? '' : 'the shared-name cache is never evicted per conversation',
+     /patch\.sessionLineage = lnNext/.test(APP) ? '' : 'the continuation links are never evicted'].filter(Boolean));
+  // A drift away from something GONE is not a continuation — recording it publishes a link to nothing and
+  // permanently folds a live row away. One-sided: only a populated list for THIS project may convict.
+  // …and the check must read the UNFILTERED ids: a conversation you cleared out of is routinely hidden (a stub,
+  // or already folded away), and judging it on the painted rows would drop the link and strand the chain.
+  none('a continuation is recorded onto a conversation that no longer exists',
+    /const parentGone = \(id\) => \{[\s\S]{0,320}?_wsSessCache\.get\(t\.wsId\)[\s\S]{0,900}?return !c\.ids\.includes\(id\);/.test(APP)
+      && /Date\.now\(\) - \(c\.ts \|\| 0\) > 30000\) return false;/.test(APP)
+      && /if \(driftFrom && !parentGone\(driftFrom\)\)/.test(APP)
+      ? [] : ['lineage is still recorded without checking the parent exists']);
+  // EXISTS and IS PAINTED are different questions. Both conviction sites must read the unfiltered ids.
+  none('a hidden-but-live conversation can still be convicted as deleted',
+    [/const rawIds = \(fellBack && Array\.isArray\(fellBack\.ids\)\) \? fellBack\.ids\.slice\(\) : list\.map/.test(APP) ? '' : 'the unfiltered ids are never captured, or a cached repaint narrows them to the painted set',
+     /_wsSessCache\.set\(myWs, fellBack \? \{ list, ids: rawIds, ts: fellBack\.ts, stale: fellBack\.stale \}/.test(APP) ? '' : 'the cache carries no existence answer, or a cached repaint is republished as a fresh one',
+     /!still && !rawIds\.includes\(remembered\)/.test(APP) ? '' : 'the highlight site still convicts on the painted list',
+     /Array\.isArray\(warm\.ids\) && warm\.ids\.length\) \? warm\.ids : null/.test(APP) ? '' : 'the resolver still convicts on the painted list'].filter(Boolean));
+}
+// ---- deleting a GitHub repo does not have to take the user's folder with it -------------------------------
+{
+  none('the GitHub delete always trashes the local folder too',
+    [/checkbox: \{ label: 'Also delete my local copy/.test(APP) ? '' : 'no choice offered on the confirm',
+     /function workspaceDeleteCore\(id, force, keepFolder\)/.test(MAIN) ? '' : 'the core cannot keep a folder',
+     /keepFolder \? 'CLAUDIBLE_KEEP_DIR=1 ' : ''/.test(MAIN) ? '' : 'keepFolder does not reach the cleanup script',
+     /CLAUDIBLE_KEEP_DIR:-\}" = 1/.test(read('wsl/delete-workspace.sh')) ? '' : 'the cleanup script has no keep-the-folder mode',
+     /keptDir/.test(read('wsl/delete-workspace.sh')) ? '' : 'keeping the folder skips the shadow dir and sync worktree instead of still trashing them',
+     /workspaceDeleteCore\(id, true, !!keepLocal\)/.test(MAIN) ? '' : 'the handler drops the choice',
+     /keepLocal: !!\(opts && opts\.keepLocal\)/.test(PRELOAD) ? '' : 'the bridge drops the choice'].filter(Boolean));
+  none('the choice defaults to anything other than today’s behaviour',
+    /checkbox: \{ label: 'Also delete my local copy[\s\S]{0,420}?checked: true \}/.test(APP)
+      ? [] : ['the local-copy checkbox does not default to checked']);
+  // THE line that decides whether a user's folder lives or dies. Inverting it passes every pin above, so it is
+  // pinned by its exact shape: an object answer honours `checked`, and anything else keeps the old behaviour.
+  none('the checkbox answer is read backwards, or an older caller silently loses its folder',
+    /const alsoLocal = !\(ans && typeof ans === 'object'\) \|\| ans\.checked !== false;/.test(APP)
+      ? [] : ['the alsoLocal decision does not have its verified shape']);
+  none('the folder-keeping mode is unreachable because the script no longer runs',
+    /const willMoveFolder = APPDIR_WSL/.test(MAIN)
+      ? [] : ['keepFolder gates the whole cleanup script again, stranding the transcripts and the sync worktree']);
+  // …and the mode must still TRASH the two things that are not the user's folder.
+  { const DW = read('wsl/delete-workspace.sh');
+    const keep = (DW.match(/if \[ "\$\{CLAUDIBLE_KEEP_DIR:-\}" = 1 \][\s\S]*?\nfi/) || [''])[0];
+    none('keeping the folder also strands the transcripts or the shared-sessions worktree',
+      [/mv -f "\$proj"/.test(keep) ? '' : 'the transcript shadow dir is left behind',
+       /mv -f "\$HOME\/\.claudible\/sessions-sync\/\$slug"/.test(keep) ? '' : 'the sessions worktree is left behind'].filter(Boolean)); }
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

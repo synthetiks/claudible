@@ -84,6 +84,57 @@ const fn = make();
   fn.forgetSessionTitle('never-existed');
   ok('forgetting an unknown id writes nothing at all', saved === null);
 }
+// A NAME IS WHAT KEEPS A DEAD ID ADDRESSABLE. The local title map was the only one ever cleared; the
+// workspace-shared name cache and the continuation links outlived the conversation, which is how an id with
+// nothing behind it could still be shown — and how a link to a deleted conversation could fold a live row away.
+{
+  store = {
+    sessionTitles: { doomed: 'D' }, sessionTitleTs: { doomed: 2 },
+    remoteTitlesCache: { 'repo-a': { doomed: { n: 'D' }, other: { n: 'O' } }, 'repo-b': { doomed: { n: 'D' } } },
+    sessionLineage: { doomed: 'grandparent', child: 'doomed', unrelated: 'someone-else' },
+  };
+  saved = null;
+  fn.forgetSessionTitle('doomed', 'repo-a', true);   // gone = deleted everywhere
+  ok('the shared name cache drops the deleted id, in the project it was deleted from',
+    saved && saved.remoteTitlesCache && !('doomed' in saved.remoteTitlesCache['repo-a']));
+  ok('…without touching that project’s other conversations',
+    saved && saved.remoteTitlesCache['repo-a'].other);
+  ok('…and without reaching into another project when one was named',
+    saved && saved.remoteTitlesCache['repo-b'].doomed);
+  ok('the deleted conversation’s own continuation link goes', saved && !('doomed' in saved.sessionLineage));
+  ok('…and anyone continuing it inherits what IT continued, so the chain is re-pointed, not cut',
+    saved && saved.sessionLineage.child === 'grandparent');
+  ok('…while unrelated links stay', saved && saved.sessionLineage.unrelated === 'someone-else');
+}
+// Cutting instead of re-pointing is what makes a live conversation reappear beside its own continuation.
+{
+  store = { sessionTitles: {}, sessionTitleTs: {}, sessionLineage: { child: 'doomed' } };   // deleted one continued nothing
+  saved = null;
+  fn.forgetSessionTitle('doomed', 'repo-a', true);
+  ok('with nothing above it, the orphaned link is dropped rather than left pointing at a ghost',
+    saved && !('child' in saved.sessionLineage));
+}
+// A local-only delete leaves the conversation on the branch, re-importable — its shared name must survive.
+{
+  store = {
+    sessionTitles: { doomed: 'D' }, sessionTitleTs: { doomed: 2 },
+    remoteTitlesCache: { 'repo-a': { doomed: { n: 'D' } } }, sessionLineage: { child: 'doomed' },
+  };
+  saved = null;
+  fn.forgetSessionTitle('doomed', 'repo-a');   // gone omitted = deleted here only
+  ok('a local-only delete drops the local title', saved && !('doomed' in saved.sessionTitles));
+  ok('…but leaves the shared name alone', saved && !saved.remoteTitlesCache);
+  ok('…and leaves the continuation links alone', saved && !saved.sessionLineage);
+}
+{
+  store = { remoteTitlesCache: { 'repo-a': { doomed: { n: 'D' } }, 'repo-b': { doomed: { n: 'D' } } }, sessionTitles: {}, sessionTitleTs: {} };
+  saved = null;
+  // DEFENSIVE BRANCH, no live caller today: deleteSession always names its workspace. Exercised so a future
+  // caller that omits it behaves sanely — do not read this as coverage of a shipped path.
+  fn.forgetSessionTitle('doomed', null, true);   // no project named: the id is dead everywhere, so sweep
+  ok('with no project named, the id is dropped from every project that cached it',
+    saved && !('doomed' in saved.remoteTitlesCache['repo-a']) && !('doomed' in saved.remoteTitlesCache['repo-b']));
+}
 
 // ---- workspace caches ----------------------------------------------------------------------------------------
 {
@@ -101,9 +152,14 @@ const fn = make();
 }
 
 // ---- the wiring: the three title write sites must go through the bounded helper ------------------------------
+// NOTE on what this pin can and cannot see: it catches a raw OBJECT-LITERAL title write. forgetSessionTitle now
+// assembles a `patch` and calls savePrefs(patch), which no regex here can distinguish from a future raw write in
+// that same shape — so this bounds the literal form only. The cap itself is proven by the functional cases above.
 ok('no raw savePrefs({ sessionTitles … }) outside the two helpers',
-  (APP.match(/savePrefs\(\{ sessionTitles/g) || []).length === 2);   // saveSessionTitles + forgetSessionTitle
-ok('deleteSession evicts the deleted id', /forgetSessionTitle\(id\);/.test(APP));
+  (APP.match(/savePrefs\(\{ sessionTitles/g) || []).length === 1);   // saveSessionTitles; forgetSessionTitle writes one combined patch (below)
+ok('…and the eviction helper still writes through savePrefs',
+  /function forgetSessionTitle\(id, wsId, gone\)[\s\S]*?if \(Object\.keys\(patch\)\.length\) savePrefs\(patch\);/.test(APP));
+ok('deleteSession evicts the deleted id', /forgetSessionTitle\(id, myWs, scope === 'everywhere'\);/.test(APP));
 ok('deleteWorkspace evicts its caches', /forgetWorkspaceCaches\(w\.id\);/.test(APP));
 
 console.log(`prefs-bound: ${pass} passed, ${fail} failed`);

@@ -2941,7 +2941,12 @@ ipcMain.handle('workspace:rename', async (e, payload) => {
 // Named (not an inline ipcMain.handle callback) so C-3.6's "Delete from GitHub" path can call it AFTER the repo
 // itself is gone — same core, same result shape, same reconciliation on the renderer side (see app.js's
 // applyWorkspaceDeleteResult). Do not fork this logic; extend it here so both callers stay in sync.
-function workspaceDeleteCore(id, force) { return new Promise((resolve) => {
+// `keepFolder` — unregister the project but LEAVE its directory exactly where it is. Only the GitHub-delete
+// path passes it, from a checkbox the user unticked: they asked for the repo to be gone, not their files. The
+// folder move is the one part of a delete that touches the user's own data, so it is the one part worth making
+// optional; everything else (tab re-pointing, tombstoning, registry removal) is unchanged, and the project
+// still leaves Claudible for everyone.
+function workspaceDeleteCore(id, force, keepFolder) { return new Promise((resolve) => {
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return resolve({ ok: false, error: 'unknown workspace' });
   // Mirrors the renderer's isLastLocal(). An ADOPTED entry only POINTS at a folder the user already owned —
@@ -2962,6 +2967,9 @@ function workspaceDeleteCore(id, force) { return new Promise((resolve) => {
   // ADOPTED workspaces point at a folder the USER already owned — Claudible never created it, so removing the
   // project must never remove the folder. delete-workspace.sh prefers CLAUDIBLE_WS_DIR (wsEnv emits ws.path), so
   // shelling out here would `mv -f` their real source tree into ~/.claudible/trash. Unregister only.
+  // The cleanup script still RUNS when the folder is being kept — the project owns more than its code dir (the
+  // transcript shadow dir, and a repo's sessions worktree), and leaving those behind would let a later project
+  // at the same path inherit this one's conversations. keepFolder only spares the folder itself.
   const willMoveFolder = APPDIR_WSL && slug && !ws.adopted && (ws.kind === 'local' || ws.kind === 'repo');
   // Everything below this point (respawning tabs, unregistering the workspace, tombstoning) is
   // irreversible from the user's point of view, so the REFUSE-with-explicit-override check must run BEFORE any
@@ -3038,7 +3046,7 @@ function workspaceDeleteCore(id, force) { return new Promise((resolve) => {
     // force=true is the renderer's SECOND, explicit "delete anyway" confirm (only sent after the first
     // attempt came back needsForce:true) — extraEnv reaches the script exactly like trash:empty's EMPTY_ALL above.
     // Run BEFORE any mutation below — a needsForce refusal must leave the workspace registered and untouched.
-    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}' '${shq(ws.label || slug)}'`, { ws, timeout: 20000, extraEnv: force ? 'CLAUDIBLE_FORCE_DELETE=1 ' : '' }).then(({ err, stdout }) => {
+    runner.runScript('delete-workspace.sh', `'${ws.kind}' '${slug}' '${shq(ws.label || slug)}'`, { ws, timeout: 20000, extraEnv: (force ? 'CLAUDIBLE_FORCE_DELETE=1 ' : '') + (keepFolder ? 'CLAUDIBLE_KEEP_DIR=1 ' : '') }).then(({ err, stdout }) => {
       if (err) { console.error('[claudible] delete-workspace:', err.message); return proceedWithMutation('the project was removed, but its folder could not be moved to trash'); }
       let r = {}; try { r = JSON.parse(String(stdout).trim() || '{}'); } catch {}
       if (r.ok === false && r.needsForce) { console.error('[claudible] delete-workspace refused (needsForce):', r.error); return resolve({ ok: false, needsForce: true, uncommitted: r.uncommitted, unpushed: r.unpushed, error: r.error || 'this project has work not on GitHub' }); }
@@ -3056,7 +3064,7 @@ ipcMain.handle('workspace:delete', (e, id, force) => workspaceDeleteCore(id, !!f
 // On success this delegates straight to workspaceDeleteCore — the repo is already gone, so what's left is
 // EXACTLY an ordinary local delete (same trash-move, same tab reconciliation, same result shape).
 ipcMain.handle('workspace:deleteFromGithub', async (e, payload) => {
-  const { id, confirmName } = payload || {};
+  const { id, confirmName, keepLocal } = payload || {};
   const ws = registry.workspaces.find((w) => w.id === id);
   if (!ws) return { ok: false, error: 'unknown workspace' };
   if (ws.kind !== 'repo') return { ok: false, error: 'not a shared project' };
@@ -3076,7 +3084,10 @@ ipcMain.handle('workspace:deleteFromGithub', async (e, payload) => {
   // registered, and a message telling the user to push to a repo that no longer exists. The typed-exact-repo-name
   // confirmation this path required IS the explicit override — stronger than the modal the local path asks for —
   // and the folder still goes to the recoverable trash, not to /dev/null.
-  return workspaceDeleteCore(id, true);
+  // keepLocal: the user unticked "also delete my local copy" on the confirm. The repo is gone from GitHub for
+  // everyone and the project leaves Claudible either way — this only decides whether their folder is moved to
+  // trash or left untouched on disk.
+  return workspaceDeleteCore(id, true, !!keepLocal);
 });
 // Reorder the workspace chips (drag). Accepts the new id order; any ids not listed keep their place at the end.
 ipcMain.handle('workspace:reorder', (e, ids) => {

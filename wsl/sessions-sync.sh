@@ -267,6 +267,12 @@ tag_write() {   # $1=id — record/replace this id's exporter as THIS machine
   { grep -v "^$1 " "$TAGF" 2>/dev/null || true; printf '%s %s\n' "$1" "$MID"; } > "$TAGF.tmp.$$" && mv -f "$TAGF.tmp.$$" "$TAGF" 2>/dev/null
 }
 tag_of() { grep -m1 "^$1 " "$TAGF" 2>/dev/null | cut -d' ' -f2; }
+tag_drop() {   # $1=id — drop MY stamp for a session deleted everywhere (other authors' tag files are theirs to
+               # write, same disjointness rule as meta/ below; a stamp without a transcript is inert either way)
+  [ -f "$TAGF" ] || return 0
+  { grep -v "^$1 " "$TAGF" 2>/dev/null || true; } > "$TAGF.tmp.$$" && mv -f "$TAGF.tmp.$$" "$TAGF" 2>/dev/null
+  return 0
+}
 tag_heal() {   # $1=id — our OWN author dir carries a stale stamp (another machine id) on a copy this machine
   # agrees with: claim it now instead of letting it rot. Reinstalling mints a brand-new machine identity (the
   # uninstaller used to wipe the identity file), and every session this user exported under the OLD id then read
@@ -618,6 +624,19 @@ case "$op" in
       mkdir -p "$HOME/.claudible/trash" 2>/dev/null
       mv -f "$PROJ/$did.jsonl" "$HOME/.claudible/trash/$did.$(date +%Y%m%d-%H%M%S).deleted.jsonl" 2>/dev/null
     fi
+    # A DELETED CONVERSATION MUST NOT KEEP ITS NAME. The transcript is gone above; everything that NAMES the
+    # session used to outlive it — its entry in every author's meta file (and any link claiming to continue it,
+    # which now points at nothing) and its exporter stamp. A leftover name keeps a dead id addressable, which is
+    # what let an id with no conversation behind it still be shown. All of these are best-effort: the delete has
+    # already succeeded, so a failure to tidy up must never report the delete as failed.
+    # MY OWN meta file only. Every author's file is written exclusively by that author — the disjointness the
+    # conflict handler relies on (see pull_branch) — and reaching into another author's file to tidy up would
+    # make my delete collide with their next rename, resolving as a hard reset that discards this whole commit.
+    # Their entry for the deleted id is theirs to drop; the tombstone is what makes it unresolvable anyway.
+    if [ -e "$WT/meta/$author.json" ]; then
+      (unset MSYS_NO_PATHCONV; CL_FILE="$WT/meta/$author.json" CL_ID="$did" node "$HERE/sessions-sync-tool.js" meta-evict) >/dev/null 2>&1 || true
+    fi
+    tag_drop "$did"
     gitwt add -A >/dev/null 2>&1                           # stage the tombstone ADD + the explicit removals (intended here, unlike sync)
     gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: delete session $did" >/dev/null 2>&1
     pushed=0

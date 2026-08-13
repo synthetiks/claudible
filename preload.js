@@ -83,7 +83,7 @@ contextBridge.exposeInMainWorld('claudible', {
   workspaceSetShared: (id, shared) => ipcRenderer.invoke('workspace:setShared', { id, shared }),
   workspaceRename: (id, label) => ipcRenderer.invoke('workspace:rename', { id, label }),
   workspaceDelete: (id, force) => ipcRenderer.invoke('workspace:delete', id, !!force),   // force: the second, explicit "delete anyway" re-confirm after needsForce
-  workspaceDeleteFromGithub: (id, confirmName) => ipcRenderer.invoke('workspace:deleteFromGithub', { id, confirmName }),   // C-3.6 — the typed-name-confirmed GitHub delete
+  workspaceDeleteFromGithub: (id, confirmName, opts) => ipcRenderer.invoke('workspace:deleteFromGithub', { id, confirmName, keepLocal: !!(opts && opts.keepLocal) }),   // C-3.6 — the typed-name-confirmed GitHub delete
   workspaceReorder: (ids) => ipcRenderer.invoke('workspace:reorder', ids),
   // C-3.6 — the trash icon (left of the settings X) and the settings drawer's Open trash / Delete trash buttons
   trashOpen: () => ipcRenderer.invoke('trash:open'),

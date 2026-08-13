@@ -17,7 +17,9 @@ esac
 # Custom-save-location workspaces store their real folder in CLAUDIBLE_WS_DIR (emitted by wsEnv); prefer it so we
 # trash the actual directory rather than the default-location guess above (mirrors the other SDIR-aware scripts).
 [ -n "${CLAUDIBLE_WS_DIR:-}" ] && dir="$CLAUDIBLE_WS_DIR"
-[ -d "$dir" ] || { printf '{"ok":true,"note":"already gone"}'; exit 0; }
+# …unless we are only here to clear up around a folder the user is KEEPING: the folder being absent (they moved
+# it themselves) is exactly when the transcript shadow dir and the sessions worktree would otherwise be stranded.
+[ -d "$dir" ] || [ "${CLAUDIBLE_KEEP_DIR:-}" = 1 ] || { printf '{"ok":true,"note":"already gone"}'; exit 0; }
 trash="$HOME/.claudible/trash"; mkdir -p "$trash" 2>/dev/null
 ts="$(date +%Y%m%d-%H%M%S)"
 # Owners' note: a trash entry used to be named ws-<kind>-<slug> — the internal, url-safe slug, not what the user
@@ -37,6 +39,20 @@ label_clean="$(printf '%s' "$label" | tr -s ' \t\n' ' ' | sed "s/[^A-Za-z0-9 ._-
 #    link once the code dir moved, still holding every collaborator's exported transcripts.
 # Encoding matches sessions.sh/session.sh exactly; CLAUDIBLE_PROJ overrides on win-native (same contract).
 proj="$HOME/.claude/projects/${CLAUDIBLE_PROJ:-$(printf '%s' "$dir" | sed 's#[^A-Za-z0-9]#-#g')}"
+# CLAUDIBLE_KEEP_DIR=1 — the user deleted the GitHub repo but chose to keep their folder. The code dir stays
+# exactly where it is; the other two pieces of the project's footprint still go, for the same reasons they go
+# in a normal delete: the shadow dir would let a later project at this path inherit these transcripts and their
+# permanent foreign/diverged marks, and the sessions worktree would be left holding every collaborator's
+# exported transcripts against a branch whose remote no longer exists. The unpushed-work refusal below is
+# deliberately skipped: it protects work that only lives in this folder, and this folder is being kept.
+if [ "${CLAUDIBLE_KEEP_DIR:-}" = 1 ]; then
+  [ -d "$proj" ] && mv -f "$proj" "$trash/proj-$kind-$label_clean.$ts" 2>/dev/null
+  if [ "$kind" = "repo" ] && [ -d "$HOME/.claudible/sessions-sync/$slug" ]; then
+    mv -f "$HOME/.claudible/sessions-sync/$slug" "$trash/syncwt-$label_clean.$ts" 2>/dev/null
+  fi
+  printf '{"ok":true,"keptDir":true}'
+  exit 0
+fi
 # REFUSE-with-explicit-override — a repo workspace with uncommitted changes or commits never pushed
 # to its upstream is work that only lives in this folder. Default refuses; the renderer's second, explicit
 # "delete anyway" confirm re-calls with CLAUDIBLE_FORCE_DELETE=1, which is the only thing that skips this.

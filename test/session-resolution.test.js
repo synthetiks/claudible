@@ -30,7 +30,9 @@ if (!m) { console.error('  FAIL sessionToOpenFor not found in renderer/app.js');
 function mk(remembered, warmList, fetchImpl) {
   const calls = [];
   const forgotten = [];
-  const cache = new Map(warmList ? [['W', { list: warmList, ts: 1 }]] : []);
+  // `ids` mirrors what every real cache writer now stores: the UNFILTERED conversation ids. The rows in `list`
+  // have been through the display filters, so they answer "what is painted", never "what exists".
+  const cache = new Map(warmList ? [['W', { list: warmList, ids: warmList.map((s) => s && s.id).filter(Boolean), ts: 1 }]] : []);
   const claudible = { sessionListWs: async (id) => { calls.push(id); return fetchImpl(id); } };
   const fn = new Function('lastSessionFor', 'forgetLastSession', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor', 'claudible', 'Date',
     m[0] + '; return sessionToOpenFor;')(
@@ -69,6 +71,19 @@ function mk(remembered, warmList, fetchImpl) {
     cache.get('W').stale = true;   // a sync landed changes since this list was read — it proves nothing about a missing id
     eq('a STALE cache cannot convict either', await fn('W'), 'DELETED');
     eq('…so the pointer survives', forgotten.length, 0); }
+  // EXISTS is not the same question as IS PAINTED: the display filters (being-deleted, promptless stub, folded
+  // continuation) narrow the rows, and convicting on those discarded the pointer of a LIVE conversation.
+  // EXISTS and SHOULD BE OPENED are two questions. A conversation cleared out of still exists but is
+  // deliberately unshown — reopening it drops the user back into the emptied one they left — so it falls
+  // through to the project's top row. Nothing was proven gone, so the pointer must survive that.
+  { const { fn, cache, forgotten } = mk('HIDDEN', [{ id: 'S1', msgs: 3 }], async () => { throw new Error('no'); });
+    cache.get('W').ids = ['S1', 'HIDDEN'];   // on disk, merely not painted
+    eq('a conversation that exists but is deliberately unshown is not reopened', await fn('W'), 'S1');
+    eq('…and its pointer is NOT discarded, because nothing proved it gone', forgotten.length, 0); }
+  { const { fn, cache, forgotten } = mk('DELETED', [{ id: 'S1', msgs: 3 }], async () => { throw new Error('no'); });
+    delete cache.get('W').ids;              // an entry that cannot answer "does it exist"
+    eq('a cache entry with no existence answer never convicts', await fn('W'), 'DELETED');
+    eq('…and leaves the pointer alone', forgotten.length, 0); }
 
   // ---- THE PHANTOM-DRAFT FIX: a cold cache is fetched, not guessed ----
   { const { fn, calls, cache } = mk(null, null, async () => [{ id: 'SYNCED-IN', msgs: 5 }]);

@@ -715,7 +715,23 @@ claudible.onStatus((s) => {
     // recorded, otherwise the two transcripts read as unrelated conversations forever. Additive `continuesFrom`
     // on the new id in the same meta/<login>.json map title-set merges into — the generated INDEX.md is its
     // only consumer, so a failure here is cosmetic and must never toast or block the drift handling.
-    if (driftFrom) {
+    // A CONVERSATION THAT NO LONGER EXISTS WAS NOT CONTINUED. Drift also happens when the requested conversation
+    // is GONE — deleted here, or deleted by a collaborator and synced away — and the CLI silently starts a fresh
+    // one instead. Recording that as a continuation writes a link to nothing, publishes it to everyone, and
+    // permanently marks a live conversation as superseded by a ghost. Only record when the parent is still a
+    // conversation we can see: present in the list, or (before the first list lands) known by name.
+    // Judged on the UNFILTERED ids, never on the painted rows. A conversation you cleared out of is routinely
+    // hidden — a promptless stub, or already folded away as superseded — and treating "not painted" as "does
+    // not exist" would silently drop the link, severing the chain and leaving the old row beside the new one
+    // forever (the duplicate-row bug this lineage exists to prevent). One-sided as everywhere else: only a
+    // populated, non-stale answer for THIS tab's own project can convict.
+    const parentGone = (id) => {
+      const c = _wsSessCache.get(t.wsId);
+      if (!c || c.stale || !Array.isArray(c.ids) || !c.ids.length) return false;   // nothing trustworthy to judge against
+      if (Date.now() - (c.ts || 0) > 30000) return false;   // …and an OLD answer is not evidence either: this project's cache is only refreshed while it is the active one or its tree is open, so a backgrounded tab can be holding an hour-old snapshot that predates the very conversation being judged
+      return !c.ids.includes(id);
+    };
+    if (driftFrom && !parentGone(driftFrom)) {
       saveSessionLineage(s.sessionId, driftFrom);   // LOCAL copy, deliberately ungated on workspace kind: a plain folder has no shared meta file to publish to, yet its sidebar must fold the emptied conversation away just the same — and this copy is on disk, so it still holds after a restart
       const _lw = workspaces.find((w) => w.id === t.wsId);   // the TAB's workspace (same rule as the carry-over above)
       if (_lw && _lw.kind === 'repo') { try { claudible.lineageSet(s.sessionId, driftFrom, t.wsId).catch(() => {}); } catch (e) {} }
@@ -3395,13 +3411,48 @@ function saveSessionLineage(childId, parentId) {
   if (ids.length > MAX_LINEAGE_PREFS) for (const id of ids.slice(0, ids.length - MAX_LINEAGE_PREFS)) delete m[id];
   savePrefs({ sessionLineage: m });
 }
-// A deleted session's id can never recur — drop its name so settings.json doesn't carry it forever.
-function forgetSessionTitle(id) {
+// A deleted session's id can never recur — drop EVERYTHING that still names it, so settings.json doesn't carry
+// it forever and, more importantly, so a dead id cannot stay addressable. The local title map was the only one
+// being cleared; the workspace-shared name cache and the continuation links survived, and a name is exactly
+// what lets an id with no conversation behind it be treated as real (it also un-hides an empty row, and a link
+// pointing at a deleted conversation folds a LIVE row away). All of it goes in one write.
+// `gone` — the conversation is gone EVERYWHERE (a delete-everywhere), not merely off this machine. A local-only
+// delete leaves the conversation on the branch, re-importable the moment it grows, so the shared name and the
+// continuation links must survive it; only the local title goes, exactly as before.
+function forgetSessionTitle(id, wsId, gone) {
   const p = loadPrefs();
   const lt = Object.assign({}, p.sessionTitles || {}), lts = Object.assign({}, p.sessionTitleTs || {});
-  if (!(id in lt) && !(id in lts)) return;
-  delete lt[id]; delete lts[id];
-  savePrefs({ sessionTitles: lt, sessionTitleTs: lts });
+  const patch = {};
+  if ((id in lt) || (id in lts)) { delete lt[id]; delete lts[id]; patch.sessionTitles = lt; patch.sessionTitleTs = lts; }
+  if (!gone) { if (Object.keys(patch).length) savePrefs(patch); return; }
+  // the workspace-shared name cache, per session (it was only ever dropped wholesale, when a whole project went)
+  const rc = p.remoteTitlesCache || {};
+  const keys = wsId ? (wsId in rc ? [wsId] : []) : Object.keys(rc);   // a delete names its workspace; without one, sweep (the id is dead everywhere)
+  let rcNext = null;
+  for (const k of keys) {
+    if (!rc[k] || !(id in rc[k])) continue;
+    rcNext = rcNext || Object.assign({}, rc);
+    rcNext[k] = Object.assign({}, rc[k]); delete rcNext[k][id];
+  }
+  if (rcNext) patch.remoteTitlesCache = rcNext;
+  // The continuation links. The chain is walked hop by hop, so a deleted middle link must be RE-POINTED, not
+  // cut: dropping `C→B` when B is deleted strands `B→A`, and the live grandparent A resurfaces beside C as the
+  // duplicate row the chain exists to fold away. Anyone continuing the deleted one inherits its parent instead;
+  // the deleted one's own link then goes.
+  const ln = p.sessionLineage || {};
+  let lnNext = null;
+  const grandparent = ln[id];
+  for (const child of Object.keys(ln)) {
+    if (child !== id && ln[child] !== id) continue;
+    lnNext = lnNext || Object.assign({}, ln);
+    if (child === id) delete lnNext[child];
+    else if (grandparent && grandparent !== child) lnNext[child] = grandparent;   // …never a self-link, which would hide a row because of itself
+    else delete lnNext[child];
+  }
+  if (lnNext) patch.sessionLineage = lnNext;
+  // …and the live in-memory copy of the shared names, so this repaint already behaves as if it were gone
+  try { if (remoteTitles && (id in remoteTitles)) delete remoteTitles[id]; } catch {}
+  if (Object.keys(patch).length) savePrefs(patch);
 }
 // A deleted workspace's warm caches are dead weight — and `_wsSessCache` would even serve STALE rows to a
 // workspace later re-created with the same id.
@@ -4749,7 +4800,7 @@ async function deleteSession(id, scope, force) {
   // the session is STILL on disk under this id — wiping its custom name would silently drop back to the auto
   // preview. Mirrors deleteWorkspace(), which already gates forgetWorkspaceCaches on success.
   if (r && (r.ok || r.localDone)) {
-    forgetSessionTitle(id);
+    forgetSessionTitle(id, myWs, scope === 'everywhere');
     // …and drop the "last session here" pointer if it still names what we just deleted. The re-point loop above
     // normally overwrites it (openSession → rememberLastSession), but two paths skip that: deleting a session no
     // tab is sitting on (`owners` is empty, so the loop never runs), and quitting before the next refresh — which
@@ -4799,7 +4850,9 @@ function modalChoice({ title, body, choices }) {
 // charset (promptNewSession / createSessionFromOverlay's "Name this session" prompt). Off by default —
 // confirmDeleteFromGithub reuses this same modal to type back an EXISTING repo name verbatim, which must
 // never be blocked by a charset it didn't choose.
-function modalPrompt({ title, body, placeholder, value, ok, validateNames }) {
+// `checkbox` (optional) — {label, checked}. Present ⇒ the answer becomes {value, checked} instead of a bare
+// string, so a caller that never passes one is completely unaffected. Cancel/Esc still resolves null either way.
+function modalPrompt({ title, body, placeholder, value, ok, validateNames, checkbox }) {
   if (pttCapturing) stopCapture();                                   // a modal cancels any in-progress PTT rebind — else the capture-phase keydown eats the modal's Escape/keys
   return new Promise((resolve) => {
     const back = document.createElement('div');
@@ -4813,6 +4866,18 @@ function modalPrompt({ title, body, placeholder, value, ok, validateNames }) {
     const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 200; inp.placeholder = placeholder || ''; inp.value = value || '';
     inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--hairline);border-radius:9px;background:#0a0b0d;color:#e7eaef;font:inherit;font-size:13px;outline:none;margin-bottom:16px';
     box.appendChild(inp);
+    // Optional single choice, sitting between the confirmation field and the buttons — close enough to the
+    // destructive button that it cannot be missed, and read at the moment the user commits, never before.
+    let chk = null;
+    if (checkbox) {
+      const lab = document.createElement('label');
+      lab.style.cssText = 'display:flex;align-items:flex-start;gap:9px;margin:-6px 0 16px;font-size:12.5px;line-height:1.45;color:#cfd6df;cursor:pointer';
+      chk = document.createElement('input'); chk.type = 'checkbox'; chk.checked = checkbox.checked !== false;
+      chk.style.cssText = 'margin-top:2px;accent-color:#5fb487;cursor:pointer';
+      chk.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!okb.disabled) close(answer()); } });   // Enter commits from here too — the box is between the field and the button, and stopping there to reach for the mouse is a papercut
+      const txt = document.createElement('span'); txt.textContent = checkbox.label || '';
+      lab.appendChild(chk); lab.appendChild(txt); box.appendChild(lab);
+    }
     const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
     cancel.style.cssText = 'font:inherit;font-size:12.5px;padding:8px 14px;border:1px solid var(--hairline);border-radius:9px;cursor:pointer;color:#cfd6df;background:#191c22';
@@ -4825,13 +4890,14 @@ function modalPrompt({ title, body, placeholder, value, ok, validateNames }) {
     // okb.disabled (set by wireNameValidator above while a disallowed char is present) already blocks a CLICK —
     // browsers never fire click on a disabled button — but the Enter key here bypasses that, exactly like
     // createWorkspace's "$('ws-create').disabled) return" guard, so it needs its own explicit check.
-    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); if (!okb.disabled) close(inp.value.trim()); } else if (e.key === 'Escape') { e.preventDefault(); close(null); } });
+    const answer = () => (chk ? { value: inp.value.trim(), checked: chk.checked } : inp.value.trim());   // shape depends ONLY on whether a checkbox was asked for
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); if (!okb.disabled) close(answer()); } else if (e.key === 'Escape') { e.preventDefault(); close(null); } });
     // Self-heal a stolen keyboard: if focus lands in the TERMINAL while this prompt is still open (a stray
     // deferred term.focus() from an earlier action — the "the field won't let me type" bug), take it back. Only
     // reclaims from the terminal, so clicking the prompt's own buttons (or anything else) is never fought.
     inp.addEventListener('blur', () => setTimeout(() => { try { const ae = document.activeElement; if (document.body.contains(inp) && ae && ae.closest && ae.closest('.xterm')) inp.focus(); } catch {} }, 0));
     cancel.addEventListener('click', () => close(null));
-    okb.addEventListener('click', () => close(inp.value.trim()));       // the OK button had NO handler — clicking "Create session" did nothing, only Enter committed. Mirror the Enter path.
+    okb.addEventListener('click', () => close(answer()));       // the OK button had NO handler — clicking "Create session" did nothing, only Enter committed. Mirror the Enter path.
     back.addEventListener('mousedown', (e) => { if (e.target === back) close(null); });
     document.addEventListener('keydown', onDocKey, true);
     document.body.appendChild(back); back.appendChild(box);
@@ -4895,18 +4961,25 @@ async function refreshSessions() {
   let list = []; try { list = await claudible.sessionListWs(myWs); } catch {}
   if (myWs !== activeWsId) return;                                                  // a newer workspace switch already owns the list
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;               // a rename opened DURING the await — bail so the rebuild below can't wipe the in-flight edit (the top-of-fn guard only covers renames that existed before the await)
+  let fellBack = null;                                                             // set when this pass is repainting a CACHED list instead of a fresh answer
   if (!Array.isArray(list)) {
     // Typed FETCH FAILURE (main marks it {error}) — not an empty project. Painting [] over a populated list
     // was the "all my sessions vanished" bug. Fall back to this ws's warm cache and keep whatever's on
     // screen; the next poll retries. Only a truly cold list (no cache, nothing rendered) shows the notice.
     const cached = _wsSessCache.get(myWs);
-    if (cached && Array.isArray(cached.list)) list = cached.list.slice();
+    if (cached && Array.isArray(cached.list)) { list = cached.list.slice(); fellBack = cached; }
     else {
       console.error('[sessions] list failed and no cache — leaving the sidebar as-is:', list && list.error);
       if (sessListEl && !sessListEl.querySelector('.sess')) sessListEl.innerHTML = '<div class="sess-empty">Couldn’t read sessions — retrying…</div>';
       return;
     }
   }
+  // Every conversation on disk, BEFORE the display filters below — the existence answer, kept apart from the
+  // paint answer. On the fallback path `list` is a cached list that has ALREADY been filtered, so deriving the
+  // ids from it would quietly narrow "what exists" to "what was painted" and then write that narrower set back
+  // over a correct one — the very false conviction this pair of fields exists to prevent, on the one path where
+  // the app is least sure of itself. Keep the cached entry's own answer there.
+  const rawIds = (fellBack && Array.isArray(fellBack.ids)) ? fellBack.ids.slice() : list.map((s) => s && s.id).filter(Boolean);
   if (deletingIds.size) list = list.filter((s) => !deletingIds.has(s.id));          // hide rows being deleted
   // Hide promptless stubs ('(empty session)' — fork artifacts / killed boots): clicking one can only re-fail
   // resume (nothing to resume) and mint ANOTHER stub. A stub reappears the moment it gains a real user message.
@@ -4944,7 +5017,15 @@ async function refreshSessions() {
   }
   const lastGood = _wsSessCache.get(myWs);                                          // what this project last listed successfully — READ BEFORE the overwrite below, because the empty-list branch needs to know whether a populated list preceded this answer
   if (list.length) _sessEmptyRechecked.delete(myWs);                                // rows are back → a future blank answer earns its own single re-check
-  _wsSessCache.set(myWs, { list, ts: Date.now() });                                 // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash) — keyed by the SAME id the fetch was scoped to, so it can never hold another workspace's rows
+  // `ids` is EVERY conversation this project actually has — taken before the display filters above (the
+  // being-deleted strip, the promptless-stub hide, the continued-away fold) narrowed `list` down to what is
+  // worth painting. Anything asking "does this conversation still exist?" must consult THIS, never `list`:
+  // a live conversation that is merely hidden from the sidebar was being treated as deleted, and its "you
+  // were last here" pointer permanently discarded.
+  // A repaint of a CACHED list is not a fresh answer: keep that entry's own `stale` mark and timestamp rather
+  // than laundering pre-sync ids into something that reads as authoritative. Consumers convict on this.
+  _wsSessCache.set(myWs, fellBack ? { list, ids: rawIds, ts: fellBack.ts, stale: fellBack.stale }
+    : { list, ids: rawIds, ts: Date.now() });                                       // warm THIS ws's cache so when it later becomes a non-active expanded ws it paints instantly (no "loading…" flash) — keyed by the SAME id the fetch was scoped to, so it can never hold another workspace's rows
   const savedIds = new Set(list.map((s) => s.id));
   // A live tab gets its OWN sidebar row whenever it isn't ALREADY shown as a saved row — but ONLY for a session
   // the USER explicitly created new: either still pending an id ('new') or born-new and not yet saved (bornNew,
@@ -5012,7 +5093,9 @@ async function refreshSessions() {
   if (!activeSession && list.length && !(AT() && (AT().session === 'new' || AT().kind === 'live'))) {
     const remembered = lastSessionFor(activeWsId);
     const still = remembered && list.some((x) => x && x.id === remembered);
-    if (remembered && !still) forgetLastSession(activeWsId);   // deleted since — drop it rather than let a dead id keep losing this race
+    // EXISTS is not the same question as IS PAINTED. Convicting against `list` discarded the pointer of any
+    // conversation the display filters had merely hidden — a live one — so the check consults the unfiltered ids.
+    if (remembered && !still && !rawIds.includes(remembered)) forgetLastSession(activeWsId);   // genuinely gone — drop it rather than let a dead id keep losing this race
     const mru = list.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0];
     activeSession = still ? remembered : (mru || ordered[0]).id;
   }
@@ -5500,7 +5583,7 @@ function renderWsNonActiveSessions(w, kids) {                          // a save
     claudible.sessionListWs(w.id)
       .then((list) => {
         if (!Array.isArray(list)) return;               // typed fetch failure — keep the warm cache + whatever's painted (never cache/paint [] over real rows); the next 4s-stale refresh retries
-        _wsSessCache.set(w.id, { list, ts: Date.now() });
+        _wsSessCache.set(w.id, { list, ids: list.map((s) => s && s.id).filter(Boolean), ts: Date.now() });   // raw ids alongside the rows — this list has not been display-filtered, so they are the same set here, and every cache entry must be able to answer "does it exist?"
         if (document.body.contains(kids)) fill(list);
         else if (isWsExpanded(w.id)) renderWsChips();   // the container was replaced by a re-render mid-fetch → repaint from the now-fresh cache (no re-fetch)
       })
@@ -5952,11 +6035,13 @@ async function deleteWorkspace(w, force) {
 // destructive cross-account action). On success this is a real GitHub deletion PLUS the usual local trash-move
 // (main's workspace:deleteFromGithub delegates to the exact same core workspace:delete already runs), so the
 // result shape — and therefore the reconciliation — is identical; only the confirmation toast differs.
-async function deleteWorkspaceFromGithub(w, confirmName) {
+async function deleteWorkspaceFromGithub(w, confirmName, alsoLocal) {
   const busyToast = () => toast('A session in this project is still running — stop it before deleting');
   if (wsBusy(w.id)) { busyToast(); return; }
-  let r = null; try { r = await claudible.workspaceDeleteFromGithub(w.id, confirmName); } catch {}
-  await applyWorkspaceDeleteResult(w, r, busyToast, 'Deleted “' + (w.repoName || w.slug || w.label) + '” from GitHub');
+  const keepLocal = alsoLocal === false;
+  let r = null; try { r = await claudible.workspaceDeleteFromGithub(w.id, confirmName, { keepLocal }); } catch {}
+  await applyWorkspaceDeleteResult(w, r, busyToast,
+    'Deleted “' + (w.repoName || w.slug || w.label) + '” from GitHub' + (keepLocal ? ' — your folder is still on this machine' : ''));
 }
 // ---- workspace options (▾) menu: every per-workspace action lives here so the chip stays a clean name ----
 // The green + on a project's manage menu. A CREATE action among toggles and destructive ops, so it is the one
@@ -6375,15 +6460,22 @@ async function confirmDeleteFromGithub(w) {
   const owner = w.owner || '';
   let scope = null; try { scope = await claudible.ghDeleteScope(); } catch (e) {}
   if (scope && scope.checked && !scope.hasScope) { const granted = await grantGithubDeletePermission(); if (!granted) return; }
-  const typed = await modalPrompt({
+  const ans = await modalPrompt({
     title: 'Delete "' + repoName + '" from GitHub',
-    body: 'This will delete this repository from GitHub — are you sure?\n\nIt permanently removes ' + (owner ? owner + '/' + repoName : repoName) + ' on GitHub for everyone, then removes the local copy too. This cannot be undone.\n\nType the repo name to confirm: ' + repoName,
+    body: 'This will delete this repository from GitHub — are you sure?\n\nIt permanently removes ' + (owner ? owner + '/' + repoName : repoName) + ' on GitHub for everyone. This cannot be undone.\n\nType the repo name to confirm: ' + repoName,
     placeholder: repoName,
     ok: 'Delete from GitHub',
+    // The GitHub delete and the local copy are two different losses, and only one of them is recoverable.
+    // Checked by default, so the behaviour is exactly what it has always been unless the user says otherwise.
+    // Says what is LOST, not just what is kept: the conversations go either way, because leaving them behind
+    // would hand them to whatever project later occupies this folder.
+    checkbox: { label: 'Also delete my local copy (moves this machine’s folder to trash, kept 30 days). Uncheck to keep the folder on disk. Either way the project leaves Claudible and its conversations go to trash — kept 30 days, then gone.', checked: true },
   });
-  if (typed === null) return;                                       // Cancel / Esc
+  if (ans === null) return;                                         // Cancel / Esc
+  const typed = ans && typeof ans === 'object' ? ans.value : ans;
+  const alsoLocal = !(ans && typeof ans === 'object') || ans.checked !== false;
   if (typed !== repoName) { toast('Name didn’t match “' + repoName + '” — nothing was deleted'); return; }
-  await deleteWorkspaceFromGithub(w, typed);
+  await deleteWorkspaceFromGithub(w, typed, alsoLocal);
 }
 // First launch (no local workspace existed → main materialized a default): once, welcome the user and open the
 // workspace setup modal so they name + place their Local workspace. Clearing the flag means it shows only once.
@@ -6471,9 +6563,11 @@ function primeSessionListForWs(id) {
 // session survived: handing a deleted one back puts `--resume <dead id>` on the pty, the CLI refuses it with
 // "No conversation found with session ID: …", and the tab comes up on a session it can never open — whose fresh
 // id is then recorded as a continuation of a parent that no longer exists, and synced to collaborators as such.
-// The check reads the WARM cache only (the same list the sidebar paints): fetching here would put a backend
-// round trip on the boot path this early return exists to keep quick. A cold or stale cache is UNVERIFIABLE and
-// always trusts the record — "I could not check" must never be confused with "it is gone", the same rule the
+// The check reads the WARM cache only: fetching here would put a backend round trip on the boot path this early
+// return exists to keep quick. Two separate questions, and the cache answers them from two separate fields —
+// `ids` (unfiltered) decides whether it still EXISTS, `list` (what the sidebar paints) decides whether it should
+// be OPENED, because a conversation cleared out of still exists and is deliberately not shown. A cold or stale
+// cache is UNVERIFIABLE and always trusts the record — "I could not check" is never "it is gone", the rule the
 // empty-list and typed-failure guards in refreshSessions follow. Deletion clears the pointer at the source too
 // (deleteSession); this is the second line of defence, for a pointer that went stale by any other route.
 async function sessionToOpenFor(wsId, targetSession, out) {
@@ -6481,9 +6575,10 @@ async function sessionToOpenFor(wsId, targetSession, out) {
   const remembered = lastSessionFor(wsId);
   if (remembered) {                                                  // …but only if it still EXISTS — see above
     const warm = _wsSessCache.get(wsId);
-    const known = (warm && !warm.stale && Array.isArray(warm.list) && warm.list.length) ? warm.list : null;
-    if (!known || known.some((s) => s && s.id === remembered)) return remembered;
-    forgetLastSession(wsId);   // positively absent from a good list — same judgment refreshSessions already makes
+    const known = (warm && !warm.stale && Array.isArray(warm.ids) && warm.ids.length) ? warm.ids : null;   // `ids`, not `list`: unfiltered — see the header note
+    if (!known) return remembered;                                   // unverifiable → trust the record
+    if (known.includes(remembered)) { if ((warm.list || []).some((s) => s && s.id === remembered)) return remembered; }   // exists AND is shown → open it; exists but hidden → fall through, pointer untouched
+    else forgetLastSession(wsId);                                    // positively absent from a good answer — the same judgment refreshSessions makes
   }
   // COLD CACHE → FETCH, don't guess. _wsSessCache is only warmed when a project becomes active or its tree is
   // expanded — so a project never yet visited in this app run (typically a SHARED one whose sessions synced in
@@ -6494,7 +6589,7 @@ async function sessionToOpenFor(wsId, targetSession, out) {
   if (!c || c.stale || !Array.isArray(c.list) || !c.list.length) {   // `stale` = a sync landed changes since this list was read: resolve "what should this project open" from fresh rows, never from the pre-sync ones
     try {
       const list = await claudible.sessionListWs(wsId);
-      if (Array.isArray(list)) { c = { list, ts: Date.now() }; _wsSessCache.set(wsId, c); }
+      if (Array.isArray(list)) { c = { list, ids: list.map((s) => s && s.id).filter(Boolean), ts: Date.now() }; _wsSessCache.set(wsId, c); }
       else if (out) out.unknown = true;   // typed {error} from main — we did NOT learn this project is empty
     } catch { if (out) out.unknown = true; }   // fetch failed → fall through to whatever the cache held; 'new' stays the last resort, but it is now a KNOWN guess
   }

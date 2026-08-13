@@ -407,6 +407,56 @@ function lineageWrite() {
   fs.renameSync(tmp, f);
 }
 
+// subcommand "meta-evict": env CL_FILE (an author's meta/<login>.json), CL_ID (the deleted session).
+// A DELETED CONVERSATION MUST NOT KEEP ITS NAME. Deleting removed the transcript and dropped a tombstone, but
+// every map that NAMES the session outlived it: the name kept a dead id addressable, which is how an id with
+// no conversation behind it could still be shown. Drops the id's own entry, and any continuation link POINTING
+// at it (a link to a conversation that no longer exists is not a continuation, and it would otherwise fold a
+// live row away forever). Missing file / unparseable / id absent are all no-ops: this runs inside a delete
+// that has already succeeded, and must never turn a completed delete into a failure.
+function metaEvict() {
+  const f = process.env.CL_FILE;
+  const gone = process.env.CL_ID;
+  if (!f || !gone) return;
+  let pairs = [];
+  try {
+    const parsed = parseJsonOrdered(fs.readFileSync(f, 'utf8'));
+    if (parsed !== null && typeof parsed === 'object' && parsed.__pairs) pairs = parsed.__pairs;
+  } catch (e) { return; }                                            // nothing to clean (or unreadable) — leave it exactly as it is
+  // What the deleted entry itself continued: anyone continuing IT inherits this, so the chain keeps its shape.
+  // Cutting the link instead would strand everything above the deleted one, and the live conversation at the
+  // top of that chain would reappear beside its own continuation as a duplicate row, on every machine.
+  let grandparent = '';
+  for (const p of pairs) {
+    if (p[0] !== gone) continue;
+    const v = p[1];
+    if (v && typeof v === 'object' && v.__pairs) {
+      const g = v.__pairs.filter((e) => e[0] === 'continuesFrom')[0];
+      if (g && typeof g[1] === 'string') grandparent = g[1];
+    }
+  }
+  let changed = false;
+  const kept = [];
+  for (let p of pairs) {
+    if (p[0] === gone) { changed = true; continue; }                 // the deleted session's own entry
+    const v = p[1];
+    if (v && typeof v === 'object' && v.__pairs) {
+      const cf = v.__pairs.filter((e) => e[0] === 'continuesFrom')[0];
+      if (cf && cf[1] === gone) {                                    // …and anyone recorded as continuing it
+        const rest = v.__pairs.filter((e) => e[0] !== 'continuesFrom');
+        if (grandparent && grandparent !== p[0]) rest.push(['continuesFrom', grandparent]);   // never a self-link
+        p = [p[0], obj(rest)];
+        changed = true;
+      }
+    }
+    kept.push(p);
+  }
+  if (!changed) return;
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, encVal(obj(kept), /*ensureAscii=*/ false));
+  fs.renameSync(tmp, f);
+}
+
 // --- index-write: a generated, human-readable per-author session index -------------------------
 const IDX_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function idxShort(id) { return String(id || '').slice(0, 8); }
@@ -668,6 +718,8 @@ if (sub === 'title-write') {
   titleRead();
 } else if (sub === 'lineage-write') {
   lineageWrite();
+} else if (sub === 'meta-evict') {
+  metaEvict();
 } else if (sub === 'index-write') {
   indexWrite();
 } else if (sub === 'presence-filter') {

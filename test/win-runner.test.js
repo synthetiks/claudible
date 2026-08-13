@@ -287,5 +287,25 @@ ok('3999ms is still fast (a refusal)', shouldFallbackToFresh(T0, T0 + 3999, 1, u
     pickHealthyClaudeBin([NPM + '\\claude', SHIM], { exists: () => true, readText: read, home: 'C:\\Users\\X' }), SHIM);
 }
 
+// ---- a conversation that no longer exists is not resumed -------------------------------------------------
+// Handing a deleted id to the CLI is how a tab ended up on a conversation it could never open: the CLI answers
+// "No conversation found with session ID: …" and exits, and the fresh id it falls back to was then recorded as
+// a continuation of the deleted one. The listing is already in hand here, so the check is free.
+{
+  const F = new Set();
+  const list = [{ id: 'aaa' }, { id: 'bbb' }];
+  eq('an explicitly requested conversation that is still there resumes',
+    pickResumeTarget('bbb', list, F), { mode: 'resume', id: 'bbb', foreign: false });
+  eq('one that is gone starts a fresh conversation instead of a doomed resume',
+    pickResumeTarget('deleted-id', list, F), { mode: 'fresh' });
+  eq('an EMPTY listing never convicts — it means we could not look, not that it is gone',
+    pickResumeTarget('aaa', [], F), { mode: 'resume', id: 'aaa', foreign: false });
+  eq('…and neither does a missing listing', pickResumeTarget('aaa', null, F), { mode: 'resume', id: 'aaa', foreign: false });
+  eq('an imported conversation still resumes sandboxed when it exists',
+    pickResumeTarget('ccc', [{ id: 'ccc' }], new Set(['ccc'])), { mode: 'resume', id: 'ccc', foreign: true });
+  eq('asking for nothing still takes the newest local conversation',
+    pickResumeTarget('', list, F), { mode: 'resume', id: 'aaa', foreign: false });
+}
+
 console.log(`\nwin-runner (pure core): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -141,13 +141,23 @@ function sessionDir(ws, home) {
 function claudeProjectsDir(sdir, home) {
   return path.win32.join(home, '.claude', 'projects', String(sdir).replace(/[^A-Za-z0-9]/g, '-'));
 }
-// Resume selection, mirror of session.sh (114-148). jsonl = [{id}] newest-first (caller reads the dir);
+// Resume selection, modelled on session.sh (114-148). jsonl = [{id}] newest-first (caller reads the dir);
 // foreign = Set of collaborator-imported ids that must NEVER auto-resume under skip-permissions.
+// NOT a line-for-line mirror any more: the "requested conversation no longer exists" guard below is here only.
+// The posix twin still hands any non-empty selection straight to the CLI and relies on its own timing fallback,
+// so a port belongs with the next change to that file — do not read the two as equivalent.
 function pickResumeTarget(sel, jsonl, foreign) {
   sel = String(sel || '');
   if (sel.startsWith('-')) sel = '';                       // a dash-prefixed id could read as a flag -> ignore (session.sh:115)
   sel = sel.replace(/[^A-Za-z0-9-]/g, '');
   if (sel === 'new') return { mode: 'fresh' };
+  // A REQUESTED CONVERSATION THAT NO LONGER EXISTS STARTS A FRESH ONE. Resuming an id blindly is how a deleted
+  // conversation reached the CLI, which answers "No conversation found with session ID: …" and exits — the tab
+  // then sat on something it could never open, and the replacement id it eventually got was recorded as a
+  // continuation of the deleted one. The caller already holds the transcript listing, so this costs nothing.
+  // Only convict on a NON-EMPTY listing: an empty one means we could not read the store, and "I could not
+  // check" must never be treated as "it is gone" (a first run on a cold machine legitimately lists nothing).
+  if (sel && Array.isArray(jsonl) && jsonl.length && !jsonl.some((f) => String((f && f.id) || '') === sel)) return { mode: 'fresh' };
   if (sel) return { mode: 'resume', id: sel, foreign: foreign.has(sel) };
   for (const f of (jsonl || [])) {                         // default: newest LOCAL conversation (skip foreign + dash)
     const id = String(f && f.id || '');
