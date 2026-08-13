@@ -4748,7 +4748,16 @@ async function deleteSession(id, scope, force) {
   // delete whose GitHub half failed). If the delete threw or the script failed (r null / {ok:false,error:'exec'}),
   // the session is STILL on disk under this id — wiping its custom name would silently drop back to the auto
   // preview. Mirrors deleteWorkspace(), which already gates forgetWorkspaceCaches on success.
-  if (r && (r.ok || r.localDone)) forgetSessionTitle(id);
+  if (r && (r.ok || r.localDone)) {
+    forgetSessionTitle(id);
+    // …and drop the "last session here" pointer if it still names what we just deleted. The re-point loop above
+    // normally overwrites it (openSession → rememberLastSession), but two paths skip that: deleting a session no
+    // tab is sitting on (`owners` is empty, so the loop never runs), and quitting before the next refresh — which
+    // is exactly what an app restart right after a delete does. A dead pointer is not inert: the next boot resumes
+    // it, the CLI refuses, and the tab comes up on an unopenable session. savePrefs is a synchronous file write,
+    // so this lands even if the app is closed a second later.
+    if (lastSessionFor(myWs) === id) forgetLastSession(myWs);
+  }
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions();
 }
@@ -6458,10 +6467,24 @@ function primeSessionListForWs(id) {
 // is empty" still produced the identical phantom draft. Callers that pass an object learn which one it was;
 // callers that pass nothing behave exactly as before. That asymmetry is deliberate — a required out-param, or a
 // changed return shape, is the class of edit where ONE missed call site silently breaks a guard.
+// P2 — the remembered id is CHECKED before it is trusted. It is a record of where the user was, not proof the
+// session survived: handing a deleted one back puts `--resume <dead id>` on the pty, the CLI refuses it with
+// "No conversation found with session ID: …", and the tab comes up on a session it can never open — whose fresh
+// id is then recorded as a continuation of a parent that no longer exists, and synced to collaborators as such.
+// The check reads the WARM cache only (the same list the sidebar paints): fetching here would put a backend
+// round trip on the boot path this early return exists to keep quick. A cold or stale cache is UNVERIFIABLE and
+// always trusts the record — "I could not check" must never be confused with "it is gone", the same rule the
+// empty-list and typed-failure guards in refreshSessions follow. Deletion clears the pointer at the source too
+// (deleteSession); this is the second line of defence, for a pointer that went stale by any other route.
 async function sessionToOpenFor(wsId, targetSession, out) {
   if (targetSession) return targetSession;
   const remembered = lastSessionFor(wsId);
-  if (remembered) return remembered;
+  if (remembered) {                                                  // …but only if it still EXISTS — see above
+    const warm = _wsSessCache.get(wsId);
+    const known = (warm && !warm.stale && Array.isArray(warm.list) && warm.list.length) ? warm.list : null;
+    if (!known || known.some((s) => s && s.id === remembered)) return remembered;
+    forgetLastSession(wsId);   // positively absent from a good list — same judgment refreshSessions already makes
+  }
   // COLD CACHE → FETCH, don't guess. _wsSessCache is only warmed when a project becomes active or its tree is
   // expanded — so a project never yet visited in this app run (typically a SHARED one whose sessions synced in
   // from a collaborator) resolved to 'new' here and opened as a phantom blank draft, the exact thing this

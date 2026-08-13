@@ -25,14 +25,17 @@ if (!m) { console.error('  FAIL sessionToOpenFor not found in renderer/app.js');
 
 // mk(remembered, warmList, fetch) → the lifted resolver wired to stubs. `calls` records every IPC the
 // resolver makes, so the no-fetch-when-warm cases can assert silence, not just the right answer.
+// `forgotten` records every pointer the resolver drops, so "a deleted session is not resumed" can be asserted as
+// two separate facts: the answer it gives, and whether it cleaned up the dead record behind it.
 function mk(remembered, warmList, fetchImpl) {
   const calls = [];
+  const forgotten = [];
   const cache = new Map(warmList ? [['W', { list: warmList, ts: 1 }]] : []);
   const claudible = { sessionListWs: async (id) => { calls.push(id); return fetchImpl(id); } };
-  const fn = new Function('lastSessionFor', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor', 'claudible', 'Date',
+  const fn = new Function('lastSessionFor', 'forgetLastSession', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor', 'claudible', 'Date',
     m[0] + '; return sessionToOpenFor;')(
-    () => remembered, cache, () => false, (ws, l) => l, claudible, Date);
-  return { fn, calls, cache };
+    () => remembered, (ws) => forgotten.push(ws), cache, () => false, (ws, l) => l, claudible, Date);
+  return { fn, calls, cache, forgotten };
 }
 
 (async () => {
@@ -46,6 +49,26 @@ function mk(remembered, warmList, fetchImpl) {
   { const { fn, calls } = mk(null, [{ id: 'S1', msgs: 3 }, { id: 'S2', msgs: 1 }], async () => { throw new Error('no'); });
     eq('a warm cache resolves the project’s top saved session', await fn('W'), 'S1');
     eq('…without fetching', calls.length, 0); }
+
+  // ---- A REMEMBERED SESSION THAT NO LONGER EXISTS IS NOT RESUMED ----
+  // Resuming a deleted id put `--resume <dead id>` on the pty, the CLI answered "No conversation found with
+  // session ID: …", and the tab came up on a session it could never open — whose fresh id was then recorded as
+  // a continuation of a parent that is gone. The check is deliberately one-sided: only a GOOD list can convict.
+  { const { fn, calls, forgotten } = mk('DELETED', [{ id: 'S1', msgs: 3 }, { id: 'S2', msgs: 1 }], async () => { throw new Error('no'); });
+    eq('a remembered session absent from a good list is not resumed — the project opens its top session instead', await fn('W'), 'S1');
+    eq('…and the dead pointer is dropped rather than left to lose the race again', forgotten.length, 1);
+    eq('…still without fetching', calls.length, 0); }
+  { const { fn, forgotten } = mk('S2', [{ id: 'S1', msgs: 3 }, { id: 'S2', msgs: 1 }], async () => { throw new Error('no'); });
+    eq('a remembered session the list confirms still wins', await fn('W'), 'S2');
+    eq('…and nothing is forgotten', forgotten.length, 0); }
+  { const { fn, calls, forgotten } = mk('REMEMBERED', null, async () => [{ id: 'S1', msgs: 3 }]);
+    eq('a COLD cache cannot convict: the record is trusted, not second-guessed', await fn('W'), 'REMEMBERED');
+    eq('…the pointer survives an unverifiable check', forgotten.length, 0);
+    eq('…and the fast path stays fast (no boot-path round trip)', calls.length, 0); }
+  { const { fn, cache, forgotten } = mk('DELETED', [{ id: 'S1', msgs: 3 }], async () => { throw new Error('no'); });
+    cache.get('W').stale = true;   // a sync landed changes since this list was read — it proves nothing about a missing id
+    eq('a STALE cache cannot convict either', await fn('W'), 'DELETED');
+    eq('…so the pointer survives', forgotten.length, 0); }
 
   // ---- THE PHANTOM-DRAFT FIX: a cold cache is fetched, not guessed ----
   { const { fn, calls, cache } = mk(null, null, async () => [{ id: 'SYNCED-IN', msgs: 5 }]);
@@ -69,9 +92,9 @@ function mk(remembered, warmList, fetchImpl) {
   // ---- determinism: whatever ordering helper the app uses is the one this resolver obeys ----
   { const calls = [];
     const cache = new Map([['W', { list: [{ id: 'A', msgs: 1 }, { id: 'B', msgs: 9 }], ts: 1 }]]);
-    const fn = new Function('lastSessionFor', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor', 'claudible', 'Date',
+    const fn = new Function('lastSessionFor', 'forgetLastSession', '_wsSessCache', 'hasExplicitTitle', 'orderedSessionsFor', 'claudible', 'Date',
       m[0] + '; return sessionToOpenFor;')(
-      () => null, cache, () => false, (ws, l) => [...l].reverse(), { sessionListWs: async () => { calls.push(1); return []; } }, Date);
+      () => null, () => {}, cache, () => false, (ws, l) => [...l].reverse(), { sessionListWs: async () => { calls.push(1); return []; } }, Date);
     eq('the TOP OF THE ORDER wins, not raw list position (same helper as every render path)', await fn('W'), 'B'); }
 
   // ---- the phantom-draft ROOT fix + safety net (grep pins over the shipped renderer) ----
@@ -79,6 +102,14 @@ function mk(remembered, warmList, fetchImpl) {
   // reconcile dance entirely: a project that resolves 'new' is PARKED — no pty ever starts for it — and shows
   // a create/retry overlay until an explicit Create/Retry click (or a session CONFIRMED to already exist).
   // These pins now check that mechanism instead of the retired autoDraft one.
+  // The SOURCE half of "a deleted session is never resumed": clearing the pointer as part of the delete itself,
+  // so it cannot outlive the transcript. deleteSession's re-point loop only covers tabs SITTING on that session,
+  // so a session deleted while no tab holds it — and any delete followed by a quit before the next refresh —
+  // would otherwise leave the pointer naming a session that is gone, and the next boot would resume it.
+  ok('deleting a session clears the workspace pointer that names it',
+    /if \(lastSessionFor\(myWs\) === id\) forgetLastSession\(myWs\);/.test(APP));
+  ok('…gated on the delete having actually happened (a failed delete must keep the pointer)',
+    /if \(r && \(r\.ok \|\| r\.localDone\)\) \{[\s\S]{0,900}?forgetLastSession\(myWs\);/.test(APP));
   ok('tab records default parked:false', /session: session \|\| '', altFrac: 0, parked: false, parkReason: '',/.test(APP));
   ok('commitParkedTab is the only place a parked tab turns real (id===\'new\' spawns fresh, any other id opens in place)',
     /function commitParkedTab\(t, id, name\)/.test(APP) && /t\.parked = false; t\.parkReason = '';/.test(APP));
