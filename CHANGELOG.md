@@ -4,6 +4,70 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.13] — 2026-08-15
+
+The frontend redesign. What used to be one opt-in palette is now the app's design in every theme,
+the gaps that made the sidebar, terminal and chat read as three floating cards are gone, and the
+bar across the bottom becomes the place you drive a session from. Everything here is verified by
+the automated test suite only — **nothing in this release has been confirmed on real hardware
+yet**, which is what keeps it a pre-release.
+
+**New**
+- **One design, four themes.** Dark, Cockpit, Graphite and Midnight — down from seven — now share
+  the same structure, type and spacing, and differ only in colour. Picking a theme changes the
+  colours, never the layout. If your saved theme was one of the three that were removed, you land
+  on Dark.
+- **The permission mode lives on the bottom bar.** Manual, Accept edits, Plan, Auto and Bypass
+  permissions, in the order the Claude app uses them, one click away and always visible. It
+  replaces the copy that used to live in Settings, so there is only one place to set it.
+- **A model picker, next to it.** Choose the model a new session starts on, or leave it unset to
+  keep whatever Claude Code would have picked.
+- **A Skill & Strategy panel** in the top bar, holding skills, plugins and model strategy — all
+  three moved out of Settings.
+- **The top bar names where you are** — the project and session you are working in, updating as you
+  rename or switch tabs.
+- **The usage ring is always there**, from the start of a session rather than appearing only once
+  Claude Code first reports a limit.
+
+**Changed**
+- **Sessions now start in Auto if you have never picked a mode.** Earlier releases asked before
+  every tool. This applies to existing installs as well as new ones — if you never opened the mode
+  control, this release changes what Claude may do on your machine without asking. Pick **Manual**
+  on the bottom bar for the previous behaviour. A mode you have already chosen is kept exactly as
+  you set it.
+- **Settings opens instantly and reads as one panel.** One type scale, one control size, sections
+  that line up. The GitHub row used to run a program before the panel could answer, which stalled
+  it for up to four and a half seconds; it now shows the last known answer immediately and corrects
+  itself in the background.
+- **The command palette is an anchored popover**, not a modal that dimmed the whole window.
+- **The terminal has no scrollbar.** Claude Code takes the alternate screen and keeps its own
+  history, so the lines above the view were never sent to Claudible — the bar that shipped before
+  was a fixed-height thumb on a guessed position. The mouse wheel scrolls exactly as before, and
+  the terminal takes the width the bar was using.
+- **The guest page matches the host**, including losing its own scrollbar for the same reason.
+
+**Fixed**
+- **The terminal was drawing about two columns outside its own viewport** — text written, clipped
+  and never seen. Found by measuring the grid against the window rather than by looking at it.
+- **Closed side panels were casting a shadow across the right edge of the app**, dimming real
+  content. Panels now cast only while open.
+- **Context and token readouts no longer drift apart** when empty: one alignment, one dash, one
+  weight.
+
+**Known limitations**
+- **The model picker and the Plan and Auto modes apply on native Windows.** Sessions on WSL, Linux
+  and macOS keep the previous behaviour — the picker will not change the model there, and Plan and
+  Auto fall back to Claude Code's own default. Closing that gap is the next release's first job.
+- **The left sidebar's internals are still the previous design.** Its frame changed to match; its
+  contents were deliberately left alone.
+- **A session synced from a collaborator never inherits your Claudible mode**, but Claudible passes
+  no mode at all on that path — so Claude Code falls back to whatever default your own
+  `~/.claude/settings.json` sets. With no default set, which is the usual case, that is ask-first.
+- **On a Claude Code older than 2.1.200**, the mode on the bottom bar cannot be applied; the session
+  starts and works as it did in earlier releases, and says so once in the terminal.
+- Fixes from 0.9.10 through 0.9.12 are still awaiting confirmation on real machines and are not
+  claimed as proven here.
+
 ## [0.9.12] — 2026-08-14
 
 The recovery release. Two ways the app could fail without explaining itself — a Claude Code install
