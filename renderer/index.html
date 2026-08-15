@@ -1691,7 +1691,11 @@
        is open". The glyph itself comes up to full ink over a faint tint: unmistakable at a glance, and still
        quieter than the terminal it sits under. */
     html.skin .cockpit .vin.live{color:var(--ink);background:color-mix(in srgb,var(--live) 16%,transparent)}
-    html.skin .cockpit .vin .vico,html.skin .cockpit .vmerge .vico{width:15px;height:15px}
+    /* 15 → 16.5px (+10%). These two are the only icon-only controls on the bar — everything else beside them
+       is a word — so they carry their whole meaning in a glyph and were the first thing to get lost at a
+       glance. The BUTTONS keep their 26px box; only the glyph inside grows, so the row's geometry is
+       untouched and nothing reflows. One rule covers both: the megaphone's svg carries .vico as well. */
+    html.skin .cockpit .vin .vico,html.skin .cockpit .vmerge .vico{width:16.5px;height:16.5px}
     /* the recording dot becomes a corner badge — the same shape the connection button uses upstairs — so the
        button can be square without losing the one piece of state it carries. */
     html.skin .cockpit .vin .vdot{position:absolute;right:2px;bottom:2px;width:6px;height:6px}
@@ -1959,7 +1963,9 @@
     html.skin .top .topbtns .iconbtn{width:28px;height:28px;padding:0;border:0;border-radius:6px;
       background:none;box-shadow:none;color:var(--ink-dim);display:grid;place-items:center;flex:none}
     html.skin .top .topbtns .iconbtn:hover{background:var(--raised-hi);color:var(--ink)}
-    html.skin .top .topbtns .iconbtn svg{width:15px;height:15px}
+    /* 15 → 15.75px (+5%). Same reasoning as the voice glyphs below, applied gently: these sit in the corner
+       furthest from where the eye rests, and they are also icon-only. The button box is unchanged. */
+    html.skin .top .topbtns .iconbtn svg{width:15.75px;height:15.75px}
     /* All three top-right controls are the SAME square button. The draft's .conn pill was tried here and the
        owners called it: a control shaped differently from the two beside it reads as a different KIND of
        thing, when it is simply the third button in the group. #claude-btn carries .iconbtn, so it takes the
