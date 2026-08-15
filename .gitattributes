@@ -2,9 +2,9 @@
 # core.autocrlf=true — CRLF would break `bash` (\r errors) and stop patch-package from applying.
 *.sh    text eol=lf
 *.patch text eol=lf
-# B5: the contract suite is 473 static regexes over the shipped source, and several span lines — a CRLF
-# checkout makes 6 of them report phantom failures naming plausible regressions (467/6 vs the LF truth 473/0),
-# inviting someone to debug working code. Pin every file the suite reads to LF everywhere.
+# The contract suite is hundreds of static regexes over the shipped source, and several of them span lines — a
+# CRLF checkout makes a handful report phantom failures naming plausible regressions, which invites someone to
+# spend an afternoon debugging working code. Pin every file the suite reads to LF everywhere.
 *.js    text eol=lf
 *.html  text eol=lf
 # test/e2e/fake-gh/gh — extensionless `#!/bin/sh` shim (see its own header comment for why it has no

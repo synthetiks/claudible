@@ -90,8 +90,10 @@ contextBridge.exposeInMainWorld('claudible', {
   trashEmpty: () => ipcRenderer.invoke('trash:empty'),
   effortGet: () => ipcRenderer.invoke('effort:get'),
   effortSet: (level) => ipcRenderer.invoke('effort:set', level),
+  modelGet: () => ipcRenderer.invoke('model:get'),
+  modelSet: (id) => ipcRenderer.invoke('model:set', id),   // '' = let Claude Code choose; otherwise rides --model into the NEXT session
   permissionModeGet: () => ipcRenderer.invoke('permissionMode:get'),
-  permissionModeSet: (mode) => ipcRenderer.invoke('permissionMode:set', mode),   // 'default' | 'acceptEdits' | 'bypass'
+  permissionModeSet: (mode) => ipcRenderer.invoke('permissionMode:set', mode),   // 'default' (the stored name for Manual) | 'acceptEdits' | 'plan' | 'auto' | 'bypass'
   modelStrategyGet: () => ipcRenderer.invoke('modelStrategy:get'),
   modelStrategySet: (v) => ipcRenderer.invoke('modelStrategy:set', v),           // 'planBigExecSmall' (opt-in) | 'off' (default)
   repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),

@@ -10,21 +10,30 @@
   <title>Claudible — shared session</title>
   <link rel="stylesheet" href="/xterm.css" />
   <style>
-    :root{ --bg:#070809; --ink:#e7eaef; --ink-dim:#9097a1; --ink-faint:#565c66; --silver:#cfd6df;
-      --hairline:#2b2f37; --live:#e5564b; --ok:#5fb487; --amber:#e0a93b; --sheen:rgba(255,255,255,.07); }
+    /* Matched to the renderer's Cockpit palette. The guest is the same product seen from the other side, and a
+       cool-grey guest beside a warm-black host reads as two different apps mid-session. The guest has no theme
+       switcher and no transport for the host's choice — carrying the theme over the wire is a feature, not a
+       repaint — so this tracks Cockpit directly. Surface tokens below are new: the guest carried its control
+       gradients as literals too, which is why its old palette only ever half-applied. */
+    :root{ --bg:#0b0a09; --ink:#f2ece5; --ink-dim:#b4aaa1; --ink-faint:#7a716a; --silver:#ddd4cb;
+      --hairline:rgba(255,236,220,.075); --live:#d9714f; --ok:#63c88a; --amber:#d5a03f; --sheen:rgba(255,236,220,.07);
+      --surface-top:#1e1a17; --surface-bot:#151210;   /* buttons + pills */
+      --bar-top:#161310;     --bar-bot:#0e0c0b;       /* the top/bottom bars and sheets */
+      --raised-top:#241f1b;  --raised-bot:#1a1613;    /* avatars, action buttons */
+      --field:#0d0b0a; }                              /* text inputs */
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;overflow:hidden}        /* lock the page: no page scroll / dead gap — only the terminal & chat-log scroll inside */
-    html{background:#070809}                                /* masks any 1px seam during URL-bar transitions (no flash) */
+    html{background:var(--bg)}                                /* masks any 1px seam during URL-bar transitions (no flash) */
     /* The app height tracks the LIVE visible viewport (JS sets --app-h from visualViewport) so the layout always
        exactly fills the device — no empty gap under the chat box, no page-level vertical scroll. The fallback
        chain (vh → svh → dvh → var) keeps older engines/webviews sane until the JS value lands. */
     body{height:100vh;height:100svh;height:100dvh;height:var(--app-h,100dvh)}
-    body{background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
+    body{background:radial-gradient(135% 95% at 50% -12%, #17120f 0%, #0a0908 52%, #060505 100%);
       color:var(--ink);font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
       display:grid;grid-template-rows:52px 1fr 22px}   /* bar · terminal(1fr) · foot (the redundant projects strip was removed; Disconnect lives in the chat panel's voice bar) */
     /* top bar — mirrors the Claudable cockpit */
     .bar{display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--hairline);
-      background:linear-gradient(180deg,#0d0f13,#090a0c);font-size:12px;letter-spacing:.04em}
+      background:linear-gradient(180deg,var(--bar-top),var(--bar-bot));font-size:12px;letter-spacing:.04em}
     .bar .logo{height:30px;width:auto;mix-blend-mode:lighten;image-rendering:pixelated}
     .bar .name{font-weight:500;letter-spacing:.3em;text-transform:uppercase;color:var(--silver);font-size:14px}
     /* the old free-floating "shared" tag was absorbed into the session group below */
@@ -37,7 +46,7 @@
     .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
     .trk-item b{font-size:15px;font-weight:700;color:var(--silver)}
     .trk-item i{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-style:normal;margin-top:2px}
-    .ctxbar{display:inline-flex;align-items:center;gap:9px;height:33px;padding:0 11px;border-radius:7px;background:#0a0c10;box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px rgba(95,217,155,.30)}
+    .ctxbar{display:inline-flex;align-items:center;gap:9px;height:33px;padding:0 11px;border-radius:7px;background:var(--field);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px rgba(95,217,155,.30)}
     .ctxlabel{font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#f6f8fc;flex:none}
     .ctxsegs{display:inline-flex;align-items:center;gap:2.5px;height:15px;flex:none}
     .ctxsegs i{width:3.5px;height:15px;border-radius:1.5px;background:rgba(132,147,166,.22);transition:background .25s ease}
@@ -54,7 +63,7 @@
     .dot.work{background:var(--amber);box-shadow:0 0 8px -1px var(--amber)}
     /* bottom status strip */
     .foot{display:flex;align-items:center;gap:10px;padding:0 16px;border-top:1px solid var(--hairline);
-      font-size:10px;letter-spacing:.1em;color:var(--ink-faint);background:linear-gradient(0deg,#0c0e11,#090a0c)}
+      font-size:10px;letter-spacing:.1em;color:var(--ink-faint);background:linear-gradient(0deg,var(--bar-top),var(--bar-bot))}
     .main{display:flex;min-height:0;min-width:0}
     /* min-width:0 lets the wide (mirrored) terminal scroll INSIDE .wrap instead of stretching the whole
        page — without it the body grows past the viewport and mobile browsers zoom out, so the phone
@@ -69,7 +78,7 @@
     .gchat{min-width:0}
     /* guest chat — human↔human side channel with the host */
     .gchat{flex:none;width:300px;display:flex;flex-direction:column;min-height:0;margin:14px 14px 14px 0;
-      background:#0d0f12;border:1px solid var(--hairline);border-radius:11px;overflow:hidden}
+      background:var(--bar-top);border:1px solid var(--hairline);border-radius:11px;overflow:hidden}
     .gchat-head{display:flex;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--hairline);
       font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-dim)}
     .gchat-head .gchat-sub{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-faint);text-transform:none}
@@ -111,40 +120,28 @@
     /* name gate — viewer picks a display name before joining */
     .nameover{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(5,6,8,.94)}
     .nameover .card{max-width:360px}
-    .nameover input{width:100%;margin:14px 0 16px;font-family:inherit;font-size:16px;color:var(--ink);background:#0a0b0d;
+    .nameover input{width:100%;margin:14px 0 16px;font-family:inherit;font-size:16px;color:var(--ink);background:var(--field);
       border:1px solid var(--hairline);border-radius:9px;padding:11px 12px}
     .nameover input:focus{outline:none;border-color:rgba(255,255,255,.28)}
     .nameover button{font-family:inherit;font-size:13px;color:var(--ink);background:linear-gradient(180deg,#1c2a22,#142019);
       border:1px solid #294a39;border-radius:9px;padding:11px 26px;cursor:pointer}
     .gchat-input{display:flex;align-items:center;gap:8px;padding:10px;border-top:1px solid var(--hairline)}
-    .gchat-input input{flex:1;font-family:inherit;font-size:12px;color:var(--ink);background:#0a0b0d;
+    .gchat-input input{flex:1;font-family:inherit;font-size:12px;color:var(--ink);background:var(--field);
       border:1px solid var(--hairline);border-radius:9px;padding:10px 11px}
     .gchat-input input:focus{outline:none;border-color:rgba(255,255,255,.24)}
-    .gchat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-family:inherit;font-size:0;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,#101216);border:1px solid var(--hairline);cursor:pointer;display:flex;align-items:center;justify-content:center}
+    .gchat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-family:inherit;font-size:0;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,var(--bar-top));border:1px solid var(--hairline);cursor:pointer;display:flex;align-items:center;justify-content:center}
     .gchat-input button::after{content:'→';font-size:15px;line-height:1}
     .gchat-input button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
-    #terminal{background:#0a0b0d;border:1px solid var(--hairline);border-radius:11px;padding:5px 12px;
+    #terminal{background:var(--field);border:1px solid var(--hairline);border-radius:11px;padding:5px 12px;
       box-shadow:inset 0 1px 0 var(--sheen), inset 0 26px 64px -52px #000, 0 0 0 1px rgba(0,0,0,.4)}
-    /* hide xterm's native scrollbar (it sits over the text) — mirror the cockpit and render our own gutter */
+    /* Hide xterm's native scrollbar — it sits over the text. These two rules STAY: nothing replaces the bar, so
+       deleting them would simply put a scrollbar back. The host hides its own the same way. */
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
     .wrap{scrollbar-width:none}
     .wrap::-webkit-scrollbar{width:0;height:0}
-    /* custom vertical scroll gutter — the cockpit's affordance, ported. Desktop/tablet only (touch scrolls on phones). */
-    /* The TRACK now follows the thumb instead of standing there empty. A view-only guest (the default) watching a
-       full-screen app can never page, so the thumb never appears — leaving a permanent 7px strip that reads as a
-       broken scrollbar. Hidden with opacity, NEVER display:none: the track must stay laid out or its clientHeight
-       reads 0, upd() would take the "no room" branch, and it could never come back once hidden. */
-    .gutter{position:absolute;top:14px;bottom:14px;right:5px;width:7px;border-radius:7px;z-index:4;display:none;
-      background:linear-gradient(180deg,#101216,#0b0d10);box-shadow:inset 0 0 0 1px var(--hairline);
-      opacity:0;pointer-events:none;transition:opacity .18s ease}
-    .gutter.on{opacity:1;pointer-events:auto}
-    .gutter .gthumb{position:absolute;left:0;right:0;top:0;min-height:26px;border-radius:7px;cursor:grab;opacity:0;
-      background:linear-gradient(180deg,#3a414c,#262b32);box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
-      transition:background .15s,opacity .2s;will-change:transform,height}
-    .gutter:hover .gthumb{background:linear-gradient(180deg,#49515d,#30353d)}
-    .gutter .gthumb.drag{cursor:grabbing;background:linear-gradient(180deg,var(--silver),#8a929b)}
-    body:not(.mobile) .gutter{display:block}
+    /* The custom scroll gutter that used to be styled here is gone, matching the host: it estimated its own
+       position rather than knowing it, over an ALTERNATE screen that keeps no scrollback to scroll. */
     /* ---- mobile sizing is done in guest.js by scaling the terminal FONT SIZE (cols x rows unchanged) so xterm's
        cell metrics stay consistent with the DOM and tap/selection coordinates stay correct. Desktop never touches
        the font that way (gated behind body.mobile). Phones get a manual zoom (−/＋ + pinch) instead of a binary
@@ -154,7 +151,7 @@
     body.can-fit .zoomctl{display:inline-flex}
     .zoomctl button{width:26px;height:26px;border-radius:50%;border:1px solid var(--hairline);cursor:pointer;padding:0;
       font-family:inherit;font-size:16px;font-weight:600;line-height:1;color:var(--ink);
-      background:linear-gradient(180deg,#232732,#171a20);display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(180deg,var(--raised-top),var(--raised-bot));display:flex;align-items:center;justify-content:center;
       -webkit-tap-highlight-color:transparent;touch-action:manipulation}
     .zoomctl button:active{transform:scale(.9)}
     .zoomctl .lbl{min-width:34px;text-align:center;font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;
@@ -167,7 +164,7 @@
     /* "jump to bottom" — mobile only. Snaps the terminal/chat to the latest so you don't drag back down by hand.
        Sits just above the chat panel; rides lower when the chat is collapsed to the slim bar. */
     .jumpbtn{position:fixed;right:16px;bottom:calc(32svh + 16px);z-index:7;display:none;width:44px;height:44px;border-radius:50%;
-      border:1px solid var(--hairline);background:linear-gradient(180deg,#232732,#171a20);color:var(--ink);
+      border:1px solid var(--hairline);background:linear-gradient(180deg,var(--raised-top),var(--raised-bot));color:var(--ink);
       font-size:21px;line-height:1;cursor:pointer;align-items:center;justify-content:center;
       box-shadow:0 8px 22px rgba(0,0,0,.5);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
     .jumpbtn:active{transform:scale(.92)}
@@ -178,7 +175,7 @@
       background:radial-gradient(120% 120% at 50% 40%, transparent 62%, rgba(0,0,0,.32) 100%)}
     /* live-session chip in the top bar — shows the viewer which session this is */
     .sesschip{display:flex;align-items:center;gap:7px;max-width:32vw;padding:5px 11px;border:1px solid var(--hairline);
-      border-radius:8px;background:linear-gradient(180deg,#16181d,#0f1115);font-size:11px;color:var(--ink-dim);box-shadow:inset 0 1px 0 var(--sheen)}
+      border-radius:8px;background:linear-gradient(180deg,var(--surface-top),var(--surface-bot));font-size:11px;color:var(--ink-dim);box-shadow:inset 0 1px 0 var(--sheen)}
     .sesschip .dot{flex:none}   /* the chip's dot is the connection indicator (uses the shared .dot ok/bad/work colors) */
     .sesschip b{font-weight:600;color:var(--silver);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .sesschip b::before{content:'\201C'} .sesschip b::after{content:'\201D'}   /* quote the name so it reads as a title, not a label */
@@ -196,16 +193,16 @@
     /* voice room bar */
     /* voice lives at the top of the chat panel — a compact strip; stays visible even when chat is collapsed */
     .gvoice{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 12px;border-bottom:1px solid var(--hairline);
-      background:linear-gradient(180deg,#0c0e12,#0a0b0d);flex:none}
+      background:linear-gradient(180deg,#0c0e12,var(--field));flex:none}
     .voice-btn,.voice-mute{flex:none;padding:5px 11px;border:1px solid var(--hairline);border-radius:8px;
-      background:#16181d;color:var(--ink-dim);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
+      background:var(--surface-top);color:var(--ink-dim);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
     .voice-btn:hover,.voice-mute:hover{color:var(--ink);border-color:rgba(255,255,255,.25)}
     .voice-btn.on{color:#fff;border-color:var(--ok);background:rgba(95,180,135,.16)}
     .voice-mute.muted{color:#fff;border-color:var(--live);background:rgba(229,86,75,.16)}
     .voice-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;width:100%}
     .voice-members:empty{display:none}
     .vm{display:flex;align-items:center;gap:6px;flex:none;padding:4px 9px;border:1px solid var(--hairline);
-      border-radius:999px;background:#101216;font-size:11px;color:var(--ink-dim)}
+      border-radius:999px;background:var(--bar-top);font-size:11px;color:var(--ink-dim)}
     .vm .vmdot{width:7px;height:7px;border-radius:50%;background:#3a3f47;transition:.12s}
     .vm.speaking{color:var(--ink);border-color:var(--ok)}
     .vm.speaking .vmdot{background:#5fb487;box-shadow:0 0 8px 0 #5fb487}
@@ -240,7 +237,7 @@
       background:rgba(5,6,8,.78);backdrop-filter:blur(2px);z-index:5}
     .overlay.show{display:flex}
     .card{max-width:380px;text-align:center;padding:26px 28px;border:1px solid var(--hairline);border-radius:14px;
-      background:linear-gradient(180deg,#101216,#0b0d10);box-shadow:0 18px 50px rgba(0,0,0,.55)}
+      background:linear-gradient(180deg,var(--bar-top),var(--bar-bot));box-shadow:0 18px 50px rgba(0,0,0,.55)}
     .card h2{margin:0 0 8px;font-size:15px;letter-spacing:.04em;color:var(--ink)}
     .card p{margin:0;font-size:12.5px;line-height:1.55;color:var(--ink-dim)}
     .spin{width:26px;height:26px;margin:0 auto 16px;border-radius:50%;border:2px solid var(--hairline);
@@ -295,7 +292,6 @@
     <div class="wrap">
       <div id="terminal"></div>
       <div class="typist-chip" id="typist-chip"></div>
-      <div class="gutter" id="gutter"><div class="gthumb" id="gthumb"></div></div>
       <div class="paused-ov" id="paused-ov">
         <div class="card">
           <h2 id="paused-title">Host is in a private project</h2>

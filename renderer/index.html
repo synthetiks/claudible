@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- class="skin" is PERMANENT and carries the redesign. It was scoped to html.skin while the
+     skin was one opt-in theme; all four palettes wear it now, so the scope moved to a class every theme has.
+     Element+class has exactly the same specificity as element+attribute, so no rule changed rank in the move. -->
+<html lang="en" class="skin">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -36,11 +39,28 @@
       --chrome:color-mix(in srgb,color-mix(in srgb,var(--panel) 72%,var(--bg)) 65%,#000);
       --sidebar-glass:var(--chrome);
 
+      /* ── CONTROL SURFACES ──────────────────────────────────────────────────────────────────────────────────
+         Every button, telemetry box, input, popover, modal, drawer and diff panel used to carry its near-black
+         as a LITERAL, which is why a theme only ever half-landed: the ground re-tinted and the whole control
+         layer stayed on default-black. These are those literals, promoted to tokens.
+         The values here are byte-for-byte what the default theme already painted, so naming them changes
+         nothing on Dark — a theme that wants the control layer to follow it now simply overrides them. */
+      --control-top:#16181d;   --control-bot:#0f1115;    /* iconbtn / vbox / ctxbar / tokbar / usagebar / termtab / scroll */
+      --control2-top:#191c22;  --control2-bot:#101216;   /* cc-btn / rmember / chat-input / diff-file-head / toast */
+      --chip:#14171c;                                    /* flat chips, chat-msg.them, name-field, termseg */
+      --field:#0a0b0d;                                   /* text inputs, transcript, rename fields */
+      --sheet-top:#0d0f12;     --sheet-bot:#090a0c;      /* drawer + diffpanel */
+      --pop-top:#14171c;       --pop-bot:#0e1013;        /* ws-info-pop and everything reusing it */
+      --modal-top:#14171c;     --modal-bot:#0c0e11;      /* approve .box — 8 dialogs + wizard + ws-modal */
+
       /* ── SELECTION TINT ────────────────────────────────────────────────────────────────────────────────────
          "this project / this session is the one you're on". Deliberately NEUTRAL: it was Claude-orange on
          projects and --live red on sessions, which read as an ALERT and fought the app's cool greys. A soft
          blue-silver says "selected" without claiming anything is wrong. Kept unthemed on purpose — a neutral
          reads as selection in all six palettes, where a themed hue would compete with each palette's accent. */
+      /* The docked sidebar's width, as ONE value. It sets the grid column AND the x the top bar's breadcrumb
+         divider is pinned to, so the two rules line up by construction rather than by a number typed twice. */
+      --side-w:clamp(228px,14.9vw,316px);
       --sel:#cdd9ea;
       /* the SYNC blue, shared by the project dot and the session busy dot — they are the same claim ("work in
          flight here"), so they are one token. The session dot used --live red, which read as an error. */
@@ -78,40 +98,88 @@
       --elev-1:0 2px 5px rgba(0,0,0,.38);     /* resting control      */
       --elev-2:0 5px 12px rgba(0,0,0,.5);     /* lifted / hovered     */
       --elev-3:0 14px 32px rgba(0,0,0,.52);   /* floating surface     */
+
+      /* ── THE SKIN'S OWN TOKENS ─────────────────────────────────────────────────────────────────────────────
+         Shared by all four themes, because the design is shared — only the palette differs per theme. The two
+         families live here for different reasons: the FACES and SIZES are structural (a theme that changed
+         them would be a different design, not a different palette), while the four colours below are Dark's
+         values for roles every theme must fill — graphite and midnight override them in their own blocks. */
+      --ui:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+      --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",Consolas,monospace;
+      /* The draft's exact type sizes, as tokens. The 8-step scale has no 11.5 or 12.5, and rounding each of
+         them to the nearest existing step is what made the skin land "close" instead of identical — half a
+         pixel per element, compounding across a whole bar. Extending the scale is the correct move; the pin
+         exists to stop ad-hoc values, and a named token is not ad-hoc. */
+      --fs-eyebrow:9.5px;   /* popover section headers      */
+      --fs-key:10px;        /* keyboard hints, micro-labels */
+      --fs-desc:11px;       /* row descriptions, slider ends */
+      --fs-pill:11.5px;     /* pills, readout values        */
+      --fs-row:12.5px;      /* popover row titles           */
+      --fs-body:13px;       /* the draft's app base: wordmark, shell body text */
+      --fs-av:8.5px;        /* roster avatar initial        */
+      --sunken:#333945;     /* the LIGHTEST control step: an open pill, a slider track, the active segment */
+      --ink-dimmer:#40454e; /* one step quieter than --ink-faint: micro-labels, keyboard hints, reset times */
+      /* the chat sender's NAME. Messages are not bubbles here — no face, no side, no tail — so this line is the
+         only thing that says who wrote one, and it sits on --chrome, the darkest surface in the app. --ink-dimmer
+         is sized for a label you are meant to skim past and lands near 2:1 there, which is not a legibility
+         setting for the only identity cue on screen. Its own step: readable at 10px, still a clear step below
+         the message body so the name never outshouts the words. Every theme sets its own. */
+      --ink-name:#788090;
+      --flame:#d97757;      /* brand accent — project marker, caret, slider fill, avatar disc */
+      --flame-dim:#8a4b34;
     }
-    /* ── Themes: subtle, low-key dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
-       Dark = default (no data-theme attr). Each block overrides the structural + accent vars; some bare hardcoded
-       shades intentionally remain (these are gentle tints, not a full repaint). Names are placeholders — tune the
-       exact shades by eye. The matching terminal palettes live in app.js TERM_THEMES. ── */
+    /* ── Themes: FOUR dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
+       Dark = default (no data-theme attr). Every theme now wears the same design: the skin is scoped to
+       html.skin, which is permanent, so a theme block carries PALETTE ONLY — structure, type, geometry and
+       component anatomy are shared and cannot drift between themes.
+       Starlight, Aurora and Evergreen were removed. applyTheme() falls back to Dark for any name it does not
+       recognise, so a saved preference still pointing at one of them migrates itself on next launch.
+       Each block must supply the five tokens the skin adds on top of the base set — --sunken, --ink-dimmer,
+       --ink-name, --flame and --flame-dim — or the controls it paints fall back to unset. --ink-name is the
+       chat sender's name and is the one of the five with a floor rather than a taste: it is measured against
+       the theme's own resolved --chrome, so each block sets a value that holds its palette's hue and still
+       clears small-text contrast. The matching terminal palettes live in app.js TERM_THEMES. ── */
     html[data-theme="graphite"]{   /* cool platinum-steel */
       --bg:#0e1116;--terminal-bg:#13161d;--panel:#191d26;--raised:#252b38;--raised-hi:#303747;
       --hairline:rgba(255,255,255,.05);--hairline-soft:rgba(255,255,255,.03);--ink:#eef1f7;--ink-dim:#a6afbe;--ink-faint:#6b7482;
       --silver:#dbe2ec;--steel:#9fb0c6;--live:#ee6358;--live-soft:#d7736a;--ok:#54d4a3;--accent:#78b9f2;--warn:#ebc16f;
-    }
-    html[data-theme="starlight"]{   /* bright silver — the lightest */
-      --bg:#171b22;--terminal-bg:#1c212a;--panel:#232935;--raised:#303845;--raised-hi:#3c4658;
-      --hairline:rgba(255,255,255,.045);--hairline-soft:rgba(255,255,255,.028);--ink:#f6f8fc;--ink-dim:#bcc5d3;--ink-faint:#808a99;
-      --silver:#e8eef6;--steel:#aebccd;--live:#ec5f55;--live-soft:#d97066;--ok:#36c993;--accent:#56a0f3;--warn:#e6b75b;
+      --sunken:#3a4254;--ink-dimmer:#4b535e;--flame:#d98060;--flame-dim:#8c5238;   /* the five the skin adds */
+      --ink-name:#798494;   /* graphite's own cool platinum, lifted to clear small-text contrast on its --chrome */
     }
     html[data-theme="midnight"]{   /* deep ocean blue */
       --bg:#060d1c;--terminal-bg:#0a1426;--panel:#0c1b35;--raised:#17304f;--raised-hi:#214264;
       --hairline:rgba(255,255,255,.05);--hairline-soft:rgba(255,255,255,.03);--ink:#dde8f7;--ink-dim:#90a3c0;--ink-faint:#566a90;
       --silver:#b9d0f0;--steel:#6f92c8;--live:#f2657a;--live-soft:#dd7181;--ok:#42cda3;--accent:#4c9df6;--warn:#f0b957;
+      --sunken:#2b547c;--ink-dimmer:#3c4b68;--flame:#e08a63;--flame-dim:#8f5539;   /* the five the skin adds */
+      --ink-name:#6e83ab;   /* midnight keeps its deeper ocean blue — same hue as its --ink-dimmer, more light */
     }
-    html[data-theme="aurora"]{   /* violet / iridescent */
-      --bg:#0b0818;--terminal-bg:#0f0a22;--panel:#180f2e;--raised:#221841;--raised-hi:#2d1f5c;
-      --hairline:rgba(255,255,255,.05);--hairline-soft:rgba(255,255,255,.03);--ink:#ece7fa;--ink-dim:#a898c8;--ink-faint:#6b5e8c;
-      --silver:#dccdf7;--steel:#9b7dd9;--live:#f0609a;--live-soft:#db7099;--ok:#49d4bd;--accent:#b877f5;--warn:#e7b255;
-    }
-    html[data-theme="evergreen"]{   /* forest green + fresh sky accent */
-      --bg:#060c09;--terminal-bg:#081610;--panel:#0c1e14;--raised:#12321f;--raised-hi:#1e3e2b;
-      --hairline:rgba(255,255,255,.05);--hairline-soft:rgba(255,255,255,.03);--ink:#ddf2e5;--ink-dim:#8bb49c;--ink-faint:#517d64;
-      --silver:#bfe8d2;--steel:#70b291;--live:#f0645a;--live-soft:#d97169;--ok:#3fd5b7;--accent:#4aabe6;--warn:#e3b954;
+    html[data-theme="cockpit"]{   /* warm near-black — the frontend-redesign palette. Hairlines are WARM (255,236,220)
+                                     rather than pure white: on an amber-biased ground a white hairline reads blue. */
+      --bg:#0b0a09;--terminal-bg:#0f0d0c;--panel:#161310;--raised:#1c1815;--raised-hi:#241f1b;
+      --hairline:rgba(255,236,220,.055);--hairline-soft:rgba(255,236,220,.032);--ink:#f2ece5;--ink-dim:#b4aaa1;--ink-faint:#7a716a;
+      --silver:#ddd4cb;--steel:#9a8e84;--live:#d9484a;--live-soft:#c4544f;--ok:#64c98a;--accent:#5b8def;--warn:#b8862c;
+      /* the control layer follows this theme instead of staying on default-black */
+      --control-top:#1e1a17;--control-bot:#151210;
+      --control2-top:#221d19;--control2-bot:#171310;
+      --chip:#1a1613;--field:#0d0b0a;
+      --sheet-top:#131110;--sheet-bot:#0c0b0a;
+      --pop-top:#1c1815;--pop-bot:#131110;
+      --modal-top:#1c1815;--modal-bot:#110f0d;
+      /* ── values lifted from the design draft, so the two are the same palette rather than a resemblance.
+         The chrome (top bar, sidebar, cockpit, chat) is DARKER than the terminal here: in the draft the
+         terminal is the lit surface and everything around it recedes. --chrome is normally derived from
+         --panel by a nested color-mix; it is set outright so it lands on the draft's exact value. */
+      --bg:#0f0d0c; --terminal-bg:#161310; --panel:#131110; --chrome:#131110; --sidebar-glass:#131110;
+      --raised:#1c1815; --raised-hi:#241f1b; --sunken:#2b2521;
+      --hairline:#302925; --hairline-soft:#221d1a; --sheen:rgba(255,236,220,.06);
+      --ink:#f2ece5; --ink-dim:#b4aaa1; --ink-faint:#7a716a; --ink-dimmer:#584f4a;
+      --ink-name:#8f8179;   /* cockpit's warm grey — the one theme whose --chrome is a literal, not a derivation */
+      --flame:#d97757; --flame-dim:#8a4b34;          /* brand accent — project marker, caret */
     }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{
-      margin:0;display:grid;grid-template-rows:50px 1fr 24px;   /* top bar 50; status bar 25→24 (~5% slimmer) — the version/status strip sits lower-profile */
+      margin:0;display:grid;grid-template-rows:44px 1fr 42px;   /* top bar 50→44 (voice + telemetry left it); status 24→42, now the cockpit row carrying them. Net shell height is unchanged, so the terminal keeps its space. */
       background:radial-gradient(135% 95% at 50% -12%, #11141a 0%, #08090b 52%, #050506 100%);
       color:var(--ink);
       font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",Consolas,monospace;
@@ -135,13 +203,17 @@
        IS --chrome, so the two now flow into one continuous chrome surface with nothing to draw. Toward the
        terminal there is no seam to lose either: the 5px of --bg body padding is darker than --terminal-bg, so
        that boundary is already a brightness step. (The sidebar's own top edge-light comes off with it — see there.) */
-    /* ZONES, not one flat gap: brand · actions · voice · telemetry. The gap inside a group is tight, the gap
-       BETWEEN groups is wide, so the bar reads as four things instead of nine evenly-spaced controls. */
+    /* ZONES, not one flat gap: brand · actions. Voice and telemetry LEFT this bar for the cockpit row at the
+       bottom of the shell — the bar now carries identity and destinations only, and everything you reach for
+       DURING a turn lives down beside the terminal instead of above it. */
     .top{display:flex;align-items:center;gap:0;padding:0 16px;
       background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}
-    .top>.topbtns{margin-left:22px}    /* brand → actions: the widest break in the bar */
-    .top>.vgroup{margin-left:6px}      /* voice sits in the SAME rhythm as the icon buttons (topbtns gap:6px) — it read as a detached cluster at 18px */
-    .top>.trk{margin-left:auto}        /* telemetry stays pinned right (unchanged) */
+    .top>.topbtns{margin-left:auto}    /* actions sit in the RIGHT corner; brand holds the left. The old 22px
+                                          break belonged to a bar with four groups in it — with voice and
+                                          telemetry gone there are only two, so they take opposite ends. */
+    .cockpit>.vgroup{margin-left:0}    /* voice leads the cockpit row, so it needs no leading offset of its own */
+    .cockpit>.trk{margin-left:auto}    /* telemetry opens the RIGHT cluster: it takes the single auto gap… */
+    .cockpit>.end{margin-left:0}       /* …and #meta gives its own up, or two autos would split the free space */
     .logo{height:28px;width:auto;display:inline-block;margin-right:4px;
       mix-blend-mode:lighten;image-rendering:pixelated}
     .wordmark{font-weight:500;letter-spacing:.3em;text-transform:uppercase;font-size:var(--fs-lg);color:#f6f8fc;margin-left:4px}   /* BRAND: classic white, locked — never themed (matches the logo's white) */
@@ -160,7 +232,7 @@
        which can only give one spacing for both joins. */
     .usagebar{width:auto;display:inline-flex;align-items:center;gap:0;height:31px;padding:0 10px 0 11px;border-radius:9px;
       border:none;cursor:pointer;color:var(--ok);
-      background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
+      background:linear-gradient(180deg,var(--control-top),var(--control-bot));box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
       transition:box-shadow var(--dur-slow) ease,color var(--dur-slow) ease}
     .usagebar:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 40%,transparent)}
     .ub-batt{flex:none;display:inline-flex;align-items:center;margin:0 7px 0 8px}   /* 7, not 5: tight enough to still read as one unit with the number, loose enough not to look crammed */
@@ -182,10 +254,41 @@
     .usagebar.u-warn{color:var(--warn)}                /* running down          */
     .usagebar.u-crit{color:var(--live)}                /* nearly out            */
     .usagebar.u-stale{color:var(--ink-faint)}          /* window rolled over; the last reading is no longer true — see renderRateStale */
+    /* ── USAGE AS A RING ───────────────────────────────────────────────────────────────────────────────────
+       In the top bar this was a labelled battery about 90px wide. In the cockpit row it sits at the far right
+       beside context, tokens and effort, where a dial says the same thing in a quarter of the space — and a
+       row that gains this control MID-SESSION (it is hidden until Claude reports rate limits) cannot afford
+       90px. The severity classes above already set `color`, so the ring inherits all five with no new colour
+       rules, and the battery markup stays in the DOM untouched, just unpainted.
+       --u-pct is written by renderRate(); it defaults to 0, so a chip that somehow paints before data has
+       arrived reads EMPTY rather than full. */
+    /* 26px, not 22: the ring closes the row and was reading as an afterthought next to 28px controls. The bar
+       stays 44px — this is the largest the dial goes while keeping the row's vertical rhythm. The hole scales
+       with it (the draft's 14:22 ratio held), so the arc keeps its weight rather than thickening. */
+    .usagebar{width:26px;min-width:26px;height:26px;padding:0;border-radius:50%;flex:none;
+      display:inline-grid;place-items:center;position:relative;box-shadow:none;
+      background:conic-gradient(currentColor calc(var(--u-pct,0) * 1%), var(--control-top) 0)}
+    .usagebar::after{content:"";width:17px;height:17px;border-radius:50%;background:var(--chrome)}
+    .usagebar:hover{box-shadow:none;outline:1px solid var(--hairline);outline-offset:2px}
+    .usagebar>.ctxlabel,.usagebar>.ub-batt{display:none}
+    /* the number stays in the DOM — renderRate still writes it and a screen reader still reads it — but the
+       ring is what is painted. Removing the element instead would break both. */
+    .usagebar>.ubpct{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+      clip-path:inset(50%);white-space:nowrap;border:0}
     /* the detail popover reuses the .ws-info-pop shell; only the row grid is new */
     .usage-pop{width:264px}
-    .usage-pop .up-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 9px}
+    .usage-pop .up-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 6px}
     .usage-pop .up-row:last-child{margin-bottom:0}
+    /* One full-width bar per limit. Deliberately NO context-window row here: context already has a permanent
+       readout in the cockpit row and the terminal reports it too, so a third copy inside this panel was the
+       same number said three ways. This panel answers one question — how much of the PLAN is left. */
+    .usage-pop .up-meter{display:block;height:4px;border-radius:2px;background:var(--control-top);
+      overflow:hidden;margin:0 0 13px}
+    .usage-pop .up-meter:last-child{margin-bottom:0}
+    .usage-pop .up-meter i{display:block;height:100%;border-radius:2px;background:var(--accent);
+      transition:width var(--dur-base) var(--ease-out)}
+    .usage-pop .up-meter.warn i{background:var(--warn)}
+    .usage-pop .up-meter.crit i{background:var(--live)}
     /* These two rows ARE the content — they were set at the 9px/--ink-faint treatment used for incidental
        metadata, which made the only two things worth reading the faintest text in the popover. Up one step on
        the scale and two on contrast; the reset lines stay a size down but share the brighter ink. */
@@ -195,7 +298,7 @@
     /* context gauge — segmented "instrument" read: CONTEXT label · level segments · percent.
        Heights tuned to sit level with the adjacent tokens stat (15px digits) rather than tower over it. */
     .ctxbar{display:inline-flex;align-items:center;gap:8px;height:31px;padding:0 10px;border-radius:9px;
-      background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
+      background:linear-gradient(180deg,var(--control-top),var(--control-bot));box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent);
       transition:box-shadow .25s ease}                                                  /* box height matches the Talk/Speak (.vbox) buttons */
     .ctxlabel{font-size:var(--fs-2xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#f6f8fc;flex:none}  /* size = Talk/Speak label (10px); color = the CLAUDIBLE wordmark white — no green */
     .ctxsegs{display:inline-flex;align-items:center;gap:2px;height:11px;flex:none}   /* shorter, tighter bars — the gauge reads as an instrument rather than a fence */
@@ -207,7 +310,7 @@
     /* tokens readout — a sibling box that replicates the context box (height/bg/border/glow), only narrower.
        TOKENS label reuses .ctxlabel (10px, wordmark white). Value matches the % readout +2.5% to stress it. */
     .tokbar{display:inline-flex;align-items:center;gap:7px;height:31px;padding:0 11px;border-radius:9px;
-      background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent)}
+      background:linear-gradient(180deg,var(--control-top),var(--control-bot));box-shadow:inset 0 0 0 1px var(--hairline),inset 0 0 12px -6px color-mix(in srgb,var(--ok) 30%,transparent)}
     .tokval{min-width:30px;text-align:center;transform:translateX(2px);font-size:var(--fs-md);font-weight:700;letter-spacing:.02em;color:#f6f8fc;
       font-variant-numeric:tabular-nums}    /* white by default; JS tints it warm as raw token count climbs (easter egg). centered + a hair right so a short value sits balanced in the box; grows to fit big values */
     /* context guardrail: amber ≥70%, red ≥85% — one class on .ctxbar drives segment + percent color + pulse */
@@ -228,14 +331,14 @@
        The terminal stays 1fr and re-fits its pty automatically via the ResizeObserver. */
     .body{display:grid;grid-template-columns:1fr;gap:9px;padding:5px 7px 4px 5.25px;min-height:0}   /* left gutter trimmed 7→5.25 (−25%): less dead space to the terminal's left. top5 / right7 / bottom4 / left5.25 */
     .body.sharing{grid-template-columns:1fr clamp(312px,24vw,480px)}                                         /* + chat (right) */
-    .body.with-sessions{grid-template-columns:clamp(228px,14.9vw,316px) 1fr}                                   /* + docked sessions (left) — another ~5% narrower, sleeker */
-    .body.with-sessions.sharing{grid-template-columns:clamp(228px,14.9vw,316px) 1fr clamp(312px,24vw,480px)}   /* both */
+    .body.with-sessions{grid-template-columns:var(--side-w) 1fr}                                   /* + docked sessions (left) — another ~5% narrower, sleeker */
+    .body.with-sessions.sharing{grid-template-columns:var(--side-w) 1fr clamp(312px,24vw,480px)}   /* both */
     /* center column: terminal + its scroll gutter (row) on top, command bar docked beneath */
     .center{display:flex;flex-direction:column;gap:7.65px;min-height:0;min-width:0}   /* gap −15% more (9→7.65): the command buttons sit a touch closer to the bottom of the terminal */
     .termrow{display:flex;gap:5px;flex:1;min-height:0;min-width:0;position:relative}   /* gap terminal↔scrollbar −50% (11→5) */
     /* Agents view — a tab over the terminal (xterm stays mounted underneath, just covered) */
     .termseg{position:absolute;top:8px;left:8px;z-index:24;display:flex;gap:2px;padding:2px;border-radius:9px;
-      background:#14171c;border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
+      background:var(--chip);border:1px solid var(--hairline);box-shadow:inset 0 1px 0 var(--sheen)}
     .termseg button{width:auto;padding:3px 9px;font-size:var(--fs-xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
       background:none;border:none;border-radius:6px;cursor:pointer;box-shadow:none;position:relative;transition:all var(--dur-fast)}
     .termseg button:hover{color:var(--ink-dim)}
@@ -389,14 +492,11 @@
     /* hide xterm's built-in scrollbar — we render our own in the gutter */
     #terminal .xterm-viewport{scrollbar-width:none}
     #terminal .xterm-viewport::-webkit-scrollbar{width:0;height:0}
-    /* custom scroll gutter: lives in the UI, outside the terminal, never covers text */
-    .scroll{position:relative;width:10px;align-self:stretch;border-radius:7px;flex:none;   /* gutter −30% (14→10) — sleeker */
-      background:linear-gradient(180deg,#171a20,#0e1116);box-shadow:inset 0 0 0 1px var(--hairline)}
-    .scroll .thumb{position:absolute;left:2px;right:2px;top:0;min-height:34px;border-radius:6px;
-      background:linear-gradient(180deg,var(--steel),var(--ink-faint));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 4px -1px #000;
-      cursor:grab;opacity:.6;transition:background var(--dur-fast),opacity var(--dur-slow);will-change:transform,height}
-    .scroll:hover .thumb{opacity:.92;background:linear-gradient(180deg,var(--silver),var(--steel))}
-    .scroll .thumb.drag{cursor:grabbing;opacity:1;background:linear-gradient(180deg,var(--silver),#9aa3ae)}
+    /* The custom scroll gutter lived here. It is gone: Claude Code runs on the ALTERNATE SCREEN (proved by
+       spawning it in a bare pty and reading the raw bytes — it emits ESC[?1049h plus full mouse tracking), and
+       the alternate screen carries no history for a scrollbar to measure. The wheel is delivered to Claude as
+       input and Claude scrolls its own view, which is why scrolling never depended on this. See the matching
+       note in app.js. */
     /* (the command PILL BAR lived here — 15 pills in a horizontal drag-scroller with edge fades and arrow
        buttons, of which 5 were ever visible. Replaced by the command palette below: searchable, keyboard-first,
        and it gave the whole row back to the terminal. Its .cmdpill / .cmdarrow / .cmdscroll rules are gone.) */
@@ -408,7 +508,7 @@
     .termtab{position:absolute;right:8px;z-index:20;
       width:auto;display:flex;align-items:center;height:30px;padding:0 9px;overflow:hidden;
       border:1px solid var(--hairline);border-radius:9px;color:var(--ink-dim);cursor:pointer;
-      background:linear-gradient(180deg,#16181d,#0f1115);
+      background:linear-gradient(180deg,var(--control-top),var(--control-bot));
       box-shadow:inset 0 1px 0 var(--sheen),0 3px 14px -6px #000;transition:all var(--dur-base) ease}
     .termtab.tr{top:8px}
     .termtab.br{bottom:8px}
@@ -436,7 +536,7 @@
     .dot.work{background:var(--steel);box-shadow:0 0 8px -1px var(--steel)}
     .dot.bad{background:var(--live);box-shadow:0 0 8px -1px var(--live)}
     button{width:100%;font-family:inherit;font-size:var(--fs-sm);letter-spacing:.06em;color:var(--ink-dim);
-      background:linear-gradient(180deg,#191c22,#101216);border:1px solid var(--hairline);
+      background:linear-gradient(180deg,var(--control2-top),var(--control2-bot));border:1px solid var(--hairline);
       border-radius:9px;padding:13px 14px;cursor:pointer;transition:all var(--dur-base) ease;
       box-shadow:inset 0 1px 0 var(--sheen)}
     button:hover{border-color:rgba(255,255,255,.22);color:var(--ink);
@@ -451,18 +551,18 @@
     /* voice selector pills */
     .voices{display:flex;gap:6px;margin-bottom:10px}
     .vpill{flex:1;width:auto;padding:8px 4px;font-size:var(--fs-xs);letter-spacing:.03em;color:var(--ink-dim);
-      background:#101216;border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:all var(--dur-fast);
+      background:var(--control2-bot);border:1px solid var(--hairline-soft);border-radius:8px;cursor:pointer;transition:all var(--dur-fast);
       display:flex;align-items:center;justify-content:center;gap:5px;box-shadow:none}
     .vpill i{font-style:normal;font-size:var(--fs-xs);opacity:.55}
     .vpill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
-    .vpill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
+    .vpill.on{color:var(--field);background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
     .vpill.on i{opacity:.7}
     /* default-effort selector (remembered, applied to new sessions) */
     .effort-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:7px}
     .eff-pill{width:auto;flex:none;padding:5px 11px;font-size:var(--fs-xs);letter-spacing:.04em;color:var(--ink-dim);
-      background:linear-gradient(180deg,#16181d,#101216);border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen)}
+      background:linear-gradient(180deg,var(--control-top),var(--control2-bot));border:1px solid var(--hairline);border-radius:7px;cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen)}
     .eff-pill:hover{border-color:rgba(255,255,255,.18);color:var(--ink)}
-    .eff-pill.on{color:#0a0b0d;background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
+    .eff-pill.on{color:var(--field);background:linear-gradient(180deg,#cfd6df,#9aa3ae);border-color:transparent;font-weight:600}
     /* sleek collapse chevron + collapsible text box */
     .collapse{width:auto;padding:0 3px;background:none;border:none;box-shadow:none;color:var(--ink-dim);
       font-size:var(--fs-xl);line-height:1;cursor:pointer;transition:transform var(--dur-slow) ease,color var(--dur-fast)}
@@ -470,7 +570,7 @@
     .collapse.min{transform:rotate(-90deg)}
     .collapsible{max-height:180px;overflow:hidden;opacity:1;transition:max-height .24s ease,opacity var(--dur-base) ease,margin var(--dur-slow)}
     .collapsible.min{max-height:0;opacity:0;margin:0}
-    .transcript{font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim);background:#0a0b0d;
+    .transcript{font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim);background:var(--field);
       border:1px solid var(--hairline-soft);border-radius:8px;padding:9px 11px;
       white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto}
     /* Always-Speak slide toggle */
@@ -508,15 +608,97 @@
       background:currentColor;vertical-align:middle;animation:out-work-pulse 1.1s ease-in-out infinite}
     @keyframes out-work-pulse{0%,100%{opacity:.25}50%{opacity:1}}
     input[type=text]{width:100%;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);
-      background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color var(--dur-base)}
+      background:var(--field);border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px;margin-bottom:9px;transition:border-color var(--dur-base)}
     input[type=text]:focus{outline:none;border-color:rgba(255,255,255,.24)}
     /* status bar */
     /* Chrome, like the top bar: same --chrome token, same top-light direction, no hairline. It was a hardcoded
-       #0c0e11→#090a0c that never re-tinted for any theme, and its border-top was the last seam in the shell. */
-    .status{display:flex;align-items:center;gap:18px;padding:0 16px;
+       var(--modal-bot)→var(--sheet-bot) that never re-tinted for any theme, and its border-top was the last seam in the shell. */
+    /* THE COCKPIT ROW. Was a 24px strip of status words; it now also carries the controls that used to sit in
+       the top bar — voice on the left, telemetry on the right, the status words between them. Everything you
+       touch mid-turn is here, one glance below the terminal instead of a whole shell away above it. */
+    .status{display:flex;align-items:center;gap:14px;padding:0 12px;
       font-size:var(--fs-2xs);letter-spacing:var(--tk-label);color:var(--ink-faint);
       background:linear-gradient(180deg,color-mix(in srgb,var(--chrome) 92%,#ffffff),var(--chrome))}
-    .status .s{display:flex;align-items:center;gap:7px}
+    .status.cockpit>.vgroup{gap:6px}   /* the group keeps the icon-button rhythm it had upstairs */
+    /* NOWRAP. At 24px the row held six short words; the cockpit row holds those PLUS voice and telemetry, and
+       every chip that ran out of room broke onto a second line ("claude code / 2.1.232"), turning a status
+       strip into a paragraph. They shrink and truncate instead — a clipped version number still reads. */
+    /* NOT overflow:hidden on the row. The services panel opens upward, i.e. OUTSIDE this box, so clipping the
+       row clips the panel — and getBoundingClientRect still reports it on-screen, so it looks fine to a test
+       and is invisible to a human. The chips carry their own overflow, which is what actually holds the row. */
+    .cockpit>.vgroup,.cockpit>.trk{flex:none}   /* the two control clusters are load-bearing: they never shrink */
+    .status .s,.status .end,.status .ver{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .status .s{display:flex;align-items:center;gap:7px;min-width:0;flex:0 1 auto}
+    .status .end{min-width:0;flex:0 2 auto}   /* #meta yields room first — it is the least load-bearing text here */
+    /* SHRINK ORDER. The usage chip is hidden until Claude reports rate limits, so the row gains a control
+       mid-session and something has to give. The version is pinned — losing the build number to make space for
+       a permission label is the wrong trade — so the middle status text truncates instead. */
+    .status .ver{flex:none}
+    .status .cock-chip>span:first-child{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+    /* ── SERVICES CHIP ─────────────────────────────────────────────────────────────────────────────────────
+       One chip standing in for whisper + kokoro + their endpoints. The panel opens UPWARD: this row is the
+       bottom of the shell, so a downward panel would render below the viewport floor. CSS-only on :hover and
+       :focus-within, so it is reachable by keyboard and needs no JS. */
+    /* overflow:visible UNDOES the .status .s ellipsis rule for this one chip — .svc is an .s too, so it was
+       clipping its own popover at its own 60px-wide border box. */
+    .status .svc{position:relative;cursor:default;overflow:visible}
+    .status .svc>.dot{background:var(--ok)}
+    /* clickable siblings of .svc: same shell, but they OPEN ON CLICK because they change something. Hover is
+       right for reading a status and wrong for arming a permission mode. */
+    /* ── READOUTS, BARE ────────────────────────────────────────────────────────────────────────────────────
+       Context and tokens were 31px boxes with their own gradient, border and inset glow — chrome that made
+       sense in a top bar of nine competing controls. In the cockpit row they are the QUIET half: a label and a
+       number, no container, exactly as the draft has them. The box is gone, the data is not. */
+    .cockpit .ctxbar,.cockpit .tokbar{height:auto;padding:0;border-radius:0;background:none;box-shadow:none;gap:8px}
+    .cockpit .ctxbar:hover,.cockpit .tokbar:hover{background:none;box-shadow:none}
+    .cockpit .ctxlabel{color:var(--ink-faint);font-weight:500}
+    .cockpit .ctxpct,.cockpit .tokval{font-size:var(--fs-sm);font-weight:600;color:var(--ink-dim)}
+    .status .cock-chip{position:relative;overflow:visible;cursor:pointer;border-radius:6px;padding:3px 7px;margin:0 -1px}
+    .status .cock-chip:hover{background:var(--control-top);color:var(--ink-dim)}
+    .status .cock-chip.open{background:var(--raised);color:var(--ink)}
+    .status .cock-chip.open>.cock-pop{opacity:1;visibility:visible;transform:none}
+    /* A chip in the RIGHT cluster must anchor its menu to its right edge. Left-anchoring is correct for the
+       left of the row and renders the whole panel past the window edge over here — open, measurable, and
+       entirely off-screen. */
+    .status .cock-chip.pop-right>.cock-pop{left:auto;right:-10px}
+    .cock-pop-h{font-size:var(--fs-2xs);letter-spacing:var(--tk-label);color:var(--ink-faint);padding:1px 2px 4px}
+    .cock-pop-h.svc-h{margin-top:7px;padding-top:8px;border-top:1px solid var(--hairline)}
+    /* ── THE MERGED VOICE BUTTON ───────────────────────────────────────────────────────────────────────────
+       Talk keeps its own button (push-to-talk must stay a single click), but Read, auto-speak and the service
+       readouts collapse behind the speaker icon. Inside the menu the two voice buttons become full-width rows
+       rather than the compact boxes they were in the bar. */
+    .status .vmerge{display:inline-grid;place-items:center;width:31px;height:31px;padding:0;border-radius:8px;
+      background:linear-gradient(180deg,var(--control-top),var(--control-bot));box-shadow:inset 0 0 0 1px var(--hairline)}
+    .status .vmerge .vico{width:15px;height:15px}
+    .vpop{min-width:210px}
+    .vpop .vbox{width:100%;height:auto;justify-content:flex-start;gap:8px;padding:6px 8px;border-radius:6px;
+      background:none;box-shadow:none;text-align:left}
+    .vpop .vbox:hover{background:var(--raised)}
+    .vpop .vbox[disabled]{opacity:.45}
+    .vpop .vstat{font-size:var(--fs-xs)}
+    .vpop .s,.vpop .end,.vpop .ver{white-space:nowrap;overflow:visible;flex:none;margin-left:0;color:var(--ink-dim);padding:1px 2px}
+    .vpop .end,.vpop .ver{color:var(--ink-faint)}
+    /* the microphone button drops its "Talk" label — the icon says it, and the row has no width to spare */
+    .vin .vico{width:15px;height:15px}
+    .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+    /* ── SIDEBAR EDGE HANDLE ───────────────────────────────────────────────────────────────────────────────
+       Only visible while the sidebar is closed. Absolutely positioned so it sits over the terminal's left edge
+       rather than taking a slot in the top bar it was removed from. */
+    .edge-handle{position:absolute;left:6px;top:52px;z-index:40;width:26px;height:26px}
+    /* Two traps here. openSidebar() toggles .with-sessions on the DIV.body, so `body.with-sessions` matches
+       nothing; and the handle lives inside .top, which PRECEDES .body, so no sibling combinator can reach it
+       either. :has() on the root is the one selector that sees both. */
+    body:has(.body.with-sessions) .edge-handle{display:none}
+    .cock-pop .eff-pill{width:100%;text-align:left}
+    .svc-pop,.cock-pop{position:absolute;bottom:calc(100% + 9px);left:-10px;z-index:60;
+      display:flex;flex-direction:column;gap:6px;padding:9px 11px;min-width:190px;
+      background:linear-gradient(180deg,var(--pop-top),var(--pop-bot));
+      border:1px solid var(--hairline);border-radius:10px;box-shadow:0 16px 44px rgba(0,0,0,.6);
+      opacity:0;visibility:hidden;transform:translateY(3px);
+      transition:opacity var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out),visibility var(--dur-fast)}
+    .status .svc:hover>.svc-pop,.status .svc:focus-within>.svc-pop{opacity:1;visibility:visible;transform:none}
+    .svc-pop .s,.svc-pop .end{white-space:nowrap;overflow:visible;flex:none;margin-left:0;color:var(--ink-dim)}
+    .svc-pop .end{color:var(--ink-faint);padding-top:6px;border-top:1px solid var(--hairline-soft)}
     .status .s .dot{margin-left:0}
     .status .end{margin-left:auto;color:var(--ink-faint)}
     .status .ver{color:var(--silver);font-weight:600;letter-spacing:.08em}   /* quiet build metadata — bare like its status-bar siblings */
@@ -570,14 +752,14 @@
     /* skills + plugins manager rows (Settings drawer sections) */
     .ext-list{display:flex;flex-direction:column;gap:6px}
     .ext-empty{color:var(--ink-faint);font-size:var(--fs-xs);line-height:1.55;padding:6px 2px}
-    .ext-row{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#131519,#0e1013)}
+    .ext-row{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#131519,var(--pop-bot))}
     .ext-row .ext-main{flex:1;min-width:0}
     .ext-row .ext-name{font-size:var(--fs-sm);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ext-row .ext-desc{margin-top:3px;font-size:var(--fs-xs);color:var(--ink-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .ext-row .ext-meta{margin-top:3px;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
     .ext-tog{flex:none;width:auto;padding:3px 10px;font-size:var(--fs-2xs);letter-spacing:.06em;text-transform:uppercase;border-radius:6px;cursor:pointer;
-      border:1px solid var(--hairline);background:#101216;color:var(--ink-dim);box-shadow:none;transition:all var(--dur-fast)}
-    .ext-tog.on{color:#0a0b0d;background:linear-gradient(180deg,var(--ok),#3f8f68);border-color:transparent;font-weight:700}
+      border:1px solid var(--hairline);background:var(--control2-bot);color:var(--ink-dim);box-shadow:none;transition:all var(--dur-fast)}
+    .ext-tog.on{color:var(--field);background:linear-gradient(180deg,var(--ok),#3f8f68);border-color:transparent;font-weight:700}
     .ext-tog:hover{border-color:rgba(255,255,255,.22)}
     /* official-marketplace browser (the "+" beside Skills/Plugins) */
     .mkt-box{width:480px;max-width:92vw}
@@ -587,7 +769,7 @@
     .vm-log{font-size:var(--fs-xs);color:var(--ink-faint);text-align:left;margin:0 0 14px}
     .vm-log b{color:var(--ink-dim);font-weight:600}
     .vm-log span{font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;font-size:var(--fs-2xs);word-break:break-all}
-    #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:var(--fs-md);color:var(--ink);background:#0a0b0d;
+    #mkt-search{width:100%;margin:2px 0 12px;font-family:inherit;font-size:var(--fs-md);color:var(--ink);background:var(--field);
       border:1px solid var(--hairline);border-radius:9px;padding:10px 12px}
     #mkt-search:focus{outline:none;border-color:rgba(255,255,255,.28)}
     .mkt-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;margin-bottom:14px;text-align:left}
@@ -595,7 +777,7 @@
     /* top-bar voice boxes — equal-height with the Settings button. Voice In = mic; Voice Out = TTS + controls */
     .vgroup{display:flex;align-items:center;gap:6px}   /* match .topbtns so Talk/Read/speaker space exactly like History/Settings */
     .vbox{display:flex;align-items:center;gap:7px;height:31px;width:auto;padding:0 11px;border:1px solid var(--hairline);
-      border-radius:9px;background:linear-gradient(180deg,#16181d,#0f1115);box-shadow:inset 0 1px 0 var(--sheen);
+      border-radius:9px;background:linear-gradient(180deg,var(--control-top),var(--control-bot));box-shadow:inset 0 1px 0 var(--sheen);
       font-size:var(--fs-xs);letter-spacing:.03em;color:var(--ink-dim);white-space:nowrap}   /* matches .iconbtn — the speaker glyph inherits this, so it must not outshine the icon buttons beside it */
     .vbox .vdot{width:8px;height:8px;border-radius:50%;background:#3a3f47;flex:none;transition:var(--dur-slow)}
     .vbox .vstat{font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim)}   /* --ink-faint (#5b616c) was ~halfway to the background; --ink-dim (#9aa1ad) is roughly half that fade */
@@ -623,13 +805,13 @@
     .ptt-key-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;
       font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
     .keycap-btn{width:auto;padding:6px 12px;font-size:var(--fs-xs);color:var(--silver);letter-spacing:.04em;cursor:pointer;
-      background:linear-gradient(180deg,#1c1f25,#0f1115);border:1px solid var(--hairline);border-bottom-color:#05060a;border-radius:6px}
+      background:linear-gradient(180deg,#1c1f25,var(--control-bot));border:1px solid var(--hairline);border-bottom-color:#05060a;border-radius:6px}
     .keycap-btn:hover{border-color:rgba(255,255,255,.22);color:var(--ink)}
     .keycap-btn.capturing{color:var(--live);border-color:var(--live);box-shadow:0 0 12px -4px var(--live)}
     /* sessions hamburger (top bar) + the left session sidebar */
     .iconbtn{width:auto;height:31px;padding:0 11px;font-size:var(--fs-lg);line-height:1;color:var(--ink-dim);   /* 31px = the ctxbar/tokbar/usagebar/vbox height. It was 6+6 padding + a 15px glyph = 29px, so the voice boxes stood 2px proud of the icon buttons. */
       display:inline-flex;align-items:center;justify-content:center;
-      background:linear-gradient(180deg,#16181d,#0f1115);border:1px solid var(--hairline);border-radius:9px;
+      background:linear-gradient(180deg,var(--control-top),var(--control-bot));border:1px solid var(--hairline);border-radius:9px;
       cursor:pointer;box-shadow:inset 0 1px 0 var(--sheen);transition:all var(--dur-base) var(--ease-pop)}
     .iconbtn svg{width:15.5px;height:15.5px;display:block}
     .iconbtn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
@@ -668,7 +850,7 @@
     /* Refresh-session + Update actions, tucked under the connected view (renderCenter) */
     .cc-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px}
     .cc-update{flex-basis:100%;font-size:var(--fs-xs);color:#f5b74a;letter-spacing:.01em}
-    .cc-btn{flex:none;padding:6px 12px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#191c22,#101216);color:var(--ink-dim);font:inherit;font-size:var(--fs-xs);cursor:pointer;transition:all var(--dur-fast)}
+    .cc-btn{flex:none;padding:6px 12px;border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,var(--control2-top),var(--control2-bot));color:var(--ink-dim);font:inherit;font-size:var(--fs-xs);cursor:pointer;transition:all var(--dur-fast)}
     .cc-btn:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
     .cc-btn:disabled{opacity:.5;cursor:default}
     .cc-btn.upd{color:#f5c96a;border-color:rgba(245,183,74,.4);background:rgba(245,183,74,.10)}
@@ -846,7 +1028,7 @@
       box-shadow:0 0 6px -1px var(--ok);flex:none;animation:livepulse 2.6s ease-in-out infinite}
     .sess.renaming .sess-live-ind{display:none}
     /* inline rename input (replaces the title while editing) */
-    .sess-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);background:#0a0b0d;
+    .sess-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-sm);color:var(--ink);background:var(--field);
       border:1px solid var(--hairline);border-radius:6px;padding:4px 7px;margin-bottom:3px}
     /* The 44px right padding this replaces was a reserve for the ✓/✗ back when .sess-rename-actions was
        position:absolute OVER the input. They became an in-flow sibling (margin-left:4px) in 2799ffd, so the
@@ -902,7 +1084,7 @@
     .sh-actions>.panel-close{font-size:var(--fs-xl)}
     /* "what's a workspace?" popover — anchored under the ⓘ by JS; teaches the concept without crowding the sidebar */
     .ws-info-pop{position:fixed;z-index:80;width:250px;padding:13px 15px;border:1px solid var(--hairline);border-radius:11px;
-      background:linear-gradient(180deg,#14171c,#0e1013);box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim)}
+      background:linear-gradient(180deg,var(--pop-top),var(--pop-bot));box-shadow:0 16px 44px rgba(0,0,0,.6);font-size:var(--fs-sm);line-height:1.5;color:var(--ink-dim)}
     /* W4/3d — the GitHub row in Settings. Same reserved-slot discipline as .ws-chip .ws-dot: .off keeps the
        dot's 6px + gap so resolving from "Checking…" to connected never nudges the text beside it. */
     .gh-row{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--ink-dim)}
@@ -911,9 +1093,16 @@
     .gh-dot.on{background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}
     .gh-dot.warn{background:var(--warn);box-shadow:0 0 6px -1px var(--warn)}
     .gh-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .gh-connect{flex:none;padding:3px 9px;border:1px solid var(--hairline);border-radius:6px;background:none;
+    /* width:auto overrides the base button{width:100%}. With flex:none as well, the button took the whole row
+       and could not shrink, so the dot and the account line were pushed out of the panel. */
+    .gh-connect{width:auto;flex:none;padding:3px 9px;border:1px solid var(--hairline);border-radius:6px;background:none;
       color:var(--ink);font-family:inherit;font-size:var(--fs-xs);cursor:pointer}
     .gh-connect:hover{background:rgba(255,255,255,.06)}
+    /* Settings → services. A reference list, so it reads as a column of facts: one line each, the endpoint URLs
+       last and quietest, and every line clipped rather than wrapped so a long path cannot re-flow the panel. */
+    .svc-grid{display:flex;flex-direction:column;gap:5px;font-size:var(--fs-xs);color:var(--ink-dim)}
+    .svc-line{display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .svc-ep{color:var(--ink-faint)}
     .ws-info-pop b{color:var(--silver)}
     .ws-info-pop .wt{display:block;font-size:var(--fs-sm);color:var(--ink);margin-bottom:5px}
     .ws-info-pop p{margin:0 0 7px}
@@ -1011,7 +1200,7 @@
     .ws-menu .ws-mi.danger:hover{background:rgba(210,104,95,.12);color:#e0796f}
     .ws-menu .ws-menu-sep{height:1px;background:var(--hairline);margin:5px 6px}
     @keyframes ws-sync-pulse{0%,100%{opacity:1}50%{opacity:.35}}
-    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-xs);color:var(--ink);background:#0a0b0d;
+    .ws-chip .ws-rename{flex:1;min-width:0;font-family:inherit;font-size:var(--fs-xs);color:var(--ink);background:var(--field);
       border:1px solid var(--hairline);border-radius:6px;padding:2px 6px}
     .ws-chip .ws-rename:focus{outline:none;border-color:rgba(255,255,255,.3)}
     /* Transient toast. Centred over the TOP of the terminal — the same line as the Terminal|Agents control,
@@ -1025,7 +1214,7 @@
        also set `left:0` pinned both edges at once and stretched every toast to the full max-width, so a
        three-word message wore a 420px box. Never set both edges; translateX does the centring instead. */
     .toast{position:fixed;top:0;left:0;transform:translateX(-50%) translateY(-6px);opacity:0;pointer-events:none;
-      background:linear-gradient(180deg,#191c22,#0f1115);border:1px solid rgba(255,255,255,.22);border-radius:10px;
+      background:linear-gradient(180deg,var(--control2-top),var(--control-bot));border:1px solid rgba(255,255,255,.22);border-radius:10px;
       padding:8px 13px;font-size:calc(var(--fs-sm) * 1.08);line-height:1.4;color:var(--ink);box-shadow:var(--elev-3);z-index:10001;
       width:max-content;max-width:420px;transition:opacity var(--dur-slow),transform var(--dur-slow)}   /* max-width caps the long ones (they wrap); short ones shrink to the text */
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -1033,7 +1222,7 @@
     /* new-workspace chooser (reuses the .approve overlay shell) */
     .choice-row{display:flex;flex-direction:column;gap:9px;margin:4px 0 14px;text-align:left}
     .choice{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border:1px solid var(--hairline);border-radius:10px;
-      background:linear-gradient(180deg,#131519,#0e1013);cursor:pointer;transition:border-color var(--dur-base),box-shadow var(--dur-base)}
+      background:linear-gradient(180deg,#131519,var(--pop-bot));cursor:pointer;transition:border-color var(--dur-base),box-shadow var(--dur-base)}
     .choice:hover{border-color:rgba(255,255,255,.22)}
     .choice.sel{border-color:var(--live);box-shadow:0 0 16px -9px var(--live)}
     .choice .ci{width:18px;height:18px;flex:none;margin-top:1px;color:var(--silver)}
@@ -1102,12 +1291,12 @@
     .live-member .md.ok{background:var(--ok)}
     .live-member .md.idle{background:#e0a93b}
     .live-member .md.gone{background:var(--live,#e5564b)}
-    .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:var(--ink);font:inherit;font-size:var(--fs-sm);outline:none}
+    .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--chip);color:var(--ink);font:inherit;font-size:var(--fs-sm);outline:none}
     .name-field:focus{border-color:rgba(95,180,135,.5)}
     .share-dock input[type=text]{margin-bottom:0;font-size:var(--fs-xs);padding:9px 10px}
     /* voice room (host) — a compact strip at the top of the viewer chat panel */
     .voicerow{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:9px 12px;border-bottom:1px solid var(--hairline-soft);
-      background:linear-gradient(180deg,#0c0e12,#0a0b0d);flex:none}
+      background:linear-gradient(180deg,#0c0e12,var(--field));flex:none}
     .hv-members:empty{display:none}
     .hv-btn,.hv-mute{width:auto;flex:none;padding:6px 11px;font-size:var(--fs-xs);border-radius:8px;box-shadow:none}
     /* Join voice + End/Leave Session must read as the SAME control size (they sit in the same live cluster).
@@ -1119,7 +1308,7 @@
     .hv-mute.muted{color:#fff;border-color:var(--live);background:rgba(229,86,75,.16)}
     .hv-members{display:flex;align-items:center;flex-wrap:wrap;gap:5px;width:100%}
     .hvm{display:flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border:1px solid var(--hairline);
-      border-radius:999px;background:#101216;font-size:var(--fs-xs);color:var(--ink-dim)}
+      border-radius:999px;background:var(--control2-bot);font-size:var(--fs-xs);color:var(--ink-dim)}
     .hvm .d{width:6px;height:6px;border-radius:50%;background:#3a3f47;transition:.12s}
     .hvm.speaking{color:var(--ink);border-color:var(--ok)}
     .hvm.speaking .d{background:var(--ok);box-shadow:0 0 7px 0 var(--ok)}
@@ -1163,10 +1352,10 @@
     /* input + ✓ button pinned to the SAME explicit height (border-box is global) so they match exactly —
        align-self:stretch wasn't equalizing a flex <input> against the button reliably, so don't rely on it */
     .username-row .name-field{flex:1 1 0;min-width:0;width:auto;height:31px}
-    .name-save{flex:0 0 auto;width:38px;height:31px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:#14171c;color:var(--ok);font-size:var(--fs-md);line-height:1;cursor:pointer;transition:background var(--dur-fast),border-color var(--dur-fast)}
+    .name-save{flex:0 0 auto;width:38px;height:31px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:8px;background:var(--chip);color:var(--ok);font-size:var(--fs-md);line-height:1;cursor:pointer;transition:background var(--dur-fast),border-color var(--dur-fast)}
     .name-save:hover{border-color:rgba(95,180,135,.55);background:rgba(95,180,135,.14)}
     /* saved-username display: shows the name as text with a hover edit (✎) toggle back into the input */
-    .username-view{display:flex;align-items:center;gap:8px;margin-top:2px;padding:7px 11px;border:1px solid var(--hairline-soft);border-radius:8px;background:#14171c}
+    .username-view{display:flex;align-items:center;gap:8px;margin-top:2px;padding:7px 11px;border:1px solid var(--hairline-soft);border-radius:8px;background:var(--chip)}
     .username-text{flex:1;font-size:var(--fs-sm);color:var(--ink);font-weight:500}
     .username-edit{flex:none;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink-faint);font-size:var(--fs-sm);cursor:pointer;opacity:0;transition:opacity var(--dur-fast),color var(--dur-fast)}
     .username-view:hover .username-edit{opacity:1}
@@ -1195,7 +1384,7 @@
     .drawer-scrim{position:fixed;inset:0;z-index:9000;background:rgba(4,5,7,.45);opacity:0;pointer-events:none;transition:opacity var(--dur-slow)}
     .drawer-scrim.open{opacity:1;pointer-events:auto}
     .drawer{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:340px;max-width:92vw;display:flex;flex-direction:column;
-      transform:translateX(102%);transition:transform var(--dur-slow) ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
+      transform:translateX(102%);transition:transform var(--dur-slow) ease;background:linear-gradient(180deg,var(--sheet-top),var(--sheet-bot));
       border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
     .drawer.open{transform:translateX(0)}
     .drawer-head{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;border-bottom:1px solid var(--hairline);
@@ -1213,7 +1402,7 @@
     .eff-pill.danger:hover{background:rgba(150,40,40,.14);color:#ffb0b0}
     /* Diff Review panel — a wider right-side slide-in (mirrors the drawer mechanism) */
     .diffpanel{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:540px;max-width:94vw;display:flex;flex-direction:column;
-      transform:translateX(102%);transition:transform var(--dur-slow) ease;background:linear-gradient(180deg,#0d0f12,#090a0c);
+      transform:translateX(102%);transition:transform var(--dur-slow) ease;background:linear-gradient(180deg,var(--sheet-top),var(--sheet-bot));
       border-left:1px solid var(--hairline);box-shadow:-18px 0 50px -20px #000}
     .diffpanel.open{transform:translateX(0)}
     .diffpanel .drawer-head button{font-size:var(--fs-2xl)}
@@ -1238,7 +1427,7 @@
     .ph-body{padding:0 14px 8px}
     .ph-diff{display:flex;flex-direction:column;gap:8px}   /* the COMMIT HISTORY .ph-sec line above it is the divider */
     .ph-empty{color:var(--ink-faint);font-size:var(--fs-xs);padding:6px 2px}
-    .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:#0d0f12}
+    .hf-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--sheet-top)}
     .hf-meta{display:flex;flex-wrap:wrap;gap:1px 10px;font-size:var(--fs-xs);line-height:1.4;padding-right:42px}   /* Name / Time / User on one line; right pad clears the hover expand + copy buttons */
     .hf-pair{white-space:nowrap}
     .hf-k{color:var(--ink-faint);letter-spacing:.02em}
@@ -1280,13 +1469,13 @@
     .ph-chip.ahead{color:#e8c37a;border-color:rgba(232,195,122,.32);background:rgba(232,195,122,.09)}
     .ph-chip.behind{color:#7f9cff;border-color:rgba(127,156,255,.32);background:rgba(127,156,255,.09)}
     .diff-file{border:1px solid var(--hairline);border-radius:10px;overflow:hidden;background:#0b0d10}
-    .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:#101216;border-bottom:1px solid var(--hairline)}
+    .diff-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;background:var(--control2-bot);border-bottom:1px solid var(--hairline)}
     .diff-path{font-size:var(--fs-sm);color:var(--ink);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;flex:1;min-width:0}
     .diff-counts{flex:none;font-size:var(--fs-xs);font-family:ui-monospace,monospace}
     .diff-counts .add{color:var(--ok);font-style:normal}
     .diff-counts .del{color:#d2685f;font-style:normal;margin-left:4px}
     .diff-revert-file,.diff-revert-hunk{width:auto;flex:none;padding:3px 9px;font-size:var(--fs-xs);letter-spacing:.02em;color:var(--ink-dim);
-      background:#16181d;border:1px solid var(--hairline);border-radius:6px;cursor:pointer;box-shadow:none}
+      background:var(--control-top);border:1px solid var(--hairline);border-radius:6px;cursor:pointer;box-shadow:none}
     .diff-revert-file:hover,.diff-revert-hunk:hover{color:#fff;border-color:rgba(210,104,95,.5);background:rgba(210,104,95,.14)}
     .diff-revert-file:disabled,.diff-revert-hunk:disabled{opacity:.45;cursor:default}
     .diff-binary{padding:10px 12px;font-size:var(--fs-xs);color:var(--ink-faint)}
@@ -1327,7 +1516,7 @@
        (28px tall, 8px radius, the button-face gradient) so a badge and "Join voice"/"End Session" read as one
        control family, per the owners' roster-redesign note. */
     .rmember{flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;white-space:nowrap;
-      border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,#191c22,#101216);
+      border:1px solid var(--hairline);border-radius:8px;background:linear-gradient(180deg,var(--control2-top),var(--control2-bot));
       box-shadow:inset 0 1px 0 var(--sheen);font-size:var(--fs-xs);color:var(--ink-dim)}
     .rmember.you{color:var(--ink);border-color:rgba(255,255,255,.16)}
     /* in a voice call → the person's ONE roster pill carries the mic state (never a second pill in the voice
@@ -1344,6 +1533,7 @@
     .rkick:hover{opacity:1;color:#fff;background:rgba(229,86,75,.45)}
     .rmember.gone{color:var(--ink-faint);opacity:.65}
     .rdot{width:7px;height:7px;border-radius:50%;background:#565c66;flex:none}
+    .rdot .rav{display:none}   /* the initial paints only under html.skin, where .rdot is a 15px avatar disc — at this 7px fallback it would spill out of its own circle */
     .rdot.ok{background:var(--ok);box-shadow:0 0 6px -1px var(--ok)}
     .rdot.idle{background:#e0a93b;box-shadow:0 0 6px -1px #e0a93b}
     .rdot.gone{background:var(--live);opacity:.85}
@@ -1351,7 +1541,7 @@
     .chat-msg{position:relative;max-width:88%;padding:7px 11px;border-radius:12px;font-size:var(--fs-sm);line-height:1.4;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}
     .chat-msg .who{display:block;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
     .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6;border-bottom-right-radius:4px}    /* softer rounding + a subtle chat-tail toward the sender */
-    .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink);border-bottom-left-radius:4px}
+    .chat-msg.them{align-self:flex-start;background:var(--chip);border:1px solid var(--hairline);color:var(--ink);border-bottom-left-radius:4px}
     /* hover-revealed copy button, bottom-right of the bubble — copy a collaborator's prompt straight to the clipboard */
     .chat-copy{position:absolute;bottom:3px;right:3px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:6px;background:rgba(0,0,0,.28);color:var(--ink-faint);opacity:0;cursor:pointer;transition:opacity var(--dur-fast),color var(--dur-fast),background var(--dur-fast)}
     .chat-copy svg{width:12px;height:12px;display:block}
@@ -1360,7 +1550,7 @@
     .chat-empty{margin:auto;max-width:210px;color:var(--ink-faint);font-size:var(--fs-xs);text-align:center;padding:18px;line-height:1.5}
     .chat-empty::before{content:'';display:block;width:30px;height:23px;margin:0 auto 11px;border:1.5px solid currentColor;border-radius:9px 9px 9px 3px;opacity:.4}   /* faint speech-bubble glyph so the empty state reads as intentional */
     .chat-input{display:flex;align-items:center;gap:8px;padding:10px;border-top:1px solid var(--hairline-soft)}
-    .chat-input input{margin:0;flex:1;border-radius:9px;background:#101216}
+    .chat-input input{margin:0;flex:1;border-radius:9px;background:var(--control2-bot)}
     .chat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-size:0;display:flex;align-items:center;justify-content:center}   /* circular send (text hidden via font-size:0; arrow drawn below — keeps the accessible label) */
     .chat-input button::after{content:'→';font-size:var(--fs-lg);line-height:1}
     /* approve-guest prompt: a viewer can't attach to the terminal until you say yes here */
@@ -1368,7 +1558,7 @@
       background:rgba(5,6,8,.62);backdrop-filter:blur(2px)}
     .approve.show{display:flex}
     .approve .box{width:344px;max-width:90vw;padding:22px 22px 18px;text-align:center;
-      border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,#14171c,#0c0e11);
+      border:1px solid var(--hairline);border-radius:14px;background:linear-gradient(180deg,var(--modal-top),var(--modal-bot));
       box-shadow:0 20px 60px rgba(0,0,0,.6)}
     .approve .box h3{margin:0 0 9px;font-size:var(--fs-md);letter-spacing:.03em;color:var(--ink)}
     .approve .box p{margin:0 0 17px;font-size:var(--fs-sm);line-height:1.55;color:var(--ink-dim)}
@@ -1393,7 +1583,7 @@
     .share-warn.danger{background:rgba(229,86,75,.10);border-color:rgba(229,86,75,.44);color:#e9b3ad}
     .share-warn .sw-txt b{font-weight:700;color:#f2c8c3}
     .approve input{width:100%;margin:2px 0 16px;font-family:inherit;font-size:var(--fs-md);color:var(--ink);
-      background:#0a0b0d;border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px}
+      background:var(--field);border:1px solid var(--hairline-soft);border-radius:9px;padding:11px 12px}
     .approve input:focus{outline:none;border-color:rgba(255,255,255,.24)}
     .approve .ghost{background:none;border-color:var(--hairline-soft);color:var(--ink-dim)}
     /* first-run onboarding wizard — reuses the .approve scrim/card; left-aligned, wider, stepped */
@@ -1450,41 +1640,563 @@
     .iconbtn:focus-visible,.vbox:focus-visible,.termtab:focus-visible,.share-btn:focus-visible,
     .ws-chip:focus-visible,.ext-tog:focus-visible,.ws-add:focus-visible,.panel-close:focus-visible,
     .vin:focus-visible,.vout:focus-visible,.vauto:focus-visible,input:focus-visible{ outline:1.5px solid rgba(207,214,223,.55); outline-offset:2px }
+
+    /* ══════════════════════════════════════════════════════════════════════════════════════════════════════
+       COCKPIT SKIN — the design draft, applied.
+       Scoped to html.skin, a class the root element carries permanently, so ALL FOUR palettes wear this one
+       design and only their colours differ. It was scoped to html[data-theme="cockpit"] while the redesign was
+       a single opt-in theme; element+class has exactly the same specificity as element+attribute, so
+       re-scoping it moved no rule's rank. Everything below takes its colours from tokens rather than literals,
+       which is what lets one design serve four palettes.
+       It sits LAST on purpose — the polish block above re-declares shadows on .iconbtn and the drawers, and
+       source order is what lets these win.
+       ══════════════════════════════════════════════════════════════════════════════════════════════════════ */
+    html.skin body{font-family:var(--ui);letter-spacing:0}
+    /* …but every NUMBER and every micro-label stays mono. The app is data-forward: session ids, percentages,
+       token counts and shas all want tabular figures and a fixed advance. Prose chrome goes proportional;
+       anything you read as a value does not. */
+    html.skin .ctxlabel,html.skin .ctxpct,
+    html.skin .tokval,html.skin .ubpct,
+    html.skin .ver,html.skin .up-v,
+    html.skin .cock-pop-h,html.skin .wordmark,
+    html.skin .ws-section-head,html.skin .chat-head,
+    html.skin .sess-meta,html.skin .up-k,
+    html.skin .row .k,html.skin .up-sub,
+    html.skin .badge,html.skin .pip,
+    html.skin .transcript,html.skin code,
+    html.skin .diff-lines,html.skin .diff-path{font-family:var(--mono)}
+
+    /* ── PILLS ─────────────────────────────────────────────────────────────────────────────────────────────
+       Ported rule for rule from the draft's .pill, tokens swapped: ink-700→raised, ink-600→raised-hi,
+       ink-500→sunken, tx→ink-dim, tx-hi→ink, tx-lo→ink-faint, line→hairline. Sizes are the draft's exact
+       values via the tokens added above — no rounding to the nearest existing step. */
+    html.skin .cockpit .cock-chip{
+      display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;
+      border-radius:8px;border:1px solid transparent;background:var(--raised);
+      color:var(--ink-dim);font-family:var(--ui);font-size:var(--fs-pill);cursor:pointer;white-space:nowrap;margin:0}
+    html.skin .cockpit .cock-chip:hover{background:var(--raised-hi);color:var(--ink)}
+    html.skin .cockpit .cock-chip.open,
+    html.skin .cockpit .cock-chip[aria-expanded="true"]{
+      background:var(--sunken);color:var(--ink);border-color:var(--hairline)}
+    html.skin .cockpit .cock-chip svg{width:13px;height:13px}
+    /* The mic and the speaker are the SAME control as the three in the top-right corner: 28px square, 6px
+       radius, no face until hovered, 15px glyph. They were 26px lozenges of a different width each (46 and 31),
+       which made the row's left end read as three unrelated shapes. One button family, one geometry. */
+    html.skin .cockpit .vin,html.skin .cockpit .vmerge{
+      position:relative;width:28px;height:28px;min-width:28px;padding:0;gap:0;border:0;border-radius:6px;
+      background:none;box-shadow:none;color:var(--ink-faint);display:grid;place-items:center}
+    html.skin .cockpit .vin:hover,html.skin .cockpit .vmerge:hover{background:var(--raised-hi);color:var(--ink)}
+    /* RECORDING. The base rule lit this with a red face, a border and a 16px glow, all of which the square
+       ghost geometry drops — leaving the corner pip as the only signal, which is small for "your microphone
+       is open". The glyph itself comes up to full ink over a faint tint: unmistakable at a glance, and still
+       quieter than the terminal it sits under. */
+    html.skin .cockpit .vin.live{color:var(--ink);background:color-mix(in srgb,var(--live) 16%,transparent)}
+    html.skin .cockpit .vin .vico,html.skin .cockpit .vmerge .vico{width:15px;height:15px}
+    /* the recording dot becomes a corner badge — the same shape the connection button uses upstairs — so the
+       button can be square without losing the one piece of state it carries. */
+    html.skin .cockpit .vin .vdot{position:absolute;right:2px;bottom:2px;width:6px;height:6px}
+    /* THE SPEAKER GETS THE SAME PIP, same corner, same 6px — the mic's lights while it is LISTENING, this one
+       lights while a reply is being READ ALOUD. #voice-chip is not a .vbox, so the dot needs its own resting
+       style rather than inheriting one. */
+    html.skin .cockpit .vmerge .vdot{position:absolute;right:2px;bottom:2px;width:6px;height:6px;
+      border-radius:50%;background:#3a3f47;flex:none;transition:background var(--dur-slow)}
+    html.skin .cockpit .vmerge.reading .vdot{background:var(--ok);box-shadow:0 0 9px 0 var(--ok);
+      animation:micpulse 1s ease-in-out infinite}
+    /* …and when "always read replies" is on, the BUTTON carries the green, the way the old three-button voice
+       group did — so the state reads straight off the row without opening the menu. Hover deepens it. */
+    html.skin .cockpit .vmerge.auto-on{color:var(--ok)}
+    html.skin .cockpit .vmerge.auto-on:hover{background:color-mix(in srgb,var(--ok) 20%,transparent);color:var(--ok)}
+
+    /* ── READOUTS ──────────────────────────────────────────────────────────────────────────────────────── */
+    /* the draft's .read / .segs, verbatim: mono uppercase micro-label, then the value in normal case. */
+    html.skin .cockpit .ctxbar,html.skin .cockpit .tokbar{
+      display:flex;align-items:center;gap:7px;padding:0 4px;font-family:var(--mono)}
+    /* --ink-faint, not --ink-dimmer: the dimmer step is right for a keyboard hint sitting inside an open menu,
+       and one step too quiet for a standing label on the shell's own bar, where it reads as switched off. */
+    html.skin .cockpit .ctxlabel{
+      font-size:var(--fs-key);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:400}
+    /* min-width:30px + text-align:right on the context value and centre-plus-2px on the tokens value were
+       tuned for the old boxed telemetry, and they put each number a different distance from its own label —
+       the context dash floated ~28px off the end of its bar while the token value sat centred in a reserved
+       slot. Both now sit exactly one 7px gap after the thing they belong to, so the pair reads as one set. */
+    html.skin .cockpit .ctxpct,html.skin .cockpit .tokval{
+      font-size:var(--fs-desc);letter-spacing:0;color:var(--ink-dim);font-weight:500;text-transform:none;
+      min-width:0;text-align:left;transform:none}
+    html.skin .cockpit .ctxsegs{display:flex;gap:1.5px}
+    html.skin .cockpit .ctxsegs i{width:4px;height:10px;border-radius:1px;background:var(--sunken)}
+    html.skin .cockpit .ctxsegs i.lit{background:var(--accent)}
+    /* the draft's .ring: 22px, 14px hole, unfilled arc on --ink-500 (=sunken), hole on the bar's own colour */
+    html.skin .usagebar{
+      background:conic-gradient(currentColor calc(var(--u-pct,0) * 1%), var(--sunken) 0)}
+    html.skin .usagebar::after{background:var(--chrome)}
+    html.skin .usagebar:hover{outline:2px solid var(--hairline);outline-offset:2px}
+
+    /* ── STRUCTURE ─────────────────────────────────────────────────────────────────────────────────────────
+       The draft's bar metrics, exactly: both bars 44px tall, 12px side padding; 10px between items up top,
+       7px along the cockpit. The shell grid follows so the rows are the heights the draft draws. */
+    /* 40px, down from the draft's 44. Both bars carry 28px controls, so this is 6px of air above and below —
+       the tightest the row goes before the controls start touching their own edges, and 8px of shell height
+       handed back to the terminal. Nothing inside either bar changed size. */
+    html.skin body{grid-template-rows:40px 1fr 40px}
+    html.skin .top{height:40px;gap:10px;padding:0 12px;border-bottom:1px solid var(--hairline-soft)}
+    html.skin .status.cockpit{height:40px;gap:5px;padding:0 10px;border-top:1px solid var(--hairline)}
+    /* MODEL AND EFFORT ARE READOUTS YOU CAN CLICK, not buttons. They sit beside context and tokens — which are
+       bare text — and giving two of those four a filled pill made the row read as controls interrupted by
+       data. The face comes off; the click, the menu and the focus ring all stay. Mode keeps its pill on
+       purpose: it is the one whose value changes what the next session is ALLOWED to do. */
+    html.skin .cockpit #model-chip,html.skin .cockpit #eff-chip{
+      background:none;border-color:transparent;padding:0 5px;color:var(--ink-dim)}
+    /* a little air before the readouts, so the two things you CLICK and the three you only READ separate into
+       two groups instead of one run-on row */
+    html.skin .cockpit #eff-chip{margin-right:4px}
+    /* ONE LINE BOX for everything in the right cluster. Every item here already shared a midpoint to the
+       half-pixel — measured at 801.5 across all of them — so the "model and effort sit higher" is optical, not
+       geometric: their text renders in a 15px line box (11.5px at normal leading) while the readouts use 13px,
+       and the taller box reads as riding higher against its neighbours. Pinning all four to the same 13px line
+       box makes the text boxes coincide exactly, which is what puts the glyphs on one line. */
+    html.skin .cockpit #sb-model,html.skin .cockpit #sb-eff,
+    html.skin .cockpit .ctxlabel,html.skin .cockpit .ctxpct,html.skin .cockpit .tokval{line-height:13px}
+    /* …and the chip values must not CLIP that box. .status .s sets overflow:hidden for horizontal ellipsis,
+       which also cuts vertically — a 13px line box at 11.5px leaves no room for a descender, so the tail of
+       the "g" in "high" was sliced off. These three carry short values that never need ellipsis. */
+    html.skin .cockpit #sb-model,html.skin .cockpit #sb-eff,html.skin .cockpit #sb-perm{overflow:visible}
+    html.skin .cockpit #model-chip:hover,html.skin .cockpit #eff-chip:hover{background:none;color:var(--ink)}
+    html.skin .cockpit #model-chip.open,html.skin .cockpit #eff-chip.open{background:none;color:var(--ink)}
+
+    /* ── POPOVERS ──────────────────────────────────────────────────────────────────────────────────────────
+       The draft's .pop / .pop-h / .row, rule for rule. Note gap:1px between rows and 6px panel padding —
+       those two are most of why a menu reads as one object rather than a stack of buttons. */
+    html.skin .cock-pop{
+      /* PROPORTION. 212px made every one of the five descriptions wrap to two lines, which took the panel to
+         212x360 — a column, not a menu. The height was coming from the WORDS, so that is where it comes back
+         out: the descriptions are trimmed to fit a single line at 232px (see the markup), and the panel lands
+         near square-ish rather than either a wide slab at 236 or a ribbon at 212. Row padding stays 8. */
+      /* bottom is measured from the CHIP's bottom edge, and the chip is 26px tall — so 44px left an 18px void
+         between menu and button. 36px puts a 10px gap above the chip: clearly attached to the thing you
+         clicked, and still clearing the bar's top edge. */
+      min-width:232px;max-width:232px;padding:6px;gap:1px;bottom:36px;
+      /* the popover is a CHILD of the chip, and the chip is white-space:nowrap so its own label never wraps —
+         which cascaded in here and made every description clip at the panel edge instead of wrapping. Undoing
+         it is what actually makes the menu vertical: the descriptions take the second line they need. */
+      white-space:normal;
+      background:var(--raised);border:1px solid var(--hairline);border-radius:10px;
+      box-shadow:0 18px 44px -16px #000,0 0 0 1px #00000040}
+    html.skin .cock-pop-h{
+      font-family:var(--mono);font-size:var(--fs-eyebrow);letter-spacing:.13em;text-transform:uppercase;
+      color:var(--ink-dimmer);padding:6px 9px 5px}
+    html.skin .cock-pop .eff-pill{
+      display:flex;align-items:flex-start;gap:9px;width:100%;padding:8px 9px;border-radius:6px;border:0;
+      background:none;box-shadow:none;text-align:left;color:var(--ink-dim)}
+    html.skin .cock-pop .eff-pill:hover{background:var(--raised-hi)}
+    html.skin .cock-pop .eff-pill .tt{flex:1;min-width:0}
+    html.skin .cock-pop .eff-pill .t{display:block;font-size:var(--fs-row);color:var(--ink)}
+    html.skin .cock-pop .eff-pill .d{display:block;font-size:var(--fs-desc);color:var(--ink-faint);line-height:1.45}
+    html.skin .cock-pop .eff-pill .k{
+      font-family:var(--mono);font-size:var(--fs-key);color:var(--ink-dimmer);flex:none;padding-top:2px}
+    /* the check is a fixed-width slot on EVERY row, lit only on the selected one — otherwise rows shift
+       sideways as the selection moves */
+    html.skin .cock-pop .eff-pill .ck{flex:none;width:13px;padding-top:2px;color:transparent}
+    html.skin .cock-pop .eff-pill.on .ck{color:var(--accent)}
+    html.skin .cock-pop .eff-pill.on{background:none}
+    html.skin .cock-pop .eff-pill .ck svg{width:13px;height:13px;display:block}
+
+    /* ── EFFORT SLIDER ─────────────────────────────────────────────────────────────────────────────────────
+       Ported RULE FOR RULE from the draft's .eff / .track / .knob, with only the token names swapped for this
+       stylesheet's equivalents (ink-500→sunken, tx-lo→ink-faint, tx-dim→ink-dimmer, tx-hi→ink).
+       The previous version was a native range input dressed up, which has no fill and no ticks and was never
+       going to match. This is the draft's four-part control: track, terracotta fill, five dots, knob. */
+    html.skin .eff{padding:9px 11px 12px;min-width:250px;display:block}
+    html.skin .eff .hd{display:flex;align-items:center;gap:8px;font-size:var(--fs-row);color:var(--ink-faint);margin-bottom:14px}
+    html.skin .eff .hd b{color:var(--ink);font-weight:600}
+    html.skin .eff .hd .q{margin-left:auto;color:var(--ink-dimmer);font-size:var(--fs-desc);cursor:help}
+    html.skin .eff .ends{display:flex;justify-content:space-between;font-size:var(--fs-desc);color:var(--ink-faint);margin-bottom:7px}
+    html.skin .eff .track{position:relative;height:16px;display:flex;align-items:center}
+    html.skin .eff .track .bar{position:absolute;inset:6px 0 auto;height:3px;border-radius:2px;background:var(--sunken)}
+    html.skin .eff .track .fill{position:absolute;left:0;top:6px;height:3px;border-radius:2px;background:var(--flame)}
+    html.skin .eff .track .tk{position:relative;flex:1;display:flex;justify-content:space-between;align-items:center}
+    html.skin .eff .track .tk i{width:3px;height:3px;border-radius:50%;background:var(--ink-dimmer);z-index:1}
+    html.skin .eff .track .knob{position:absolute;width:16px;height:16px;border-radius:50%;
+      background:var(--ink);z-index:2;box-shadow:0 2px 8px #000a}
+    /* the real input rides invisibly on top, so dragging and keyboard both work while every painted pixel is
+       the draft's */
+    html.skin .eff .track input[type=range]{position:absolute;inset:0;width:100%;height:100%;
+      margin:0;opacity:0;cursor:pointer;z-index:3}
+    /* the five levels stay in the DOM — they are still the one mechanism that talks to the backend, and the
+       settings drawer shares them. The slider moves them; it does not replace them. */
+    html.skin .eff .eff-pill{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+    /* ── USAGE POPOVER ─────────────────────────────────────────────────────────────────────────────────────
+       The draft's .use / .meter / .lim, rule for rule. */
+    html.skin .usage-pop{
+      min-width:268px;width:268px;padding:11px 12px 13px;   /* 312 was sized for a three-row panel; two rows do not need it */
+      background:var(--raised);border:1px solid var(--hairline);border-radius:10px;
+      box-shadow:0 18px 44px -16px #000,0 0 0 1px #00000040}
+    html.skin .usage-pop .glab{
+      font-size:var(--fs-desc);color:var(--ink-faint);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+    html.skin .usage-pop .meter{
+      height:4px;border-radius:2px;background:var(--sunken);overflow:hidden;display:flex;gap:2px}
+    html.skin .usage-pop .meter span{display:block;height:100%;border-radius:2px;background:var(--accent)}
+    html.skin .usage-pop .lim{margin-bottom:11px}
+    html.skin .usage-pop .lim:last-child{margin-bottom:0}
+    html.skin .usage-pop .lim .hd{
+      display:flex;align-items:baseline;gap:8px;margin-bottom:5px;font-size:var(--fs-pill)}
+    html.skin .usage-pop .lim .nm{color:var(--ink);display:flex;align-items:center;gap:5px}
+    html.skin .usage-pop .lim .rs{margin-left:auto;color:var(--ink-dimmer);font-size:var(--fs-xs)}
+    html.skin .usage-pop .lim .pc{
+      font-family:var(--mono);font-size:var(--fs-desc);color:var(--ink-dim);min-width:34px;text-align:right}
+    html.skin .usage-pop .lim svg{width:11px;height:11px;flex:none}
+    /* severity rides the row, so the icon and the bar can never disagree about it */
+    html.skin .usage-pop .lim.warn .nm svg{color:var(--warn)}
+    html.skin .usage-pop .lim.warn .meter span{background:var(--warn)}
+    html.skin .usage-pop .lim.crit .nm svg{color:var(--live)}
+    html.skin .usage-pop .lim.crit .meter span{background:var(--live)}
+
+    /* ── ONE CONTINUOUS SURFACE ────────────────────────────────────────────────────────────────────────────
+       The draft's .cols is a bare grid — `grid-template-columns:214px 1fr 232px`, no gap, no padding — and the
+       panels are divided by a 1px hairline and nothing else. This shell FLOATS its panels instead: a 9px
+       gutter between them, 4-7px of body padding around them, an 11px radius on the chat, 9px on the terminal
+       and a drop shadow under the sidebar. That is what reads as gaps between sidebar, terminal and chat.
+       Flattening it is the single biggest structural difference between the two and it is pure CSS — every
+       element keeps its id, its parent and its handler; only the gutters close. */
+    html.skin .body{gap:0;padding:0}
+    html.skin .center{gap:0}
+    /* THE SEAM. .body.with-sessions .sidebar carries margin:-5px 0 -4px -5.25px, whose whole job was to cancel
+       the body padding this block has just set to zero. Left in place it pulls the sidebar 5px ABOVE the
+       terminal and 5.25px off the left edge — which is the hairline of misalignment along the top. */
+    html.skin .body.with-sessions .sidebar{margin:0}
+    html.skin #terminal{background:var(--terminal-bg);border-radius:0;box-shadow:none}
+    html.skin #agents-pane{border-radius:0}
+    /* the draft's .term padding. The xterm mount is watched by a ResizeObserver (app.js:468) which re-fits the
+       pty after layout settles, so changing this needs no sizing code of ours. */
+    html.skin .term-host{padding:14px 16px}
+    /* the sidebar's OUTER frame only — the glass fill, the shadow and the radius that made it a floating card
+       become the draft's single hairline. Nothing inside it is touched. */
+    html.skin .sidebar{background:var(--chrome);backdrop-filter:none;
+      border-right:1px solid var(--hairline-soft);border-radius:0;box-shadow:none}
+    /* the share button: a touch shorter, and centred for real. Its 14/38 padding reserved room for the "i"
+       overlay on the right, which left the icon+label sitting 12px LEFT of the button's centre — measured, not
+       eyeballed. Matching the left padding to the right one centres the content while keeping the reserve. */
+    html.skin .share-btn{height:42px;padding-left:34px;padding-right:34px;gap:8px}
+    /* the "i" is a sibling overlaying the button's right edge. Even with the label truly centred, a full-weight
+       badge on one side tips the button optically — so it sits tighter to the edge and rests quiet, coming up
+       to full strength only when reached for. */
+    /* right:15px is measured, not chosen: the label ends at 169.6 and the button's inside edge is at 214, so
+       the badge's centre wants 191.8 — which puts a 16px badge 15.2px off the right edge. At 8px it sat hard
+       against the border with all the slack on the label side. */
+    html.skin .btnwrap .ws-info{right:15px;width:16px;height:16px;opacity:.5}
+    html.skin .btnwrap .ws-info:hover{opacity:1}
+    /* and one notch brighter, so the sidebar's primary action carries against every ground. It follows the
+       theme rather than fighting it: --ok is re-declared in each palette, so the wash re-resolves per theme. */
+    html.skin .share-btn:not(.live){
+      background:linear-gradient(180deg,color-mix(in srgb,var(--ok) 20%,transparent),color-mix(in srgb,var(--ok) 8%,transparent));
+      border-color:color-mix(in srgb,var(--ok) 44%,transparent)}
+
+    /* ── TOP BAR ───────────────────────────────────────────────────────────────────────────────────────────
+       The draft's .top / .mark / .wordmark / .ico / .conn, transcribed. Bar geometry (44px, gap 10, pad 0 12)
+       is set in STRUCTURE above; this is what sits in it. */
+    html.skin .top,html.skin .status{background:var(--chrome)}
+    /* the right cluster now OPENS with the model chip, so the single auto gap belongs to it. Left on .trk, the
+       readouts would still be pushed right and the two chips would sit stranded on the left of them. */
+    html.skin .cockpit>.trk{margin-left:0}
+    html.skin .cockpit>#model-chip{margin-left:auto}
+    /* THE BRAND IS NOT THE SKIN'S TO RESTYLE. The draft carried a placeholder ✳ mark and a lowercase mono
+       wordmark; both were stand-ins for an identity that already exists. Sizing the real logo to the draft's
+       20px mangled it (it is pixel-art, rendered with image-rendering:pixelated — it wants its own scale), and
+       lowercasing the wordmark replaced the mark the owners chose. The FORM is untouched — uppercase, .3em,
+       locked white, the same mark — and only the scale steps down ~5% to sit in the shorter bar.
+       The logo lands on a WHOLE pixel (28→27, −3.6%) rather than the exact 26.6: it is pixel-art under
+       image-rendering:pixelated, where a fractional height doubles some source rows and not others. The
+       wordmark takes the true 5% off the type scale, so it stays a token rather than an ad-hoc size. */
+    html.skin .logo{height:27px}
+    html.skin .wordmark{font-size:calc(var(--fs-lg) * .95)}
+    /* the draft's .crumb, transcribed: mono, quiet, and separated from the brand by a hairline rather than by
+       whitespace. The session is the brighter half because it is the thing that changes. It truncates rather
+       than wraps — the top bar is a fixed 40px and a long project name must never grow it. */
+    /* a step up the scale (11.5 -> 12.5) and a step up the ink ramp: this names where you ARE, which is
+       reference you glance at, not decoration to be squinted at. */
+    html.skin .crumb{font-family:var(--mono);font-size:var(--fs-row);color:var(--ink-dim);
+      padding-left:10px;margin-left:4px;border-left:1px solid var(--hairline);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42ch;min-width:0}
+    html.skin .crumb b{color:var(--ink);font-weight:500}   /* the session is the half that changes, so it carries the brighter ink */
+    /* THE TWO DIVIDERS ARE ONE LINE. The crumb's rule is pinned to --side-w, the same value that sets the
+       sidebar's grid column, so it sits directly above the sidebar/terminal seam at any window width instead
+       of floating wherever the wordmark happens to end. Absolute, so the brand's width can never push it off.
+       Only while the sidebar is docked — with the panel closed there is no seam to line up with, and it falls
+       back to normal flow.
+       Centred by transform rather than flex on purpose: as a flex container the text node and the <b> become
+       separate items and the space in "Local / 4444" collapses, printing "Local /4444".
+       left is --side-w MINUS the sidebar's 1px border: that border is drawn INSIDE the column, spanning
+       227-228, so a rule at 228 would sit one pixel to its right rather than on it. */
+    html.skin .top{position:relative}
+    html.skin:has(.body.with-sessions) .crumb{
+      position:absolute;left:calc(var(--side-w) - 1px);top:50%;transform:translateY(-50%);margin-left:0;max-width:34ch}
+    html.skin .crumb:empty{display:none}   /* no orphan divider rule before the app knows where it is */
+    /* .ico — 28px square, no face until hovered, 15px glyph. The base rule is a 31px labelled button with a
+       gradient fill; in the draft the top bar's actions are quiet icons, so the fill comes off entirely.
+       Scoped to .topbtns, so the sidebar edge-handle (also an .iconbtn) keeps the geometry we gave it. */
+    html.skin .top .topbtns{gap:6px}
+    /* --ink-dim at rest. A destination you have to hunt for is not restraint, it is a broken affordance: with
+       the button FACE removed the glyph is the whole control, so it cannot also be the quietest ink on screen.
+       Every theme gets this for free — --ink-dim is re-declared per palette, so the step holds on each ground. */
+    html.skin .top .topbtns .iconbtn{width:28px;height:28px;padding:0;border:0;border-radius:6px;
+      background:none;box-shadow:none;color:var(--ink-dim);display:grid;place-items:center;flex:none}
+    html.skin .top .topbtns .iconbtn:hover{background:var(--raised-hi);color:var(--ink)}
+    html.skin .top .topbtns .iconbtn svg{width:15px;height:15px}
+    /* All three top-right controls are the SAME square button. The draft's .conn pill was tried here and the
+       owners called it: a control shaped differently from the two beside it reads as a different KIND of
+       thing, when it is simply the third button in the group. #claude-btn carries .iconbtn, so it takes the
+       rule above untouched — only the mascot and its status dot are sized to sit inside 28px. */
+    /* the mascot fills its button the way the two stroked glyphs beside it do. At 15px it was a small picture
+       floating in a 28px box while the neighbours' 15px strokes reach their own edges — a filled raster mark
+       needs more of the box than a line drawing to read at the same weight. */
+    html.skin .claude-mascot{width:21px;height:21px;border-radius:5px}
+    html.skin .claude-dot{right:2px;bottom:2px;width:6px;height:6px}
+
+    /* ── LIVE BAR ──────────────────────────────────────────────────────────────────────────────────────────
+       The draft's .livebar / .dot / b / .badge / .who, rule for rule. */
+    html.skin .livebar{height:30px;padding:0 14px;gap:8px;font-size:var(--fs-pill);
+      color:var(--ink-faint);background:color-mix(in srgb,var(--ok) 6%,transparent);
+      border-bottom:1px solid var(--hairline-soft)}
+    html.skin .livebar .live-dot{width:6px;height:6px;box-shadow:none}
+    html.skin .livebar .live-txt{font-size:var(--fs-pill);font-weight:500;letter-spacing:0;
+      text-transform:none;color:var(--ok)}
+    /* the two ALARM states must survive the repaint. This block outranks .livebar.paused / .elsewhere on
+       specificity, so without these three lines a frozen mirror would paint calm green. */
+    html.skin .livebar.elsewhere{background:color-mix(in srgb,var(--ok) 4.5%,transparent)}
+    html.skin .livebar.paused{background:color-mix(in srgb,var(--warn) 12%,transparent);
+      border-bottom-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+    html.skin .livebar.paused .live-dot{background:var(--warn)}
+    html.skin .livebar.paused .live-txt{color:var(--warn)}
+    /* This chip is the only standing notice that an approved guest can run commands on this machine, as the
+       user. It keeps the draft's shape — outline, 3px radius, letter-spaced micro-caps, 2px/6px — and changes
+       what the shape is SAYING. --flame was wrong for it on meaning, not on brightness: the same token paints
+       the project marker, the caret, the slider fill and the avatar disc, so a warning wearing it is wearing
+       the app's ordinary accent and reads as one more label. --live is the app's danger ink (the End-live
+       button is the other thing wearing it), the fill is a tint rather than a face so the chip stays a chip,
+       and 700 gives it the weight to be found without a glow. The ink is --live lifted toward white because
+       the darkest palette's --live could not otherwise clear small-text contrast on the paused (amber) bar,
+       which is a ground this badge really does appear on.
+       OWNER PASS, second look: the first build read too loud in the bar, so the two edges were pulled back —
+       border 70% → 55% (the top of the range originally proposed, not the deviation that shipped past it) and
+       fill 12% → 7%. The INK is deliberately untouched: it is the only part carrying the small-text contrast
+       measurement, and softening the fill moves the text's ground away from red, so contrast rises rather
+       than falls. Weight stays 700 — the ask was quieter, not lighter, and weight is what lets the chip be
+       found at a glance without a glow. */
+    html.skin .codrive-badge{border:1px solid color-mix(in srgb,var(--live) 55%,transparent);
+      color:color-mix(in srgb,var(--live) 80%,#fff);background:color-mix(in srgb,var(--live) 7%,transparent);
+      font-size:var(--fs-2xs);letter-spacing:.1em;border-radius:3px;padding:2px 6px;box-shadow:none;font-weight:700}
+    /* the draft's .who — a quiet mono line pushed to the right end, not a row of filled pills */
+    html.skin .live-members{margin-left:auto;gap:5px;font-family:var(--mono);
+      font-size:var(--fs-desc);color:var(--ink-dimmer)}
+    html.skin .live-member{background:none;padding:0;font-size:var(--fs-desc)}
+    html.skin .live-member.you{background:none;color:var(--ok)}
+
+    /* ── CHAT PANEL ────────────────────────────────────────────────────────────────────────────────────────
+       The draft's .chat / .chat-h / .mini / .roster / .av / .log / .msg / .chat-in. */
+    html.skin .chat{background:var(--chrome);border:0;border-radius:0;box-shadow:none;
+      border-left:1px solid var(--hairline-soft)}
+    html.skin .chat-head{height:34px;padding:0 12px;gap:8px;
+      border-bottom:1px solid var(--hairline-soft)}
+    html.skin .chat-title{font-family:var(--mono);font-size:var(--fs-key);letter-spacing:.13em;
+      text-transform:uppercase;color:var(--ink-dimmer);font-weight:400}
+    /* .mini — the draft's outline pill. Join voice / Mute / End live are all this one control. */
+    html.skin .chat-head-actions .hv-btn,
+    html.skin .chat-head-actions .hv-mute,
+    html.skin .chat-head-actions .chat-term{height:22px;min-width:0;padding:0 8px;
+      border-radius:99px;border:1px solid var(--hairline);background:none;color:var(--ink-faint);
+      font-family:var(--ui);font-size:var(--fs-xs);font-weight:400;box-shadow:none}
+    html.skin .chat-head-actions .hv-btn:hover,
+    html.skin .chat-head-actions .hv-mute:hover{color:var(--ink);border-color:var(--ink-dimmer)}
+    /* …except that ending a share is destructive, and the draft has no equivalent to take a cue from. It keeps
+       its red so it can never be mistaken for the button beside it. */
+    html.skin .chat-head-actions .chat-term{color:var(--live);
+      border-color:color-mix(in srgb,var(--live) 45%,transparent)}
+    html.skin .roster-strip{padding:9px 12px;gap:8px;border-bottom:1px solid var(--hairline-soft)}
+    /* the strip's height is FIXED upstream so showing/hiding its scrollbar can never jump the layout. That
+       reserve was sized for 28px badges; the draft's are 19px, so it comes down with them — keeping the
+       no-jump guarantee instead of dropping 14px of dead space below the pills. */
+    html.skin .chat-roster{gap:5px;height:24px}
+    /* the draft's .av: a rounded pill whose left cap IS the avatar. The pill's 3px left padding is what makes
+       the disc sit flush inside it. */
+    html.skin .rmember{height:19px;padding:2px 8px 2px 3px;gap:5px;border:0;border-radius:99px;
+      background:var(--raised);box-shadow:none;font-size:var(--fs-xs);color:var(--ink-dim)}
+    html.skin .rmember.you{color:var(--ink)}
+    /* .av i — 15px disc carrying the initial. The status dot BECOMES the avatar rather than sitting beside it:
+       presence still reads (idle amber, gone faded), and identity is gained, without a second glyph. */
+    html.skin .rmember .rdot{width:15px;height:15px;display:grid;place-items:center;
+      font-family:var(--ui);font-size:var(--fs-av);font-weight:700;line-height:1;
+      background:var(--accent);color:#08122b;box-shadow:none}
+    html.skin .rmember.you .rdot{background:var(--flame);color:#1a0f0a}
+    html.skin .rmember .rdot.idle{background:var(--warn);color:#231705}
+    html.skin .rmember .rdot.gone{background:var(--ink-dimmer);color:var(--chrome)}
+    html.skin .rmember .rdot .rav{display:block}
+    html.skin .rkick{width:14px;height:14px;border-radius:50%;background:none;color:var(--ink-dimmer)}
+    html.skin .rkick:hover{background:color-mix(in srgb,var(--live) 45%,transparent);color:#fff}
+    html.skin .chat-log{padding:11px 12px;gap:11px}
+    /* the draft's messages are not bubbles: a mono name, then the text. The face, border, radius and tail all
+       come off, and .me/.them stop being two shapes and become two names. */
+    html.skin .chat-msg{max-width:100%;align-self:stretch;padding:0;border:0;border-radius:0;
+      background:none;box-shadow:none;font-size:var(--fs-sm);line-height:1.55;color:var(--ink-dim)}
+    /* the name keeps the layout the messages were designed around — mono, above the text, no pill, no side —
+       and only changes ink. --ink-dimmer is the app's quietest label step and was never meant to carry the
+       sole answer to "who said this"; on --chrome it measured near 2:1. --ink-name is that step for this one
+       job, per theme, so the name reads without turning into a heading. */
+    html.skin .chat-msg .who{font-family:var(--mono);font-size:var(--fs-key);letter-spacing:0;
+      text-transform:none;color:var(--ink-name);margin-bottom:2px}
+    html.skin .chat-copy{background:none;bottom:auto;top:0}
+    html.skin .chat-input{padding:0 10px 10px;gap:8px;border-top:0}
+    html.skin .chat-input input{height:30px;padding:0 10px;border-radius:6px;
+      border:1px solid var(--hairline);background:var(--terminal-bg);font-family:var(--ui);
+      font-size:var(--fs-pill);color:var(--ink-dim)}
+    /* the draft has no send button — Enter sends. Ours stays, because removing it would take away the only
+       pointer path to send; it just drops to a ghost so the field reads as one control the way the draft's does. */
+    html.skin .chat-input button{width:26px;height:26px;border:0;border-radius:99px;
+      background:none;box-shadow:none;color:var(--ink-faint)}
+    html.skin .chat-input button:hover{background:var(--raised);color:var(--ink)}
+
+    /* ── TERMINAL / AGENTS ─────────────────────────────────────────────────────────────────────────────────
+       The draft's .seg — top-RIGHT of the terminal, 2px padding, 6px radius, 11px UI type, no tracking and no
+       uppercase. Its right inset is the draft's 14px plus the 15px scroll gutter this shell has and the draft
+       does not, so it lands 14px from the terminal's own edge rather than from the column's. */
+    /* 5px, not 8: it tucks into the terminal's top-right corner. right:14px now the scroll gutter is gone —
+       the extra 15px it used to clear no longer exists. */
+    html.skin .termseg{top:5px;right:14px;left:auto;padding:2px;gap:2px;border-radius:6px;
+      background:var(--raised);border:1px solid var(--hairline);box-shadow:none}
+    /* wider and a size up, on --ink-dim rather than --ink-faint: this is a tab control you switch views with,
+       not a caption, and at 11px faint it was the hardest thing on screen to read. */
+    html.skin .termseg button{padding:2.5px 12px;border-radius:4px;font-family:var(--ui);
+      font-size:var(--fs-sm);letter-spacing:0;text-transform:none;color:var(--ink-dim);background:none}
+    html.skin .termseg button.on{background:var(--sunken);color:var(--ink)}
+    /* It floats OVER the terminal, and Claude Code draws a full-width startup panel into exactly these rows —
+       so at full strength it eats content it has no business hiding (visible in the owners' screenshot). It
+       rests translucent and comes up whole the moment it is reached for or in use. Never below a legible
+       contrast, and never pointer-blocking, so this costs nothing but the obstruction. */
+    html.skin .termseg{opacity:.72;transition:opacity var(--dur-base) var(--ease-out)}
+    html.skin .termseg:hover,html.skin .termseg:focus-within,
+    html.skin .termrow:hover .termseg{opacity:1}
+    /* ── THE DRAWER PANELS: ONE RHYTHM ─────────────────────────────────────────────────────────────────────
+       Measured before touching anything. The panel carried SIX type sizes (9 / 10.5 / 12 / 13.33 / 13.5 / 15)
+       and TEN control heights (18 / 20 / 22 / 24 / 26 / 30 / 31 / 32 / 34) across eleven padding values —
+       which is what reads as "some buttons are bigger than others". Nothing is removed or reordered here;
+       every control keeps its id, its handler and its place. It is scoped to .drawer, so Settings and
+       Skill & Strategy are the same object rather than two panels that resemble each other.
+
+       TYPE — two roles. --fs-xs (10.5) is a LABEL: section heads, control captions, helper text. --fs-sm (12)
+       is everything you read as content or press. The 13.5 base and the browser's stray 13.33 on an unstyled
+       input both come down to 12; the 9px caption comes up to 10.5. Section heads keep their .2em against a
+       caption's .06em, so the hierarchy survives the two sizes becoming one. */
+    html.skin .drawer .panel{font-size:var(--fs-sm)}
+    html.skin .drawer .out{font-size:var(--fs-xs)}
+    /* The switch captions are a rank BELOW a section head, and I had put them on the same size — uppercase at
+       the same 10.5px, so "AUTO-SPEAK" competed with "ALERTS" above it. --fs-2xs is the scale's existing meta
+       step and it is where a control caption belongs. Three type roles, not two: 9 caption / 10.5 label /
+       12 content. */
+    html.skin .drawer .toggle{font-size:var(--fs-2xs);letter-spacing:.1em}
+    /* …and the switch itself comes down with its label. 34x18 was the largest control in a panel whose chips
+       are 24px tall; it now reads as the small binary control it is, with the knob and travel scaled with it
+       so the on-state still lands flush. */
+    html.skin .drawer .toggle .sw{width:28px;height:15px}
+    html.skin .drawer .toggle .sw::after{width:11px;height:11px}
+    html.skin .drawer .toggle input:checked + .sw::after{transform:translateX(13px)}
+    html.skin .drawer .name-save{font-size:var(--fs-sm)}   /* a ✓ glyph at 13.5 was the largest type in the panel */
+    html.skin .drawer input,html.skin .drawer .collapse{font-size:var(--fs-sm)}
+
+    /* HEIGHT — three steps, down from ten. A row control you type or press into, a chip, and a glyph. */
+    html.skin .drawer .name-field,html.skin .drawer .name-save,html.skin .drawer .vpill,
+    html.skin .drawer .vtest,html.skin .drawer .keycap-btn,html.skin .drawer #tts-in,
+    html.skin .drawer button.primary{
+      height:28px;min-height:28px;padding-top:0;padding-bottom:0;display:inline-flex;align-items:center;justify-content:center}
+    html.skin .drawer .name-field,html.skin .drawer #tts-in{display:block;line-height:26px}   /* an input centres by line-height, not by flex */
+    html.skin .drawer .eff-pill,html.skin .drawer .gh-connect{
+      height:24px;padding-top:0;padding-bottom:0;display:inline-flex;align-items:center;justify-content:center}
+    /* the Connect button carries the GitHub mark and names the account it connects. It is the widest control
+       in the row, so the row is allowed to WRAP: the status line keeps its full width and the button drops
+       beneath it on a narrow drawer, rather than crushing "Connected as <name>" into an ellipsis. */
+    html.skin .drawer .gh-connect{gap:6px;padding-left:9px;padding-right:10px}
+    html.skin .drawer .gh-connect svg{width:13px;height:13px;flex:none}
+    html.skin .drawer .gh-row{flex-wrap:wrap;row-gap:7px}
+    html.skin .drawer .gh-row .gh-text{flex:1 1 auto}
+    /* the version line's repo arrow. width:auto is load-bearing — the base button rule is width:100%, which
+       would put a full-width arrow under the version string. */
+    html.skin .drawer .ver-row{display:flex;align-items:center;gap:7px}
+    html.skin .drawer .repo-link{width:auto;height:auto;min-width:0;padding:0 2px;border:0;border-radius:4px;
+      background:none;box-shadow:none;color:var(--ink-faint);font-size:var(--fs-sm);line-height:1;cursor:pointer}
+    html.skin .drawer .repo-link:hover{color:var(--flame);background:none}
+    html.skin .drawer .collapse,html.skin .drawer .ws-info{
+      width:20px;height:20px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+    /* the ⟳/+ glyphs sat at 15px — larger than any text in the panel, on the smallest control in it */
+    html.skin .drawer .collapse.min{transform:none}
+
+    /* DENSITY — ~25% of the vertical comes off without a single size shrinking: the panel was 1121px of scroll
+       in a 766px viewport. Section padding, label gap and helper-text gap each tighten by the same proportion,
+       so the rhythm stays even rather than merely smaller. */
+    html.skin .drawer .sec{padding:11px 4px}
+    html.skin .drawer .label{margin-bottom:9px}
+    html.skin .drawer .out{margin-top:8px;min-height:0}
+    html.skin .drawer .voices{margin-bottom:8px}
+    html.skin .drawer .speakrow{margin-top:9px}
+
+    /* A CLOSED DRAWER MUST NOT CAST A SHADOW. Settings, Skill & Strategy and Project History are all parked
+       just past the right edge with box-shadow:-18px 0 50px -20px — a LEFT-cast shadow, so all three bled back
+       onto the visible app and stacked there permanently. Measured on a solid blue test row: the last ~90px
+       ramped 255 → 124, dimming terminal text, the usage ring and the top-bar icons alike. The scroll gutter
+       used to sit in the darkest part of it with its own opaque background, which is why removing the gutter
+       appeared to create a shadow it only uncovered.
+       The shadow is worth having when a drawer is actually OPEN — that is what lifts it off the app — so it is
+       cast then and only then. */
+    html.skin .drawer,html.skin .diffpanel{box-shadow:none}
+    html.skin .drawer.open,html.skin .diffpanel.open{box-shadow:-18px 0 50px -20px #000}
+    /* …and park them with real clearance. translateX(102%) leaves a closed 340px drawer only ~7px past the
+       window edge, and at that distance its own BACKGROUND still bleeds back over the app — bisected: hiding
+       one drawer lifted the last column from 204 to 228, removing the background lifted it to 252, and pushing
+       the panels far off restored a flat 255. Two of them stack, so the effect doubled. An extra 64px costs
+       nothing (the open state is still translateX(0), so only the travel distance changes) and it ends the
+       bleed outright rather than trimming it. */
+    html.skin .drawer:not(.open),html.skin .diffpanel:not(.open){transform:translateX(calc(102% + 64px))}
+
+    /* ── COMMAND PALETTE ───────────────────────────────────────────────────────────────────────────────────
+       It was a MODAL: a 520px sheet parked at 18vh over a 42%-black scrim that dimmed the whole app. Nothing
+       about picking a command needs to take the screen hostage — it is the same kind of choice as the mode or
+       model menus, so it gets the same shell and the same manners as those. It anchors above the ⌘ button it
+       opens from, in the terminal's bottom-right corner, and the scrim stays only as an invisible
+       click-catcher so clicking away still closes it. */
+    html.skin .cmdk-scrim{background:none}
+    html.skin .cmdk{left:auto;right:22px;top:auto;bottom:58px;width:340px;max-width:calc(100vw - 44px);
+      border-radius:10px;background:var(--raised);border:1px solid var(--hairline);
+      box-shadow:0 18px 44px -16px #000,0 0 0 1px #00000040}
+    html.skin .cmdk-top{padding:7px 10px;gap:8px}
+    html.skin .cmdk-top input{font-size:var(--fs-sm)}
+    html.skin .cmdk-ico{width:13px;height:13px}
+    html.skin .cmdk-hint{font-size:var(--fs-2xs)}
+    html.skin .cmdk-list{max-height:min(38vh,300px);padding:6px;gap:1px}
+    html.skin .cmdk-row{padding:6px 9px;border-radius:6px;font-size:var(--fs-sm)}
+    html.skin .cmdk-row .ck-desc{font-size:var(--fs-2xs)}
+    html.skin .ws-section-head{font-size:var(--fs-xs);letter-spacing:.13em;color:var(--ink-dimmer)}
+    html.skin .ws-chip.active .ws-dot,html.skin .ws-chip .ws-dot.on{background:var(--flame)}
   </style>
 </head>
 <body>
   <div class="top">
     <img class="logo" src="../assets/logo.png" alt="Claudible logo" />
     <span class="wordmark">claudible</span>
+    <!-- WHERE YOU ARE — the draft's breadcrumb: the project, then the open session in brighter ink. Filled by
+         paintCrumb() from NODES, never innerHTML: a project or session name can be collaborator-supplied and
+         arrives over the wire. It stays empty until there is something to say, and :empty hides its divider. -->
+    <span class="crumb" id="crumb"></span>
+    <!-- #sessions-btn LEFT the top bar but must still exist: it is the ONLY way to bring the sidebar back
+         (#sidebar-close only ever closes it), so deleting it would let you collapse the panel with no way to
+         reopen. It is now an edge handle that appears only while the sidebar is closed — same id, same
+         listener, no JS change — so the top bar is clean and the panel is still recoverable. -->
+    <button class="iconbtn edge-handle" id="sessions-btn" title="Projects">☰</button>
     <div class="topbtns">
-      <button class="iconbtn" id="sessions-btn" title="Projects">☰</button>
+      <!-- Skill &amp; Strategy. An OPEN BOOK: what lives behind it is a library — the skills and plugins Claude can
+           draw on, and the strategy it reads them with. Two mirrored leaves and a spine, all straight strokes
+           and one curve, so it stays legible at 15px beside the clock-arrow and the cog. -->
+      <button class="iconbtn" id="strategy-btn" title="Skill &amp; Strategy — model strategy, skills &amp; plugins" aria-label="Skill and Strategy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h5a3.5 3.5 0 0 1 3.5 3.5V20a3 3 0 0 0-3-2.5H2.5z"/><path d="M21.5 4h-5A3.5 3.5 0 0 0 13 7.5V20a3 3 0 0 1 3-2.5h5.5z"/><path d="M12 7.6V20"/></svg></button>
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
       <button class="iconbtn" id="diff-btn" title="Project History — pick a project, see its session history + changes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
-    <div class="vgroup">
-      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
-        <span class="vdot"></span><span class="vstat" id="vin-stat">Talk</span>
-      </button>
-      <button class="vbox vout" id="vout-stop" type="button" title="Read Claude's latest reply aloud" disabled>
-        <span class="vdot" id="vout-dot"></span><span class="vstat" id="vout-label">Read</span>
-      </button>
-      <button class="vbox vauto on" id="vout-auto" type="button" aria-pressed="true" title="Auto-speak Claude's replies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
-    </div>
-    <span class="trk" title="session usage">
-      <!-- USAGE: your Claude.ai plan limits (account-scoped, NOT per-session). Hidden until the first payload
-           carries rate_limits — absent for API-key users, so an always-on "—" would be permanent noise. -->
-      <button class="usagebar" id="trk-usage" type="button" style="display:none" title="Your Claude plan usage — click for detail" aria-label="Plan usage">
-        <span class="ctxlabel">USAGE</span>
-        <span class="ub-batt" aria-hidden="true">
-          <svg viewBox="0 0 26 14" fill="none"><rect x="0.6" y="0.6" width="21.8" height="12.8" rx="3.2" stroke="currentColor" stroke-width="1.2"/><path d="M24 5v4a2 2 0 0 0 0-4z" fill="currentColor"/><g class="ub-cells"><rect x="2.7" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="7.4" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="12.1" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="16.8" y="2.7" width="3.9" height="8.6" rx="1"/></g></svg>
-        </span>
-        <span class="ubpct" id="ub-pct">—</span>
-      </button>
-      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxlabel">CONTEXT</span><span class="ctxsegs" id="trk-ctxsegs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ctxpct" id="trk-ctx">—</span></span>
-      <b id="trk-cost" hidden>$0.00</b><!-- session cost now lives in the context-bar tooltip; tokens stay visible -->
-      <span class="tokbar" id="trk-tokbar" title="tokens used this session"><span class="ctxlabel">TOKENS</span><span class="tokval" id="trk-tokens">—</span></span>
-    </span>
   </div>
 
   <div class="body with-sessions">
@@ -1550,7 +2262,6 @@
         <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.21 11.16.6.11.82-.26.82-.58 0-.28-.01-1.04-.02-2.04-3.34.72-4.04-1.6-4.04-1.6-.55-1.38-1.34-1.75-1.34-1.75-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.23 1.84 1.23 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.29C24 5.78 18.63.5 12 .5z"/></svg>
       </button>
     </div>
-      <div class="scroll" id="scroll"><div class="thumb" id="scroll-thumb"></div></div>
       <div class="termseg" id="termseg">
         <button id="seg-term" class="on" type="button">Terminal</button>
         <button id="seg-agents" type="button">Agents<span class="agent-badge"></span></button>
@@ -1618,7 +2329,9 @@
         <div class="gh-row">
           <span class="gh-dot off" id="gh-dot"></span>
           <span class="gh-text" id="gh-text">Checking…</span>
-          <button type="button" id="gh-connect" class="gh-connect" style="display:none">Connect</button>
+          <!-- The label lives in MARKUP now, not in paintGhRow's textContent — a textContent write would wipe
+               the logo out of the button the first time the row painted. paintGhRow only shows/hides it. -->
+          <button type="button" id="gh-connect" class="gh-connect" style="display:none"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.21 11.16.6.11.82-.26.82-.58 0-.28-.01-1.04-.02-2.04-3.34.72-4.04-1.6-4.04-1.6-.55-1.38-1.34-1.75-1.34-1.75-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.23 1.84 1.23 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.29C24 5.78 18.63.5 12 .5z"/></svg>Connect your GitHub Account</button>
         </div>
       </div>
       <div class="sec">
@@ -1717,55 +2430,19 @@
         </label>
       </div>
 
-      <div class="sec">
-        <div class="label">default effort</div>
-        <div class="effort-row" id="effort-row">
-          <button class="eff-pill" data-eff="medium">medium</button>
-          <button class="eff-pill" data-eff="high">high</button>
-          <button class="eff-pill" data-eff="xhigh">xhigh</button>
-          <button class="eff-pill" data-eff="max">max</button>
-          <button class="eff-pill" data-eff="ultracode">ultracode</button>
-        </div>
-        <div class="out">remembered across launches · applies to new sessions you open</div>
-      </div>
-
-      <div class="sec">
-        <div class="label">permission default</div>
-        <div class="effort-row" id="perm-row">
-          <button class="eff-pill" data-perm="default">ask first</button>
-          <button class="eff-pill" data-perm="acceptEdits">accept edits</button>
-          <button class="eff-pill" data-perm="bypass">bypass</button>
-        </div>
-        <div class="out">how a new session starts before running tools · remembered · a collaborator’s synced session always asks first · switch any time inside Claude with shift+tab</div>
-      </div>
-
-      <div class="sec">
-        <div class="label">model strategy</div>
-        <div class="effort-row" id="strategy-row">
-          <button class="eff-pill" data-strategy="planBigExecSmall">plan big, execute small</button>
-          <button class="eff-pill" data-strategy="off">off</button>
-        </div>
-        <div class="out">off by default · when on, your session plans &amp; synthesizes on your chosen model and subagents that request no model default to Sonnet 5 — an explicitly requested subagent model always wins · ~2.5× cheaper on a Fable/Opus main model at the same rigor (Anthropic cookbook pattern) · a no-op when your main model is already Sonnet · applies to new sessions</div>
-      </div>
-
-      <div class="sec" id="sec-skills">
-        <div class="label">skills <button class="collapse min" id="skills-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
-        <div class="ext-list" id="skills-list"><div class="ext-empty">loading…</div></div>
-      </div>
-      <div class="sec" id="sec-plugins">
-        <div class="label">plugins <button class="collapse min" id="plugins-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="plugins-refresh" title="Refresh">⟳</button></div>
-        <div class="ext-list" id="plugins-list"><div class="ext-empty">loading…</div></div>
-      </div>
+      <!-- DEFAULT EFFORT and PERMISSION DEFAULT are gone from here. They are set on the cockpit row now, and a
+           second copy in a drawer is not a convenience — it is a second thing to keep in step, and the one the
+           owners would find first is the one two scrolls away from where the work happens. Nothing was rewired:
+           both selectors always drove a LIST of rows and simply find one row instead of two now.
+           MODEL STRATEGY, SKILLS and PLUGINS moved whole into the Skill & Strategy panel (top bar). -->
 
       <div class="sec" id="sec-theme">
         <div class="label">theme</div>
         <div class="effort-row" id="theme-row">
           <button class="eff-pill" data-theme="dark">Dark</button>
+          <button class="eff-pill" data-theme="cockpit">Cockpit</button>
           <button class="eff-pill" data-theme="graphite">Graphite</button>
-          <button class="eff-pill" data-theme="starlight">Starlight</button>
           <button class="eff-pill" data-theme="midnight">Midnight</button>
-          <button class="eff-pill" data-theme="aurora">Aurora</button>
-          <button class="eff-pill" data-theme="evergreen">Evergreen</button>
         </div>
         <div style="font-size:var(--fs-xs);color:var(--ink-faint);margin-top:4px">re-tints the interface and the terminal · applied instantly</div>
       </div>
@@ -1783,23 +2460,181 @@
            tell a stale installer apart from a fresh one at a glance. The update line only appears once the
            once-per-launch GitHub check has actually landed (packaged builds only; C-9.1: never wait on it). -->
       <div class="sec" id="sec-about">
-        <div class="label">about</div>
-        <div id="about-version" style="font-size:var(--fs-sm)">claudible</div>
+        <div class="label">version</div>
+        <!-- A <button>, not an <a href>: an anchor in the renderer would navigate the app window out of the
+             app. This routes through openExternal, which only ever accepts an https://github.com/… URL. -->
+        <div class="ver-row">
+          <div id="about-version" style="font-size:var(--fs-sm)">claudible</div>
+          <button type="button" class="repo-link" id="repo-link" title="Open the Claudible repository on GitHub" aria-label="Open the Claudible repository on GitHub">↗</button>
+        </div>
         <div id="about-update" style="font-size:var(--fs-xs);color:var(--ink-faint);margin-top:4px"></div>
+      </div>
+
+      <!-- SERVICES — the reference readouts that used to sit in the speaker's menu. Every one of these is a
+           thing you LOOK UP, never a thing you press, so they belong in the drawer rather than on a control
+           you reach for mid-turn. The nodes moved whole: #d-pty, #pty-note, #sb-claude and #meta keep their
+           ids and their writers. #svc-whisper / #svc-kokoro are new, and the ONE endpoints fetch fills them
+           alongside the pair still shown in the speaker menu — one writer, so the two surfaces cannot drift. -->
+      <div class="sec" id="sec-services">
+        <div class="label">services</div>
+        <!-- No "terminal" line. It was a dot and the word "terminal" — no version, no port, no path — so it
+             told you nothing the other four lines don't, and it sat above them claiming to be one of them.
+             setDot('d-pty') is null-tolerant by construction, so the pty health call still runs harmlessly. -->
+        <div class="svc-grid">
+          <div class="svc-line" id="sb-claude" style="display:none">claude code</div>
+          <div class="svc-line" id="svc-whisper">whisper</div>
+          <div class="svc-line" id="svc-kokoro">kokoro</div>
+          <div class="svc-line svc-ep" id="meta">connecting…</div>
+        </div>
       </div>
 
     </div>
   </div>
 
-  <div class="status">
-    <span class="s"><span class="dot" id="d-pty"></span> <span id="pty-note">terminal</span></span>
-    <span class="s" id="sb-claude" style="display:none">claude code</span>
-    <span class="s" id="sb-whisper">whisper</span>
-    <span class="s" id="sb-kokoro">kokoro</span>
-    <span class="s" id="sb-perm" title="Default permission mode for NEW sessions (Settings → Permissions). A session synced from a collaborator is always sandboxed regardless.">perms</span>
+  <!-- SKILL & STRATEGY — the three things that decide HOW Claude works rather than how the app behaves. They
+       were buried between "commits" and "theme" in a drawer people open to change a setting; here they are one
+       click from the top bar and read as one subject. Same drawer shell, same scrim, same Escape/outside-click
+       behaviour as Settings — and every section moved as a whole node, so #strategy-row, #skills-list and
+       #plugins-list are the same elements their loaders have always written to. -->
+  <div class="drawer-scrim" id="strat-scrim"></div>
+  <div class="drawer" id="stratdrawer" aria-hidden="true">
+    <div class="drawer-head"><span>skill &amp; strategy</span><span class="drawer-head-actions"><button id="strat-close" title="Close">×</button></span></div>
+    <div class="panel">
+      <div class="sec">
+        <div class="label">model strategy</div>
+        <div class="effort-row" id="strategy-row">
+          <button class="eff-pill" data-strategy="planBigExecSmall">plan big, execute small</button>
+          <button class="eff-pill" data-strategy="off">off</button>
+        </div>
+        <div class="out">off by default · when on, your session plans &amp; synthesizes on your chosen model and subagents that request no model default to Sonnet 5 — an explicitly requested subagent model always wins · ~2.5× cheaper on a Fable/Opus main model at the same rigor (Anthropic cookbook pattern) · a no-op when your main model is already Sonnet · applies to new sessions</div>
+      </div>
+
+      <div class="sec" id="sec-skills">
+        <div class="label">skills <button class="collapse min" id="skills-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
+        <div class="ext-list" id="skills-list"><div class="ext-empty">loading…</div></div>
+      </div>
+      <div class="sec" id="sec-plugins">
+        <div class="label">plugins <button class="collapse min" id="plugins-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="plugins-refresh" title="Refresh">⟳</button></div>
+        <div class="ext-list" id="plugins-list"><div class="ext-empty">loading…</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status cockpit">
+    <!-- MODE + EFFORT, reachable from the cockpit instead of two scrolls into the settings drawer. Both are
+         mirrors, not new settings: the option buttons carry the same data-perm / data-eff values the drawer
+         rows do, and app.js drives BOTH rows from one place, so either surface updates the other.
+         #sb-perm keeps its own element and id — app.js rewrites its textContent, which would wipe any child
+         popover, so the menu is a SIBLING inside the wrapper rather than a child of the chip.
+         Mode leads the row and effort closes it, matching the draft: the thing that governs how a turn RUNS
+         sits by the voice controls you drive it with, and the thing that governs how HARD it thinks sits with
+         the meters that tell you what that cost. -->
+    <span class="s cock-chip" id="perm-chip" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Permission mode for new sessions">
+      <span id="sb-perm" title="Default permission mode for NEW sessions. A session synced from a collaborator is always sandboxed regardless.">perms</span>
+      <span class="cock-pop" id="perm-cock-row">
+        <span class="cock-pop-h">Mode</span>
+        <!-- FIVE modes, in the Claude app's order. Descriptions are the documented behaviour, not paraphrase:
+             `default` is the stored name for Manual (win.js sends the CLI's `manual` alias at spawn), and
+             `dontAsk` is deliberately absent — it auto-DENIES anything not pre-approved, which is a curated
+             allow-list workflow rather than a mode you pick from a menu. -->
+        <button class="eff-pill" data-perm="default"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Manual</span><span class="d">Asks before every change</span></span></button>
+        <button class="eff-pill" data-perm="acceptEdits"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Accept edits</span><span class="d">File edits apply without asking</span></span></button>
+        <button class="eff-pill" data-perm="plan"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Plan</span><span class="d">Explores, never edits source</span></span></button>
+        <button class="eff-pill" data-perm="auto"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Auto</span><span class="d">Routine steps, safety-checked</span></span></button>
+        <button class="eff-pill" data-perm="bypass"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Bypass permissions</span><span class="d">Nothing is asked, all tools run</span></span></button>
+      </span>
+    </span>
+    <!-- VOICE, two buttons instead of three plus a chip. Talk is now the microphone alone — its "Talk" label
+         said what the icon already says. The speaker button absorbed Read and the services chip: one click
+         opens a menu holding auto-speak, read-this-reply, and the service readouts.
+         Every id and every handler survives the merge: #vout-stop is the same button app.js enables/disables
+         and labels, #vout-auto is the same aria-pressed toggle, and the service spans are the same elements
+         app.js writes by id. Only their address changed. -->
+    <div class="vgroup">
+      <button class="vbox vin" id="voice-in" title="Push-to-talk — click to start / stop talking">
+        <span class="vdot"></span>
+        <svg class="vico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+        <span class="vstat sr" id="vin-stat">Talk</span>
+      </button>
+      <span class="s cock-chip vmerge" id="voice-chip" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Speech and services">
+        <!-- the same .vdot the microphone carries, in the same corner at the same size: the mic's lights while
+             it is LISTENING, this one lights while Claude is READING a reply aloud. Two controls, one language
+             for "this is active right now". setSpeakBtn() drives it. -->
+        <span class="vdot"></span>
+        <svg class="vico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l9 4V5L7 9H4z"/><path d="M7 15v3a1.5 1.5 0 0 0 3 0v-2"/><path d="M19 9.5a3.5 3.5 0 0 1 0 5"/></svg>
+        <span class="cock-pop vpop">
+          <span class="cock-pop-h">Speech</span>
+          <button class="vbox vauto on" id="vout-auto" type="button" aria-pressed="true" title="Auto-speak Claude's replies">
+            <span class="vdot"></span><span class="vstat">Always read replies</span>
+          </button>
+          <button class="vbox vout" id="vout-stop" type="button" title="Read Claude's latest reply aloud" disabled>
+            <span class="vdot" id="vout-dot"></span><span class="vstat" id="vout-label">Read</span>
+          </button>
+          <!-- SPEECH services only. This menu hangs off the speaker button, so what belongs in it is what
+               speech runs on: the two voice daemons. The terminal dot, the Claude Code version, the endpoint
+               URLs and the build number were reference material that happened to be nearby — they moved to
+               Settings → services, where you go to look something up rather than to press something. -->
+          <span class="cock-pop-h svc-h">Services</span>
+          <span class="s" id="sb-whisper">whisper</span>
+          <span class="s" id="sb-kokoro">kokoro</span>
+        </span>
+      </span>
+    </div>
     <span class="s" id="sb-voice" style="display:none"><span class="dot" id="d-voice"></span> <span id="voice-note">voice</span></span>
-    <span class="end" id="meta">connecting…</span>
-    <span class="ver" id="app-ver">claudible</span>
+    <!-- ORDER: model · effort · context · tokens · usage. The two CONTROLS lead the right-hand cluster and the
+         three READOUTS close it, so the things you click are grouped together and the things you only read sit
+         together beside the ring they belong with. .trk moved as one whole node — every id, child and writer
+         travelled with it. -->
+    <span class="s cock-chip pop-right" id="model-chip" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Model for new sessions">
+      <span id="sb-model">model</span>
+      <span class="cock-pop" id="model-cock-row">
+        <span class="cock-pop-h">Model</span>
+        <button class="eff-pill" data-model=""><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Auto</span><span class="d">Claude Code picks for you</span></span></button>
+        <button class="eff-pill" data-model="claude-fable-5"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Fable 5</span><span class="d">Fast and expressive</span></span></button>
+        <button class="eff-pill" data-model="claude-opus-5"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Opus 5</span><span class="d">Deepest reasoning</span></span></button>
+        <button class="eff-pill" data-model="claude-sonnet-5"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Sonnet 5</span><span class="d">Balanced everyday work</span></span></button>
+        <button class="eff-pill" data-model="claude-haiku-4-5-20251001"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span><span class="tt"><span class="t">Haiku 4.5</span><span class="d">Cheapest and quickest</span></span></button>
+      </span>
+    </span>
+    <span class="s cock-chip pop-right" id="eff-chip" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Default effort for new sessions">
+      <span id="sb-eff">effort</span>
+      <!-- Effort is a SLIDER in the draft, not a list, and the five levels sit exactly on five ticks.
+           The buttons stay in the DOM beneath it: they are the one mechanism that reaches the backend and the
+           settings drawer shares them, so the slider MOVES them rather than replacing them. -->
+      <span class="cock-pop eff" id="eff-cock-row">
+        <span class="hd">Effort <b id="eff-now">default</b><span class="q" title="Higher effort means more reasoning per turn — slower, and it spends more of your plan.">?</span></span>
+        <span class="ends"><span>Faster</span><span>Smarter</span></span>
+        <span class="track">
+          <span class="bar"></span><span class="fill" id="eff-fill"></span>
+          <span class="tk"><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="knob" id="eff-knob"></span>
+          <input type="range" id="eff-slider" min="0" max="4" step="1" value="1" aria-label="Effort level" />
+        </span>
+        <button class="eff-pill" data-eff="medium">medium</button>
+        <button class="eff-pill" data-eff="high">high</button>
+        <button class="eff-pill" data-eff="xhigh">xhigh</button>
+        <button class="eff-pill" data-eff="max">max</button>
+        <button class="eff-pill" data-eff="ultracode">ultracode</button>
+      </span>
+    </span>
+    <span class="trk" title="session usage">
+      <span class="ctxbar" id="trk-ctxbar" title="context window used"><span class="ctxlabel">CONTEXT</span><span class="ctxsegs" id="trk-ctxsegs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ctxpct" id="trk-ctx">—</span></span>
+      <b id="trk-cost" hidden>$0.00</b><!-- session cost now lives in the context-bar tooltip; tokens stay visible -->
+      <span class="tokbar" id="trk-tokbar" title="tokens used this session"><span class="ctxlabel">TOKENS</span><span class="tokval" id="trk-tokens">—</span></span>
+    </span>
+      <!-- USAGE: your Claude.ai plan limits (account-scoped, NOT per-session). ALWAYS present, like context and
+           tokens beside it — it used to appear only once the first payload carried rate_limits, which meant the
+           cockpit row gained a control mid-session and the corner sat empty until then. It starts in the same
+           unknown state the two readouts use: an empty ring, a dimmed "—", and a popover that says so.
+           (The old reasoning was that an API-key user would see a permanent "—"; that is the honest reading for
+           them, and it matches what context shows before a session reports.) -->
+      <button class="usagebar u-stale" id="trk-usage" type="button" style="--u-pct:0" title="Your Claude plan usage — click for detail" aria-label="Plan usage">
+        <span class="ctxlabel">USAGE</span>
+        <span class="ub-batt" aria-hidden="true">
+          <svg viewBox="0 0 26 14" fill="none"><rect x="0.6" y="0.6" width="21.8" height="12.8" rx="3.2" stroke="currentColor" stroke-width="1.2"/><path d="M24 5v4a2 2 0 0 0 0-4z" fill="currentColor"/><g class="ub-cells"><rect x="2.7" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="7.4" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="12.1" y="2.7" width="3.9" height="8.6" rx="1"/><rect x="16.8" y="2.7" width="3.9" height="8.6" rx="1"/></g></svg>
+        </span>
+        <span class="ubpct" id="ub-pct">—</span>
+      </button>
   </div>
 
   <!-- COMMAND PALETTE — replaced the 15-pill horizontal scroller. Ctrl/Cmd+Shift+P (NOT Ctrl+K: that is

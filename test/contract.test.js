@@ -1387,19 +1387,33 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /cf\.used_percentage !== five\.used_percentage \|\| cf\.resets_at !== five\.resets_at\) savePrefs/.test(APP)
       ? [] : ['lastRate is saved unconditionally']);
 
-  // One height across the whole top row. 31px is set by .ctxbar/.tokbar/.usagebar/.vbox; .iconbtn must match.
+  // One height across the bar controls. 31px is set by .ctxbar/.tokbar/.vbox; .iconbtn must match.
+  // .usagebar is DELIBERATELY out of this set now: it is a 26px ring, not a box. It left the row of labelled
+  // controls when usage moved to the far right of the cockpit as a dial, so holding it to the box height would
+  // pin a shape it no longer has. Its own size is asserted separately below.
   const h = (re) => { const m = styleBlk2.match(re); return m ? m[1] : null; };
   const heights = {
     iconbtn: h(/\.iconbtn\{[^}]*height:(\d+)px/), vbox: h(/\.vbox\{[^}]*height:(\d+)px/),
     ctxbar: h(/\.ctxbar\{[^}]*height:(\d+)px/), tokbar: h(/\.tokbar\{[^}]*height:(\d+)px/),
-    usagebar: h(/\.usagebar\{[^}]*height:(\d+)px/),
   };
   const odd = Object.entries(heights).filter(([, v]) => v !== '31').map(([k, v]) => `${k}=${v}`);
   none('the top-bar controls drifted off one shared height', odd);
+  // The ring must stay square and stay driven by --u-pct, or it silently becomes a lozenge / a full circle.
+  none('the usage ring lost its circular geometry or its percentage source',
+    /\.usagebar\{[^}]*width:26px[^}]*height:26px[^}]*border-radius:50%/.test(styleBlk2)
+      && /conic-gradient\(currentColor calc\(var\(--u-pct/.test(styleBlk2)
+      && /setProperty\('--u-pct'/.test(APP)
+      ? [] : ['.usagebar is no longer a --u-pct-driven circle']);
   // …and one shared rhythm: the voice group must space like the icon buttons, not as a detached cluster.
+  // The group MOVED to the cockpit row at the bottom of the shell, so the parent named here moved with it —
+  // the rule being defended is unchanged (one 6px rhythm, no detached cluster), only its address.
   none('the voice group spaces differently from the icon buttons again',
-    /\.vgroup\{[^}]*gap:6px/.test(styleBlk2) && /\.top>\.vgroup\{margin-left:6px\}/.test(styleBlk2)
+    /\.vgroup\{[^}]*gap:6px/.test(styleBlk2) && /\.cockpit>\.vgroup\{margin-left:0\}/.test(styleBlk2)
       ? [] : ['.vgroup gap / margin no longer matches .topbtns']);
+  // The cockpit row is the voice + telemetry home now; if either group drifts back upstairs, say so.
+  none('voice or telemetry drifted back into the top bar',
+    /<div class="status cockpit">/.test(HTML) && !/<div class="top">[\s\S]*?class="(vgroup|trk)"[\s\S]*?<\/div>\s*<div class="body/.test(HTML)
+      ? [] : ['.vgroup/.trk is back inside .top, or .status lost its cockpit class']);
 
   // The palette trigger moved to the terminal corner; wherever it lives it must still be wired.
   none('the command-palette trigger lost its click handler in the move',
@@ -1769,22 +1783,28 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 49. THE GUEST SCROLL GUTTER ONLY EXISTS WHEN IT CAN DO SOMETHING.
-//   Only the THUMB used to hide itself; the 7px track stayed painted. A view-only guest (now the default) in a
-//   full-screen app can never page, so the thumb is permanently suppressed and the strip was pure decoration
-//   that read as a broken scrollbar. THE TRAP: it must hide with opacity, never display:none — a display-hidden
-//   track reports clientHeight 0, upd() takes its "no room" branch, and it can never come back.
+// 49. THE GUEST TERMINAL CARRIES NO SCROLLBAR AT ALL — NOT A CUSTOM ONE, NOT THE NATIVE ONE.
+//   The custom scroll gutter is gone, matching the host. It estimated its own position rather than knowing it,
+//   and the embedded CLI holds the terminal's ALTERNATE screen, which carries no scrollback — so the bar was
+//   scrolling an estimate over content that cannot scroll, and charged a repaint timer every 150ms for the life
+//   of the page to keep the estimate on screen. THE TRAP on the way out: the two rules that hide xterm's OWN
+//   scrollbar must stay, or deleting the custom bar simply puts a scrollbar back — the opposite of the fix.
 // ---------------------------------------------------------------------------------------------------------
 {
   const gflat = GUEST_HTML.replace(/\s*\n\s*/g, '');
-  none('the gutter track stays painted when there is nothing to scroll',
-    /\.gutter\{[^}]*opacity:0;pointer-events:none/.test(gflat) && /\.gutter\.on\{opacity:1/.test(gflat)
-      ? [] : ['the track is not opacity-gated behind .on']);
-  none('…and it hides with display, so clientHeight would read 0 and it could never come back',
-    !/\.gutter\.on\{[^}]*display:/.test(gflat) ? [] : ['the .on toggle switches display instead of opacity']);
-  none('…and nothing shows/hides the track alongside the thumb',
-    /function show\(on\) \{ sc\.classList\.toggle\('on'/.test(GUEST_JS) && !/thumb\.style\.opacity = '0'; return;/.test(GUEST_JS)
-      ? [] : ['upd() still hides only the thumb, leaving the track behind']);
+  none('the custom scroll gutter is back in the guest markup',
+    !/id="gutter"/.test(GUEST_HTML) && !/id="gthumb"/.test(GUEST_HTML)
+      ? [] : ['the guest page renders a gutter/thumb element again']);
+  none('…and its styling is back',
+    !/\.gutter\{/.test(gflat) && !/\.gthumb\{/.test(gflat)
+      ? [] : ['.gutter / .gthumb rules are back in guest.html']);
+  none('…and the script that drove it is back',
+    !/\$\('gutter'\)/.test(GUEST_JS) && !/altFrac/.test(GUEST_JS) && !/setInterval\(upd/.test(GUEST_JS)
+      ? [] : ['guest.js drives a gutter again (element lookup, position estimate, or repaint timer)']);
+  none('removing it exposed xterm’s NATIVE scrollbar instead',
+    /#terminal \.xterm-viewport\{scrollbar-width:none\}/.test(gflat)
+      && /#terminal \.xterm-viewport::-webkit-scrollbar\{width:0/.test(gflat)
+      ? [] : ['the rules hiding xterm’s own scrollbar are gone — the guest terminal has a scrollbar again']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -2778,7 +2798,14 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   none('Settings lost its GitHub row (the state sync/invites depend on is invisible again)',
     [/id="gh-text"/.test(HTML) ? '' : 'no #gh-text row in the drawer',
      /async function refreshGhRow\(\)/.test(APP) ? '' : 'no refreshGhRow()',
-     /if \(open\) \{ loadSkills\(\); loadPlugins\(\); try \{ refreshGhRow\(\); \} catch \(e\) \{\}/.test(APP) ? '' : 'refreshGhRow is not wired to the drawer opening'].filter(Boolean));
+     // The rule defended here is "the GitHub row refreshes when Settings opens", not the literal neighbours it
+     // used to share a line with: loadSkills/loadPlugins moved to the Skill & Strategy panel along with their
+     // sections, and are pinned at their new address below. This now names openDrawer itself.
+     /function openDrawer\(open\) \{[\s\S]{0,400}?refreshGhRow\(\)/.test(APP) ? '' : 'refreshGhRow is not wired to the drawer opening',
+     // …and the inventory scans still run when the panel that OWNS those sections opens.
+     /function openStrat\(open\) \{[\s\S]{0,400}?loadSkills\(\); loadPlugins\(\)/.test(APP) ? '' : 'loadSkills/loadPlugins are not wired to the Skill & Strategy panel opening',
+     // both sections must actually live in that panel, or the scans paint into nothing
+     /id="stratdrawer"[\s\S]*?id="skills-list"[\s\S]*?id="plugins-list"/.test(HTML) ? '' : 'skills/plugins are not inside #stratdrawer'].filter(Boolean));
   none('…and its dot has no reserved slot, so resolving the state nudges the text',
     /\.gh-dot\.off\{visibility:hidden\}/.test(HTML) ? [] : ['.gh-dot.off is not visibility:hidden — the same shift .ws-dot.off exists to prevent']);
   none('the Settings connect button duplicates the device-code flow instead of reusing 2g',
@@ -3213,6 +3240,31 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /\*\)\s*echo "\[claudible\] opening a collaborator's session - Claude will ask before running tools\."/.test(resumeOneBody)
       ? [] : ['the default (no remembered mode) case lost its fallback line']);
 
+  // THE SAME RULE ON THE WINDOWS PATH, which carried no pin at all. claude.exe is spawned with no wrapping
+  // shell, so main.js injects this notice itself — and its list of modes to name was written when the picker
+  // offered two. The picker offers five. Now that a profile with no saved choice starts on Auto, an unwidened
+  // list would print the GENERIC line for every foreign session on a fresh machine: the case where naming the
+  // overridden setting matters most, since the user never chose the mode being overridden and has no reason
+  // to connect the prompting they see with a setting they did not set.
+  none('main.js names only some of the picker’s modes on a foreign session (Plan/Auto would fall through)',
+    [/const overridden = mode === 'default' \? '' : \(PERM_LABELS\[mode\] \|\| ''\);/.test(MAIN)
+      ? '' : 'the foreign notice does not derive the overridden setting from the shared label map',
+     /\['bypass', 'acceptEdits'\]\.includes/.test(MAIN)
+      ? 'the foreign notice tests a hardcoded two-mode list again — plan and auto would print the generic line' : '',
+     /registry\.permissionMode === 'bypass' \? 'Bypass permissions' : 'Accept edits'/.test(MAIN)
+      ? 'the foreign notice labels every non-bypass mode "Accept edits" again' : '',
+     /so Claude asks before running tools — your '"\n\s*\+ overridden/.test(MAIN)
+      ? '' : 'the named-override line no longer prints the resolved label'].filter(Boolean));
+  // …and those names must be the words on the buttons that set them, checked against the picker itself: a
+  // terminal line naming 'acceptEdits' sends someone hunting Settings for a control labelled "Accept edits".
+  none('the terminal names a permission mode by something other than the picker’s own label',
+    (() => {
+      const picker = [...HTML.matchAll(/data-perm="([a-zA-Z]+)"[\s\S]{0,400}?class="t">([^<]+)</g)].map((m) => [m[1], m[2]]);
+      const map = (MAIN.match(/const PERM_LABELS = \{[^}]*\}/) || [''])[0];
+      if (picker.length !== 5) return ['the permission picker no longer offers exactly five modes (found ' + picker.length + ')'];
+      return picker.filter(([v, t]) => !new RegExp(v + ": '" + t + "'").test(map)).map(([v, t]) => v + ' is not labelled "' + t + '" in main.js');
+    })());
+
   // TRUST OVERRIDE (.claudible-trusted). The foreign mark is append-only and permanent, so it cannot tell a
   // collaborator's transcript apart from the user's OWN session synced back from their OWN second machine.
   // For the latter the guard is pure friction, and hand-clearing the foreign entry does not survive the next
@@ -3293,7 +3345,21 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 {
   none('gh:state cheap handler is missing (drawer would block on onboardStatus again)',
     [/ipcMain\.handle\('gh:state'/.test(MAIN) ? '' : "no ipcMain.handle('gh:state', ...) in main.js",
-     /function refreshGhStateCache\(\)/.test(MAIN) ? '' : 'no refreshGhStateCache() background-refresh function',
+     // takes a `force` argument now: a drawer-open serves the cache and spawns nothing, while the events that
+    // genuinely invalidate it pass true. The rule pinned here is unchanged — the function must exist and the
+    // handler must not block on onboardStatus.
+    /function refreshGhStateCache\(force\)/.test(MAIN) ? '' : 'no refreshGhStateCache() background-refresh function',
+    // …and the throttle must actually be honoured, or every drawer-open respawns `gh` as before
+    /if \(!force && _ghProbedAt && \(Date\.now\(\) - _ghProbedAt\) < GH_PROBE_TTL\) return;/.test(MAIN)
+      ? '' : 'the gh probe is no longer throttled — every drawer open would spawn one again',
+    // THE RULE, not the characters: A FAILED PROBE IS THROTTLED TOO. The guard also required
+    // _ghStateCache.known, which is set only on SUCCESS — so a probe that timed out or threw left it false,
+    // the guard was skipped, and the next drawer-open spawned `gh` all over again, on exactly the slow or
+    // offline machine the throttle was written for. The stamp was always right (_ghProbedAt is set before the
+    // empty-result bail); only the guard disagreed with it. Any success-only condition reappearing in this
+    // guard is that bug coming back, so the shape is pinned from the other side too.
+    /if \(!force &&[^\n]*_ghStateCache\.known/.test(MAIN)
+      ? 'the throttle gates on a SUCCESSFUL probe again — a failed probe would respawn gh on every drawer open' : '',
      /setTimeout\(\(\) => resolve\(null\), 5000\)/.test(MAIN) ? '' : 'gh:state\'s background probe lost its 5000ms timeout',
      /ghState: \(\) => ipcRenderer\.invoke\('gh:state'\)/.test(PRELOAD) ? '' : 'no ghState bridge in preload.js',
      /onGhStateChanged: \(cb\) => ipcRenderer\.on\('gh:state-changed'/.test(PRELOAD) ? '' : 'no onGhStateChanged bridge in preload.js'].filter(Boolean));
@@ -3301,8 +3367,10 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     [/async function refreshGhRow\(\) \{[\s\S]{0,200}?claudible\.onboardStatus\(\)/.test(APP) ? 'refreshGhRow still calls claudible.onboardStatus()' : '',
      /s = await claudible\.ghState\(\);/.test(APP) ? '' : 'refreshGhRow no longer calls claudible.ghState()'].filter(Boolean));
   none('connectGh success / a post-install no longer invalidate the drawer\'s gh cache',
-    [/if \(r\.ok\) refreshGhStateCache\(\);/.test(MAIN) ? '' : 'onboard:gh-login no longer refreshes the gh cache on success',
-     (MAIN.match(/refreshGhStateCache\(\);/g) || []).length >= 3 ? '' : 'refreshGhStateCache() is not called from both the connectGh-success and post-install paths'].filter(Boolean));
+    // These three sites must FORCE the probe: they are the events the throttle would otherwise swallow, which
+    // is exactly how a drawer ends up showing a signed-out row to someone who just signed in.
+    [/if \(r\.ok\) refreshGhStateCache\(true\);/.test(MAIN) ? '' : 'onboard:gh-login no longer refreshes the gh cache on success',
+     (MAIN.match(/refreshGhStateCache\(true\);/g) || []).length >= 3 ? '' : 'refreshGhStateCache() is not called from both the connectGh-success and post-install paths'].filter(Boolean));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -3580,7 +3648,10 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /function paintAboutRow\(\) \{[\s\S]{0,220}?APP_VERSION[\s\S]{0,140}?MY_SHA/.test(APP)
       ? [] : ['paintAboutRow no longer reads both APP_VERSION and MY_SHA']);
   none('the boot version fetch stopped setting APP_VERSION (C-10.1)',
-    /APP_VERSION = av; ve\.textContent = 'claudible v' \+ av;/.test(APP)
+    // What C-10.1 needs is that the boot fetch SETS APP_VERSION, which is what paintAboutRow reads. The old
+    // form also pinned a write to #app-ver — a second version line that printed the same string as
+    // #about-version, in the speaker menu; that element is gone, so the pin names only the rule that matters.
+    /claudible\.appVersion\(\)[\s\S]{0,160}?APP_VERSION = av/.test(APP)
       ? [] : ['the app:version boot fetch no longer sets APP_VERSION']);
 
   // (2a) the toast call site is GONE — a partial revert that re-adds the toast text while leaving the chip
@@ -4159,6 +4230,30 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // (h) styling: red, matching the existing danger vocabulary (var(--live)) rather than an ad-hoc color.
   none('.codrive-badge lost its red (var(--live)) styling (C-5.2)',
     /\.codrive-badge\{[^}]*background:var\(--live\)/.test(HTML) ? [] : ['.codrive-badge no longer uses var(--live) as its background']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 110b. THE CHAT SENDER LINE'S INK TOKEN, DEFINED IN EVERY PALETTE. The skin flattens messages out of bubbles
+//   deliberately — no face, no border, no radius, no side — so the small mono name above each message is the
+//   ONLY remaining answer to "who said this". It is painted with --ink-name, a token that exists for that one
+//   job and is defined once per theme. A palette edit that drops the line is silent: the name falls back to
+//   unset, and nothing else in this suite looks at it. So the pin is on the token's existence in all four
+//   palettes AND on the rule that consumes it — either half alone would pass while the pairing is broken.
+// ---------------------------------------------------------------------------------------------------------
+{
+  // `[^}]*` bounds each match at its own block's closing brace — a generous character window would happily
+  // reach the NEXT theme's definition and pass while this one is missing, which is the failure a count alone
+  // cannot see either. Count (4) plus three bounded block matches is what proves the base palette has one too.
+  const themed = (name) => new RegExp('html\\[data-theme="' + name + '"\\]\\{[^}]*--ink-name:\\s*#[0-9a-fA-F]{3,8}').test(HTML);
+  const defs = (HTML.match(/--ink-name:\s*#[0-9a-fA-F]{3,8}/g) || []).length;
+  none('--ink-name is no longer defined for every theme',
+    [defs === 4 ? '' : `--ink-name is defined ${defs} times, expected 4 (the base palette plus graphite, midnight and cockpit)`,
+      themed('graphite') ? '' : 'the graphite theme no longer defines --ink-name',
+      themed('midnight') ? '' : 'the midnight theme no longer defines --ink-name',
+      themed('cockpit') ? '' : 'the cockpit theme no longer defines --ink-name'].filter(Boolean));
+  none('the chat sender name stopped painting with --ink-name',
+    /html\.skin \.chat-msg \.who\{[^}]*color:var\(--ink-name\)/.test(HTML)
+      ? [] : ['html.skin .chat-msg .who no longer uses var(--ink-name) — the sender line is the only cue left, so this is who-said-what going unreadable']);
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -4786,7 +4881,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // …and that early return still has to do the housekeeping the normal end of the success path does: the
   // install really ran and really moved PATH, so the settings drawer's cached GitHub row is stale from here on.
   none('the failed-verification exit leaves the settings drawer holding a stale GitHub row',
-    /refreshGhStateCache\(\);[\s\S]{0,200}?return \{ ok: false, error: 'Claude Code installed but will not start/.test(pf)
+    /refreshGhStateCache\(true\);[\s\S]{0,200}?return \{ ok: false, error: 'Claude Code installed but will not start/.test(pf)
       ? [] : ['the failed-verification return skips the gh state refresh after a PATH move']);
   none('the consent flag is not carried across the preload bridge',
     /preflightInstall: \(depId, opts\) => ipcRenderer\.invoke\('preflight:install', depId, opts\)/.test(PRELOAD)
@@ -4928,6 +5023,104 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     none('keeping the folder also strands the transcripts or the shared-sessions worktree',
       [/mv -f "\$proj"/.test(keep) ? '' : 'the transcript shadow dir is left behind',
        /mv -f "\$HOME\/\.claudible\/sessions-sync\/\$slug"/.test(keep) ? '' : 'the sessions worktree is left behind'].filter(Boolean)); }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// THE SHIPPED PERMISSION DEFAULT, THE CLAUDE CODE FLOOR IT DEPENDS ON, AND THE MODEL RAIL.
+//   (a) The app now starts on Auto instead of asking before every step. The stored mode is read on FOUR lines
+//       — the spawn log, the mode handed to spawnClaude, the foreign-override notice, and the get handler —
+//       and each used to carry its own private fallback, so changing one alone made the chip promise a mode
+//       the session did not launch with (the handler said Auto while spawnClaude was handed undefined and
+//       fell through to Manual). One resolver answers all four. Absent means Auto; anything already stored is
+//       returned untouched, INCLUDING the legacy 'default' that means Manual, so no saved choice is rewritten
+//       by shipping a new default; and reading never writes, which keeps 'absent' recoverable.
+//   (b) Every native-Windows launch now carries a permission-mode value, where the old default path passed
+//       nothing at all. A Claude Code from before those values existed rejects the flag outright: the session
+//       dies at spawn and the automatic resume-refusal retry sends the same flag again, so it never recovers.
+//       A version floor stops that with an explanation naming the fix — and FAILS OPEN, because a version we
+//       could not read must never cost anyone a session that would have worked.
+//   (c) The model rail (allow-listed ids -> IPC handlers -> preload bridges) had no pin at either end.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const WINRUN = require('../runners/win.js');
+  none('the shipped permission default is no longer Auto (a fresh profile would launch Manual again)',
+    [/function permModeNow\(\) \{ return registry\.permissionMode \|\| 'auto'; \}/.test(MAIN)
+      ? '' : 'permModeNow() is missing, or an unset mode no longer resolves to auto',
+     /ipcMain\.handle\('permissionMode:get', \(\) => permModeNow\(\)\)/.test(MAIN)
+      ? '' : 'permissionMode:get answers from something other than the shared resolver',
+     /permMode: permModeNow\(\)/.test(MAIN)
+      ? '' : 'spawnClaude is handed the raw registry value again — undefined on a fresh profile, which falls through to manual at the runner',
+     /permission-mode=' \+ permModeNow\(\)/.test(MAIN)
+      ? '' : 'the spawn log line reads the registry directly again, so the log can disagree with the mode that launched',
+     /registry\.permissionMode \|\| 'default'/.test(MAIN)
+      ? 'a private "|| default" fallback is back in main.js — the chip and the session can disagree again' : ''].filter(Boolean));
+  none('an already-saved permission mode is no longer preserved exactly as the user saved it',
+    [/\['default', 'acceptEdits', 'plan', 'auto', 'bypass'\]\.includes\(mode\) \? mode : 'default'/.test(MAIN)
+      ? '' : "the set handler stopped accepting the legacy 'default' (Manual) alongside the five modes, or its unknown-value fallback stopped being the most restrictive one",
+     /function permModeNow\(\) \{[^\n]*saveRegistry/.test(MAIN)
+      ? 'the resolver WRITES on read — an absent mode would be stamped to disk at boot and stop being recoverable' : ''].filter(Boolean));
+
+  // (b) The floor is a pure function of whatever `claude --version` printed, so the RULE is exercised here,
+  //     not the characters that spell it.
+  const gate = WINRUN._internals.claudeVersionGate;
+  none('the Claude Code version floor is gone, moved off 2.1.200, or stopped failing open',
+    [typeof gate === 'function' ? '' : 'runners/win.js exports no claudeVersionGate',
+     typeof WINRUN.claudeVersionNow === 'function' ? '' : 'runners/win.js exports no claudeVersionNow for main.js to consult',
+     ...(typeof gate === 'function' ? [
+       gate('').ok === true ? '' : 'a version that could not be read is treated as too old — it must fail open',
+       gate('claude: command not found').ok === true ? '' : 'an unparseable version is treated as too old — it must fail open',
+       // The NUMBER is pinned, not just the mechanism. 2.1.200 is where `--permission-mode manual` starts being
+       // accepted, and that single fact is the floor's whole basis; an earlier draft used 2.1.207 on a second
+       // ground that turned out to apply only to the Bedrock/Vertex/Foundry backends.
+       gate('').min === '2.1.200' ? '' : `the floor moved off 2.1.200 (now ${gate('').min}) — the only published basis for this gate is that 2.1.200 is where --permission-mode manual begins`,
+       gate('2.1.200 (Claude Code)').ok === true ? '' : 'the floor version itself is judged too old',
+       gate('2.1.233 (Claude Code)').ok === true ? '' : 'a current Claude Code is judged too old',
+       gate('2.1.199 (Claude Code)').ok === false ? '' : 'a Claude Code below the floor is judged fine, so its session would silently ignore the mode chip with nothing said',
+       gate('1.0.0').ok === false ? '' : 'a years-old Claude Code is judged fine',
+     ] : [])].filter(Boolean));
+  // The floor DEGRADES, it does not block. Claudible has never refused to start a session over a version
+  // number: below the floor the runner sends no --permission-mode (exactly what every release before this one
+  // sent, on every Claude Code ever shipped) and main.js says so, so the session still starts and works.
+  // Both halves are pinned, because either alone is a defect — silently degrading is the dishonesty this work
+  // set out to remove, and warning while still sending the rejected flag would kill the session anyway.
+  none('the version floor started BLOCKING launches instead of degrading them',
+    [/if \(ver\.ok === false\) winSend\(/.test(MAIN)
+      ? '' : 'the spawn path no longer just warns on a below-floor version — if it returns or throws here, a working setup becomes a blocked one',
+     /if \(ver\.ok === false\)[^\n]*\n\s*return;/.test(MAIN)
+      ? 'the spawn path REFUSES to launch on a below-floor version — degrade and warn, never block' : '',
+     /function claudeTooOldLines\(v\)/.test(MAIN) ? '' : 'the too-old message has no single wording shared by both places that can discover it',
+     /npm install -g @anthropic-ai\/claude-code@latest/.test(MAIN) ? '' : 'the message no longer names the command that fixes it',
+     /Claude Code ' \+ \(v\.version \|\| /.test(MAIN) ? '' : 'the message no longer names the version that was found',
+     /older than ' \+ v\.min \+ '/.test(MAIN) ? '' : 'the message no longer names the version that would make the mode chip work'].filter(Boolean));
+  none('a below-floor Claude Code is still sent the flag its parser rejects',
+    (() => {
+      const argv = WINRUN._internals && WINRUN._internals.claudeArgv;
+      if (typeof argv !== 'function') return ['runners/win.js exports no claudeArgv to check the degraded argv against'];
+      const old = argv({ mode: 'fresh' }, 'C:\\home', 'high', 'auto', '', false);
+      const cur = argv({ mode: 'fresh' }, 'C:\\home', 'high', 'auto', '', true);
+      const oldBypass = argv({ mode: 'fresh' }, 'C:\\home', 'high', 'bypass', '', false);
+      return [old.includes('--permission-mode') ? 'a below-floor CLI is still handed --permission-mode, which its parser rejects and the session dies at spawn' : '',
+        cur.includes('--permission-mode') ? '' : 'a current CLI stopped receiving --permission-mode at all — the chip would be decorative everywhere',
+        // Bypass never used this flag, so no version can refuse it; degrading it would remove a mode the user explicitly chose.
+        oldBypass.includes('--dangerously-skip-permissions') ? '' : 'bypass was degraded too, but bypass does not use --permission-mode and no version refuses it'].filter(Boolean);
+    })());
+  none('the dependency row and the spawn gate disagree about the same floor',
+    [/if \(id === 'claude'\) rec\.ok = installed && claudeVersionGate\(rec\.version\)\.ok;/.test(read('runners/win.js'))
+      ? '' : 'buildDepReport no longer scores claude against the floor, so Settings would show ready for a CLI that cannot launch a session',
+     /if \(\(m\.id === 'node' \|\| m\.id === 'claude'\) && r\.ok === false\) return 'outdated';/.test(read('runners/deps.js'))
+      ? '' : 'the deps row ignores claude.ok, so the floor never reaches the Settings pill'].filter(Boolean));
+
+  // (c) The model rail, both ends. Allow-listed rather than free text so a typo cannot make every future
+  //     session fail to launch, and '' must stay the answer for anything off the list (let Claude Code decide).
+  none('the model allow-list or its bridges went missing (free text could ride into --model)',
+    [/const MODELS = \['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'\];/.test(MAIN)
+      ? '' : 'the MODELS allow-list is gone or no longer holds the four shipped ids',
+     /registry\.model = MODELS\.includes\(id\) \? id : '';/.test(MAIN)
+      ? '' : "model:set no longer falls back to '' for an id outside the list",
+     /ipcMain\.handle\('model:get'/.test(MAIN) ? '' : "no ipcMain.handle('model:get', …) for the bridge to reach",
+     /ipcMain\.handle\('model:set'/.test(MAIN) ? '' : "no ipcMain.handle('model:set', …) for the bridge to reach",
+     /modelGet: \(\) => ipcRenderer\.invoke\('model:get'\)/.test(PRELOAD) ? '' : 'no modelGet bridge in preload.js',
+     /modelSet: \(id\) => ipcRenderer\.invoke\('model:set', id\)/.test(PRELOAD) ? '' : 'no modelSet bridge in preload.js'].filter(Boolean));
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

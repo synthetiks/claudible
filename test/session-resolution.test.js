@@ -125,7 +125,9 @@ function mk(remembered, warmList, fetchImpl) {
     /if \(lastSessionFor\(myWs\) === id\) forgetLastSession\(myWs\);/.test(APP));
   ok('…gated on the delete having actually happened (a failed delete must keep the pointer)',
     /if \(r && \(r\.ok \|\| r\.localDone\)\) \{[\s\S]{0,900}?forgetLastSession\(myWs\);/.test(APP));
-  ok('tab records default parked:false', /session: session \|\| '', altFrac: 0, parked: false, parkReason: '',/.test(APP));
+  // altFrac left the record with the scroll ESTIMATE it fed: the gutter reads the line buffer directly now, so
+  // there is no per-tab position to carry. The rule pinned here is unchanged — a new tab starts UNPARKED.
+  ok('tab records default parked:false', /session: session \|\| '', parked: false, parkReason: '',/.test(APP));
   ok('commitParkedTab is the only place a parked tab turns real (id===\'new\' spawns fresh, any other id opens in place)',
     /function commitParkedTab\(t, id, name\)/.test(APP) && /t\.parked = false; t\.parkReason = '';/.test(APP));
   ok('onStatus stopped clearing a retired autoDraft flag when a real session id lands (nothing to clear anymore)',

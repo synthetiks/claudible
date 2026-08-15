@@ -113,7 +113,7 @@ function focusTermSoon(ms) { setTimeout(() => { try { if (term && !typingElsewhe
 const BASE_LH = 1.15;   // terminal line-height
 const TERM_OPTS = {
   fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace',
-  fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 5000,
+  fontSize: 13, lineHeight: BASE_LH, cursorBlink: true, scrollback: 10000,   // 10k lines: the gutter is only as useful as the history it can reach, and a line is a few hundred bytes
   theme: { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc',
            selectionBackground: '#272c35', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#070809', brightBlack: '#565c66' },
 };
@@ -123,6 +123,9 @@ let activeTabId = null;
 // ---------- themes: re-tint the UI (CSS :root vars via html[data-theme]) + the xterm terminal palette ----------
 // Dark = default (no data-theme attr). The UI palettes live in index.html (html[data-theme="…"]); these are the
 // matching TERMINAL palettes. applyTheme also updates TERM_OPTS so newly-spawned tabs adopt the chosen palette.
+// FOUR themes: dark, cockpit, graphite, midnight. They share one design (the skin is scoped to html.skin, which
+// is permanent) and differ only in palette. Starlight, Aurora and Evergreen were removed; the `TERM_THEMES[name]
+// ? name : 'dark'` guard below is what migrates anyone whose saved preference still names one of them.
 const TERM_THEMES = {
   // selectionInactiveBackground = TRANSPARENT on purpose: when the terminal is UNFOCUSED (you scrolled up via the
   // gutter, or clicked away), a lingering text selection must show NO highlight — otherwise it rendered as a band
@@ -130,10 +133,10 @@ const TERM_THEMES = {
   // highlighted line"). The ACTIVE selection (selectionBackground) still shows while you're actually selecting.
   dark:      { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc', selectionBackground: '#272c35', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#070809', brightBlack: '#565c66' },
   graphite:  { background: '#13161d', foreground: '#e9edf4', cursor: '#cfd8e4', selectionBackground: '#313846', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#0e1116', brightBlack: '#6b7482' },
-  starlight: { background: '#1c212a', foreground: '#f4f7fc', cursor: '#dde4ee', selectionBackground: '#3e4756', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#171b22', brightBlack: '#808a99' },
   midnight:  { background: '#0a1426', foreground: '#d6e4f6', cursor: '#a9c6ee', selectionBackground: '#214264', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#060d1c', brightBlack: '#566a90' },
-  aurora:    { background: '#0f0a22', foreground: '#e6dff6', cursor: '#c3aef0', selectionBackground: '#2f2358', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#0b0818', brightBlack: '#6b5e8c' },
-  evergreen: { background: '#081610', foreground: '#d8efe1', cursor: '#a6dcbb', selectionBackground: '#1b4129', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#050d09', brightBlack: '#517d64' },
+  // background tracks --terminal-bg exactly. It was #0f0d0c — the page GROUND, one step darker than the
+  // terminal surface it sits on — which drew a faint rim around the xterm canvas.
+  cockpit:   { background: '#161310', foreground: '#e6ded5', cursor: '#d9714f', selectionBackground: '#2f2721', selectionInactiveBackground: 'rgba(0,0,0,0)', black: '#0f0d0c', brightBlack: '#7a716a' },
 };
 function applyTheme(name) {
   const t = TERM_THEMES[name] ? name : 'dark';
@@ -197,33 +200,22 @@ function makeTab(tabId, wsId, session, opts) {
   // becomes scroll bytes that page the SHARED view; in a normal-buffer shell it moves this viewer's own local
   // scrollback (emits nothing). A read-only viewer's wheel bytes are refused at the input chokepoints below,
   // same as their keystrokes — look, don't drive.
-  // The handler always returns true (stock processing) — it only keeps the gutter's position ESTIMATE
-  // (rec.altFrac) tracking this viewer's own wheel in a full-screen app, where xterm has no scrollback for the
-  // thumb to map (a wheel report scrolls a few lines ≈ a third of a Page key's nudge). Skipped for a read-only
-  // viewer, whose wheel bytes are refused — their estimate must not move for scrolls that never happen.
-  t.attachCustomWheelEventHandler((ev) => {
-    if (ev && t.buffer.active && t.buffer.active.type === 'alternate') {
-      const r = tabs.get(tabId);
-      if (r && canPageShared(r)) {
-        r.altFrac = Math.max(0, Math.min(1, (r.altFrac || 0) + (ev.deltaY < 0 ? 1 : -1) * (ALT_PAGE / 3)));
-        if (tabId === activeTabId) updateScrollbar();
-      }
-    }
-    return true;
-  });
+  // No custom wheel handler at all: xterm owns the wheel, the trackpad and the alt-screen translation, which is
+  // exactly what it is good at. The handler that used to sit here existed only to advance a position ESTIMATE
+  // for the gutter in full-screen apps — and that estimate is gone (see the gutter below).
   if (kind === 'live') {
     t.onData((d) => {
       const r = tabs.get(tabId); if (!r || r.liveReadOnly) return;
       if (d) claudible.liveInput(tabId, d);             // co-drive: keystrokes AND scroll bytes → the peer's terminal (shared view, shared scroll)
     });
   } else t.onData((d) => { claudible.ptyInput(tabId, d); });   // keystrokes → THIS tab's pty. A PARKED tab (see C-4.4) has none yet — main's pty:input no-ops on an unknown tabId, so a stray keystroke here is silently swallowed, never a phantom spawn.
-  t.onScroll(() => { if (tabId === activeTabId) updateScrollbar(); });
+  // No scroll-position listeners: there is no gutter to repaint. See the note where the gutter used to live.
   // parked: true for a tab sitting on an empty (or unreachable-list) project, showing the create/retry overlay
   // instead of a pty. C-4.4's structural fix — set ONLY by parkedTabFor/boot, cleared ONLY by commitParkedTab,
   // and never by anything auto-triggering: sync()'s first-start guard reads it, so a parked tab spawns nothing
   // until an explicit Create/Retry click flips it off. parkReason ('empty' | 'unknown') decides which overlay
   // renders — 'unknown' (the session list couldn't be fetched) must never read as "this project is empty".
-  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', altFrac: 0, parked: false, parkReason: '',
+  const rec = { tabId, term: t, fit: f, container, started: false, kind, peer: opts.peer || null, wsId: wsId || null, session: session || '', parked: false, parkReason: '',
     baseCost: null, lastCostUsd: null, sessTok: 0, lastUsageKey: null, curCtxPct: null, curSessionLabel: '',
     agents: new Map(), workflows: [], agentTok: 0,
     liveReadOnly: false, hostCols: 120, hostRows: 32, liveState: '', liveCost: null, liveTokens: null, hostName: '' };
@@ -248,6 +240,25 @@ function sendPaste(t) {
   if (tab && tab.kind === 'live') { if (!tab.liveReadOnly) claudible.livePaste(activeTabId, t); return; }
   sendInput('\x1b[200~' + t + '\x1b[201~');
 }
+// Give back any column the renderer drew outside the viewport. Reads the grid xterm ACTUALLY painted
+// (.xterm-screen) against the box it may paint into (.xterm-viewport) and steps the column count down until it
+// fits. Bounded to 3 attempts: the error is a rounding remainder, never more than a couple of cells, and a
+// runaway loop here would resize the pty repeatedly. Returns the column count now in force.
+function trimOverflowCols(t, cols, rows) {
+  try {
+    for (let i = 0; i < 3; i++) {
+      const el = t.container.querySelector('.xterm-screen');
+      const vp = t.container.querySelector('.xterm-viewport');
+      if (!el || !vp) return cols;
+      const over = el.getBoundingClientRect().width - vp.clientWidth;
+      if (over <= 0.5 || cols <= 20) return cols;                 // fits (or refuses to shrink into uselessness)
+      const cell = el.getBoundingClientRect().width / Math.max(1, t.term.cols);
+      cols = Math.max(20, cols - Math.max(1, Math.ceil(over / cell)));
+      t.term.resize(cols, rows);
+    }
+  } catch (e) {}
+  return cols;
+}
 function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
   if (t.kind === 'live') { fitLiveTab(t); return; }            // a live tab is a fixed-grid remote mirror — never start/resize a local pty
@@ -257,16 +268,22 @@ function sync() {
     // proposeDimensions measures without resizing, so we resize exactly once, and only when it actually changed.
     const d = t.fit.proposeDimensions();
     if (!d || !(d.cols >= 2) || !(d.rows >= 2)) return;        // not laid out yet → don't start/resize at 0×0
-    const cols = d.cols;
+    let cols = d.cols;
     // Leave ~1 row of breathing room at the bottom: Claude's TUI anchors its input box, the
     // bypass-permissions banner and the status/“working… esc to interrupt” line to the last rows —
     // running them flush to the pane edge clips them. One reserved row keeps those always visible.
     const rows = d.rows > 6 ? d.rows - 1 : d.rows;
     const changed = (t.term.cols !== cols || t.term.rows !== rows);
     if (changed) t.term.resize(cols, rows);
+    // …then correct for RENDERER ROUNDING. proposeDimensions divides the available width by a measured cell
+    // width; the renderer then rounds each cell up to whole device pixels, so at some widths the grid it
+    // actually draws is wider than the box it draws into and the last column or two land outside the viewport,
+    // clipped mid-glyph. Claude Code wraps to those columns, so the text there is written and never seen.
+    // The scroll gutter used to cover that overhang, which is why removing it revealed a "dark band" that was
+    // really the edge of an over-wide grid. Measure what was drawn and give the columns back.
+    cols = trimOverflowCols(t, cols, rows);
     if (!t.started && !t.parked) { t.started = true; claudible.tabOpen(t.tabId, t.wsId, t.session); claudible.ptyStart(t.tabId, cols, rows); } // spawn at the EXACT fitted size — NEVER for a parked tab (C-4.4): commitParkedTab clears `parked` and calls sync() again to do this exact first spawn once the user actually asks for one
     else if (changed && !t.parked) claudible.ptyResize(t.tabId, cols, rows);   // a pure tab-switch (no size change) is now a no-op resize → one clean repaint, no redundant pty:resize IPC. A parked tab has no pty to resize either — this just fits the (started:false) xterm sitting behind the overlay.
-    updateScrollbar();
   } catch {}
 }
 // Route incoming bytes to the ADDRESSED tab's xterm — background tabs keep accumulating while hidden.
@@ -277,93 +294,23 @@ claudible.onPtyData((tabId, d) => {
   if (t.bootOv) { t.bootOv = false; setPtyBootOverlay(t, ''); }   // claude has painted — drop the "Opening…" label. First byte, not a timer: it clears exactly when there is something to look at.
   const b = t.term.buffer.active;
   const wasAtBottom = b.viewportY >= b.baseY - 1;
-  t.term.write(d, () => { if (tabId === activeTabId) { if (wasAtBottom) t.term.scrollToBottom(); updateScrollbar(); } });
+  t.term.write(d, () => { if (tabId === activeTabId && wasAtBottom) t.term.scrollToBottom(); });
 });
 
-// ---------- custom scroll gutter (lives in the UI, never covers terminal text) ----------
-const sc = $('scroll'), thumb = $('scroll-thumb');
-// Claude Code runs full-screen (alt buffer) → no xterm scrollback for the bar to map. But it scrolls its OWN view
-// on PageUp/PageDown (proven), and unlike mouse sequences those keystrokes always survive the ConPTY/wsl bridge
-// that carries Claude's input — which is why a mouse-based jog could silently do nothing here. So for a full-screen
-// app the bar drives Claude with Page keys (through sendInput, the keyboard's own channel) and keeps a position
-// ESTIMATE (altFrac) so the thumb moves as you scroll and rests at the bottom, where Claude shows the newest
-// output. A normal-buffer shell still gets real xterm scrollback below.
-function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
-// altFrac (the scroll-position estimate) is now PER-TAB (rec.altFrac) — it used to be one module-global that
-// bled between tabs (switching left the thumb where another tab's scroll had put it, firing spurious pages).
-const ALT_PAGE = 0.14;                 // estimate nudge per PageUp/PageDown
-// SHARED SCROLL: a live session's screen is one view for everyone — gutter paging on a shared or joined tab
-// drives the SAME TUI every viewer is watching, exactly like typing does. (This replaced the earlier
-// isolation/inert guards by explicit choice: simple model, no special cases.) sendPage routes through
-// sendInput, so on a joined mirror the Page keys ride live:input to the host. The ONE viewer who can't
-// drive it is a READ-ONLY guest — their bytes are refused at sendInput, so their gutter must stay inert
-// too (adversarial-review find: a moving thumb over refused pages is false feedback, and the altFrac
-// estimate would drift with no way back).
-function canPageShared(r) { return !(r && r.kind === 'live' && r.liveReadOnly); }
-function sendPage(dir) {   // PageUp (older) / PageDown (newer)
-  sendInput(dir < 0 ? '\x1b[5~' : '\x1b[6~');
-}
-function jogPages(dir) {                // wheel / gutter-click: fire pages + advance the estimate
-  const at = tabs.get(activeTabId);
-  if (!at || !dir || !canPageShared(at)) return;
-  const n = Math.min(6, Math.abs(dir));
-  for (let i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
-  at.altFrac = Math.max(0, Math.min(1, (at.altFrac || 0) + (dir < 0 ? 1 : -1) * ALT_PAGE * n));   // per-tab estimate — no longer a shared global that bleeds between tabs
-  updateScrollbar();
-}
-function updateScrollbar() {
-  if (!term) return;                                 // no active tab yet (pre-boot)
-  const at = tabs.get(activeTabId);
-  if (isAlt() && at && !canPageShared(at)) { if (thumb) thumb.style.display = 'none'; return; }   // read-only viewer + full-screen TUI: there is NOTHING the thumb could honestly do (paging is refused) → hide it. Normal-buffer scrollback below stays draggable — that's local.
-  if (thumb && thumb.style.display === 'none') thumb.style.display = '';
-  const trackH = sc.clientHeight;
-  if (trackH <= 0) { thumb.style.opacity = '0'; return; }
-  if (isAlt()) {                                      // full-screen app → a draggable thumb that pages Claude's view
-    const thumbH = Math.max(40, trackH * 0.20);
-    thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px';
-    if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (1 - (at.altFrac || 0))) + 'px)';   // 0=bottom · per-tab estimate
-    return;
-  }
-  const b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
-  if (baseY <= 0 || total <= rows) { thumb.style.opacity = '0'; return; }
-  const thumbH = Math.max(26, trackH * (rows / total));
-  const top = (trackH - thumbH) * (b.viewportY / baseY);
-  thumb.style.opacity = '1'; thumb.style.height = thumbH + 'px'; thumb.style.transform = 'translateY(' + top + 'px)';
-}
-setInterval(updateScrollbar, 80);   // poll so the thumb tracks the live scroll position even when onScroll is sparse (snappier fallback; live scroll is event-driven via onScroll)
-
-let dragging = false, grabDY = 0, jogLastY = 0;
-function thumbTop() { return thumb.getBoundingClientRect().top - sc.getBoundingClientRect().top; }
-function scrollToFrac(frac) {
-  const baseY = term.buffer.active.baseY;
-  term.scrollToLine(Math.round(Math.max(0, Math.min(1, frac)) * baseY));
-}
-thumb.addEventListener('pointerdown', (e) => {
-  dragging = true; grabDY = e.clientY - thumbTop(); jogLastY = e.clientY; thumb.classList.add('drag');
-  thumb.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
-});
-window.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  const trackH = sc.clientHeight, thumbH = thumb.offsetHeight;
-  const top = Math.max(0, Math.min(trackH - thumbH, e.clientY - sc.getBoundingClientRect().top - grabDY));
-  if (isAlt()) {                                      // full-screen: thumb follows the cursor; fire a Page key per ~24px
-    const _at = tabs.get(activeTabId);
-    if (!canPageShared(_at)) return;                  // read-only viewer: the page would be refused — don't move the thumb/estimate either (no false feedback)
-    thumb.style.transform = 'translateY(' + top + 'px)';
-    if (_at) _at.altFrac = (trackH - thumbH) > 0 ? 1 - (top / (trackH - thumbH)) : 0;   // per-tab estimate = where the thumb now sits
-    const dy = e.clientY - jogLastY;
-    if (Math.abs(dy) >= 24) { sendPage(dy < 0 ? -1 : 1); jogLastY = e.clientY; }
-    return;
-  }
-  scrollToFrac((trackH - thumbH) > 0 ? top / (trackH - thumbH) : 0);
-});
-window.addEventListener('pointerup', () => { if (dragging) { dragging = false; thumb.classList.remove('drag'); } });
-sc.addEventListener('pointerdown', (e) => {           // click the gutter: page (full-screen) / jump (scrollback)
-  if (e.target === thumb) return;
-  if (isAlt()) { const mid = sc.getBoundingClientRect().top + sc.clientHeight / 2; jogPages(e.clientY < mid ? -2 : 2); return; }
-  scrollToFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
-});
-sc.addEventListener('wheel', (e) => { if (isAlt()) { jogPages(e.deltaY < 0 ? -1 : 1); e.preventDefault(); } }, { passive: false });
+// ---------- terminal scrolling ----------
+// THERE IS NO SCROLL GUTTER, and that is the honest answer rather than a missing feature. Claude Code runs on
+// the ALTERNATE SCREEN — proved outside this app, by spawning it in a bare pty and reading the raw bytes: it
+// emits ESC[?1049h at startup, plus full mouse tracking (?1000/1002/1003/1006). The alternate screen is a bare
+// rows x cols grid with NO history; the lines above the view were never transmitted and exist only inside
+// Claude Code's own memory. No terminal emulator anywhere can scroll them, which is why less and im do
+// their own scrolling too.
+//
+// So a scrollbar here could only ever be one of three things: a lie (the fixed-height thumb driven by a
+// position ESTIMATE that shipped before — it never matched what was on screen), a control with no position
+// readout (a page-up/page-down proxy), or absent. The owners chose absent.
+//
+// THE WHEEL IS UNAFFECTED and always was: mouse tracking means the wheel is delivered to Claude Code as input,
+// and Claude scrolls its own view. That path never went through this code.
 // ---------- concurrent sessions ----------
 // Each tab is still one live session/pty running in the background; the active tab is the visible terminal.
 // There is NO top tab strip — every live session is shown as a row in the LEFT SIDEBAR instead (saved
@@ -373,13 +320,36 @@ function tabLabel(rec) {
   if (rec.label) return rec.label;
   return (rec.session === 'new' || !rec.session) ? 'New session' : 'Session';
 }
+// The top bar's breadcrumb: which project, and which session inside it. Built from TEXT NODES rather than a
+// template string — both halves can be collaborator-supplied and arrive over the wire, and this sits in the
+// chrome where an injected tag would be doing it on every surface at once.
+// It reads the ACTIVE TAB's workspace, not activeWsId: the sidebar can be showing one project's library while
+// you are working in a tab that belongs to another, and the bar must name where the WORK is.
+function paintCrumb() {
+  const el = $('crumb'); if (!el) return;
+  const rec = tabs.get(activeTabId);
+  const ws = workspaces.find((w) => w.id === ((rec && rec.wsId) || activeWsId));
+  const proj = (ws && (ws.label || ws.slug)) || '';
+  // The session's REAL name, not the tab's placeholder. tabLabel falls back to the word "Session" whenever a
+  // record carries no label — which is every resumed session, since the title lives in prefs rather than on
+  // the record. histSessionName is the app's own resolver for exactly this (local rename → shared-title cache
+  // → short id), so the bar says "4444" where the sidebar says "4444".
+  let sess = rec ? tabLabel(rec) : '';
+  if (rec && rec.session && rec.session !== 'new') {
+    const real = histSessionName(rec.session);
+    if (real && real !== '—') sess = real;
+  }
+  el.textContent = '';
+  if (proj) el.appendChild(document.createTextNode(proj + (sess ? ' / ' : '')));
+  if (sess) { const b = document.createElement('b'); b.textContent = sess; el.appendChild(b); }
+  el.title = proj && sess ? (proj + ' / ' + sess) : (proj || sess);   // the full text when it truncates
+}
 // Show one tab, hide the rest. Point the global term at it, fit it (NEVER fit a hidden tab), and
 // project its meter/agents/scroll into the shared UI. Tells main this is the foreground (guest-mirrored) tab.
 function setActiveTab(tabId) {
   const rec = tabs.get(tabId); if (!rec) return;
   const prev = tabs.get(activeTabId);   // the tab being LEFT — captured before activeTabId moves (R6 below)
   rec.lastActive = Date.now();   // "least recently VIEWED" — the only ordering reclaimTabSlot() may evict by
-  if (dragging) { dragging = false; thumb.classList.remove('drag'); }   // a scroll-thumb drag must not straddle a tab switch (its window-level pointermove would page the newly-active tab)
   activeTabId = tabId;
   for (const r of tabs.values()) r.container.classList.toggle('active', r.tabId === tabId);
   term = rec.term;
@@ -392,7 +362,7 @@ function setActiveTab(tabId) {
   if (rec.kind === 'live') repaintLiveTracker(rec); else repaintTracker(rec);    // project this tab's tracker into #trk-*
   _agentsSig = '';                                 // force an agents rebuild for THIS tab (the sig guard is module-global)
   renderAgents();                                  // …and its agents into the agents pane
-  updateScrollbar();
+  paintCrumb();                                    // …and the top bar names the project + session you just moved to
   refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined)
   if ($('tts-in')) $('tts-in').value = rec.lastReply || '';   // the Speak box shows THIS tab's latest reply (per-tab, never another tab's — the lastReply bleed fix)
   try { updateVoiceOutBtn(); } catch {}
@@ -475,7 +445,7 @@ if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFi
 window.addEventListener('load', scheduleFit);
 // NOTE: the first tab is seeded at the very END of this file (bootFirstTab), AFTER every const/helper it
 // transitively touches (fmtK, SWARM_SVG, …) is initialized — seeding it here would hit those in the TDZ.
-// These timers/observer are safe before then: sync()/updateScrollbar() no-op until a tab is active.
+// These timers/observer are safe before then: sync() no-ops until a tab is active.
 setTimeout(sync, 180);
 focusTermSoon(350);   // keyboard ready in the terminal on launch
 
@@ -489,11 +459,20 @@ document.querySelectorAll('.panel button').forEach((b) =>
   const ep = await claudible.endpoints();
   $('meta').textContent = ep.whisper.replace('http://', '') + ' · ' + ep.kokoro.replace('http://', '');
   setDot('d-pty', ep.pty ? 'ok' : 'bad');
-  $('sb-whisper').textContent = 'whisper ' + ep.whisper.split(':').pop();
-  $('sb-kokoro').textContent = 'kokoro ' + ep.kokoro.split(':').pop();
+  // TWO surfaces, ONE writer: the pair in the speaker's menu (what speech runs on) and the pair in Settings →
+  // services (the full reference list). Writing both here is what keeps them from drifting — the alternative,
+  // a second fetch behind the drawer, is how two readouts end up disagreeing about the same port.
+  const port = (u) => u.split(':').pop();
+  [['sb-whisper', 'svc-whisper', 'whisper ' + port(ep.whisper)],
+    ['sb-kokoro', 'svc-kokoro', 'kokoro ' + port(ep.kokoro)]].forEach(([a, b, txt]) => {
+    [a, b].forEach((id) => { const el = $(id); if (el) el.textContent = txt; });
+  });
   // the embedded Claude Code CLI version, left of whisper/kokoro — hidden gracefully if it can't be resolved
   try { const cv = await claudible.claudeVersion(); const el = $('sb-claude'); if (el) { if (cv) { el.textContent = 'claude code ' + cv; el.style.display = ''; } else { el.style.display = 'none'; } } } catch {}
-  try { const av = await claudible.appVersion(); const ve = $('app-ver'); if (ve && av) { APP_VERSION = av; ve.textContent = 'claudible v' + av; } } catch {}   // real version, not the hardcoded 'v0.2'
+  // APP_VERSION still comes from here — paintAboutRow() reads it for the Settings version line. The old
+  // #app-ver element it also wrote is gone: it printed the same string #about-version already prints, in a
+  // menu that is now about speech only.
+  try { const av = await claudible.appVersion(); if (av) APP_VERSION = av; } catch {}
   try { MY_SHA = (await claudible.buildSha()) || ''; } catch {}   // my running build — compared against the sha peers now carry in their presence stamps
   try { paintAboutRow(); } catch (e) {}   // the drawer may already be open (rare, but boot is async) — paint once version+sha land, cheap no-op otherwise
 })();
@@ -613,8 +592,13 @@ function repaintTracker(t) {
   if (bar) bar.title = bar.title + ' · ' + $('trk-cost').textContent + ' this session';   // append cost to the (warn-aware) context tooltip — cost lives here now
   const at = t.agentTok || 0;                                    // subagent/swarm tokens (the main meter misses these)
   const tokN = (t.sessTok || 0) + at, tokEl = $('trk-tokens');
-  tokEl.textContent = fmtK(tokN);
-  tokEl.style.color = tokenHue(tokN);                            // faint warm tint past 1M (easter egg)
+  // "—" at zero, so the two readouts agree: context prints "—" until it has a reading, and a bare 0 beside it
+  // read as a different KIND of state when both mean "nothing yet". The moment work starts, both show numbers.
+  tokEl.textContent = tokN > 0 ? fmtK(tokN) : '—';
+  // …and at zero the tint comes OFF entirely rather than painting tokenHue's plain white. An inline colour
+  // outranks the stylesheet, so the two placeholder dashes sat at different brightnesses — the same glyph, the
+  // same weight, the same face, one near-white and one muted, which reads as one of them being bolder.
+  tokEl.style.color = tokN > 0 ? tokenHue(tokN) : '';             // faint warm tint past 1M (easter egg)
   tokEl.title = at ? (fmtK(t.sessTok || 0) + ' main + ' + fmtK(at) + ' agents') : '';
 }
 function resetStats(t) {
@@ -822,6 +806,7 @@ function setOwnRate(r) {
   box.className = 'usagebar ' + rateClass(pct);
   // 0% lights nothing; anything above lights at least one cell — a nonzero reading must never look empty.
   box.dataset.cells = String(pct === 0 ? 0 : Math.min(4, Math.ceil(pct / 25)));
+  box.style.setProperty('--u-pct', String(pct));   // the ring's sweep (the battery cells above still work off data-cells)
   $('ub-pct').textContent = pct + '%';
   const wk = r.seven_day;
   box.title = `Plan usage — ${pct}% of your 5-hour limit used`
@@ -837,6 +822,7 @@ function renderRateStale() {
   box.style.display = '';
   box.className = 'usagebar u-stale';
   box.dataset.cells = '0';
+  box.style.setProperty('--u-pct', '0');   // an unknown reading must show an EMPTY ring, never a stale sweep
   const el = $('ub-pct'); if (el) el.textContent = '—';
   box.title = 'Your usage window has reset — this refreshes on your next message.';
   if (_usagePopOpen) renderUsagePop();
@@ -874,21 +860,47 @@ setTimeout(() => {
 }, 0);
 let _usagePopOpen = false;
 function renderUsagePop() {
-  const pop = $('usage-pop'); if (!pop || !_ownRate) return;
+  const pop = $('usage-pop'); if (!pop) return;
+  // The ring is permanent now, so it is clickable before any reading exists. Say that plainly rather than
+  // opening an empty panel — the same shape the expired-window branch below uses.
+  if (!_ownRate) {
+    pop.innerHTML = '<span class="wt">Plan usage</span><p>No reading yet. Claude reports your plan limits after the first message of a session — this fills in then.</p>';
+    return;
+  }
+  // The draft's .lim row, transcribed: name and reset-time share one line with the percentage right-aligned,
+  // and a full-width meter sits under them. Severity is by threshold and never colour alone — every row is
+  // named, carries its exact percentage, and gets an icon at the warning and critical steps.
+  const WARN_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>';
+  const CRIT_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
   const row = (k, pct, resets) => {
     if (!pct && pct !== 0) return '';
-    return `<p class="up-row"><span class="up-k">${k}${resets ? `<span class="up-sub">resets ${fmtReset(resets)}</span>` : ''}</span>`
-         + `<span class="up-v">${Math.round(pct)}%</span></p>`;
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    const sev = p >= 90 ? 'crit' : p >= 70 ? 'warn' : '';
+    const ico = sev === 'crit' ? CRIT_ICO : sev === 'warn' ? WARN_ICO : '';
+    return `<div class="lim ${sev}"><div class="hd">`
+         + `<span class="nm">${ico}${k}</span>`
+         + (resets ? `<span class="rs">resets ${fmtReset(resets)}</span>` : '')
+         + `<span class="pc">${p}%</span></div>`
+         + `<div class="meter"><span style="width:${p}%"></span></div></div>`;
   };
-  const f = _ownRate.five_hour || {}, w = _ownRate.seven_day || {};
   if (rateExpired(_ownRate, Date.now())) {
     pop.innerHTML = '<span class="wt">Plan usage</span><p>Your 5-hour window has reset. The figures refresh on your next message — Claude only reports them when it is working.</p>';
     return;
   }
-  pop.innerHTML = '<span class="wt">Plan usage</span>'
-    + row('5-hour window', f.used_percentage, f.resets_at)
-    + row('This week', w.used_percentage, w.resets_at)
-    + (f.used_percentage == null && w.used_percentage == null ? '<p>No limit data reported yet.</p>' : '');
+  // EVERY window Claude Code reports, rather than two hard-coded ones. Today it sends five_hour and seven_day
+  // and nothing else — checked against every status.json on this machine — so there is no per-model figure to
+  // show here: claude.ai's usage page breaks the week down by model, the CLI's rate_limits payload does not.
+  // Iterating means the day it starts reporting one, the row appears with no change here.
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const NICE = { five_hour: '5-hour limit', seven_day: 'This week' };
+  const ORDER = ['five_hour', 'seven_day'];
+  const keys = Object.keys(_ownRate)
+    .filter((k) => _ownRate[k] && typeof _ownRate[k].used_percentage === 'number')
+    .sort((a, b) => ((ORDER.indexOf(a) + 1) || 99) - ((ORDER.indexOf(b) + 1) || 99));
+  pop.innerHTML = '<div class="glab">Plan usage</div>'
+    + keys.map((k) => row(esc(NICE[k] || k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())),
+      _ownRate[k].used_percentage, _ownRate[k].resets_at)).join('')
+    + (keys.length ? '' : '<p>No limit data reported yet.</p>');
 }
 function toggleUsagePop(on) {
   let pop = $('usage-pop');
@@ -898,8 +910,15 @@ function toggleUsagePop(on) {
   renderUsagePop();
   const r = $('trk-usage').getBoundingClientRect();
   pop.style.display = '';
-  pop.style.top = Math.round(r.bottom + 8) + 'px';
-  // right-anchored: the box lives at the top-right, so a left-anchored popover would hang off-screen
+  // FLIPS. The anchor used to live in the top bar, where opening downward was always right; it now sits in the
+  // cockpit row at the BOTTOM of the shell, where a fixed `r.bottom + 8` renders the whole panel below the
+  // viewport floor — open, correct, and completely invisible. Measure once the box is displayed (offsetHeight
+  // is 0 while it is display:none) and prefer above when there is not room below.
+  const gap = 8;
+  const below = window.innerHeight - r.bottom - gap;
+  const top = pop.offsetHeight <= below ? r.bottom + gap : Math.max(gap, r.top - gap - pop.offsetHeight);
+  pop.style.top = Math.round(top) + 'px';
+  // right-anchored: a left-anchored popover would hang off-screen from a control pinned to the right edge
   pop.style.left = Math.round(Math.max(8, r.right - pop.offsetWidth)) + 'px';
 }
 {
@@ -1067,7 +1086,7 @@ if ($('ptt-key-btn')) $('ptt-key-btn').addEventListener('click', () => { pttCapt
 // ---------- (out) Kokoro TTS — Speak <-> Stop Speech ----------
 let ttsAudio = null, ttsBusy = false, selectedVoice = 'af_bella', alwaysSpeak = true, ttsUrl = null, speakGen = 0, fullReadout = true;
 // Claude's latest reply (stripped) lives ON THE TAB RECORD (rec.lastReply), never in a module global — a
-// global bled between tabs (the altFrac class): once any tab had spoken, "▶ Speak" read tab A's reply while
+// global bled between tabs (the same class of bug the scroll estimate had): once any tab had spoken, "▶ Speak" read tab A's reply while
 // tab B was on screen. lastReplyNow() is the one accessor; setActiveTab repopulates the Speak box from it.
 function lastReplyNow() { const t = AT(); return (t && t.lastReply) || ''; }
 let ttsSpeed = 0;                                    // % faster over baseline (0–25), applied via audio.playbackRate
@@ -1084,7 +1103,7 @@ function stripForSpeech(t) {
   return t.replace(/```[\s\S]*?```/g, ' … code block … ').replace(/`([^`]+)`/g, '$1')
           .replace(/[#*_>]/g, '').replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim().slice(0, fullReadout ? Infinity : 1500);
 }
-function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? '■' : '▶'; b.title = on ? 'Stop' : 'Test the selected voice'; b.classList.toggle('live', on); const vo = $('vout-stop'); if (vo) vo.classList.toggle('speaking', on); updateVoiceOutBtn(); }
+function setSpeakBtn(on) { const b = $('speak'); b.textContent = on ? '■' : '▶'; b.title = on ? 'Stop' : 'Test the selected voice'; b.classList.toggle('live', on); const vo = $('vout-stop'); if (vo) vo.classList.toggle('speaking', on); const vc = $('voice-chip'); if (vc) vc.classList.toggle('reading', on); updateVoiceOutBtn(); }   // the speaker button lights the same green pip the mic lights while it is talking — one function flips both, so they cannot disagree
 function stopSpeech() {
   speakGen++;                                         // invalidate any in-flight speak()
   ttsBusy = false;
@@ -1153,6 +1172,9 @@ function syncVoiceUI() {
   document.querySelectorAll('.vpill').forEach((x) => x.classList.toggle('on', x.dataset.voice === selectedVoice));
   const a = $('vout-auto'); if (a) { a.classList.toggle('on', alwaysSpeak); a.setAttribute('aria-pressed', String(alwaysSpeak)); }
   const t = $('always-toggle'); if (t) t.classList.toggle('on', alwaysSpeak);
+  // …and the merged speaker button itself, so "replies get read aloud" is visible from the cockpit row without
+  // opening the menu — the state the three-button voice group used to show with a green face.
+  const vc = $('voice-chip'); if (vc) vc.classList.toggle('auto-on', alwaysSpeak);
   const cb = $('always-speak'); if (cb) cb.checked = alwaysSpeak;
 }
 function setVoice(v) { selectedVoice = v; savePrefs({ voice: v }); syncVoiceUI(); }
@@ -1917,6 +1939,16 @@ function updateSessionCtrlBtn() {
 // (claudible.onSharePaused below), because the pause is automatic: it flips when the host tabs into a workspace
 // that isn't shareable, and back when they return. The live bar reads this to say "Paused" instead of "Live".
 let sharePaused = false;
+// The cockpit skin paints .rdot as the draft's 15px avatar disc, so the disc carries the person's initial.
+// The letter is a CHILD of the same dot rather than a second element beside it: the dot already carries the
+// presence class (ok/idle/gone), and a separate avatar would mean two nodes to keep in step. Every other
+// theme keeps .rdot a 7px dot and hides the letter — see `.rdot .rav{display:none}` in the stylesheet.
+function rosterAvatar(name) {
+  const b = document.createElement('b'); b.className = 'rav';
+  const s = String(name || '').trim();
+  b.textContent = s ? s[0].toUpperCase() : '?';
+  return b;
+}
 function renderRoster(roster) {
   const el = $('chat-roster'); if (!el) return;
   el.innerHTML = '';
@@ -1924,7 +1956,7 @@ function renderRoster(roster) {
   updateSessionCtrlBtn();                                            // host: "End Session" · joiner: "Leave Session" (mutually exclusive)
   const you = document.createElement('span'); you.className = 'rmember you';
   you.dataset.name = youName();                                       // voice-state projection matches pills by this (textContent also holds the ✕ kick glyph)
-  const yd = document.createElement('span'); yd.className = 'rdot ok'; you.appendChild(yd);
+  const yd = document.createElement('span'); yd.className = 'rdot ok'; yd.appendChild(rosterAvatar(youName())); you.appendChild(yd);
   you.appendChild(document.createTextNode(hosting ? HOST(youName()) : youName()));   // you're the host → say so, same rule as the guest pill below
   el.appendChild(you);
   activeRosterMembers().forEach((g) => {
@@ -1932,7 +1964,7 @@ function renderRoster(roster) {
     const m = document.createElement('span'); m.className = 'rmember' + (g.state === 'gone' ? ' gone' : '');
     m.dataset.name = g.name;
     m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'closed the tab'));
-    const d = document.createElement('span'); d.className = 'rdot ' + cls;
+    const d = document.createElement('span'); d.className = 'rdot ' + cls; d.appendChild(rosterAvatar(g.name));
     m.appendChild(d); m.appendChild(document.createTextNode(g.host ? HOST(g.name) : g.name));
     if (hosting && !g.host && g.state !== 'gone') {                  // host can remove a guest who's present
       const k = document.createElement('button'); k.className = 'rkick'; k.type = 'button';
@@ -2471,13 +2503,16 @@ const drawer = $('drawer'), drawerScrim = $('drawer-scrim');
 // builds only) — degrades to nothing (not a guess, not a stale placeholder) until then, per C-9.1.
 function paintAboutRow() {
   const ve = $('about-version');
-  if (ve) ve.textContent = 'claudible v' + (APP_VERSION || '?') + (MY_SHA ? ' · build ' + MY_SHA.slice(0, 7) : '');
+  if (ve) ve.textContent = 'Claudible release ' + (APP_VERSION || '?') + (MY_SHA ? ' · build ' + MY_SHA.slice(0, 7) : '');
 }
 function paintAboutUpdateLine(mine, latest, newer) {
   const el = $('about-update');
   if (!el) return;
   el.textContent = mine ? ("you're on " + mine + ' · ' + (newer ? latest + ' is available' : 'latest is ' + (latest || mine))) : '';
 }
+// The version line's ↗ — straight to the repo, for when someone wants to check what a build actually contains.
+// openExternal hands it to the real browser and refuses anything that is not an https://github.com/… URL.
+if ($('repo-link')) $('repo-link').addEventListener('click', () => { try { claudible.openExternal('https://github.com/synthetiks/claudible'); } catch (e) {} });
 async function refreshAboutRow() {
   paintAboutRow();
   try { const st = await claudible.updateStatus(); if (st && st.mine) paintAboutUpdateLine(st.mine, st.latest, st.newer); } catch (e) {}
@@ -2486,7 +2521,18 @@ function openDrawer(open) {
   drawer.classList.toggle('open', open);
   drawerScrim.classList.toggle('open', open);
   drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) { loadSkills(); loadPlugins(); try { refreshGhRow(); } catch (e) {} try { refreshVoiceSetupRow(); } catch (e) {} try { refreshAboutRow(); } catch (e) {} }       // refresh extension inventory + GitHub state + the voice manual-path notice + version/update info each time the drawer opens (W4: a real gh subprocess — on open, never on a timer; C-9.1: about row paints from cache instantly, updateStatus is a cache read too; voice:status is fs-only, equally cheap)
+  if (open) { try { refreshGhRow(); } catch (e) {} try { refreshVoiceSetupRow(); } catch (e) {} try { refreshAboutRow(); } catch (e) {} }       // refresh GitHub state + the voice manual-path notice + version/update info each time the drawer opens (W4: a real gh subprocess — on open, never on a timer; C-9.1: about row paints from cache instantly, updateStatus is a cache read too; voice:status is fs-only, equally cheap). The skills/plugins scans moved to openStrat with their sections.
+  if (!open) focusTermSoon(0);
+}
+// The Skill & Strategy panel. Same shell, same rules as Settings — and the two are mutually exclusive, since
+// they share the scrim treatment and a second drawer open behind the first would trap Escape on the wrong one.
+const stratDrawer = $('stratdrawer'), stratScrim = $('strat-scrim');
+function openStrat(open) {
+  if (open) openDrawer(false);
+  stratDrawer.classList.toggle('open', open);
+  stratScrim.classList.toggle('open', open);
+  stratDrawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (open) { loadSkills(); loadPlugins(); }   // the inventory scans follow their sections — same call, new opener
   if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
@@ -2661,13 +2707,92 @@ async function voiceRescanClick() {
 if ($('voice-manual-close')) $('voice-manual-close').addEventListener('click', closeVoiceManual);
 if ($('voice-setup-fix')) $('voice-setup-fix').addEventListener('click', openVoiceManual);
 if ($('voice-setup-rescan')) $('voice-setup-rescan').addEventListener('click', voiceRescanClick);
-// default-effort selector — load the remembered value, highlight it, persist on click (applies to new sessions)
+// A cockpit chip opens its menu on CLICK, not hover: these arm a setting, and hover-to-open is right for
+// reading a status and wrong for changing one. Escape and an outside click close it; only one is ever open.
+function wireCockpitPop(chipId) {
+  const chip = $(chipId); if (!chip) return;
+  const close = () => { chip.classList.remove('open'); chip.setAttribute('aria-expanded', 'false'); };
+  chip.addEventListener('click', (e) => {
+    if (e.target.closest('.eff-pill')) return;                 // a choice inside the menu is the menu's own click
+    e.stopPropagation();
+    const wasOpen = chip.classList.contains('open');
+    document.querySelectorAll('.cock-chip.open').forEach((c) => { c.classList.remove('open'); c.setAttribute('aria-expanded', 'false'); });
+    if (!wasOpen) { chip.classList.add('open'); chip.setAttribute('aria-expanded', 'true'); }
+  });
+  chip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.click(); }
+    else if (e.key === 'Escape') close();
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#' + chipId)) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+wireCockpitPop('perm-chip');
+wireCockpitPop('eff-chip');
+wireCockpitPop('model-chip');
+wireCockpitPop('voice-chip');
+// Default MODEL for new sessions. Same shape as the effort selector below and the same rail underneath:
+// registry key → spawnClaude option → a --model flag. '' means pass nothing and let Claude Code decide, which
+// is exactly what every session did before this existed.
 (async () => {
-  const row = $('effort-row'); if (!row) return;
-  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.eff || '') === (v || '')));
+  const row = $('model-cock-row'); if (!row) return;
+  const LBL = { '': 'auto', 'claude-fable-5': 'Fable 5', 'claude-opus-5': 'Opus 5', 'claude-sonnet-5': 'Sonnet 5', 'claude-haiku-4-5-20251001': 'Haiku 4.5' };
+  const chip = $('sb-model');
+  const pills = () => [...row.querySelectorAll('.eff-pill')];
+  const paint = (v) => {
+    pills().forEach((b) => b.classList.toggle('on', (b.dataset.model || '') === (v || '')));
+    if (chip) chip.textContent = LBL[v || ''] || v;
+  };
+  let cur = ''; try { cur = await claudible.modelGet(); } catch {}
+  paint(cur || '');
+  pills().forEach((b) => b.addEventListener('click', async () => {
+    const v = b.dataset.model || '';
+    let r = null; try { r = await claudible.modelSet(v); } catch {}
+    const set = (r && typeof r.model === 'string') ? r.model : v; paint(set);
+    // A failed persist must not toast like a success — it holds for this run and resets on relaunch.
+    if (r && r.ok === false) toast('Model: ' + (LBL[set] || set) + ' — set for THIS run, but SAVING FAILED');
+    else toast(set ? ('Model: ' + (LBL[set] || set) + ' — applies to new sessions') : 'Model: auto — Claude Code chooses');
+  }));
+})();
+// default-effort selector — load the remembered value, highlight it, persist on click (applies to new sessions).
+// Drives BOTH surfaces: the settings-drawer row and the cockpit chip's menu carry the same data-eff values, so
+// one selector paints and wires them together and neither can drift out of step with the other.
+(async () => {
+  const rows = ['effort-row', 'eff-cock-row'].map((id) => $(id)).filter(Boolean);
+  if (!rows.length) return;
+  const pills = () => rows.reduce((a, r) => a.concat([...r.querySelectorAll('.eff-pill')]), []);
+  const chip = $('sb-eff');
+  // The cockpit renders these five as a Faster→Smarter slider. It is a VIEW of the same buttons, not a second
+  // control: moving it clicks the level it lands on, so there is still exactly one path to the backend.
+  const ORDER = ['medium', 'high', 'xhigh', 'max', 'ultracode'];
+  const slider = $('eff-slider'), effNow = $('eff-now');
+  const paint = (v) => {
+    pills().forEach((b) => b.classList.toggle('on', (b.dataset.eff || '') === (v || '')));
+    if (chip) chip.textContent = v || 'default';   // BARE value, like the mode and model chips beside it: the draft's pills carry what the setting IS, never "setting: value" (the prefix also cost ~50px the row cannot spare once the usage ring appears)
+    if (effNow) effNow.textContent = v || 'default';
+    const i = ORDER.indexOf(v || '');
+    if (slider && i >= 0) slider.value = String(i);
+    // The painted track is the draft's own markup, so the fill width and knob position are ours to set.
+    // 8px is half the knob, matching the draft's `left:calc(<pct>% - 8px)`.
+    const pct = i >= 0 ? (i / (ORDER.length - 1)) * 100 : 0;
+    const fill = $('eff-fill'), knob = $('eff-knob');
+    if (fill) fill.style.width = pct + '%';
+    if (knob) knob.style.left = `calc(${pct}% - 8px)`;
+  };
+  if (slider) {
+    slider.addEventListener('input', () => {
+      const want = ORDER[Number(slider.value)] || 'high';
+      const target = pills().find((b) => (b.dataset.eff || '') === want);
+      if (!target) return;
+      target.click();
+      // Choosing from a LIST should dismiss the menu; dragging a slider should not — you are still adjusting.
+      // The click above goes through the normal pill path, which closes the chip, so re-arm it here.
+      const chipEl = $('eff-chip');
+      if (chipEl) { chipEl.classList.add('open'); chipEl.setAttribute('aria-expanded', 'true'); }
+    });
+  }
   let cur = ''; try { cur = await claudible.effortGet(); } catch {}
   paint(cur || '');
-  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
+  pills().forEach((b) => b.addEventListener('click', async () => {
     const v = b.dataset.eff || '';
     let r = null; try { r = await claudible.effortSet(v); } catch {}
     const set = (r && r.ok) ? r.effort : v; paint(set);
@@ -2676,17 +2801,32 @@ if ($('voice-setup-rescan')) $('voice-setup-rescan').addEventListener('click', v
 })();
 // default permission-mode selector — ships as 'default' (Claude asks); 'accept edits' / 'bypass' are opt-in + remembered
 (async () => {
-  const row = $('perm-row'); if (!row) return;
-  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.perm || 'default') === (v || 'default')));
-  const LBL = { default: 'ask first', acceptEdits: 'auto-accept edits', bypass: 'bypass permissions' };
+  // Same two-surface arrangement as effort above: the drawer row and the cockpit chip's menu are one selector.
+  const rows = ['perm-row', 'perm-cock-row'].map((id) => $(id)).filter(Boolean);
+  if (!rows.length) return;
+  const pills = () => rows.reduce((a, r) => a.concat([...r.querySelectorAll('.eff-pill')]), []);
+  const paint = (v) => pills().forEach((b) => b.classList.toggle('on', (b.dataset.perm || 'default') === (v || 'default')));
+  // The chip's words are the menu's words. "ask first" described `default` before it had a name in the UI;
+  // the mode is called Manual everywhere Claude Code shows it, so the chip says Manual too.
+  const LBL = { default: 'manual', acceptEdits: 'accept edits', plan: 'plan', auto: 'auto', bypass: 'bypass permissions' };
+  // What "nobody has picked a mode yet" means, in ONE place, matching main's resolver — an unset mode IS Auto.
+  // These are READ fallbacks, and a read fallback that disagrees with the launcher is worse than no chip at
+  // all: it would print Manual on a build that starts sessions on Auto, and this chip exists precisely so the
+  // mode can be trusted at a glance. Note this is the opposite direction from the SET path, which coerces an
+  // UNRECOGNISED value to Manual on purpose — that is failing closed on bad input, not the shipped default.
+  const UNSET = 'auto';
   // Status-bar chip: the mode the app will launch NEW sessions with, always visible — so "settings say
   // bypass but the session asks" is diagnosable at a glance (either this chip disagrees with what you set →
   // the setting didn't persist, or the terminal shows the collaborator-session sandbox notice → the RCE guard).
   const chip = $('sb-perm');
-  const paintChip = (v) => { if (chip) chip.textContent = 'perms: ' + (LBL[v || 'default'] || v); };
-  let cur = 'default'; try { cur = await claudible.permissionModeGet(); } catch {}
-  paint(cur || 'default'); paintChip(cur || 'default');
-  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
+  // The chip prints the VALUE, not a sentence. It used to read "perms: auto-accept edits" in a 24px strip that
+  // held nothing else; in the cockpit row it shares space with voice, telemetry and a usage chip that appears
+  // mid-session, and the prefix was ~50px of the width that pushed the build number off the edge. What it IS
+  // is carried by its own title and aria-label, and by the menu header it opens.
+  const paintChip = (v) => { if (chip) chip.textContent = LBL[v || UNSET] || v; };
+  let cur = UNSET; try { cur = await claudible.permissionModeGet(); } catch {}
+  paint(cur || UNSET); paintChip(cur || UNSET);
+  pills().forEach((b) => b.addEventListener('click', async () => {
     const v = b.dataset.perm || 'default';
     let r = null; try { r = await claudible.permissionModeSet(v); } catch {}
     const set = (r && r.permissionMode) ? r.permissionMode : v; paint(set); paintChip(set);
@@ -2763,6 +2903,10 @@ $('settings-btn').addEventListener('click', () => openDrawer(!drawer.classList.c
 $('drawer-close').addEventListener('click', () => openDrawer(false));
 drawerScrim.addEventListener('click', () => openDrawer(false));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) openDrawer(false); });
+$('strategy-btn').addEventListener('click', () => openStrat(!stratDrawer.classList.contains('open')));
+$('strat-close').addEventListener('click', () => openStrat(false));
+stratScrim.addEventListener('click', () => openStrat(false));
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && stratDrawer.classList.contains('open')) openStrat(false); });
 // C-3.6 — the trash icon (left of the settings X) and the settings drawer's own Open trash button do the exact
 // same thing: hand the recoverable trash folder straight to the OS file manager. A basic function on purpose —
 // no in-app browsing, just get the user to the folder.
@@ -4279,7 +4423,8 @@ function repaintLiveTracker(rec) {
   $('trk-cost').textContent = rec.liveCost != null ? rec.liveCost : '$0.00'; $('trk-cost').title = 'host session cost';
   if (bar) bar.title = bar.title + ' · ' + $('trk-cost').textContent + ' host session cost';
   const lt = rec.liveTokens != null ? rec.liveTokens : '0', tokEl = $('trk-tokens');
-  tokEl.textContent = lt; tokEl.style.color = tokenHue(parseTokCount(lt)); tokEl.title = 'host session tokens';
+  const ltN = parseTokCount(lt);
+  tokEl.textContent = ltN > 0 ? lt : '—'; tokEl.style.color = ltN > 0 ? tokenHue(ltN) : ''; tokEl.title = 'host session tokens';   // same rule on the mirrored host readout: no value, no tint, so it matches the context dash beside it
 }
 // Open (or focus) a peer's live session as a native tab in THIS window.
 function openLiveTab(peer, localLabel) {
@@ -4382,7 +4527,7 @@ claudible.onLiveData((tabId, data) => {
   const rec = tabs.get(tabId); if (!rec || rec.kind !== 'live') return;
   const u8 = (data instanceof Uint8Array) ? data : (data && data.buffer ? new Uint8Array(data.buffer) : new Uint8Array(data || []));
   const b = rec.term.buffer.active, wasBottom = b.viewportY >= b.baseY;
-  rec.term.write(u8, () => { if (tabId === activeTabId) { if (wasBottom) rec.term.scrollToBottom(); updateScrollbar(); } });
+  rec.term.write(u8, () => { if (tabId === activeTabId && wasBottom) rec.term.scrollToBottom(); });
 });
 claudible.onLiveHello((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
@@ -4949,6 +5094,7 @@ let _sessSig = '';
 let _sessRecheckTimer = null;
 const _sessEmptyRechecked = new Set();
 async function refreshSessions() {
+  paintCrumb();                                                                     // the bar names where the work is; every path that renames a session or moves a tab already lands here
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;              // a rename input is focused → defer the whole refresh so a background poll can't wipe the in-progress edit; commit() re-runs refreshSessions when done
   if (sdrag && sdrag.moved) return;                                                // a row drag is in progress → defer: a mid-drag rebuild would orphan the dragged row's DOM node and reinsert a stale (pre-refresh) element into the fresh list; onSessPointerUp re-runs refreshSessions
   const myWs = activeWsId;                                                          // ignore this refresh if we switch workspaces mid-flight
@@ -5434,7 +5580,7 @@ async function openSession(id, label, opts) {
   rememberLastSession(t.wsId || activeWsId, activeSession);   // boot restores THIS, not a filesystem-timestamp guess
   updateAdvertise();                                  // if I'm sharing in a repo workspace, advertise the now-active session
   refreshSessions();                                  // re-highlight without collapsing (stays docked)
-  t.term.reset(); t.altFrac = 0;                       // clear this tab's view (the new pty repaints it) + reset its scroll estimate
+  t.term.reset();                                      // clear this tab's view (the new pty repaints it)
   t.bootOv = true; setPtyBootOverlay(t, 'Opening ' + (t.label || 'session') + '…');   // the pane is blank from here until claude paints — say so rather than showing a dead black rectangle
   resetStats(t);                                      // reset THIS tab's tracker baselines + push label to guests
   focusTermSoon(150);
@@ -5859,22 +6005,35 @@ function paintGhRow(s) {
   const dot = $('gh-dot'), txt = $('gh-text'), btn = $('gh-connect');
   if (!dot || !txt || !btn) return;
   dot.className = 'gh-dot off'; btn.style.display = 'none';
+  // main answers from a cache that starts UNKNOWN. Say so, rather than reporting its opening zeros as fact —
+  // "GitHub CLI not installed" about a working install is worse than admitting we are still looking.
+  if (s && s.known === false) { txt.textContent = 'Checking…'; return; }
   if (!s) { txt.textContent = 'Couldn’t check GitHub'; return; }
   if (!s.ghInstalled) { txt.textContent = 'GitHub CLI not installed — run the System check'; return; }
   if (!s.ghSignedIn) {
     dot.className = 'gh-dot warn'; txt.textContent = 'Not connected';
-    btn.style.display = ''; btn.textContent = 'Connect';
+    btn.style.display = '';   // the label and the GitHub mark are in the markup — writing textContent here would delete the logo
     return;
   }
   dot.className = 'gh-dot on';
   txt.textContent = s.ghAccount ? ('Connected as ' + s.ghAccount) : 'Connected';
 }
+// WHY THE DRAWER FELT SLOW. Measured: ghState is a real `gh` subprocess at ~1200ms, while voiceStatus,
+// updateStatus and appVersion are all ~1ms. The panel itself opens in 236ms — but the GitHub row sat on
+// "Checking…" for over a second afterwards, and a section still resolving reads as the whole drawer loading.
+// So: paint the LAST KNOWN answer immediately and let the subprocess correct it if it changed. Same shape as
+// the About row, which C-9.1 already requires to paint from cache rather than wait.
+let _ghLast = null;
 async function refreshGhRow() {
   if (!$('gh-dot') || !$('gh-text') || !$('gh-connect')) return;
+  if (_ghLast) paintGhRow(_ghLast);                     // instant, from the last real answer
   let s = null; try { s = await claudible.ghState(); } catch (e) {}
-  paintGhRow(s);
+  if (s) _ghLast = s;
+  // Only repaint when we actually got an answer. Without this guard a failed check would wipe the cached row
+  // back to "Couldn't check GitHub" — replacing something true with something less true.
+  if (s || !_ghLast) paintGhRow(s);
 }
-if (claudible.onGhStateChanged) claudible.onGhStateChanged((s) => paintGhRow(s));   // the background recheck landed — repaint if the drawer is (still) open
+if (claudible.onGhStateChanged) claudible.onGhStateChanged((s) => { if (s) _ghLast = s; paintGhRow(s); });   // the background recheck landed — repaint if the drawer is (still) open, and warm the cache for the next open
 if ($('gh-connect')) $('gh-connect').addEventListener('click', () => {
   // Reuse the terminal route (2g) rather than duplicating the wizard's device-code flow: it lands the user in
   // the real `gh auth login` prompts, which are readable and answerable, and it is one already-tested path.
@@ -7111,7 +7270,7 @@ claudible.onSyncChanged((s) => {
 // tracker baselines (token/cost state belongs to the old transcript) — then tell the user why it reloaded.
 if (claudible.onSessionReloaded) claudible.onSessionReloaded((s) => {
   const t = tabs.get(s && s.tabId);
-  if (t) { try { t.term.reset(); } catch {} t.altFrac = 0; resetStats(t); }
+  if (t) { try { t.term.reset(); } catch {} resetStats(t); }
   toast('Session updated with synced changes');
   refreshSessions();
 });

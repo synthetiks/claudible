@@ -712,6 +712,18 @@ function armUltracode(tabId, proc) {
 // Guarded send: the window can be destroyed mid-flight (a ConPTY may emit a final chunk during shutdown), so pty
 // sends must tolerate a gone webContents instead of throwing into the uncaughtException net.
 function winSend(channel, payload) { try { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); } catch {} }
+// The names the user actually picked from, keyed by the value we store. A terminal line that names a setting
+// must use the words on the button that set it — 'acceptEdits' or 'plan' would send someone hunting through
+// Settings for a control that is labelled something else. ('default' is the stored name for Manual.)
+const PERM_LABELS = { default: 'Manual', acceptEdits: 'Accept edits', plan: 'Plan', auto: 'Auto', bypass: 'Bypass permissions' };
+// ONE wording for "your Claude Code is too old", used by both places that can discover it (before a spawn, and
+// after a session that died before the check had an answer). It names three things and nothing else: the
+// version found, the version needed, and the exact command that fixes it.
+function claudeTooOldLines(v) {
+  return ['[claudible] Claude Code ' + (v.version || 'on this machine') + ' is older than ' + v.min + ', so this session ignores the permission mode shown in the status bar — Claude will ask before running tools, as it did in earlier Claudible releases.',
+    '[claudible] To make the mode setting work, update Claude Code and open a new session:',
+    '  npm install -g @anthropic-ai/claude-code@latest'];
+}
 function spawnPty(tabId, cols, rows, ws, session) {
   if (!tabId) return;
   if (liveTabs.has(tabId)) return;   // never bind a local pty to a joined live tab's id (invariant: a tabId is EITHER in ptys OR in liveTabs, never both)
@@ -745,6 +757,15 @@ function spawnPty(tabId, cols, rows, ws, session) {
     try { win && win.webContents.send('claude:needed', { health: health.state }); } catch {}
     return;                                              // never spawn a pty that can only die
   }
+  // AN INSTALLED, HEALTHY CLAUDE CAN STILL BE TOO OLD FOR THE PERMISSION FLAG. Claudible now sets the mode on
+  // nearly every launch; a Claude Code from before those values existed rejects the flag outright and the
+  // session dies at spawn. The runner already handles that by sending NO mode flag below the floor — the
+  // session starts and behaves exactly as it did in every earlier release. This block does the other half:
+  // it SAYS SO, because a status-bar chip promising a mode the session isn't running is the same silent lie
+  // the explicit flag was introduced to end. It does NOT block — the launch continues either way. Win runner
+  // only (wsl/posix claude lives in the guest), and it FAILS OPEN: it speaks only about a version it read.
+  const ver = (typeof runner.claudeVersionNow === 'function') ? runner.claudeVersionNow() : { ok: true };
+  if (ver.ok === false) winSend('pty:data', { tabId, data: '\r\n' + claudeTooOldLines(ver).join('\r\n') + '\r\n' });
   ws = ws || activeWorkspace;
   try {
     const runtimeId = nextRuntimeId(tabId);
@@ -752,13 +773,13 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // first thing to check when "bypass is on in settings but the session prompts". (A foreign session is
     // still sandboxed downstream regardless; session.sh / win.js print that override into the terminal.)
     console.log('[claudible] spawn tab=' + tabId + ' ws=' + ((ws && (ws.slug || ws.id)) || 'default')
-      + ' permission-mode=' + (registry.permissionMode || 'default') + ' (from workspaces.json registry)');
+      + ' permission-mode=' + permModeNow() + ' (from workspaces.json registry)');
     // A THROW from spawnClaude (installHooks hitting a too-long path, a hostile fs state) used to bubble
     // straight out of this handler — the terminal showed nothing at all, which is the worst of the three
     // outcomes. Catch it onto the same surface the null case uses; runners raise classified messages
     // (see win.js's long-path guard) precisely so this line has something human to print.
     let proc = null, spawnErr = '';
-    try { proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: registry.permissionMode, runtimeId, modelStrategy: modelStrategyNow() }); }
+    try { proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: permModeNow(), model: registry.model, runtimeId, modelStrategy: modelStrategyNow() }); }
     catch (e) { spawnErr = (e && e.message) || String(e); console.error('[claudible] spawnClaude threw:', spawnErr); }
     if (!proc) {   // node-pty failed to load/build — on Linux this is almost always a missing C toolchain. Tell the user how to fix it instead of a bare error.
       const hint = process.platform === 'linux' ? '\r\n  On Linux node-pty builds from source — install: sudo apt install build-essential python3   (then: npm rebuild)\r\n' : '';
@@ -772,11 +793,18 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // Bypass set, watching Claude prompt anyway. That reads as the setting being broken, not as a guard doing its
     // job (a real report). So when the user's remembered mode is one this guard is currently overriding, say so
     // outright, and say where the setting DOES apply. Text only — the guard itself is untouched.
+    // The list of modes this can override is the SAME list the picker offers, or the notice silently stops
+    // naming the setting it just ignored. It used to test two of them while the picker grew to five, so Plan
+    // and Auto fell through to the generic line — and with Auto now the shipped default, that generic line
+    // would be what EVERY foreign session on a fresh profile printed, which is exactly the diagnosis this
+    // block exists to give. Manual is the one mode that is never "overridden": the sandbox already asks
+    // before every tool, so there is nothing to warn about.
     if (proc.claudibleForeign) {
-      const overridden = ['bypass', 'acceptEdits'].includes(registry.permissionMode || 'default');
+      const mode = permModeNow();
+      const overridden = mode === 'default' ? '' : (PERM_LABELS[mode] || '');
       winSend('pty:data', { tabId, data: overridden
         ? "[claudible] This session synced in from another machine, so Claude asks before running tools — your '"
-          + (registry.permissionMode === 'bypass' ? 'Bypass permissions' : 'Accept edits')
+          + overridden
           + "' setting does NOT apply here (anyone with repo access can write a transcript). Sessions started on this machine use your setting.\r\n"
         : "[claudible] opening a collaborator's session — Claude will ask before running tools.\r\n" });
     }
@@ -870,6 +898,9 @@ function spawnPty(tabId, cols, rows, ws, session) {
         winSend('pty:data', { tabId, data: '[claudible] Claude Code isn’t connected — click the Claude button to set it up.\r\n' });
         try { win && win.webContents.send('claude:needed'); } catch {}
       }
+      // (No version branch here. An old Claude Code no longer kills the spawn — the runner withholds the
+      // mode flag instead of sending one that would be rejected — so a dead spawn can no longer be blamed
+      // on the version, and guessing at it here would name the wrong cause.)
       if (tabId === mirrorTabId()) { share.broadcast(msg); share.resetRing(); }
       setGenBusy(tabId, false); ptys.delete(tabId); hookState.delete(tabId); lastStatusByTab.delete(tabId);
       schedulePush(rws);                                   // session ended → flush its workspace's transcripts to collaborators
@@ -3106,6 +3137,16 @@ ipcMain.handle('effort:set', (e, level) => {
   saveRegistry();
   return { ok: true, effort: registry.effort };
 });
+// Default MODEL for new sessions — the same shape as effort above, and it rides the same rail: registry key →
+// spawnClaude option → a --model flag in claudeArgv. Allow-listed rather than free-text so a typo cannot make
+// every future session fail to launch; '' means "don't pass --model at all", i.e. let Claude Code decide.
+const MODELS = ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'];
+ipcMain.handle('model:get', () => registry.model || '');
+ipcMain.handle('model:set', (e, id) => {
+  registry.model = MODELS.includes(id) ? id : '';
+  const ok = saveRegistry();
+  return { ok: ok !== false, model: registry.model };
+});
 // "Plan big, execute small" (Anthropic cookbook pattern) — the main session plans/synthesizes on the user's
 // chosen model while SUBAGENTS (the token-heavy leg: bulk reading, sweeps, workflows) are nudged toward
 // Sonnet 5 via the context-hook text (see hooks/context-hook.js). DEFAULT OFF — a default only, never an
@@ -3120,12 +3161,25 @@ ipcMain.handle('modelStrategy:set', (e, v) => {
   if (!persisted) return { ok: false, error: 'could not write workspaces.json — applies to THIS run only', modelStrategy: modelStrategyNow() };
   return { ok: true, modelStrategy: modelStrategyNow() };
 });
-// Default PERMISSION mode for the user's own sessions — ships as 'default' (Claude prompts); 'bypass' & 'acceptEdits'
-// are opt-in and remembered. A FOREIGN (collaborator-synced) session is ALWAYS sandboxed regardless (session.sh /
-// win.js enforce that). Applies to the NEXT session each tab launches.
-ipcMain.handle('permissionMode:get', () => registry.permissionMode || 'default');
+// Default PERMISSION mode for the user's own sessions. Five modes are offered and remembered — Manual (stored
+// under its old name 'default'), Accept edits, Plan, Auto and Bypass permissions — and the app now SHIPS ON
+// AUTO: a profile that has never chosen gets 'auto', which runs routine steps and stops for the rest, rather
+// than the old Manual that asked before every single one. A FOREIGN (collaborator-synced) session is ALWAYS
+// sandboxed regardless (session.sh / win.js enforce that). Applies to the NEXT session each tab launches.
+// ONE resolver for the whole file, same shape as modelStrategyNow above, because the stored mode is read on
+// four different lines (the spawn log, the mode handed to spawnClaude, the foreign-override notice, and this
+// handler) and four private fallbacks are four chances for the chip to promise one thing while the session
+// launches another. Absent -> 'auto' (that IS the migration); anything already stored is returned untouched,
+// INCLUDING the legacy 'default', so nobody's saved choice is rewritten by shipping a new default. Reading
+// never writes: leaving 'absent' recoverable keeps the migration reversible and keeps boot off the disk.
+function permModeNow() { return registry.permissionMode || 'auto'; }
+ipcMain.handle('permissionMode:get', () => permModeNow());
 ipcMain.handle('permissionMode:set', (e, mode) => {
-  registry.permissionMode = ['default', 'acceptEdits', 'bypass'].includes(mode) ? mode : 'default';
+  // Five modes, matching what the Claude app offers. 'default' is kept as the STORED name for Manual so every
+  // existing workspaces.json keeps working — the CLI's own flag value for it is `manual`, and win.js does that
+  // translation at spawn. 'plan' and 'auto' are new; 'dontAsk' is deliberately not offered (it auto-DENIES
+  // anything not pre-approved, which is a curated-allowlist workflow, not a mode you pick from a menu).
+  registry.permissionMode = ['default', 'acceptEdits', 'plan', 'auto', 'bypass'].includes(mode) ? mode : 'default';
   // A persist failure must be LOUD: the in-memory mode applies to this run, but it will silently revert on
   // relaunch ("bypass is on in my settings but off when I launch" — the exact bug this closes).
   const persisted = saveRegistry();
@@ -3725,7 +3779,7 @@ ipcMain.handle('onboard:gh-login', async () => {
   // C-9.1: connectGh succeeding here means, at minimum, the device flow started — the drawer's cached gh row
   // must not keep showing the pre-click answer. Re-probe in the background; the settings drawer's next
   // 'gh:state-changed' (or its next open) picks up the real sign-in once gh finishes polling GitHub itself.
-  if (r.ok) refreshGhStateCache();
+  if (r.ok) refreshGhStateCache(true);   // force: a sign-in is exactly the event the throttle must not swallow
   return r;
 });
 
@@ -3880,11 +3934,11 @@ ipcMain.handle('preflight:install', async (_e, depId, opts) => {
       if (!v || !v.ok) {
         const detail = (v && v.error) || 'it did not report a version';
         console.error('[claudible] claude install verification failed:', detail);
-        refreshGhStateCache();   // C-9.1: unlike every other failure return here, the install DID run and PATH DID move — the drawer's cached gh row must not go stale just because the result will not start
+        refreshGhStateCache(true);   // force (C-9.1): unlike every other failure return here, the install DID run and PATH DID move — the drawer's cached gh row must not go stale just because the result will not start
         return { ok: false, error: 'Claude Code installed but will not start: ' + detail, restartRequired: false };
       }
     }
-    refreshGhStateCache();   // C-9.1: an install here can be gh itself (or PATH moving broadly) — the drawer's cached gh row must not go stale across it
+    refreshGhStateCache(true);   // force (C-9.1): an install here can be gh itself (or PATH moving broadly) — the drawer's cached gh row must not go stale across it
     // A cloudflared installed MID-SHARE must not wait out the 45s retry cadence: its env/path is applied just
     // above, so the very next candidates() read can see it — bring the tunnel (and with it, presence) up now.
     if (id === 'cloudflared' && share.status().running && !cloudflaredProc) kickTunnelRetryNow();
@@ -3954,21 +4008,43 @@ ipcMain.handle('claude:repair', async () => {
 // the BACKGROUND with a hard 5000ms timeout of its own (deps.detect has none), pushing the fresh answer over
 // 'gh:state-changed' when it lands. The wizard is untouched — it still awaits the full onboard:status, because
 // blocking there is the point (the user is watching a spinner, not opening a drawer).
-let _ghStateCache = { ghInstalled: false, ghSignedIn: false, ghAccount: '' };
+// `known` separates "we have not probed yet" from "we probed and gh is absent". Without it the opening value
+// is a CONFIDENT WRONG ANSWER — a cold cache claims ghInstalled:false, so the drawer's first paint accuses a
+// working install of not existing and corrects itself seconds later. Same rule as the timeout branch below:
+// never state something we have not established.
+let _ghStateCache = { ghInstalled: false, ghSignedIn: false, ghAccount: '', known: false };
 let _ghStateRefreshing = false;   // one probe in flight — a burst of drawer-opens must not stack them
-function refreshGhStateCache() {
+// THROTTLE. Opening Settings used to spawn a `gh` probe every single time, so the row sat on a pending state
+// for a second or two on every open — "GitHub interrupts the panel". A drawer-open is not evidence that
+// anything changed; the events that DO change it (connectGh, an install that moves PATH) call this with
+// force:true and are unaffected. Between those, a recent answer is served as-is and nothing is spawned.
+// A FAILED PROBE IS THROTTLED TOO. The guard used to also require _ghStateCache.known, which is set only on
+// SUCCESS — so a probe that timed out or threw left it false, the guard was skipped, and the next drawer-open
+// spawned `gh` all over again. That is precisely the machine this throttle exists for: the slow or offline one
+// where the probe fails. The stamp was always right (_ghProbedAt is set before the empty-result bail, and its
+// comment already says "stamp attempts, not just successes"); only the guard disagreed with it. So gate on the
+// stamp alone — zero means we have genuinely never probed, and only then is a probe owed.
+let _ghProbedAt = 0;
+const GH_PROBE_TTL = 60000;
+function refreshGhStateCache(force) {
   if (_ghStateRefreshing) return;
+  if (!force && _ghProbedAt && (Date.now() - _ghProbedAt) < GH_PROBE_TTL) return;
   _ghStateRefreshing = true;
   const timeout = new Promise((resolve) => { const t = setTimeout(() => resolve(null), 5000); t.unref && t.unref(); });
   Promise.race([deps.detect(runner, voiceState()).then(deps.toOnboardStatus).catch(() => null), timeout])
     .then((s) => {
       _ghStateRefreshing = false;
+      _ghProbedAt = Date.now();   // stamp attempts, not just successes — a failing probe must not be retried on every drawer open
       if (!s) return;   // timed out or the probe itself threw — keep serving the last-known cache, never overwrite it with a false "signed out"
-      _ghStateCache = { ghInstalled: !!s.ghInstalled, ghSignedIn: !!s.ghSignedIn, ghAccount: s.ghAccount || '' };
+      _ghStateCache = { ghInstalled: !!s.ghInstalled, ghSignedIn: !!s.ghSignedIn, ghAccount: s.ghAccount || '', known: true };
       try { win && win.webContents.send('gh:state-changed', _ghStateCache); } catch {}
     });
 }
-ipcMain.handle('gh:state', () => { refreshGhStateCache(); return _ghStateCache; });
+// setImmediate, NOT a bare call. The comment above promises this handler answers INSTANTLY, and it did not:
+// deps.detect does synchronous work before its first await, so kicking the probe on this line blocked the
+// reply behind it — measured at ~0.8-4.5s from the renderer, which is the whole of "Settings loads slowly".
+// Deferring by one tick lets the cached answer return first and the probe run genuinely in the background.
+ipcMain.handle('gh:state', () => { setImmediate(refreshGhStateCache); return _ghStateCache; });
 
 // The active session's LATEST assistant reply, so the manual Speak button can re-read it even after a relaunch
 // (when the in-memory lastReply is empty) or for a session opened from history. Reads the transcript and returns
@@ -4574,7 +4650,10 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => { try { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } } catch {} });
-  app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 9000); });
+  // The gh warm-up rides the same "later, off the boot path" pattern as the update check beside it. One probe
+// per launch, 6s after the window is up, so the cache is already warm the FIRST time Settings is opened —
+// otherwise the first open per launch is the one that still waits, which is the open people notice.
+app.whenReady().then(() => { reapOrphanCloudflared(); reapDeadGenerations(); createWindow(); setTimeout(checkForUpdate, 9000); setTimeout(() => refreshGhStateCache(true), 6000); });
 }
 // THE full exit teardown, shared by the normal quit path and the self-update restart. Every block is
 // independently idempotent; app.exit()/app.relaunch() bypass window-all-closed entirely (Electron emits no

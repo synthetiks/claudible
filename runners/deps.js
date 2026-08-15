@@ -89,7 +89,12 @@ function rowState(m, raw, extra, runnerId) {
   // what's genuinely missing, so 'missing' is the truthful state — and its Install button (winget Git.Git)
   // is the actual fix. detect() below attaches the note that explains the seeming contradiction.
   if (m.id === 'git' && runnerId === 'win' && raw.gitBash === false) return 'missing';
-  if (m.id === 'node' && r.ok === false) return 'outdated';
+  // Claude Code carries a floor of its own now (runners/win.js, CLAUDE_MIN_VERSION): below it, the permission
+  // mode Claudible sets on every launch is rejected by the CLI and no session can start at all. That is the
+  // same class of problem as an out-of-date Node, so it gets the same amber "update" row and the same Install
+  // button. Only the win runner reports `ok` for claude — the guest runners leave it undefined, so their rows
+  // are untouched.
+  if ((m.id === 'node' || m.id === 'claude') && r.ok === false) return 'outdated';
   if (m.auth) {
     if (r.signedIn) return 'ready';
     return m.authSoft ? 'unconfirmed' : 'signin';   // claude: soft (allow Continue) · gh: needs explicit sign-in

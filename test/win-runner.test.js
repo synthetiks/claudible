@@ -54,11 +54,23 @@ eq('argv ultracode bypass -> xhigh', claudeArgv({ mode: 'fresh' }, HOME, 'ultrac
   ['--dangerously-skip-permissions', '--add-dir', HOME, '--effort', 'xhigh']);
 eq('argv bogus effort omitted (bypass)', claudeArgv({ mode: 'fresh' }, HOME, 'turbo', 'bypass'),
   ['--dangerously-skip-permissions', '--add-dir', HOME]);
-// 'default' (or unset) = Claude prompts — NO --dangerously, NO --add-dir
-eq('argv fresh default = no bypass', claudeArgv({ mode: 'fresh' }, HOME, 'high'),
-  ['--effort', 'high']);
-eq('argv resume own default = no bypass', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'default'),
-  ['--resume', 's1']);
+// 'default' (or unset) = MANUAL, i.e. Claude prompts — still NO --dangerously and NO --add-dir, which is the
+// rule these two defend. It is now STATED rather than left unsaid: the cockpit chip promises Manual, and an
+// omitted flag would defer to whatever permissions.defaultMode the user's own ~/.claude/settings.json sets.
+// `manual` (not `default`) is the value on the wire — the CLI's --permission-mode choices do not include
+// `default`, and `manual` is its documented alias.
+eq('argv fresh default = manual, no bypass', claudeArgv({ mode: 'fresh' }, HOME, 'high'),
+  ['--permission-mode', 'manual', '--effort', 'high']);
+eq('argv resume own default = manual, no bypass', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'default'),
+  ['--permission-mode', 'manual', '--resume', 's1']);
+// 'plan' and 'auto' — the two modes the picker gained, passed straight through as CLI values
+eq('argv fresh plan', claudeArgv({ mode: 'fresh' }, HOME, '', 'plan'),
+  ['--permission-mode', 'plan']);
+eq('argv resume own auto+effort', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, 'high', 'auto'),
+  ['--permission-mode', 'auto', '--resume', 's1', '--effort', 'high']);
+// …and an unknown mode must fall back to manual, never to silence (which would defer to the settings file)
+eq('argv unknown mode falls back to manual', claudeArgv({ mode: 'fresh' }, HOME, '', 'nonsense'),
+  ['--permission-mode', 'manual']);
 // 'acceptEdits' = auto-accept edits, no --add-dir
 eq('argv fresh acceptEdits', claudeArgv({ mode: 'fresh' }, HOME, '', 'acceptEdits'),
   ['--permission-mode', 'acceptEdits']);
@@ -67,6 +79,33 @@ eq('argv resume own acceptEdits+effort', claudeArgv({ mode: 'resume', id: 's1', 
 // SECURITY: a FOREIGN session is ALWAYS sandboxed — even when the user's setting is 'bypass'
 eq('argv resume FOREIGN sandboxed even with bypass', claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, 'xhigh', 'bypass'),
   ['--resume', 'f1', '--effort', 'xhigh']);
+
+// ---- the chosen model — the 5th argument, and the ORDER it lands in ----------------------------------------
+// The order is not cosmetic: the flags are built as [permission] [--resume id] [--effort] [--model], so the
+// model always closes the line. Pinned as the runner actually orders it.
+eq('argv fresh with a model: permission, effort, then the model last',
+  claudeArgv({ mode: 'fresh' }, HOME, 'high', 'default', 'claude-opus-5'),
+  ['--permission-mode', 'manual', '--effort', 'high', '--model', 'claude-opus-5']);
+eq('argv resume own with a model',
+  claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, 'high', 'acceptEdits', 'claude-sonnet-5'),
+  ['--permission-mode', 'acceptEdits', '--resume', 's1', '--effort', 'high', '--model', 'claude-sonnet-5']);
+// The asymmetry below is deliberate, and this case exists to state it out loud: a session synced from a
+// collaborator drops the permission flag — that omission IS the sandbox — but it still carries the model the
+// user picked, which decides nothing about what tools are allowed to run.
+eq('argv resume FOREIGN keeps the chosen model while still dropping the permission flag',
+  claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, 'high', 'bypass', 'claude-opus-5'),
+  ['--resume', 'f1', '--effort', 'high', '--model', 'claude-opus-5']);
+// No model chosen = pass nothing and let Claude Code decide, on every one of the three paths. This is what
+// makes an unset model incapable of changing a launch, and it is the half a wiring mistake breaks first.
+eq('argv fresh with no model chosen carries no --model',
+  claudeArgv({ mode: 'fresh' }, HOME, 'high', 'default', ''),
+  ['--permission-mode', 'manual', '--effort', 'high']);
+eq('argv resume own with no model chosen carries no --model',
+  claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'acceptEdits'),
+  ['--permission-mode', 'acceptEdits', '--resume', 's1']);
+eq('argv resume FOREIGN with no model chosen carries no --model',
+  claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, '', 'bypass'),
+  ['--resume', 'f1']);
 
 // ---- settingsJson (Node hooks via the Windows node path, per-tab args baked) ----
 const s = settingsJson('C:\\Users\\X\\.claudible\\session\\.claude', 'C:\\node.exe', 'C:\\rt\\status.json', 'C:\\rt\\hooks.ndjson');

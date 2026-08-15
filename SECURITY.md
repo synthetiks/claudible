@@ -6,14 +6,25 @@ self-hosts one). It does have real network surface when you use certain features
 
 ## What to know before you run it
 
-- **Permissions are yours to set.** By default the embedded Claude Code **asks before running tools**,
-  exactly like the plain CLI. In **Settings → Permissions** you can opt into a remembered mode:
-  *auto-accept edits*, or *bypass permissions* (`--dangerously-skip-permissions --add-dir $HOME`) for the
-  frictionless one-click/voice flow. Bypass is powerful — only use it on a machine you trust. The active
-  mode is always visible in the status bar.
-- **A session synced from a collaborator is ALWAYS sandboxed**, regardless of your permission setting: it
-  resumes in normal ask-first mode, without `--add-dir`, and is never auto-resumed. An untrusted transcript
-  can never drive tools with your home-directory access.
+- **Permissions are yours to set.** The embedded Claude Code runs in one of five modes: **Manual** — asks
+  before every change, exactly like the plain CLI; **Accept edits** — file edits apply without asking;
+  **Plan** — explores and proposes, never edits your source; **Auto** — routine steps run without asking,
+  with Claude Code's own safety checks; and **Bypass permissions** — nothing is asked and every tool runs
+  (`--dangerously-skip-permissions --add-dir $HOME`), for the frictionless one-click/voice flow. **If you
+  have never picked a mode, Claudible uses Auto** — so out of the box it does *not* ask before every tool.
+  Read that twice if you are updating from an earlier version: it applies to existing installs too, not only
+  to new ones. Earlier releases asked before every tool, so if you never opened the mode control, this
+  release changes what Claude may do on your machine without asking. Pick **Manual** for the plain CLI's
+  ask-first behaviour. If you have already chosen a mode, Claudible keeps it. Bypass is powerful — only use
+  it on a machine you trust. The mode you are on is always visible on the bar across the bottom of the
+  window, and that chip is where you change it; a change applies to sessions started after it.
+- **A session synced from a collaborator never inherits your Claudible mode.** Claudible passes no mode at
+  all on that path, so Bypass, Accept edits and Auto cannot follow you into someone else's transcript; it
+  never gets `--add-dir`, and it is never auto-resumed. One consequence, stated plainly rather than left to
+  be discovered: because no mode is passed, Claude Code falls back to whatever `permissions.defaultMode`
+  your OWN `~/.claude/settings.json` sets. If you have not set one — the case for almost everyone — that is
+  ask-first, which is the intent. If you have set a permissive default there, it applies here too, and
+  Claudible does not currently override it.
 - **Turning on collaboration syncs your full transcripts to the repo.** When you enable "Collaborate in
   Claudible" / session sync on a repo-backed project, each session's **complete transcript** — your prompts,
   the code and tool output, **anything Claude read during the session (file contents, secrets, command

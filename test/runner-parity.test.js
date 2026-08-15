@@ -22,6 +22,8 @@ function eq(label, actual, expected) {
   try { assert.strictEqual(actual, expected); pass++; }
   catch { fail++; console.error(`\n  FAIL  ${label}\n    expected: ${JSON.stringify(expected)}\n    actual:   ${JSON.stringify(actual)}`); }
 }
+// for the assertions that are about what a command string must NOT contain
+function ok(label, cond) { cond ? pass++ : (fail++, console.error(`\n  FAIL  ${label}`)); }
 
 // ---- wsEnv (main.js:103-110) ----
 eq('wsEnv legacy', wsEnv(legacy), `CLAUDIBLE_WS_KIND='legacy'`);
@@ -55,6 +57,37 @@ eq('boot acceptEdits no-effort',
 eq('boot default mode omits perm env',
   _bootStr(APP, 'new', legacy, 'main', 'high', 'default'),
   `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+
+// KNOWN CURRENT LIMITATION, pinned on purpose so it cannot widen unnoticed: this shell path carries only
+// 'bypass' and 'acceptEdits'. The Plan and Auto modes the mode picker offers reach the native-Windows
+// launcher only — here they fall past the allow-list and the session starts on Claude Code's own prompting
+// default, exactly as an unset mode does. That is what this release ships, deliberately and documented; a
+// later release is expected to carry both modes through, and these two cases are the ones it must turn
+// around. Same expected string as 'boot default mode omits perm env' — that identity IS the finding.
+eq('boot plan mode omits perm env (this path does not carry Plan yet)',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'plan'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+eq('boot auto mode omits perm env (this path does not carry Auto yet)',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'auto'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+
+// KNOWN CURRENT LIMITATION, same release decision: the model the user picks reaches the native-Windows
+// launcher only. This builder takes no model at all, so there is no argument to pass and nothing to assert
+// positively — the two honest halves are that a model handed to it today is dropped on the floor, and that
+// no boot shape carries anything model-like in any form. A later release is expected to pipe the model
+// through; whichever of these two fires then is to be turned around, not deleted.
+ok('a model handed to this builder is dropped — it changes nothing about the launch',
+  (() => {
+    const withModel = _bootStr(APP, 'new', legacy, 'main', 'high', 'default', 'off', 'claude-opus-5');
+    const without = _bootStr(APP, 'new', legacy, 'main', 'high', 'default', 'off');
+    return withModel === without;
+  })());
+ok('no model reaches this path in any boot shape — no model env, no --model flag',
+  [
+    _bootStr(APP, 'new', legacy, 'main', 'high', 'default'),
+    _bootStr(APP, 'sess-7', repo, 'tab2', 'high', 'bypass'),
+    _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass', 'planBigExecSmall'),
+  ].every((s) => !/--model/.test(s) && !/CLAUDIBLE_MODEL=/.test(s)));
 
 // model strategy: 'planBigExecSmall' inlines CLAUDIBLE_MODEL_STRATEGY (after PERM); anything else omits it
 eq('boot planBigExecSmall inlines the strategy env',

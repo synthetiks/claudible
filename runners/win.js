@@ -168,15 +168,30 @@ function pickResumeTarget(sel, jsonl, foreign) {
 }
 // claude.exe argv for a launch decision. Foreign sessions run SANDBOXED (no skip-perms, no --add-dir) â€”
 // an untrusted synced transcript must never drive tools with full $HOME (session.sh:103-111).
-function claudeArgv(launch, home, effort, permMode) {
+function claudeArgv(launch, home, effort, permMode, model, permSupported = true) {
   const lvl = effort === 'ultracode' ? 'xhigh' : effort;   // 'ultracode' is injected post-settle by main.js
   const eff = ['low', 'medium', 'high', 'xhigh', 'max'].includes(lvl) ? ['--effort', lvl] : [];
+  // Chosen model, allow-listed in main.js before it ever reaches here. Empty = pass nothing and let Claude Code
+  // decide, which is what every session did before this existed — so an unset value cannot change behaviour.
+  const mod = model ? ['--model', model] : [];
   // Trusted/fresh permission flags from the user's remembered setting. 'default' (or unset) â†’ Claude prompts.
+  //   'default' is Manual. The CLI's --permission-mode choices are acceptEdits|auto|bypassPermissions|manual|
+  //   dontAsk|plan -- there is NO `default` among them -- so Manual passes `manual`, its documented alias. It
+  //   is passed EXPLICITLY rather than omitted: the chip promises Manual, and staying silent would hand the
+  //   decision to whatever defaultMode the user's own ~/.claude/settings.json happens to set.
+  //   bypass keeps --dangerously-skip-permissions rather than --permission-mode bypassPermissions: that is the
+  //   flag this app has always shipped, and the one the --add-dir pairing was tested against.
+  //   permSupported=false means the installed Claude Code predates `--permission-mode manual` (see
+  //   CLAUDE_MIN_VERSION). Send NOTHING rather than a value its parser rejects: that is what every release
+  //   before this one sent, so the session still starts and the user keeps working. Bypass is deliberately
+  //   NOT degraded - it never used this flag, so no version can refuse it.
   const perm = permMode === 'bypass' ? ['--dangerously-skip-permissions', '--add-dir', home]
-    : permMode === 'acceptEdits' ? ['--permission-mode', 'acceptEdits'] : [];
-  if (launch.foreign) return ['--resume', launch.id, ...eff];                                  // sandboxed â€” NEVER perm (RCE guard)
-  if (launch.mode === 'fresh') return [...perm, ...eff];
-  return [...perm, '--resume', launch.id, ...eff];
+    : !permSupported ? []
+      : ['acceptEdits', 'plan', 'auto'].includes(permMode) ? ['--permission-mode', permMode]
+        : ['--permission-mode', 'manual'];
+  if (launch.foreign) return ['--resume', launch.id, ...eff, ...mod];                          // sandboxed â€” NEVER perm (RCE guard)
+  if (launch.mode === 'fresh') return [...perm, ...eff, ...mod];
+  return [...perm, '--resume', launch.id, ...eff, ...mod];
 }
 // The EXE token for a hook command, in a form BOTH Windows shells accept.
 //
@@ -501,7 +516,7 @@ async function repairClaude() {
 // process restart (the lazy-getter upgrade path; main.js currently relauches after a Git install instead).
 // _claudeBin/_nodeBin ride along for the same reason: preflight:install calls this after installing a dep, so
 // a claude or node that arrived mid-session is picked up on the next spawn rather than staying stale.
-function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; _claudeHealth = undefined; _whichMemo.clear(); _guestPathMemo.clear(); _hostPathMemo.clear(); }
+function resetCaches() { _bash = undefined; _appdirMsys = undefined; _claudePresent = undefined; _claudeBin = undefined; _nodeBin = undefined; _claudeHealth = undefined; _claudeVersion = null; _whichMemo.clear(); _guestPathMemo.clear(); _hostPathMemo.clear(); }
 
 // ---- dependency detection (pure-Node; NO git-bash) ----------------------------------------------
 // The self-bootstrapping provisioner needs to know, on a possibly-bare Windows box, which deps are present.
@@ -603,6 +618,11 @@ function buildDepReport(io) {
     const installed = !!bin;
     const rec = { installed, version: installed ? io.toolVersion(id, bin) : '' };
     if (id === 'node') rec.ok = installed && semverGte(rec.version, '22.12.0');
+    // Claude Code has a floor of its own (see CLAUDE_MIN_VERSION): below it, the permission mode this app
+    // sets on every launch is rejected and no session can start. Same rule as the spawn gate, so the row and
+    // the terminal can never disagree - including its fail-open half, where a version we could not read is
+    // reported as fine rather than as an accusation.
+    if (id === 'claude') rec.ok = installed && claudeVersionGate(rec.version).ok;
     if (id === 'claude') rec.signedIn = installed ? io.claudeSignedIn() : false;
     if (id === 'gh') { const a = installed ? io.ghAuth(bin) : { signedIn: false, account: '' }; rec.signedIn = a.signedIn; rec.account = a.account; }
     out[id] = rec;
@@ -631,6 +651,54 @@ function claudePresent() {
 // probe (which must NOT run on every launch / 3s poll tick). installed via claudePresent, signed-in via the
 // credentials read; no `claude --version` subprocess (the dot doesn't need it).
 function claudeState() { const installed = claudePresent(); return { installed, signedIn: installed ? claudeSignedIn() : false }; }
+
+// ---- is the installed Claude Code NEW ENOUGH for the permission flag this app sends? ---------------
+// Claudible sets the permission mode on nearly every launch now. An older Claude Code does not accept the
+// value: its own argument parser rejects it, the session dies the instant it spawns, and the automatic
+// resume-refusal retry sends the same flag again - so nothing recovers on its own and all the user sees is a
+// bare "session ended". Read the version once so the flag can be left off before that ever happens.
+//   FLOOR - 2.1.200, the version from which `--permission-mode manual` is accepted. That single published
+//   fact is the whole basis for this gate, and it holds on every backend. An earlier draft used 2.1.207 on a
+//   second ground - that Auto stopped needing an environment opt-in there - but that opt-in only ever applied
+//   to the Bedrock, Vertex AI and Foundry backends, not the ordinary one almost everyone runs, so it withheld
+//   the flag across seven patch releases for a condition those users never meet.
+//   WHAT HAPPENS BELOW THE FLOOR: nothing is blocked. The launch proceeds with NO --permission-mode flag,
+//   which is precisely what every release before this one sent, on every Claude Code ever shipped - so the
+//   session starts and works. main.js prints one line saying the mode chip cannot be honoured until Claude
+//   Code is updated, because an unhonoured chip that says nothing is the exact silence this work set out to
+//   remove. Claudible has never refused to start a session over a version number, and does not begin here:
+//   a version gate that blocks turns a working setup into a broken one, which is worse than the flag it
+//   protects. Bypass is unaffected either way - it sends --dangerously-skip-permissions, not this flag.
+// FAILS OPEN: a version we cannot read, cannot parse, or that never answers is treated as fine.
+const CLAUDE_MIN_VERSION = '2.1.200';
+// The PURE half (exported), so the whole decision is provable from strings with no install to downgrade.
+function claudeVersionGate(raw) {
+  const found = parseSemver(raw);
+  if (!found) return { ok: true, version: '', min: CLAUDE_MIN_VERSION };   // unreadable / unparseable -> never block
+  return { ok: semverGte(raw, CLAUDE_MIN_VERSION), version: found.join('.'), min: CLAUDE_MIN_VERSION };
+}
+// ASYNC probe, SYNC answer - the same shape main.js's gh row uses. `claude --version` costs ~0.9s on the
+// 320MB binary, and an execFileSync would freeze the entire window for all of it, on the spawn path, once
+// per run. So the answer is served from a memo while the probe fills it in the background: the first launch
+// of a run can answer "unknown" (fail open), and main.js's session-ended handler catches that case with the
+// same message. A good answer is memoized for the run; a refusal is not, so an update clears it.
+let _claudeVersion = null;          // the last answer we actually READ; null while unknown
+let _claudeVersionProbing = false;
+function probeClaudeVersion() {
+  if (_claudeVersionProbing || (_claudeVersion && _claudeVersion.ok)) return;
+  _claudeVersionProbing = true;
+  const { file, args } = claudeVerifyArgv(whichClaude());
+  try {
+    cp.execFile(file, args, { encoding: 'utf8', timeout: 15000, windowsHide: true }, (err, stdout) => {
+      _claudeVersionProbing = false;
+      _claudeVersion = claudeVersionGate(err ? '' : stdout);   // a run that failed reads as unknown -> fail open
+    });
+  } catch { _claudeVersionProbing = false; }
+}
+function claudeVersionNow() {
+  probeClaudeVersion();             // keeps a refusal fresh, so an update mid-run clears it on the next launch
+  return _claudeVersion || { ok: true, version: '', min: CLAUDE_MIN_VERSION };
+}
 
 // The runner-contract method: raw dep status for the deps.js orchestrator. Pure-Node â€” safe with no git-bash.
 function detectDeps() {
@@ -692,7 +760,7 @@ function shouldFallbackToFresh(spawnedAtMs, exitedAtMs, code, signal, wasKilled,
 // (the `ptys.get(tabId)?.proc !== proc` guard in main.js's spawnPty depends on that object identity never
 // changing across a fallback). Contract-checked against main.js's spawnPty/respawnPty consumers: onData(cb),
 // onExit(cb), write(data), resize(cols,rows), kill(signal), .pid, .claudibleForeign â€” all present here.
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, model, modelStrategy } = {}) {
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
   const sdir = sessionDir(ws, home);
@@ -742,7 +810,10 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   const isCmd = /\.cmd$|\.bat$/i.test(claude) || claude === 'claude';
   const file = isCmd ? (process.env.COMSPEC || 'cmd.exe') : claude;
   function spawnInner(l) {
-    const argv = claudeArgv(l, home, effort, permMode);
+    // Read the version answer at SPAWN time, not at module load: the probe fills in the background, so a
+    // launch early in a run may legitimately see "unknown" and fail open, and an update mid-run clears a
+    // stale refusal on the very next launch.
+    const argv = claudeArgv(l, home, effort, permMode, model, claudeVersionNow().ok !== false);
     const args = isCmd ? ['/c', claude, ...argv] : argv;
     return pty.mod.spawn(file, args, { name: 'xterm-256color', cols: dims.cols, rows: dims.rows, cwd: sdir, env });
   }
@@ -880,10 +951,10 @@ function detect() { return process.platform === 'win32' && whichClaude() !== 'cl
 
 module.exports = {
   id: 'win',
-  detect, detectDeps, resetCaches, claudePresent, claudeState, verifyClaudeRuns, claudeHealthNow, repairClaude,
+  detect, detectDeps, resetCaches, claudePresent, claudeState, claudeVersionNow, verifyClaudeRuns, claudeHealthNow, repairClaude,
   appDirGuest, toGuestPath, toHostPath, runtimeDir,
   ptyInfo, spawnClaude, runScript,
   startVoiceServices,
   // pure core, exported for the unit test:
-  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks, claudeVerifyArgv, claudeVerifyOutcome, claudeShimTarget, claudeHealth, claudeOldSiblings, pickHealthyClaudeBin },
+  _internals: { sessionDir, claudeProjectsDir, pickResumeTarget, claudeArgv, settingsJson, spawnEnv, gitBash, whichClaude, pickClaudeBin, buildDepReport, semverGte, parseSemver, pickRunnable, APP_ROOT, shouldFallbackToFresh, installHooks, claudeVerifyArgv, claudeVerifyOutcome, claudeShimTarget, claudeHealth, claudeOldSiblings, pickHealthyClaudeBin, claudeVersionGate, CLAUDE_MIN_VERSION },
 };

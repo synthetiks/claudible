@@ -48,8 +48,14 @@ if (window.visualViewport) {
 var term = new Terminal({
   fontFamily: 'ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace',
   fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
-  theme: { background: '#0a0b0d', foreground: '#d8dde3', cursor: '#c6ced8',
-           selectionBackground: '#23272e', black: '#070809', brightBlack: '#525861' },
+  // Tracks the app's DEFAULT terminal palette, Dark (TERM_THEMES.dark in renderer/app.js). It can only ever
+  // track ONE: the guest page has no theme transport, so a host who has switched to another palette will see
+  // a colour difference here until the host's choice is carried over the wire.
+  // selectionInactiveBackground is transparent on purpose, same as on the host: once the terminal loses focus
+  // a lingering selection must show NO highlight, or it renders as a band across the mirrored screen.
+  theme: { background: '#0b0c10', foreground: '#dce1e8', cursor: '#cbd2dc',
+           selectionBackground: '#272c35', selectionInactiveBackground: 'rgba(0,0,0,0)',
+           black: '#070809', brightBlack: '#565c66' },
 });
 term.open($('terminal'));
 // GUEST PASTE, step 1 of 2: make xterm NEVER handle the paste chord itself. Its stock keymap resolves
@@ -84,83 +90,11 @@ $('terminal').addEventListener('paste', function (e) {
 // to the host; in a normal-buffer shell it moves THIS viewer's own local scrollback (emits nothing). A
 // read-only viewer's scroll bytes are refused at the onData chokepoint below, same as their keystrokes.
 
-// custom scroll gutter (ported from the cockpit) — drives the terminal's scrollback so no native
-// scrollbar sits over the text. Desktop/tablet only (CSS hides it on phones, where touch scrolls).
-// Claude Code (and any full-screen TUI) runs the ALTERNATE buffer, where xterm keeps no scrollback for the
-// bar to map — but it scrolls its OWN view on PageUp/PageDown, so in alt mode the gutter instead drives the
-// shared view with Page keys (over the same 'input' ws path as keystrokes) and keeps a position ESTIMATE
-// (altFrac, 0=bottom..1=top) so the thumb moves as you page and rests at the bottom, where the newest output
-// is. Ported from the cockpit's canPageShared/sendPage/jogPages + updateScrollbar alt-buffer branch
-// (renderer/app.js ~lines 206-281). Normal-buffer shells keep the real xterm-scrollback behavior below.
-(function gutter() {
-  var sc = $('gutter'), thumb = $('gthumb'); if (!sc || !thumb) return;
-  var ALT_PAGE = 0.14;      // estimate nudge per PageUp/PageDown (matches the cockpit)
-  var altFrac = 0;          // 0=bottom .. 1=top — position ESTIMATE while in the alt (full-screen) buffer
-  function isAlt() { return !!(term && term.buffer.active && term.buffer.active.type === 'alternate'); }
-  // SHARED SCROLL: paging a live session co-drives the SAME view everyone's watching, exactly like typing
-  // (commit b7d5f8d — no wheel-blocking guards here). The one viewer who genuinely can't drive it is a
-  // READ-ONLY guest — their Page keys are refused at the same server chokepoint as their keystrokes, so the
-  // gutter must stay honestly inert for them in alt mode: a moving thumb over refused pages is false feedback.
-  function canPage() { return !readOnly; }
-  function sendPage(dir) {   // PageUp (dir<0) / PageDown (dir>0) — rides the same input path as keystrokes
-    if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'input', data: dir < 0 ? '\x1b[5~' : '\x1b[6~' })); } catch (e) {} }
-  }
-  function jogPages(dir) {   // wheel / gutter-click: fire pages + advance the estimate
-    if (!dir || !canPage()) return;
-    var n = Math.min(6, Math.abs(dir));
-    for (var i = 0; i < n; i++) sendPage(dir < 0 ? -1 : 1);
-    altFrac = Math.max(0, Math.min(1, altFrac + (dir < 0 ? 1 : -1) * ALT_PAGE * n));
-    upd();
-  }
-  // The whole gutter (track included) is shown only when it can actually do something. An always-visible empty
-  // track reads as a broken scrollbar — and for a view-only guest in a full-screen app, which is now the DEFAULT
-  // sharing mode, the thumb is permanently suppressed, so the strip could never be anything but decoration.
-  function show(on) { sc.classList.toggle('on', !!on); thumb.style.opacity = on ? '1' : '0'; }
-  function upd() {
-    if (isAlt() && !canPage()) { show(false); return; }   // read-only + full-screen: nothing honest to show
-    var trackH = sc.clientHeight; if (trackH <= 0) { show(false); return; }
-    if (isAlt()) {              // full-screen app → draggable thumb pages the shared view, positioned from the estimate
-      var thumbH = Math.max(40, trackH * 0.20);
-      show(true); thumb.style.height = thumbH + 'px';
-      if (!dragging) thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (1 - altFrac)) + 'px)';
-      return;
-    }
-    var b = term.buffer.active, rows = term.rows, baseY = b.baseY, total = b.length;
-    if (baseY <= 0 || total <= rows) { show(false); return; }   // nothing scrolled off the top yet
-    var thumbH = Math.max(26, trackH * (rows / total));
-    show(true); thumb.style.height = thumbH + 'px';
-    thumb.style.transform = 'translateY(' + ((trackH - thumbH) * (b.viewportY / baseY)) + 'px)';
-  }
-  term.onScroll(upd); setInterval(upd, 150);
-  var dragging = false, grabDY = 0, jogLastY = 0;
-  function thumbTop() { return thumb.getBoundingClientRect().top - sc.getBoundingClientRect().top; }
-  function toFrac(f) { term.scrollToLine(Math.round(Math.max(0, Math.min(1, f)) * term.buffer.active.baseY)); }
-  thumb.addEventListener('pointerdown', function (e) {
-    dragging = true; grabDY = e.clientY - thumbTop(); jogLastY = e.clientY; thumb.classList.add('drag');
-    try { thumb.setPointerCapture(e.pointerId); } catch (x) {} e.preventDefault(); e.stopPropagation();
-  });
-  window.addEventListener('pointermove', function (e) {
-    if (!dragging) return;
-    var th = sc.clientHeight, hh = thumb.offsetHeight;
-    var top = Math.max(0, Math.min(th - hh, e.clientY - sc.getBoundingClientRect().top - grabDY));
-    if (isAlt()) {
-      if (!canPage()) return;   // read-only: the page would be refused — don't move the thumb/estimate either (no false feedback)
-      thumb.style.transform = 'translateY(' + top + 'px)';
-      altFrac = (th - hh) > 0 ? 1 - (top / (th - hh)) : 0;
-      var dy = e.clientY - jogLastY;
-      if (Math.abs(dy) >= 24) { sendPage(dy < 0 ? -1 : 1); jogLastY = e.clientY; }
-      return;
-    }
-    toFrac((th - hh) > 0 ? top / (th - hh) : 0);
-  });
-  window.addEventListener('pointerup', function () { if (dragging) { dragging = false; thumb.classList.remove('drag'); } });
-  sc.addEventListener('pointerdown', function (e) {
-    if (e.target === thumb) return;
-    if (isAlt()) { var mid = sc.getBoundingClientRect().top + sc.clientHeight / 2; jogPages(e.clientY < mid ? -2 : 2); return; }
-    toFrac((e.clientY - sc.getBoundingClientRect().top) / sc.clientHeight);
-  });
-  sc.addEventListener('wheel', function (e) { if (isAlt()) { jogPages(e.deltaY < 0 ? -1 : 1); e.preventDefault(); } }, { passive: false });
-})();
+// THERE IS NO SCROLL GUTTER on this page, matching the host. The bar that used to live here estimated its own
+// position rather than knowing it, and the embedded CLI holds the terminal's ALTERNATE screen, which carries no
+// scrollback at all — so the gutter was scrolling an estimate over content that cannot scroll. Its upkeep also
+// cost a repaint timer firing every 150ms for the whole life of the page. Wheel scrolling is unaffected: it was
+// never routed through the gutter, it is stock xterm behaviour, described directly above.
 
 var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', hostName = 'host';
 // C-5.9 roster redesign: the host is ALWAYS labeled as host — "HOST (name)" once the host has a name, plain
