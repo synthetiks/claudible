@@ -1709,18 +1709,22 @@
 
     /* ── READOUTS ──────────────────────────────────────────────────────────────────────────────────────── */
     /* the draft's .read / .segs, verbatim: mono uppercase micro-label, then the value in normal case. */
+    /* ONE TYPEFACE ON THIS BAR. These two carried the draft's mono while the three chips beside them used the
+       UI face, so a row of five items read as two families sitting together. Spacing is carried entirely by
+       gaps now (see the .trk / usage rule below) rather than by per-item padding, because padding on some
+       items and gap between others is what made the three readouts sit at uneven distances from each other. */
     html.skin .cockpit .ctxbar,html.skin .cockpit .tokbar{
-      display:flex;align-items:center;gap:7px;padding:0 4px;font-family:var(--mono)}
+      display:flex;align-items:center;gap:7px;padding:0;font-family:var(--ui)}
     /* --ink-faint, not --ink-dimmer: the dimmer step is right for a keyboard hint sitting inside an open menu,
        and one step too quiet for a standing label on the shell's own bar, where it reads as switched off. */
     html.skin .cockpit .ctxlabel{
-      font-size:var(--fs-key);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:400}
+      font-size:var(--fs-pill);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:400}
     /* min-width:30px + text-align:right on the context value and centre-plus-2px on the tokens value were
        tuned for the old boxed telemetry, and they put each number a different distance from its own label —
        the context dash floated ~28px off the end of its bar while the token value sat centred in a reserved
        slot. Both now sit exactly one 7px gap after the thing they belong to, so the pair reads as one set. */
     html.skin .cockpit .ctxpct,html.skin .cockpit .tokval{
-      font-size:var(--fs-desc);letter-spacing:0;color:var(--ink-dim);font-weight:500;text-transform:none;
+      font-size:var(--fs-pill);letter-spacing:0;color:var(--ink-dim);font-weight:500;text-transform:none;
       min-width:0;text-align:left;transform:none}
     html.skin .cockpit .ctxsegs{display:flex;gap:1.5px}
     html.skin .cockpit .ctxsegs i{width:4px;height:10px;border-radius:1px;background:var(--sunken)}
@@ -1740,11 +1744,14 @@
     html.skin body{grid-template-rows:40px 1fr 40px}
     html.skin .top{height:40px;gap:10px;padding:0 12px;border-bottom:1px solid var(--hairline-soft)}
     html.skin .status.cockpit{height:40px;gap:5px;padding:0 10px;border-top:1px solid var(--hairline)}
-    /* MODEL AND EFFORT ARE READOUTS YOU CAN CLICK, not buttons. They sit beside context and tokens — which are
-       bare text — and giving two of those four a filled pill made the row read as controls interrupted by
-       data. The face comes off; the click, the menu and the focus ring all stay. Mode keeps its pill on
-       purpose: it is the one whose value changes what the next session is ALLOWED to do. */
-    html.skin .cockpit #model-chip,html.skin .cockpit #eff-chip{
+    /* MODE, MODEL AND EFFORT ARE READOUTS YOU CAN CLICK, not buttons. They sit beside context and tokens —
+       which are bare text — and giving some of them a filled pill made the row read as controls interrupted
+       by data. The face comes off all three; the click, the menu and the focus ring all stay.
+       Mode kept its pill until 0.9.13 on the argument that it is the one whose value changes what the next
+       session is ALLOWED to do. The owners looked at the shipped bar and overruled it: one lone filled pill
+       among four bare items reads as a stray control rather than as emphasis, and the mode is already stated
+       in words. Loudness on this bar now belongs only to things that are WRONG, not to things that matter. */
+    html.skin .cockpit #perm-chip,html.skin .cockpit #model-chip,html.skin .cockpit #eff-chip{
       background:none;border-color:transparent;padding:0 5px;color:var(--ink-dim)}
     /* a little air before the readouts, so the two things you CLICK and the three you only READ separate into
        two groups instead of one run-on row */
@@ -1754,14 +1761,20 @@
        geometric: their text renders in a 15px line box (11.5px at normal leading) while the readouts use 13px,
        and the taller box reads as riding higher against its neighbours. Pinning all four to the same 13px line
        box makes the text boxes coincide exactly, which is what puts the glyphs on one line. */
-    html.skin .cockpit #sb-model,html.skin .cockpit #sb-eff,
+    html.skin .cockpit #sb-perm,html.skin .cockpit #sb-model,html.skin .cockpit #sb-eff,
     html.skin .cockpit .ctxlabel,html.skin .cockpit .ctxpct,html.skin .cockpit .tokval{line-height:13px}
     /* …and the chip values must not CLIP that box. .status .s sets overflow:hidden for horizontal ellipsis,
        which also cuts vertically — a 13px line box at 11.5px leaves no room for a descender, so the tail of
        the "g" in "high" was sliced off. These three carry short values that never need ellipsis. */
     html.skin .cockpit #sb-model,html.skin .cockpit #sb-eff,html.skin .cockpit #sb-perm{overflow:visible}
-    html.skin .cockpit #model-chip:hover,html.skin .cockpit #eff-chip:hover{background:none;color:var(--ink)}
-    html.skin .cockpit #model-chip.open,html.skin .cockpit #eff-chip.open{background:none;color:var(--ink)}
+    html.skin .cockpit #perm-chip:hover,html.skin .cockpit #model-chip:hover,html.skin .cockpit #eff-chip:hover{background:none;color:var(--ink)}
+    html.skin .cockpit #perm-chip.open,html.skin .cockpit #model-chip.open,html.skin .cockpit #eff-chip.open{background:none;color:var(--ink)}
+    /* EVEN AIR ACROSS THE THREE READOUTS. Context↔tokens was carried by .trk's 8px gap PLUS 4px of padding on
+       each bar (16px), while tokens↔ring was the row's own 5px gap plus one 4px padding (9px) — so the ring
+       sat visibly tighter to tokens than tokens sat to context. With the per-item padding gone above, both
+       distances are set here and read the same: 12px, and 12px. */
+    html.skin .cockpit>.trk{gap:12px}
+    html.skin .cockpit>#trk-usage{margin-left:7px}   /* 7 + the row's own 5px gap = the same 12 */
 
     /* ── POPOVERS ──────────────────────────────────────────────────────────────────────────────────────────
        The draft's .pop / .pop-h / .row, rule for rule. Note gap:1px between rows and 6px panel padding —

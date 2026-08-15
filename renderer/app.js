@@ -495,8 +495,13 @@ const TOK_HUE = [
   [25e6, [223, 172, 130]],   // 25M — edging toward red
   [35e6, [214, 132, 100]],   // 35M+ — subtle orange-red (cap)
 ];
+// The ink a LIVE readout on the cockpit bar prints in. One definition, because two of them sit side by side:
+// the token count paints it through tokenHue, and the context percentage paints it directly. When those two
+// drifted apart the pair read as one number being bolder than the other, which is a difference that means
+// nothing. The stylesheet's --ink-dim stays the resting colour for the "nothing yet" dash — see repaintTracker.
+const READOUT_INK = '#f6f8fc';
 function tokenHue(n) {
-  if (!(n > 1e6)) return '#f6f8fc';                          // <=1M: plain white
+  if (!(n > 1e6)) return READOUT_INK;                        // <=1M: plain white
   const s = TOK_HUE;
   for (let i = 1; i < s.length; i++) {
     if (n <= s[i][0]) {
@@ -580,12 +585,17 @@ function repaintTracker(t) {
   const pct = t.curCtxPct, bar = $('trk-ctxbar');
   if (typeof pct === 'number') {
     $('trk-ctx').textContent = pct + '%';
+    // Same inline ink the token count gets, for the same reason it gets it: an inline colour outranks the
+    // stylesheet, so with only tokens painting one, the two live values sat at different brightnesses and the
+    // percentage read as the quieter of a pair that are equally true.
+    $('trk-ctx').style.color = READOUT_INK;
     paintCtxSegs(pct);
     bar.classList.toggle('warn', pct >= 70 && pct < 85);
     bar.classList.toggle('crit', pct >= 85);
     bar.title = pct >= 70 ? `context ${pct}% — click to /compact` : 'context window used';
   } else {
-    $('trk-ctx').textContent = '—'; paintCtxSegs(null);
+    $('trk-ctx').textContent = '—'; $('trk-ctx').style.color = '';   // dash resting on --ink-dim, matching the token dash
+    paintCtxSegs(null);
     bar.classList.remove('warn', 'crit'); bar.title = 'context window used';
   }
   $('trk-cost').textContent = '$' + ((t.baseCost === null || t.lastCostUsd == null) ? 0 : Math.max(0, t.lastCostUsd - t.baseCost)).toFixed(2);
@@ -4412,12 +4422,14 @@ function repaintLiveTracker(rec) {
   const pct = rec.curCtxPct, bar = $('trk-ctxbar');
   if (typeof pct === 'number') {
     $('trk-ctx').textContent = pct + '%';
+    $('trk-ctx').style.color = READOUT_INK;                          // same live ink as the local tracker beside it
     paintCtxSegs(pct);
     bar.classList.toggle('warn', pct >= 70 && pct < 85);
     bar.classList.toggle('crit', pct >= 85);
     bar.title = 'host context window used';
   } else {
-    $('trk-ctx').textContent = '—'; paintCtxSegs(null);
+    $('trk-ctx').textContent = '—'; $('trk-ctx').style.color = '';   // and the same resting dash
+    paintCtxSegs(null);
     bar.classList.remove('warn', 'crit'); bar.title = 'host context window used';
   }
   $('trk-cost').textContent = rec.liveCost != null ? rec.liveCost : '$0.00'; $('trk-cost').title = 'host session cost';
