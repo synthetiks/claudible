@@ -1717,8 +1717,13 @@
       display:flex;align-items:center;gap:7px;padding:0;font-family:var(--ui)}
     /* --ink-faint, not --ink-dimmer: the dimmer step is right for a keyboard hint sitting inside an open menu,
        and one step too quiet for a standing label on the shell's own bar, where it reads as switched off. */
+    /* lowercase, not caps. The .1em tracking came with the uppercase micro-label it was set for — caps need
+       the air to stay readable, lowercase does not, and at this size the wide tracking made a lowercase word
+       look spaced out rather than quiet. Dropped to .02em, which keeps a trace of the label feel without the
+       gaps. (The markup still reads CONTEXT / TOKENS; only the rendering is lowercased, so nothing that reads
+       these nodes by text has to change.) */
     html.skin .cockpit .ctxlabel{
-      font-size:var(--fs-pill);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:400}
+      font-size:var(--fs-pill);letter-spacing:.02em;text-transform:lowercase;color:var(--ink-faint);font-weight:400}
     /* min-width:30px + text-align:right on the context value and centre-plus-2px on the tokens value were
        tuned for the old boxed telemetry, and they put each number a different distance from its own label —
        the context dash floated ~28px off the end of its bar while the token value sat centred in a reserved
