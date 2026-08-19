@@ -185,11 +185,20 @@ function claudeArgv(launch, home, effort, permMode, model, permSupported = true)
   //   CLAUDE_MIN_VERSION). Send NOTHING rather than a value its parser rejects: that is what every release
   //   before this one sent, so the session still starts and the user keeps working. Bypass is deliberately
   //   NOT degraded - it never used this flag, so no version can refuse it.
+  //   --allow-dangerously-skip-permissions is CONSENT, not activation: "Enable bypassing all permission checks
+  //   as an option, without it being enabled by default" (claude --help, 2.1.233). Bypass is a session-scoped
+  //   runtime mode -- the CLI carries `setMode:'bypassPermissions' is session-scoped` -- but WITHOUT this flag
+  //   selecting it downgrades ("Permission mode downgraded to default -- bypass required..."). So a session that
+  //   did not launch in bypass could never reach it, at any price short of a restart. Passing it here is what
+  //   lets the perm control drive the mode cycle live (renderer/app.js cyclePermTo). It changes nothing on its
+  //   own: a session still starts in exactly the mode the chip promises.
+  //   NOT added to the bypass branch -- that one already skips every check, so consent is moot there.
+  const allowBypass = permMode === 'bypass' ? [] : ['--allow-dangerously-skip-permissions'];
   const perm = permMode === 'bypass' ? ['--dangerously-skip-permissions', '--add-dir', home]
     : !permSupported ? []
-      : ['acceptEdits', 'plan', 'auto'].includes(permMode) ? ['--permission-mode', permMode]
-        : ['--permission-mode', 'manual'];
-  if (launch.foreign) return ['--resume', launch.id, ...eff, ...mod];                          // sandboxed â€” NEVER perm (RCE guard)
+      : ['acceptEdits', 'plan', 'auto'].includes(permMode) ? ['--permission-mode', permMode, ...allowBypass]
+        : ['--permission-mode', 'manual', ...allowBypass];
+  if (launch.foreign) return ['--resume', launch.id, ...eff, ...mod];                          // sandboxed â€” NEVER perm (RCE guard), and that INCLUDES the consent flag: an untrusted synced transcript must not be able to cycle itself into bypass
   if (launch.mode === 'fresh') return [...perm, ...eff, ...mod];
   return [...perm, '--resume', launch.id, ...eff, ...mod];
 }
@@ -720,18 +729,15 @@ function detectDeps() {
 // so push both thresholds out of reach â†’ resumed sessions open straight into the composer. Layering: our
 // defaults first, then base (real env) OVERRIDES them so an explicit user setting wins, then CLAUDIBLE_TAB is
 // always this tab's runtime id.
-function spawnEnv(runtimeId, base, modelStrategy) {
+function spawnEnv(runtimeId, base) {
   const defaults = {
     CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '2000000000',
     CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '2000000000',
   };
-  // "Plan big, execute small" (Anthropic cookbook pattern, parity with wsl/session.sh): the main session
-  // plans/synthesizes on the user's chosen model; SUBAGENTS are nudged toward Sonnet 5 via the context hook's
-  // delegation text, NOT via a hard env pin. The strategy is a default only and must never override an explicit
-  // model choice: CLAUDE_CODE_SUBAGENT_MODEL was measured (API stamps) overriding explicitly-requested spawn models.
-  if (modelStrategy === 'planBigExecSmall') {
-    defaults.CLAUDIBLE_MODEL_STRATEGY = 'planBigExecSmall';   // read by the context hook for the delegation nudge
-  }
+  // "Plan big, execute small" no longer rides the spawn env: the strategy is real agent definition
+  // files + the plan-big skill, installed by the strategy panel; the CLAUDIBLE_MODEL_STRATEGY var's only
+  // consumer (the context-hook nudge) is deleted. The historical warning stands: CLAUDE_CODE_SUBAGENT_MODEL
+  // was measured overriding explicitly-requested spawn models — never hard-pin it here.
   return Object.assign(defaults, base || process.env, { CLAUDIBLE_TAB: String(runtimeId || 'default') });
 }
 
@@ -760,7 +766,7 @@ function shouldFallbackToFresh(spawnedAtMs, exitedAtMs, code, signal, wasKilled,
 // (the `ptys.get(tabId)?.proc !== proc` guard in main.js's spawnPty depends on that object identity never
 // changing across a fallback). Contract-checked against main.js's spawnPty/respawnPty consumers: onData(cb),
 // onExit(cb), write(data), resize(cols,rows), kill(signal), .pid, .claudibleForeign â€” all present here.
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, model, modelStrategy } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, model } = {}) {
   const pty = ptyInfo(); if (!pty.mod) return null;
   const home = HOME();
   const sdir = sessionDir(ws, home);
@@ -787,7 +793,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   } catch {}
   const launch = pickResumeTarget(session, jsonl, foreign);
   const claude = whichClaude();
-  const env = spawnEnv(runtimeId, undefined, modelStrategy);
+  const env = spawnEnv(runtimeId, undefined);
   // ROUTE EACH TAB'S HOOK OUTPUT BY ENV, NOT BY THE BAKED ARGV. `.claude/settings.json` is WORKSPACE-shared â€”
   // installHooks says so itself â€” but the paths it bakes into those hook commands are PER-GENERATION. So two
   // tabs on one project raced it: the second tab's spawn rewrote the shared settings.json, and the first tab's

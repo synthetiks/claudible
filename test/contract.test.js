@@ -734,16 +734,47 @@ none('renderer: orphanTab is never rendered',
 //     (c) the later ▾-menu flows survive for projects that start private.
 // ---------------------------------------------------------------------------------------------------------
 {
-  none('the New-project modal lost its shared-repo tile', /id="ch-repo" data-kind="repo" role="radio"/.test(HTML) ? [] : ['index.html has no #ch-repo radio tile']);
+  // See the import tile's twin below for why role= is `button` now. Reachability is the rule, not the role.
+  none('the New-project modal lost its shared-repo tile', /id="ch-repo" data-kind="repo" role="button"/.test(HTML) ? [] : ['index.html has no #ch-repo tile']);
   // 3b added a FOURTH kind, 'import' (clone an existing GitHub repo). What this pin protects is unchanged —
   // 'repo' must stay reachable from the modal with its creating-a-private-repo busy text — so the list is
   // matched by membership rather than by exact equality, which would have to be edited for every future kind.
   none('the modal path cannot reach workspaceCreate with kind repo',
     /const WS_KINDS = \[[^\]]*'repo'[^\]]*\]/.test(APP) && /creating private repo on GitHub/.test(APP) ? [] : ['WS_KINDS lost repo (or its busy text is gone)']);
   // Creating shared publishes transcripts from birth — the tile must gate on the same honest disclosure the
-  // ▾-menu flows use (R2). Pinned to the repo branch of createWorkspace, not just any confirm() somewhere.
-  none('the shared tile creates without the transcript-sync consent gate',
-    /wsChoiceKind === 'repo' && !confirm\([\s\S]{0,420}session sync commits your Claude transcripts/.test(APP) ? [] : ['no consent confirm before workspaceCreate(repo)']);
+  // ▾-menu flows use (R2). The gate MOVED when the modal split into two steps: out of a native confirm() and
+  // onto the page, because the surface people click past is the wrong home for the most consequential sentence
+  // in the flow. It was also CORRECTED — the old text said transcripts land in "that private repo", meaning the
+  // code repo, which stopped being true when create-workspace.sh started minting a separate <slug>-sessions
+  // repo and gitignoring .claude/ out of the code one. The old wording made the app sound leakier than it is.
+  //
+  // Same rule, five clauses, all of which must hold — a disclosure nobody must acknowledge is not a gate, and
+  // an acknowledged gate that describes the wrong repo is not a disclosure:
+  //   (a) createWorkspace REFUSES the shared path on an unticked box. Enforced in JS rather than by the disabled
+  //       button alone, because Enter reaches createWorkspace past a disabled button (its own in-flight guard
+  //       exists for that reason).
+  //   (b) that refusal happens BEFORE workspaceCreate is called — asserted by source position, which the old
+  //       confirm()-shaped pin could not express.
+  //   (c) the disclosure is in the markup and says TWO repos, so a revert to the single-repo claim fails here.
+  //   (d) the acknowledgement control exists.
+  //   (e) the button gate exists and the checkbox re-evaluates it — otherwise the charset validator, which sets
+  //       .disabled from the name alone, silently re-enables Create the moment a valid name is typed.
+  {
+    const iAck = APP.indexOf("const ack = $('ws-consent-ok')");
+    const iCreate = APP.indexOf('claudible.workspaceCreate(');
+    none('the shared tile creates without the transcript-sync consent gate',
+      [/wsChoiceKind === 'repo'\) \{[\s\S]{0,240}?ws-consent-ok[\s\S]{0,240}?!ack\.checked[\s\S]{0,240}?return;/.test(APP)
+        ? '' : 'createWorkspace no longer refuses the shared path when the consent box is unticked',
+       (iAck > 0 && iCreate > 0 && iAck < iCreate)
+        ? '' : 'the consent check no longer precedes workspaceCreate — a shared project could be created before it is agreed to',
+       /id="ws-consent"[\s\S]{0,1200}?two private repos/i.test(HTML)
+        ? '' : 'the two-repo disclosure is missing from #ws-consent, or has reverted to the old single-repo wording',
+       /id="ws-consent-ok"/.test(HTML) ? '' : 'no #ws-consent-ok acknowledgement checkbox',
+       /function syncWsCreateGate\(\)[\s\S]{0,400}?btn\.disabled = true/.test(APP)
+        ? '' : 'syncWsCreateGate no longer forces Create disabled while the consent box is unticked',
+       /\$\('ws-consent-ok'\)\.addEventListener\('change'/.test(APP)
+        ? '' : 'the consent checkbox is not wired to re-evaluate the Create button'].filter(Boolean));
+  }
   // ^\s*repo\)\s*$ = the actual case label. A bare /repo\)/ was satisfied by the header comment
   // "kind (local|repo)," — the comment-blindness trap that has now bitten this repo's guards three times.
   none('the repo-creation plumbing was garbage-collected (invites/discovery/upgrade/the tile all need it)',
@@ -1742,20 +1773,29 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 // ---------------------------------------------------------------------------------------------------------
 {
   const flat = HTML.replace(/\s*\n\s*/g, '');
-  none('the info "i" is back to owning a row instead of riding the button',
-    /<div class="btnwrap">[\s\S]*?id="share-btn"[\s\S]*?id="share-info"[\s\S]*?<\/div>/.test(HTML)
-      && /\.btnwrap \.ws-info\{[^}]*position:absolute/.test(flat)
-      ? [] : ['#share-info is not overlaying #share-btn inside .btnwrap']);
-  none('…and it centres with a transform (button:active would clobber it → the press jiggles)',
-    /\.btnwrap \.ws-info\{[^}]*top:0;bottom:0;margin:auto 0/.test(flat) && !/\.btnwrap \.ws-info\{[^}]*translate/.test(flat)
-      ? [] : ['the overlaid "i" is not centred by top/bottom + margin:auto']);
-  // MEASURED: at the sidebar clamp floor (228px → 204px button) the label is ~124px of MONOSPACE. Symmetric
-  // padding did NOT fix the reported clash — once content exceeds the padding box it overflows both ways and
-  // lands on the icon. The reserve has to be on the right (the icon's side), with the tracking trimmed to buy
-  // back width, plus an ellipsis guard because monospace metrics differ per machine.
-  none('the button reserves no room for the overlaid "i" (the label collides with it)',
-    /\.share-btn\{[^}]*padding-right:38px/.test(flat) && /\.share-btn\{[^}]*letter-spacing:\.02em/.test(flat)
-      ? [] : ['no right-side reserve for the "i", or the width-saving tracking was reverted']);
+  // OWNER REVERSAL 2026-08-19. The three pins that used to live here guarded the OPPOSITE layout: the "i" as a
+  // sibling absolutely positioned over the button's right rim, with a 38px right-side reserve so the label could
+  // not collide with it. That geometry centred icon+label in the full box and then hung the badge off the rim,
+  // so the three read as one cluster sitting left of centre — the owner's complaint. The badge is now the
+  // button's last flex child and the box is symmetric, which centres all three at any label width with no
+  // measured offsets to re-derive. The overlay was retired deliberately; it was not lost in a refactor.
+  // Adjacency, not "appears somewhere after": a lazy [\s\S]*? would happily match a share-info that had been
+  // moved back OUTSIDE the button, because it would just run on to the next </button> in the file.
+  none('the "i" fell back out of the button into its own element (the cluster goes off-centre again)',
+    /id="sb-label">[^<]*<\/span><span class="ws-info" id="share-info"[^>]*>i<\/span><\/button>/.test(HTML)
+      ? [] : ['#share-info is not the last child INSIDE #share-btn, directly after #sb-label']);
+  none('…and it is back to being a <button> (a button may not contain a button)',
+    /<span class="ws-info" id="share-info" role="button" tabindex="0"/.test(HTML)
+      ? [] : ['#share-info is not a <span role="button" tabindex="0">']);
+  none('…so it needs its own keyboard activation, and both handlers must stop the bubble to the share action',
+    /\$\('share-info'\)[\s\S]{0,600}?addEventListener\('keydown'[\s\S]{0,300}?stopPropagation\(\)[\s\S]{0,120}?openShareInfo\(\)/.test(APP)
+      && /\$\('share-info'\)[\s\S]{0,400}?addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\)/.test(APP)
+      ? [] : ['the share-info badge lost its keydown activation or a stopPropagation guard']);
+  // The reserve is gone WITH the overlay: an uneven box would push the cluster off centre, which is the whole
+  // defect this replaced. The ellipsis guard below stays — monospace metrics still differ per machine.
+  none('an asymmetric padding reserve came back (it re-creates the off-centre cluster)',
+    /\.share-btn\{[^}]*padding-left:14px;padding-right:14px/.test(flat) && /\.share-btn\{[^}]*letter-spacing:\.02em/.test(flat)
+      ? [] : ['.share-btn padding is not symmetric, or the width-saving tracking was reverted']);
   none('…and the label cannot ellipsize, so a wider mono face would collide again',
     /\.sb-label\{[^}]*text-overflow:ellipsis/.test(flat) ? [] : ['.sb-label has no ellipsis guard']);
   // THE ONE THAT MATTERS: an unscoped rest style silently kills the red stop state.
@@ -2829,8 +2869,11 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 //   invite and discovery would keep reconciling it.
 // ---------------------------------------------------------------------------------------------------------
 {
+  // role= went from radio to button when the modal split in two: the tiles stopped SELECTING a value some later
+  // control acts on and became the action itself. What this pin protects — that the import kind is reachable
+  // from the modal — is unchanged, so it moved address rather than being relaxed.
   none('the New-project modal lost its import tile',
-    /id="ch-import" data-kind="import" role="radio"/.test(HTML) ? [] : ['index.html has no #ch-import radio tile']);
+    /id="ch-import" data-kind="import" role="button"/.test(HTML) ? [] : ['index.html has no #ch-import tile']);
   none('…or the owner/repo field it needs',
     /id="ws-repo-in"/.test(HTML) ? [] : ['no #ws-repo-in input']);
   none('WS_KINDS cannot reach the import path',
@@ -3719,38 +3762,143 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     /roster-more|roster-pop/.test(HTML) || /roster-more|roster-pop|computeRosterOverflow/.test(APP)
       ? ['a roster-more/roster-pop/computeRosterOverflow reference is back — the strip should scroll, not fold']
       : []);
-  none('"Group Chat" is back instead of "Chat" (C-5.9 — it never fit its spot)',
-    /<span class="chat-title">Group Chat<\/span>/.test(HTML)
-      ? ['index.html still has the old "Group Chat" label']
-      : /<span class="chat-title">Chat<\/span>/.test(HTML) ? [] : ['no <span class="chat-title">Chat</span> in index.html']);
-  none('guest.html still says "Group Chat" instead of "Chat" (C-5.9 — the browser guest page must match the host label)',
-    /<span>Group Chat<\/span>/.test(GUEST_HTML)
-      ? ['guest.html still has the old "Group Chat" label']
-      : /<span>Chat<\/span>/.test(GUEST_HTML) ? [] : ['no <span>Chat</span> in guest.html']);
+  // 2026-08-15, owners: the header is "Live Session" with a live dot, not "Chat". The panel only exists while
+  // sharing (`.body.sharing .chat`) and the browser guest page only exists inside a live session, so on both
+  // sides the header names what the panel IS. "Group Chat" — the label the 2026-08-06 note removed for not
+  // fitting its spot — must still never come back, and the two pages must still agree with each other.
+  none('the chat header is not "Live" with its live dot (C-5.9, owners 2026-08-15)',
+    [/Group Chat/.test(HTML) ? 'index.html has the long-removed "Group Chat" label back' : '',
+     /<span class="chat-title" id="chat-title"><span class="live-dot" id="live-dot"><\/span><span id="live-txt">Live<\/span><\/span>/.test(HTML)
+       ? '' : 'no <span class="chat-title" id="chat-title"> carrying #live-dot + #live-txt "Live" in index.html'].filter(Boolean));
+  none('guest.html\'s chat header no longer matches the host label (C-5.9 — the two pages must say the same thing)',
+    [/Group Chat/.test(GUEST_HTML) ? 'guest.html has the long-removed "Group Chat" label back' : '',
+     /<span class="chat-title"><span class="live-dot"><\/span><span>Live<\/span><\/span>/.test(GUEST_HTML)
+       ? '' : 'no <span class="chat-title"> carrying a .live-dot + "Live" in guest.html'].filter(Boolean));
+  // the dot is not decoration: it is the only carrier of the two alarm states the deleted live bar used to
+  // own. Losing either rule loses a warning, not a colour — a host would be told "Live Session" while their
+  // guests are frozen out, or lose the way back to a session they left running.
+  none('the chat header lost the paused/elsewhere alarm states the live bar used to carry (C-5.2/C-5.9)',
+    [/html\.skin \.chat-title\.paused \.live-dot\{[^}]*var\(--warn\)/.test(HTML) ? '' : 'no html.skin .chat-title.paused .live-dot rule painting --warn — a frozen mirror would paint calm green',
+     /liveTxt\.textContent = paused \? 'Paused' : 'Live'/.test(APP) ? '' : 'the header no longer says "Paused" while the mirror is frozen',
+     /title\.classList\.toggle\('elsewhere', elsewhere && !paused\)/.test(APP) ? '' : 'the header no longer marks the browsing-elsewhere state',
+     /if \(!_ct\.classList\.contains\('elsewhere'\)\) return;/.test(APP) ? '' : 'the header is no longer the way back to a live session left running elsewhere'].filter(Boolean));
+  // the bar itself must stay gone — a resurrected #livebar would put the roster back above the terminal and
+  // re-split the co-drive warning across two homes.
+  none('the live bar above the terminal is back (owners removed it 2026-08-15)',
+    [/id="livebar"/.test(HTML) ? 'index.html has a #livebar element again' : '',
+     /id="live-members"/.test(HTML) ? 'index.html has a #live-members roster above the terminal again' : ''].filter(Boolean));
   // the HOST() label function: defined once per file (renderer + browser guest page each need their own copy),
   // and actually used by BOTH the roster (renderRoster's "you" chip + the host's roster pill) and chat (the
   // host's own outgoing "who", and every received host chat line) — a partial wire-up would still leave the
   // exact mismatch the owners called out: bare name in the roster, "HOST" only in chat.
+  // 2026-08-15, owners: sentence case — "Host (name)" / "Host". The redesign's chat is a quiet mono column and
+  // an all-caps label was the loudest thing in it. The RULE is untouched; only the casing moved.
   none('app.js lost the HOST() label function (C-5.9)',
-    /function HOST\(name\) \{ const n = String\(name \|\| ''\)\.trim\(\); return n \? `HOST \(\$\{n\}\)` : 'HOST'; \}/.test(APP)
-      ? [] : ['app.js no longer defines function HOST(name) with the "HOST (name)" / "HOST" format']);
+    /function HOST\(name\) \{ const n = String\(name \|\| ''\)\.trim\(\); return n \? `Host \(\$\{n\}\)` : 'Host'; \}/.test(APP)
+      ? [] : ['app.js no longer defines function HOST(name) with the "Host (name)" / "Host" format']);
   none('guest.js lost its own HOST() label function (C-5.9 — browser page has no shared module with the renderer)',
-    /function HOST\(name\) \{ var n = String\(name \|\| ''\)\.trim\(\); return n \? \('HOST \(' \+ n \+ '\)'\) : 'HOST'; \}/.test(GUEST_JS)
-      ? [] : ['guest.js no longer defines function HOST(name) with the "HOST (name)" / "HOST" format']);
+    /function HOST\(name\) \{ var n = String\(name \|\| ''\)\.trim\(\); return n \? \('Host \(' \+ n \+ '\)'\) : 'Host'; \}/.test(GUEST_JS)
+      ? [] : ['guest.js no longer defines function HOST(name) with the "Host (name)" / "Host" format']);
+  // ONE SOURCE FOR THE HOST'S NAME. This is the pin the "top bar says Host (crazy), chat says Host (Host)"
+  // report earned. hostDisplayName was declared as the literal 'Host' and only assigned in doStartSharing, a
+  // path a collab share never runs — so the roster read the real username and the chat read a placeholder
+  // that looks exactly like a real name. advertisedHostName() returns the same expression ensureTunnel puts
+  // on the wire, and returns EMPTY rather than a placeholder, so HOST() falls through to plain "Host".
+  none('the host name is being read from two different sources again (C-5.9 — this is the "Host (Host)" bug)',
+    [/function advertisedHostName\(\) \{ return collabName\(\) \|\| hostDisplayName \|\| ''; \}/.test(APP)
+       ? '' : 'advertisedHostName() is gone or no longer mirrors what ensureTunnel advertises',
+     /^let hostDisplayName = '';$/m.test(APP)
+       ? '' : "hostDisplayName is initialised to something other than '' — a placeholder that reads like a name is the whole defect",
+     /hostDisplayName = typed \|\| collabName\(\) \|\| '';/.test(APP)
+       ? '' : "doStartSharing reintroduced a placeholder fallback for hostDisplayName",
+     (APP.match(/HOST\(hostDisplayName\)/g) || []).length === 0
+       ? '' : 'a label reads hostDisplayName directly again instead of advertisedHostName()'].filter(Boolean));
   none('renderRoster stopped labeling the host with HOST() (C-5.9)',
-    [/you\.appendChild\(document\.createTextNode\(hosting \? HOST\(youName\(\)\) : youName\(\)\)\);/.test(APP)
-       ? '' : 'the "you" chip no longer wraps HOST() when you are hosting',
+    [/you\.appendChild\(document\.createTextNode\(hosting \? HOST\(advertisedHostName\(\)\) : youName\(\)\)\);/.test(APP)
+       ? '' : 'the "you" chip no longer wraps HOST(advertisedHostName()) when you are hosting',
      /m\.appendChild\(d\); m\.appendChild\(document\.createTextNode\(g\.host \? HOST\(g\.name\) : g\.name\)\);/.test(APP)
        ? '' : 'the roster member loop no longer wraps HOST() around a host entry\'s name'].filter(Boolean));
-  none('the host\'s own outgoing chat message stopped using HOST() (C-5.9)',
-    /who: HOST\(hostDisplayName\)/.test(APP)
-      ? [] : ['sendChat no longer labels your own host-share message with HOST(hostDisplayName)']);
+  // resolved at PAINT time, not frozen into the buffer at send time: a label baked into a message composed
+  // before the name resolved could never be corrected by a repaint, which is how "Host (Host)" survived.
+  none('the host\'s own outgoing chat message stopped resolving its label at paint time (C-5.9)',
+    [/chatAppend\(hostChat, \{ host: true, text, mine: true \}, true\)/.test(APP)
+       ? '' : 'sendChat no longer marks your own host-share message with host:true for late resolution',
+     /const whoText = m\.host \? HOST\(m\.hostName != null \? m\.hostName : advertisedHostName\(\)\) : m\.who;/.test(APP)
+       ? '' : 'renderChatLog no longer resolves a host message\'s label at paint time'].filter(Boolean));
   none('a joined tab\'s received host chat stopped using HOST() (C-5.9)',
-    /who: p\.role === 'host' \? HOST\(p\.name \|\| rec\.hostName\) : \(p\.name \|\| 'viewer'\)/.test(APP)
-      ? [] : ['onLiveChat no longer wraps a host-authored message\'s "who" in HOST()']);
+    /p\.role === 'host' \? \{ host: true, hostName: p\.name \|\| rec\.hostName \|\| '', text: p\.text, mine: false \}/.test(APP)
+      ? [] : ['onLiveChat no longer carries the HOST\'s own advertised name for late resolution — resolving it from OUR name would label a different person']);
   none('guest.js\'s chat rendering stopped using HOST() for host messages (C-5.9)',
-    /addChat\(HOST\(msg\.name \|\| hostName\), msg\.text, false\);/.test(GUEST_JS)
+    /addChat\(HOST\(msg\.name \|\| hostName\), msg\.text, false, null, true\);/.test(GUEST_JS)
       ? [] : ['guest.js\'s chat handler no longer wraps a host message\'s name in HOST()']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// 99b. WHO SAID THIS — one colour per person (owners, 2026-08-15). A live chat gives each author a hue: it
+//   inks their name and tints the ground behind their messages, so the eye groups a speaker without reading a
+//   word. Two properties are load-bearing and neither is taste.
+//   (1) THE SAME PERSON IS THE SAME COLOUR ON BOTH SIDES. The renderer and the browser guest page each carry
+//       their own copy of the palette and the slot rule (no shared module), so they are pinned against each
+//       other — a drift means the host and the guest see one conversation in two different colour schemes.
+//   (2) THE NAME STAYS READABLE. The hue inks the sender name, which is the ONLY identity cue on a message
+//       (they are not bubbles — no face, no side, no tail). "Subtle" is a constraint on the TINT, never a
+//       licence to dim the text: --ink-name was raised out of a ~2:1 hole for exactly this reason and these
+//       eight must not walk it back. The tint is 6% and the ink is the full value; those are different jobs.
+//   The untinted path is live, not decorative: an author that cannot be keyed ships with no data-tint and
+//   keeps --ink-name, which is why that token is still the default ink for .who rather than dead code.
+//   RE-MEASURED 2026-08-15 after the owners toned the names down to 30% hue over the neutral. 8 colours ×
+//   4 themes = 32 cells, each ink against the ground it actually sits on (that theme's --chrome with the
+//   author's own 6% tint composited over it, not bare --chrome):
+//       slot           dark  graphite  midnight  cockpit
+//       1 host/orange  4.88    4.83      4.85     4.88
+//       2 blue         5.33    5.27      5.33     5.21
+//       3 green        5.58    5.51      5.57     5.46
+//       4 purple       5.21    5.15      5.20     5.13
+//       5 cyan         5.64    5.57      5.64     5.50
+//       6 pink         5.27    5.21      5.24     5.24
+//       7 amber        5.64    5.56      5.59     5.59
+//       8 teal         5.59    5.52      5.58     5.46
+//   Worst cell 4.83:1, floor 4.5:1. The toning is real and not cosmetic: the host's orange drops from 60% to
+//   16% chroma, i.e. 73% less colourful, which is what was asked for. Mixing TOWARD --ink-name rather than
+//   dimming is what keeps the floor — the eight land within a hair of --ink-name's own 4.93-5.02 instead of
+//   below it. Guest page, same rule over its own --ink-name: worst 4.77:1.
+//   If the 30% or any hue is ever retuned, RE-MEASURE. The orange is the tightest cell and it is the host's,
+//   so it is the one that goes under first.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const WHO = ['#d97757', '#6fa8f5', '#62c98d', '#b48cf0', '#56c8d8', '#ef85b5', '#e0b158', '#55c9b0'];
+  none('the 8 author colours are missing or have drifted apart between the two pages (owners 2026-08-15)',
+    WHO.flatMap((hex, i) => {
+      const n = i + 1;
+      return [new RegExp('--who-' + n + ':' + hex + ';').test(HTML) ? '' : `--who-${n} is not ${hex} in index.html`,
+              new RegExp('--who-' + n + ':' + hex + ';').test(GUEST_HTML) ? '' : `--who-${n} is not ${hex} in guest.html — the guest page would colour the same person differently`];
+    }).filter(Boolean));
+  none('the host is no longer always the first author slot (owners: host orange, then guests in join order)',
+    [/function tintFor\(name, isHost\) \{\s*\n\s*if \(isHost\) return 1;/.test(APP) ? '' : 'app.js tintFor no longer pins the host to slot 1',
+     /function tintFor\(name, isHost\) \{\s*\n\s*if \(isHost\) return 1;/.test(GUEST_JS) ? '' : 'guest.js tintFor no longer pins the host to slot 1'].filter(Boolean));
+  // keyed case-INSENSITIVELY, because the share server dedups names that way (its nameTaken/eqCI). Without
+  // this, "MK" and "mk" are one person on the wire and two colours on screen.
+  none('author colours stopped being keyed case-insensitively (one person would get two colours)',
+    [/authorTints\.get\(k\)/.test(APP) && /String\(name \|\| ''\)\.trim\(\)\.toLowerCase\(\)/.test(APP) ? '' : 'app.js tintFor no longer lower-cases its key',
+     /String\(name \|\| ''\)\.trim\(\)\.toLowerCase\(\)/.test(GUEST_JS) ? '' : 'guest.js tintFor no longer lower-cases its key'].filter(Boolean));
+  // the tint is a GROUND, not a face. 6% over --chrome is a shift you feel and cannot name; a bigger number
+  // is what turns a two-person chat into a colour chart, which is the thing the owners asked against.
+  none('the message tint stopped being subtle (owners: a visual cue, not a circus)',
+    [/html\.skin \.chat-msg\[data-tint\]\{[^}]*color-mix\(in srgb,var\(--who-tint\) 6%,transparent\)/.test(HTML)
+       ? '' : 'the renderer message tint is no longer 6% of the author hue',
+     /\.chat-msg\.them\[data-tint\]\{background:color-mix\(in srgb,var\(--who-tint\) 8%,#14171c\)/.test(GUEST_HTML)
+       ? '' : 'the guest page message tint is no longer 8% of the author hue over its bubble'].filter(Boolean));
+  // the name takes a TOUCH of the hue over the neutral ink — 30%, owners 2026-08-15: at full strength it read
+  // as a colour chart rather than a cue, and the name's job is to say who, quietly. Mixing toward the neutral
+  // rather than dimming is what keeps the contrast the sender line was raised to. --ink-name remains the
+  // default for an unkeyed author — the fallback that keeps that token honest rather than something the tint
+  // quietly replaced. If the 30% is ever changed, re-measure: the mix is what holds the floor.
+  none('the sender name lost its author tint, or --ink-name stopped being the real fallback',
+    [/html\.skin \.chat-msg \.who\{[^}]*color:var\(--ink-name\)/.test(HTML) ? '' : '.who no longer defaults to --ink-name for an unkeyed author',
+     /html\.skin \.chat-msg\[data-tint\] \.who\{color:color-mix\(in srgb,var\(--who-tint\) 30%,var\(--ink-name\)\)\}/.test(HTML) ? '' : '.who no longer takes 30% of the author hue over --ink-name',
+     /\.chat-msg\[data-tint\] \.who\{color:color-mix\(in srgb,var\(--who-tint\) 30%,var\(--ink-name\)\)\}/.test(GUEST_HTML) ? '' : 'guest.html .who no longer takes 30% of the author hue over its neutral ink',
+     /--ink-name:#9a9086;/.test(GUEST_HTML) ? '' : 'guest.html lost its own --ink-name — it would fall back to --ink-faint, which measured 3.52:1 on the message bubbles (below the readable floor for the only line that says who wrote something)',
+     /\.chat-msg \.who\{[^}]*color:var\(--ink-name\)/.test(GUEST_HTML) ? '' : 'guest.html .who no longer defaults to --ink-name'].filter(Boolean));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -4173,27 +4321,48 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 // 110. C-5.2 — THE LOUD CO-DRIVE WARNING MUST NOT VANISH ONCE SHARING STARTS. Before this, "Co-drive is on —
 //   an approved guest can run commands on your computer, as you" only ever painted in the pre-share dialog
 //   (renderShareWarn) and disappeared the instant a share actually went live — exactly when it matters most.
-//   Now the live bar (#livebar, the same strip that shows who's here) carries a persistent #codrive-badge
-//   whenever the RUNNING share's real served mode is co-drive: lastShareReadOnly for a share we're hosting
-//   (same truth source renderShareWarn reads once locked — B14's whole point, the #share-ro checkbox can lie
-//   about what's actually being served) or the joined tab's own liveReadOnly (stamped from the host's
-//   onLiveHello) for a session we joined. Never the checkbox. Gone the instant either flips to view-only,
-//   the tunnel drops, or the share ends.
+//   Now the CHAT HEADER carries a persistent #codrive-badge whenever the RUNNING share's real served mode is
+//   co-drive: lastShareReadOnly for a share we're hosting (same truth source renderShareWarn reads once locked
+//   — B14's whole point, the #share-ro checkbox can lie about what's actually being served) or the joined
+//   tab's own liveReadOnly (stamped from the host's onLiveHello) for a session we joined. Never the checkbox.
+//   Gone the instant either flips to view-only, the tunnel drops, or the share ends.
+//   2026-08-15: the badge started in the live bar above the terminal, moved to the chat head when the owners
+//   deleted that bar, and now lives in the TOP BAR's live flag — because a host with the chat panel collapsed
+//   never looked at the chat head either. C-5.2 does not care where the warning lives, only that it is
+//   standing while co-drive is; every rule below is the same rule at the newest address.
 // ---------------------------------------------------------------------------------------------------------
 {
   // (a) the badge element exists, starts hidden, and carries the exact warning sentence as its tooltip.
   none('index.html lost the #codrive-badge element (C-5.2)',
-    [/id="livebar"/.test(HTML) ? '' : 'no #livebar element to anchor it in',
+    [/class="liveflag" id="liveflag"/.test(HTML) ? '' : 'no #liveflag element to anchor it in',
      /class="codrive-badge" id="codrive-badge" style="display:none"/.test(HTML) ? '' : '#codrive-badge missing, or no longer starts hidden',
      /id="codrive-badge"[^>]*title="Co-drive is on — an approved guest can run commands on your computer, as you\./.test(HTML) ? '' : '#codrive-badge tooltip no longer carries the full warning sentence'].filter(Boolean));
-  none('#codrive-badge lives outside #live-members (would get wiped by every roster repaint)',
+  // it must sit inside the TOP BAR's flag, which nothing rebuilds — not in #crumb, #chat-roster or #chat-log,
+  // all of which are wiped by textContent=''/innerHTML='' on every repaint. That was the original reason it sat
+  // outside the roster and the reason survives every move.
+  none('#codrive-badge is not inside the top-bar live flag (a repainted container would wipe it)',
     (() => {
-      const bar = (HTML.match(/<div class="livebar" id="livebar"[\s\S]*?<\/div>/) || [''])[0];
-      const badgeIdx = bar.indexOf('id="codrive-badge"');
-      const membersIdx = bar.indexOf('id="live-members"');
-      return (badgeIdx !== -1 && membersIdx !== -1 && badgeIdx < membersIdx) ? [] : ['#codrive-badge is not a sibling of #live-members inside #livebar, ahead of it'];
+      const flag = (HTML.match(/<span class="liveflag" id="liveflag"[\s\S]*?<\/span>\s*\n\s*<\/span>/) || [''])[0];
+      return flag.indexOf('id="codrive-badge"') !== -1 ? [] : ['#codrive-badge is not inside #liveflag — check it did not drift into #crumb, #chat-roster or #chat-log, which are wiped on every repaint'];
     })());
-  // (b) the paint helper exists, and toggles the element's display — the only thing renderLiveBar is allowed
+  // (a2) the flag is only up while something is actually live, escalates as a WHOLE when co-drive is on (a
+  //   host reading the bar from across the room must not have to parse a word to tell the two apart), and the
+  //   escalation is driven by the same helper as the chip — never a second, drift-prone decision.
+  none('the top-bar live flag stopped tracking the live state (owners 2026-08-15)',
+    [/const anyLive = liveTab \|\| collabLive;\s*\n\s*flag\.style\.display = anyLive \? '' : 'none';/.test(APP)
+       ? '' : 'the flag no longer shows exactly while a session is live (it must stay up while the host browses elsewhere — that is when a chat-panel-only signal is invisible)',
+     /const f = \$\('liveflag'\); if \(f\) f\.classList\.toggle\('codrive', !!show\);/.test(APP)
+       ? '' : 'the flag no longer escalates from the same paintCoDriveBadge call as the chip — two decisions would drift',
+     /html\.skin \.liveflag\.codrive\{[^}]*var\(--live\)/.test(HTML)
+       ? '' : 'html.skin .liveflag.codrive no longer repaints the flag in the danger ink'].filter(Boolean));
+  // (a3) the GUEST is told the same fact from the same value: exactly one of read-only / co-drive is visible,
+  //   both branches driven by the server's msg.readOnly rather than any local guess.
+  none('the browser guest is no longer told when co-drive is on (C-5.2, guest half)',
+    [/<span class="pill codrive" id="codrive" style="display:none" title="Co-drive is on — what you type runs on the host's computer, as them\."/.test(GUEST_HTML)
+       ? '' : 'guest.html lost the #codrive pill or its warning tooltip',
+     /\$\('ro'\)\.style\.display = readOnly \? '' : 'none';\s*\n\s*\$\('codrive'\)\.style\.display = readOnly \? 'none' : '';/.test(GUEST_JS)
+       ? '' : 'the guest page no longer branches both pills off the same server-sent readOnly value'].filter(Boolean));
+  // (b) the paint helper exists, and toggles the element's display — the only thing renderLiveState is allowed
   //   to drive it with.
   none('paintCoDriveBadge is gone from app.js (C-5.2)',
     /function paintCoDriveBadge\(show\) \{\s*\n\s*const b = \$\('codrive-badge'\); if \(b\) b\.style\.display = show \? '' : 'none';/.test(APP)
@@ -4201,7 +4370,7 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
   // (c) the HOST path reads lastShareReadOnly (the running share's real mode), gated on tunnelUp so a dropped
   //   tunnel can't keep flashing a warning for a share nobody can actually reach — and never reads the
   //   #share-ro checkbox.
-  none('renderLiveBar\'s host branch stopped keying the badge off lastShareReadOnly (C-5.2)',
+  none('renderLiveState\'s host branch stopped keying the badge off lastShareReadOnly (C-5.2)',
     (APP.match(/tunnelUp && lastShareReadOnly === false/g) || []).length >= 2
       ? [] : ['fewer than 2 sites gate the badge on tunnelUp && lastShareReadOnly === false (the shared-tab view + the "browsing elsewhere" reminder)']);
   none('the co-drive badge reads the #share-ro checkbox instead of the real served mode (C-5.2 regressed)',
@@ -4209,27 +4378,46 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
       ? ["a paintCoDriveBadge(...) call reads #share-ro directly"] : []);
   // (d) the GUEST path reads the joined tab's own liveReadOnly (stamped from the host's hello), not any local
   //   assumption, and excludes a paused/dead tab (C-5.6: nothing a guest sends changes anything while paused).
-  none('renderLiveBar\'s joined-tab branch stopped keying the badge off the real liveReadOnly (C-5.2)',
+  none('renderLiveState\'s joined-tab branch stopped keying the badge off the real liveReadOnly (C-5.2)',
     /paintCoDriveBadge\(liveTab \? \(t\.liveReadOnly === false && t\.liveState !== 'paused' && !LIVE_DEAD\.has\(t\.liveState \|\| ''\)\) : \(tunnelUp && lastShareReadOnly === false\)\)/.test(APP)
-      ? [] : ['the visible-bar branch no longer branches liveTab vs. host with the exact real-mode conditions']);
-  // (e) the bar-hidden early return explicitly clears the badge too — otherwise a tab switch away from any
-  //   live context could leave a stale badge lit with no bar around it.
-  none('the livebar-hidden early return stopped clearing the badge (C-5.2)',
-    /if \(!\(collabLive && onSharedTab\) && !liveTab\) \{ paintCoDriveBadge\(false\); bar\.style\.display = 'none'; return; \}/.test(APP)
-      ? [] : ['the hidden-bar branch no longer calls paintCoDriveBadge(false) before returning']);
-  // (f) a host who steps away mid-share still sees it: the "elsewhere" reminder bar paints the badge too, not
-  //   just the calm "still running" note — browsing away doesn't pause co-drive.
-  none('the "browsing elsewhere" reminder bar stopped painting the badge (C-5.2)',
-    /if \(!liveTab && collabLive && !onSharedTab && sharedSessionId\) \{\s*\n\s*bar\.style\.display = 'flex'; bar\.classList\.add\('elsewhere'\);\s*\n\s*[\s\S]{0,220}?paintCoDriveBadge\(tunnelUp && lastShareReadOnly === false\);/.test(APP)
-      ? [] : ['the elsewhere-branch no longer paints the badge right after showing the reminder bar']);
-  // (g) a host-side pause repaints the bar too, so the badge can't outlive a pause taking effect while the
+      ? [] : ['the live branch no longer branches liveTab vs. host with the exact real-mode conditions']);
+  // (e) the not-live early return explicitly clears the badge — otherwise a tab switch away from any live
+  //   context could leave a stale badge lit in a header that is no longer describing a live session.
+  none('the not-live early return stopped clearing the badge (C-5.2)',
+    /if \(!\(collabLive && onSharedTab\) && !liveTab\) \{ paintCoDriveBadge\(false\); return; \}/.test(APP)
+      ? [] : ['the not-live branch no longer calls paintCoDriveBadge(false) before returning']);
+  // (f) a host who steps away mid-share still sees it: the "elsewhere" state paints the badge too, not just
+  //   the calm "still running" tooltip — browsing away doesn't pause co-drive.
+  none('the "browsing elsewhere" state stopped painting the badge (C-5.2)',
+    /if \(elsewhere && !paused\) \{[\s\S]{0,600}?paintCoDriveBadge\(tunnelUp && lastShareReadOnly === false\);\s*\n\s*return;/.test(APP)
+      ? [] : ['the elsewhere branch no longer paints the badge before returning']);
+  // (g) a host-side pause repaints the header too, so the badge can't outlive a pause taking effect while the
   //   shared tab is the one on screen.
-  none('onLivePaused stopped repainting the live bar for the active tab (C-5.2)',
-    /claudible\.onLivePaused\(\(p\) => \{ const rec = tabs\.get\(p\.tabId\); if \(rec && rec\.kind === 'live'\) \{ setLiveState\(rec, p\.paused \? 'paused' : 'live'\); if \(p\.tabId === activeTabId\) renderLiveBar\(\); \} \}\);/.test(APP)
-      ? [] : ['onLivePaused no longer calls renderLiveBar() for the active tab']);
+  none('onLivePaused stopped repainting the live state for the active tab (C-5.2)',
+    /claudible\.onLivePaused\(\(p\) => \{ const rec = tabs\.get\(p\.tabId\); if \(rec && rec\.kind === 'live'\) \{ setLiveState\(rec, p\.paused \? 'paused' : 'live'\); if \(p\.tabId === activeTabId\) renderLiveState\(\); \} \}\);/.test(APP)
+      ? [] : ['onLivePaused no longer calls renderLiveState() for the active tab']);
   // (h) styling: red, matching the existing danger vocabulary (var(--live)) rather than an ad-hoc color.
+  //   ANCHORED ON THE RULE THAT ACTUALLY PAINTS. `class="skin"` is hardcoded and permanent on <html>,
+  //   so `html.skin .codrive-badge` always outranks the bare `.codrive-badge` rule — a pin anchored on the
+  //   bare one passed with the effective rule DELETED and failed only when the dead one was, which is worse
+  //   than no pin at all: it converts an unguarded safety control into one everybody believes is guarded.
+  //   Revert-tested both ways when it was rewritten.
   none('.codrive-badge lost its red (var(--live)) styling (C-5.2)',
-    /\.codrive-badge\{[^}]*background:var\(--live\)/.test(HTML) ? [] : ['.codrive-badge no longer uses var(--live) as its background']);
+    (() => {
+      // OWNER PASS: the badge's BORDER and FILL were removed on purpose — inside the (now also frameless) live
+      // flag they were a box within a box. So this pin no longer asks for a frame. It asks for what actually
+      // carries the warning now, and it asks for MORE of it than before, because with the chrome gone the ink
+      // is the only signal left: the badge's own red ink and weight, AND the whole flag escalating to red ink
+      // with a red dot. Deleting the assertions instead of moving them would have quietly unguarded C-5.2.
+      const rule = (HTML.match(/html\.skin \.codrive-badge\{[\s\S]*?\}/) || [''])[0];
+      if (!rule) return ['no html.skin .codrive-badge rule — the badge has no effective styling at all'];
+      const flag = (HTML.match(/html\.skin \.liveflag\.codrive\{[\s\S]*?\}/) || [''])[0];
+      const dot = (HTML.match(/html\.skin \.liveflag\.codrive \.live-dot\{[\s\S]*?\}/) || [''])[0];
+      return [/color:[^;]*var\(--live\)/.test(rule) ? '' : 'the effective rule no longer inks the label from --live',
+              /font-weight:7\d\d/.test(rule) ? '' : 'the effective rule dropped below the 700 weight that lets the chip be found without a glow',
+              flag && /color:[^;]*var\(--live\)/.test(flag) ? '' : 'the live flag no longer escalates its INK to --live for co-drive — with the frame gone that ink is the escalation',
+              dot && /background:var\(--live\)/.test(dot) ? '' : 'the live dot no longer turns --live for co-drive'].filter(Boolean);
+    })());
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -4680,15 +4868,138 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 // ---------------------------------------------------------------------------------------------------------
 {
   // (reinstated with the fix/modelstrategy reapply; renumbering dropped — the checksums branch claims 114/115)
-  none('main.js: modelStrategyNow no longer defaults OFF (must require exact opt-in "planBigExecSmall")',
-    /function modelStrategyNow\(\) \{ return registry\.modelStrategy === 'planBigExecSmall' \? 'planBigExecSmall' : 'off'; \}/.test(MAIN)
-      ? [] : ['modelStrategyNow does not gate on an explicit planBigExecSmall opt-in']);
+  none('main.js: modelStrategyNow no longer defaults OFF (must require an exact allowlisted opt-in)',
+    /function modelStrategyNow\(\) \{ return \['planBigExecSmall', 'custom'\]\.includes\(registry\.modelStrategy\) \? registry\.modelStrategy : 'off'; \}/.test(MAIN)
+      ? [] : ['modelStrategyNow does not gate on the explicit planBigExecSmall|custom allowlist']);
   const SESSSH = read('wsl/session.sh');
   const WIN = read('runners/win.js');
   none('wsl/session.sh: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (a default must never override an explicit model choice)',
     /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(SESSSH) ? ['session.sh still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
   none('runners/win.js: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (a default must never override an explicit model choice)',
     /CLAUDE_CODE_SUBAGENT_MODEL\s*=/.test(WIN) ? ['win.js still assigns CLAUDE_CODE_SUBAGENT_MODEL'] : []);
+
+  // ---- The strategy is REAL (files + observation), and these pins keep each honesty guard alive.
+  // Every pin below was proven to BITE at introduction: its guard was deleted on the working tree,
+  // the suite went red, the guard was restored. A pin that cannot fail is worse than no pin.
+  // (a) The Agents pane must never substitute the tab's model for an omitted Task-call model — that displayed
+  //     an assumption as an observation, which is the exact disease these pins exist against.
+  {
+    const start = APP.indexOf('function onAgentStart(');
+    const seg = start >= 0 ? APP.slice(start, APP.indexOf('function onAgentDone(')) : '';
+    none('renderer: onAgentStart could not be located (the model-guess pin would go vacuous)', seg ? [] : ['onAgentStart not found']);
+    none('renderer: the Agents pane GUESSES an omitted subagent model from the tab again (observed truth only)',
+      /model: String\(ti\.model \|\| ''\)\s*\|\|/.test(seg) ? ['onAgentStart falls back past the Task call for model'] : []);
+  }
+  // (b) The team chip types into a pty; it must run behind the SAME guard as every cockpit send —
+  //     a joined/parked/unstarted tab never receives its bytes.
+  {
+    const at = APP.indexOf("const pb = $('pb-btn')");
+    const seg = at >= 0 ? APP.slice(at, at + 900) : '';
+    none('renderer: the team chip sends without canApplyToLiveSession (a guest could type into the host)',
+      /canApplyToLiveSession\(\)/.test(seg) ? [] : ['pb-btn arm path does not consult canApplyToLiveSession']);
+  }
+  // (c) The file writer's delete path may touch exactly ONE thing: the plan-big skill dir. A second rmSync
+  //     appearing in that tool means its blast radius grew — fail loudly before it ships.
+  {
+    const TOOL = read('wsl/strategy-files-tool.js');
+    const rms = (TOOL.match(/rmSync\(/g) || []).length;
+    none('strategy-files-tool: the delete path widened beyond the plan-big skill dir',
+      rms === 1 && /rmSync\(skillDir/.test(TOOL) ? [] : [`expected exactly one rmSync(skillDir…), found ${rms}`]);
+    none('strategy-files-tool: seat overrides are no longer allowlisted (unknown values must reject, never interpolate)',
+      /MODELS\.includes\(v\.model\)/.test(TOOL) && /EFFORTS\.includes\(v\.effort\)/.test(TOOL) ? [] : ['the model/effort allowlist checks are gone']);
+  }
+  // (d) The toggle must keep REPORTING whether the files really landed (a real readback) — a return without
+  //     filesOk turns the honest toast back into a guess.
+  none('main.js: modelStrategy:set no longer reports filesOk (the toast would claim installs it cannot see)',
+    /return \{ ok: true, modelStrategy: now, filesOk \}/.test(MAIN) ? [] : ['the set handler return dropped filesOk']);
+  // (e) The old env rail stays DEAD: CLAUDIBLE_MODEL_STRATEGY must not reappear in any spawn path. Two
+  //     competing mechanisms claiming one setting is how the original cosmetic-control bug family started.
+  {
+    const SH = ['runners/_shared.js', 'runners/win.js', 'runners/posix.js', 'runners/wsl.js', 'wsl/session.sh'].map((f) => f + ': ' + read(f));
+    none('the CLAUDIBLE_MODEL_STRATEGY env rail grew back in a spawn path (it was deleted — files, not env)',
+      SH.filter((s) => /CLAUDIBLE_MODEL_STRATEGY\s*[:=]|CLAUDIBLE_MODEL_STRATEGY='/.test(s)).map((s) => s.slice(0, s.indexOf(':'))));
+  }
+  // (f) GRAPHS (the N-node compiler). Two guards keep custom graphs as safe as the fixed five:
+  //     the prune regex is the ONLY file-deletion in the graph path and must stay anchored to the reserved
+  //     node pattern; and every node type must pass the library allowlist — an unknown type REJECTS, never
+  //     interpolates into a generated file.
+  {
+    const TOOL = read('wsl/strategy-files-tool.js');
+    none('strategy-files-tool: the graph prune regex lost its anchors (it could match beyond the reserved node files)',
+      TOOL.includes('/^claudible--pb--n\\d+-[a-z-]+\\.md$/') ? [] : ['the anchored prune regex ^claudible--pb--n\\d+-[a-z-]+\\.md$ is gone']);
+    none('strategy-files-tool: an unknown node type no longer rejects (it must never reach a generated file)',
+      /!LIB\[n\.type\]\) return \{ ok: false/.test(TOOL) ? [] : ['the LIB[n.type] allowlist rejection is gone']);
+  }
+  // (f-i) THE AGENTS LEDGER (variant A4, owner-approved 2026-08-19). This pane had ZERO pins before today,
+  //       which is why a redesign could quietly take load-bearing behaviour with it. Three things are pinned —
+  //       each one a silent failure if lost, not a visible one.
+  {
+    // (1) The 1s tick must keep advancing timers IN PLACE. Rebuilding the pane every second re-creates every
+    //     row: the entry animations re-flash, and the open detail pane and its scroll position are destroyed
+    //     under the user's cursor while they read. The data-start contract is what keeps that cheap.
+    none('renderAgents() lost its in-place timer tick (the pane would rebuild every second)',
+      /if \(sig === _agentsSig\) \{[\s\S]{0,400}?querySelectorAll\('\[data-start\]'\)[\s\S]{0,200}?return;/.test(APP)
+        && /el\.dataset\.start = startSec/.test(APP)
+        ? [] : ['the sig short-circuit or the data-start elapsed cell is gone']);
+    // (2) The filter and the selected row change what is on screen with no underlying data change. If they are
+    //     not in the signature, clicking a filter repaints nothing and the pane looks frozen.
+    none('the agents signature ignores the filter/selection (clicks would paint nothing)',
+      /agentsFilter, selectedAgent\]\)/.test(APP) ? [] : ['agentsFilter/selectedAgent are not in the render signature']);
+    // (3) The observed strip's pin was RETIRED on 2026-08-19, the day after it was added — the owner removed
+    //     the strip itself, because the A4 ledger prints Model on every row and the strip said it twice. What
+    //     survives, and is pinned instead, is the part that was never redundant: `obs` still feeds the
+    //     empty-state test, so a tab whose only evidence is on-disk transcripts cannot claim it has no agents.
+    none('the agents empty-state ignores on-disk transcript evidence (it would claim "No agents running")',
+      /if \(!all\.length && !obs\.length\)/.test(APP) ? [] : ['the empty-state no longer consults obs']);
+    // (4) Tokens are absent (not zero) for a running Task subagent — they arrive with the completion payload.
+    //     Printing 0 would state as fact that an agent used no tokens, which is a different claim.
+    none('a running agent with no token report would render as 0 rather than as unknown',
+      /\(a\.tokens \|\| 0\) > 0 \? fmtK\(a\.tokens\) : '—'/.test(APP) ? [] : ['the unknown-tokens em-dash fallback is gone']);
+  }
+  // (f-ii) The graphs drawer's reading link (owner-chosen, 2026-08-19). Pinned because it is the one element
+  //        here that rots SILENTLY: a dead or swapped URL still renders as a perfectly good button, and nobody
+  //        clicks their own docs link. The three notes are pinned as three <li> for the same reason — the
+  //        run-on line they replaced was a readability defect the owner had to report by eye.
+  {
+    // The destination changed 2026-08-19 (article -> video, owner call: more concise and direct). The pin moves
+    // with it rather than being loosened — the whole point is that a swapped or dead link still renders as a
+    // perfectly good button, so the exact URL is what has to be guarded.
+    none('the graphs drawer lost its learn-more button, or it stopped opening the owner-chosen video',
+      /id="strat-learn"/.test(HTML)
+        && /\$\('strat-learn'\)[\s\S]{0,200}?claudible\.openExternal\('https:\/\/www\.youtube\.com\/watch\?v=mBePcvqLX88'\)/.test(APP)
+        ? [] : ['#strat-learn is gone or no longer opens the owner-chosen graphs video']);
+    // "Save & use" on the ALREADY-ACTIVE graph must still confirm and repaint. activate() early-returns on a
+    // no-op switch, so routing every useAfter through it swallowed both the toast and the list redraw: the
+    // click read as dead, and a rename left the old name on screen. The guard is the id !== deck.active test.
+    none('"Save & use" routes an already-active graph back through activate() (the click goes silent again)',
+      /if \(useAfter && r\.id !== deck\.active\) \{ await activate\(r\.id\); return; \}/.test(APP)
+        ? [] : ['save() no longer guards the useAfter path against a no-op activate()']);
+    none('the graphs notes collapsed back into one run-on line',
+      (HTML.match(/<ul class="strat-notes">[\s\S]*?<\/ul>/) || [''])[0].match(/<li>/g)?.length === 3
+        ? [] : ['the .strat-notes list is missing or no longer has exactly three items']);
+  }
+  // (g) SEND-BACK (the deliver lane's bounded feedback loop — widened from synthesizer-only on owner order,
+  //     2026-08-19). Three guards keep it honest: the value is allowlisted (×1/×2 only — an unbounded loop
+  //     must never compile), it is deliver-lane-only (on any other node the whole call REJECTS rather than
+  //     silently dropping the option), and the generated coordinator actually carries the rule — without it
+  //     the dial is cosmetic — the exact failure this whole feature was rebuilt to avoid.
+  {
+    const TOOL = read('wsl/strategy-files-tool.js');
+    // Widened to [1,2,3,5] on 2026-08-19 with the header's Loop Settings control. The POINT of the pin is
+    // unchanged and is the reason "loop until done" ships as 5 rather than as a real unbounded loop: the value
+    // must stay a finite allowlist. A regression to accept any integer, or to drop the check, still fails here.
+    none('strategy-files-tool: the send-back cap allowlist is gone (an unbounded loop could compile)',
+      /!\[1, 2, 3, 5\]\.includes\(n\.sendback\)\) return \{ ok: false/.test(TOOL) ? [] : ['the [1, 2, 3, 5] send-back rejection is gone']);
+    none('the Loop Settings control offers a value the compiler would reject (or an unbounded one)',
+      (() => { const m = APP.match(/const LOOP_OPTS = \[([\s\S]*?)\];/); if (!m) return ['LOOP_OPTS is gone'];
+        const vals = [...m[1].matchAll(/\[(\d+),/g)].map((x) => Number(x[1]));
+        const bad = vals.filter((v) => v !== 0 && ![1, 2, 3, 5].includes(v));
+        return bad.length ? ['LOOP_OPTS offers ' + bad.join('/') + ', which the compiler rejects'] : []; })());
+    none('strategy-files-tool: send-back stopped being deliver-lane-only (other lanes must reject, never silently drop it)',
+      /t\.lane !== 'deliver'\) return \{ ok: false/.test(TOOL) ? [] : ['the deliver-lane rejection is gone']);
+    none('strategy-files-tool: the generated coordinator lost the SEND-BACK rule (the dial would be cosmetic)',
+      /SEND-BACK: if /.test(TOOL) && /never loop past it/.test(TOOL) ? [] : ['the SEND-BACK coordinator rule is gone']);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -5121,6 +5432,91 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
      /ipcMain\.handle\('model:set'/.test(MAIN) ? '' : "no ipcMain.handle('model:set', …) for the bridge to reach",
      /modelGet: \(\) => ipcRenderer\.invoke\('model:get'\)/.test(PRELOAD) ? '' : 'no modelGet bridge in preload.js',
      /modelSet: \(id\) => ipcRenderer\.invoke\('model:set', id\)/.test(PRELOAD) ? '' : 'no modelSet bridge in preload.js'].filter(Boolean));
+}
+
+// ---- the model/effort selectors apply to the RUNNING session, and cannot reach another machine ----
+// Plain .includes() rather than regex: these pins have been eaten by backslash escaping before, and the whole
+// point of the block is that the GUARDS survive a refactor. A dropped live-tab guard is silent until a guest's
+// slider types into somebody else's terminal, so it is pinned harder than the feature it protects.
+{
+  const body = APP.slice(APP.indexOf('function canApplyToLiveSession()'), APP.indexOf('// Default MODEL for new sessions'));
+  none('the live-apply guards for the model/effort selectors went missing',
+    [APP.includes('function canApplyToLiveSession()')
+      ? '' : 'canApplyToLiveSession() is gone — the selectors have no single place deciding whether a send is safe',
+     body.includes("t.kind === 'live'")
+      ? '' : 'THE CROSS-MACHINE GUARD IS GONE: without it a guest moving their own slider types into the HOST’s pty via liveInput',
+     body.includes('t.parked')
+      ? '' : 'the parked-tab guard is gone — a parked tab has no pty, so the toast would claim a send that never happened',
+     body.includes('!t.started')
+      ? '' : 'the not-yet-spawned guard is gone — same false-success problem as the parked case',
+     APP.includes('function applyToLiveSessionSoon(')
+      ? '' : 'the debounce wrapper is gone — the effort slider clicks its pill on every drag step and would fire a command per step',
+     APP.includes('clearTimeout(liveApplyTimer)')
+      ? '' : 'applyToLiveSessionSoon no longer coalesces, so a drag from low to max sends four commands'].filter(Boolean));
+  none('the model/effort selectors stopped applying to the session in front of you',
+    [APP.includes("applyToLiveSessionSoon('/effort ' + set)")
+      ? '' : 'the effort selector no longer sends /effort to the running session — the control is decorative again',
+     APP.includes("applyToLiveSessionSoon('/model ' + set)")
+      ? '' : 'the model selector no longer sends /model to the running session — the control is decorative again',
+     APP.includes("' — applied to this session and saved as default'")
+      ? '' : 'the toast no longer distinguishes a live apply from a next-session-only one',
+     // Permission mode has no mid-session COMMAND — `/permissions` edits allow/deny rules, not the mode, and
+     // the CLI's bindable command list has chat:cycleMode and no setter. Phase 2 drives the cycle instead
+     // (cyclePermTo, pinned below); a /permissions send would still be wrong by construction.
+     APP.includes("applyToLiveSessionSoon('/permissions")
+      ? 'a /permissions send appeared on the perm selector — that command edits RULES, not the mode; the mode is reached via cyclePermTo' : ''].filter(Boolean));
+  // Drag is preview, release is choice (owner ruling on hardware: a drag committed every notch it paused on).
+  // `input` must only paint; the pill click that commits lives in `change`, which fires once on release.
+  none('the effort slider commits per-notch again instead of on release',
+    [APP.includes("slider.addEventListener('input', () => paint(sliderLevel()))")
+      ? '' : "the slider's input handler is no longer paint-only — dragging would commit every notch it pauses on",
+     APP.includes("slider.addEventListener('change', () => {")
+      ? '' : 'the slider has no change handler — nothing commits on release',
+     APP.includes('if (want === cur) { paint(cur); return; }')
+      ? '' : 'the settle-back no-op is gone — releasing on the starting level would commit a change that is not one'].filter(Boolean));
+
+  // ---- the perm control drives Claude Code's OWN mode cycle, with eyes ----
+  // A cycle is not a setter, so this control presses Shift+Tab and READS the screen after every press. The
+  // reading is the whole safety argument: without it the presses are blind, and a wrong count lands in bypass.
+  const cyc = APP.slice(APP.indexOf('async function cyclePermTo('), APP.indexOf('// Default MODEL for new sessions'));
+  none('the permission-mode cycle lost a guard or started pressing blind',
+    [APP.includes('function readPermModeFromScreen(')
+      ? '' : 'readPermModeFromScreen is gone — the cycle would be counting presses blind again',
+     APP.includes("return null; }") && APP.includes('} catch (e) { return null; }')
+      ? '' : 'the screen reader no longer returns null on failure, so an unreadable screen would be treated as a known mode',
+     cyc.includes('if (now === null) return null')
+      ? '' : 'FAIL-CLOSED IS GONE: an unreadable screen no longer stops the presses',
+     cyc.includes('!canApplyToLiveSession()')
+      ? '' : 'THE CROSS-MACHINE GUARD IS GONE: a joined guest could cycle the HOST’s permission mode',
+     cyc.includes('t.busy')
+      ? '' : 'THE MID-TURN GUARD IS GONE: reaching a mode can transit THROUGH bypass, and mid-turn a tool call could run under it',
+     cyc.includes("sendInput('\\x1b[Z')")
+      ? '' : 'the Shift+Tab byte (CSI Z) is no longer what gets sent',
+     APP.includes('PERM_CYCLE_MAX')
+      ? '' : 'the press cap is gone — an unreachable target would press forever'].filter(Boolean));
+  // ---- the top bar names the SESSION, and does not clip it early ----
+  // This was reported, closed, and reported again, so it gets a pin rather than a third sighting. A joined
+  // live tab's label is stamped 'Live · <who>' and histSessionName is the LOCAL resolver, so without the
+  // override below the bar reads "project / Live · crazy" for a session with a perfectly good name.
+  none('the top-bar crumb prints the live placeholder instead of the session name',
+    [APP.includes("if (rec && rec.kind === 'live')") && APP.includes('rec.joinedAsLabel')
+      ? '' : 'paintCrumb no longer resolves a joined tab to its real session name — the Live placeholder is back in the bar',
+     APP.includes("p.className = 'crumb-proj'")
+      ? '' : 'the project half is a bare text node again, so it cannot shrink independently and the session name gets clipped with it'].filter(Boolean));
+  none('the crumb clips the session name before 22 characters',
+    [/html\.skin \.crumb b\{flex:none;max-width:22ch/.test(HTML)
+      ? '' : 'the session half lost its own 22ch budget, so a long project name eats it again',
+     /html\.skin \.crumb-proj\{[^}]*text-overflow:ellipsis/.test(HTML)
+      ? '' : 'the project half no longer ellipsises, so it cannot be the half that yields',
+     /html\.skin \.crumb-proj\{[^}]*white-space:pre/.test(HTML)
+      ? '' : "the project span lost white-space:pre — as flex items the separator space collapses and it prints 'Local /4444'"].filter(Boolean));
+  // The consent flag is what makes bypass reachable at all; the foreign branch must never see it.
+  // (win-runner.test.js proves the behaviour; this pins the intent next to the rest of the rail.)
+  none('the bypass consent flag went missing, or leaked into the sandboxed foreign branch',
+    [read('runners/win.js').includes("['--allow-dangerously-skip-permissions']")
+      ? '' : 'runners/win.js no longer passes --allow-dangerously-skip-permissions, so bypass cannot be reached mid-session',
+     read('wsl/session.sh').includes('--allow-dangerously-skip-permissions')
+      ? '' : 'wsl/session.sh drifted from the win runner — the same session would behave differently per flavor'].filter(Boolean));
 }
 
 console.log(`\ncontract: ${pass} passed, ${fail} failed`);

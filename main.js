@@ -322,7 +322,11 @@ try { for (const f of fs.readdirSync(RT)) if (/^diffaction-.*\.tmp$/.test(f)) { 
 // "My Sessions" bucket; instead, when no local workspace exists, a REAL default Local workspace is materialized
 // (renameable, relocatable, and deletable once another local exists). Persisted on the Windows FS (native read).
 const WORKSPACES = path.join(PERSIST, 'workspaces.json');   // R4: survives delete-and-reclone (see PERSIST above)
-const DEFAULT_LOCAL = { id: 'local-local', label: 'Local', kind: 'local', slug: 'local', createdAt: 0 };
+// The label says "Local Default" rather than "Local" because the word that made it understandable — that this
+// is the one the app made for you, not one you named — was only ever in this comment. Noun last, the way
+// "Global Default" reads. DISPLAY ONLY: identity is `id` and `slug`, and the first-run cleanup in the renderer
+// matches on `w.id === 'local-local'`, never on the label, so renaming this cannot orphan the placeholder.
+const DEFAULT_LOCAL = { id: 'local-local', label: 'Local Default', kind: 'local', slug: 'local', createdAt: 0 };
 // Guarantee a default Local workspace. Synchronous mkdir so startup always has a valid cwd; sets firstRun so the
 // renderer can offer a one-time "name + locate your workspace" setup prompt. Never throws (caller wraps too).
 function ensureDefaultLocal(reg) {
@@ -338,6 +342,13 @@ function loadRegistry() {
   if (!Array.isArray(reg.workspaces)) reg.workspaces = [];
   // drop malformed entries AND the retired 'legacy' "My Sessions" bucket (replaced by a real default Local workspace)
   reg.workspaces = reg.workspaces.filter((w) => w && typeof w === 'object' && w.id && w.kind !== 'legacy' && w.id !== 'legacy');
+  // Rename the auto-created project 'Local' -> 'Local Default' for people who already have one. DEFAULT_LOCAL
+  // is only read when a row is MATERIALIZED, and PERSIST lives outside the install (see its note), so a
+  // reinstall does not re-materialize anything: without this line the new label would only ever be seen by
+  // someone who had never run Claudible, which is nobody who asked for it.
+  // Guarded to the exact untouched default — id local-local AND the literal old label. Anyone who renamed
+  // their project keeps their name; this is a one-time relabel of a placeholder, never a rename of user data.
+  for (const w of reg.workspaces) if (w.id === 'local-local' && w.label === 'Local') w.label = DEFAULT_LOCAL.label;
   try { ensureDefaultLocal(reg); } catch (e) { console.error('[claudible] ensureDefaultLocal:', e && e.message); }
   if (!reg.workspaces.length) reg.workspaces.push(Object.assign({}, DEFAULT_LOCAL));   // belt-and-suspenders: the library is never empty
   if (!reg.activeId || !reg.workspaces.some((w) => w.id === reg.activeId))
@@ -779,7 +790,7 @@ function spawnPty(tabId, cols, rows, ws, session) {
     // outcomes. Catch it onto the same surface the null case uses; runners raise classified messages
     // (see win.js's long-path guard) precisely so this line has something human to print.
     let proc = null, spawnErr = '';
-    try { proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: permModeNow(), model: registry.model, runtimeId, modelStrategy: modelStrategyNow() }); }
+    try { proc = runner.spawnClaude(tabId, { cols, rows, session, ws, effort: registry.effort, permMode: permModeNow(), model: registry.model, runtimeId }); }
     catch (e) { spawnErr = (e && e.message) || String(e); console.error('[claudible] spawnClaude threw:', spawnErr); }
     if (!proc) {   // node-pty failed to load/build — on Linux this is almost always a missing C toolchain. Tell the user how to fix it instead of a bare error.
       const hint = process.platform === 'linux' ? '\r\n  On Linux node-pty builds from source — install: sudo apt install build-essential python3   (then: npm rebuild)\r\n' : '';
@@ -3153,13 +3164,100 @@ ipcMain.handle('model:set', (e, id) => {
 // override: CLAUDE_CODE_SUBAGENT_MODEL was measured (API stamps) overriding explicit spawn-time models, so we no
 // longer hard-pin it — absent/unknown registry value means disabled; only explicit opt-in ('planBigExecSmall')
 // enables the nudge. Applies to the NEXT session each tab launches.
-function modelStrategyNow() { return registry.modelStrategy === 'planBigExecSmall' ? 'planBigExecSmall' : 'off'; }
+function modelStrategyNow() { return ['planBigExecSmall', 'custom'].includes(registry.modelStrategy) ? registry.modelStrategy : 'off'; }
 ipcMain.handle('modelStrategy:get', () => modelStrategyNow());
-ipcMain.handle('modelStrategy:set', (e, v) => {
-  registry.modelStrategy = v === 'planBigExecSmall' ? 'planBigExecSmall' : 'off';
+// The custom strategy's saved seat picks. The renderer's editor reads this to paint; the
+// values are re-validated by strategy-files-tool.js's allowlist on every write, so a stale/hand-edited
+// registry can never smuggle text into a generated file.
+ipcMain.handle('modelStrategy:customGet', () => (registry.customStrategy && typeof registry.customStrategy === 'object') ? registry.customStrategy : {});
+// ONE installer for every strategy path. mode 'off' removes the trigger; 'on' installs the team,
+// with optional seat overrides. The tool allowlists every value; a single quote anywhere in the JSON rejects
+// the config rather than risk breaking out of the bash single-quoted argument. Returns filesOk — a real
+// readback of whether the files landed; callers surface it, never assume it.
+async function installStrategyFiles(mode, cfg) {
+  let cfgArg = '';
+  if (mode !== 'off' && cfg && typeof cfg === 'object') { const j = JSON.stringify(cfg); if (!j.includes("'")) cfgArg = ` '${j}'`; }
+  const m = mode === 'off' ? 'off' : (mode === 'graph' ? 'graph' : 'on');
+  let files = null;
+  try { files = await runner.runScript('strategy-files.sh', `'${m}'${cfgArg}`, { timeout: 15000 }); } catch {}
+  let fr = null; try { fr = JSON.parse(String((files && files.stdout) || '').trim() || 'null'); } catch {}
+  return !!(fr && fr.ok) && !(files && files.err);
+}
+ipcMain.handle('modelStrategy:set', async (e, v, cfg) => {
+  registry.modelStrategy = ['planBigExecSmall', 'custom'].includes(v) ? v : 'off';
+  if (v === 'custom' && cfg && typeof cfg === 'object') registry.customStrategy = cfg;
   const persisted = saveRegistry();
-  if (!persisted) return { ok: false, error: 'could not write workspaces.json — applies to THIS run only', modelStrategy: modelStrategyNow() };
-  return { ok: true, modelStrategy: modelStrategyNow() };
+  // The toggle CAUSES its effect — ON installs the five team agents + the plan-big skill
+  // into the guest's ~/.claude (custom = same files, the user's seat picks); OFF removes only the skill (the
+  // trigger), leaving the inert agent files. The skill hot-loads into running sessions; agent definitions load
+  // at session START — the renderer's toast carries that split honestly. A script failure downgrades the
+  // answer rather than lying about it.
+  const now = modelStrategyNow();
+  const filesOk = await installStrategyFiles(now === 'off' ? 'off' : 'on', now === 'custom' ? ((registry.customStrategy && typeof registry.customStrategy === 'object') ? registry.customStrategy : {}) : null);
+  if (!persisted) return { ok: false, error: 'could not write workspaces.json — applies to THIS run only', modelStrategy: now, filesOk };
+  return { ok: true, modelStrategy: now, filesOk };
+});
+// ---- named strategies: the drawer picks, the panel edits ----
+// registry.strategies = [{id, name, seats}], registry.activeStrategy = 'off' | 'pb' | <id>.
+// Only the ACTIVE strategy's files exist on disk; activation swaps them. One-time migration folds the old
+// three-pill state in: 'planBigExecSmall' → active 'pb'; a saved custom config → a strategy named "Custom".
+function strategiesNow() { return Array.isArray(registry.strategies) ? registry.strategies : []; }
+function migrateStrategies() {
+  if (registry.activeStrategy !== undefined) return;
+  if (registry.modelStrategy === 'custom' && registry.customStrategy && typeof registry.customStrategy === 'object') {
+    const id = 's' + Date.now();
+    registry.strategies = strategiesNow().concat([{ id, name: 'Custom', seats: registry.customStrategy }]);
+    registry.activeStrategy = id;
+  } else registry.activeStrategy = registry.modelStrategy === 'planBigExecSmall' ? 'pb' : 'off';
+  saveRegistry();
+}
+function activeStrategyEntry() {
+  const a = registry.activeStrategy;
+  if (a === 'pb') return { id: 'pb', name: 'Plan big, execute small' };
+  return strategiesNow().find((s) => s.id === a) || null;
+}
+ipcMain.handle('strategy:list', () => { migrateStrategies(); return { active: registry.activeStrategy, list: strategiesNow() }; });
+ipcMain.handle('strategy:activate', async (e, id) => {
+  migrateStrategies();
+  const entry = id === 'pb' ? { id: 'pb' } : strategiesNow().find((s) => s.id === id);
+  registry.activeStrategy = id === 'off' ? 'off' : (entry ? id : 'off');
+  // keep the legacy key in step so anything still reading modelStrategy sees the truth
+  registry.modelStrategy = registry.activeStrategy === 'off' ? 'off' : (registry.activeStrategy === 'pb' ? 'planBigExecSmall' : 'custom');
+  if (entry && entry.seats) registry.customStrategy = entry.seats;
+  const persisted = saveRegistry();
+  // node-built graphs compile through the tool's graph mode; legacy seats entries keep the 'on' path
+  const filesOk = await installStrategyFiles(
+    registry.activeStrategy === 'off' ? 'off' : (entry && entry.nodes ? 'graph' : 'on'),
+    entry ? (entry.nodes ? { coordinator: entry.coordinator, nodes: entry.nodes } : (entry.seats || null)) : null);
+  const act = activeStrategyEntry();
+  return { ok: persisted, filesOk, active: registry.activeStrategy, name: act ? act.name : '' };
+});
+ipcMain.handle('strategy:save', async (e, s) => {
+  migrateStrategies();
+  const hasSeats = s && typeof s === 'object' && s.seats && typeof s.seats === 'object';
+  const hasNodes = s && typeof s === 'object' && Array.isArray(s.nodes) && s.nodes.length;
+  if (!hasSeats && !hasNodes) return { ok: false, error: 'bad strategy' };
+  const name = String(s.name || '').trim().slice(0, 40);
+  if (!name) return { ok: false, error: 'a strategy needs a name' };
+  const list = strategiesNow().slice();
+  let id = typeof s.id === 'string' && s.id ? s.id : 's' + Date.now();
+  const at = list.findIndex((x) => x.id === id);
+  const entry = hasNodes ? { id, name, nodes: s.nodes, coordinator: (s.coordinator && typeof s.coordinator === 'object') ? s.coordinator : undefined } : { id, name, seats: s.seats };
+  if (at >= 0) list[at] = entry; else list.push(entry);
+  registry.strategies = list;
+  const persisted = saveRegistry();
+  // editing the ACTIVE strategy re-installs it (the tool re-validates every value)
+  let filesOk = null;
+  if (registry.activeStrategy === id) filesOk = await installStrategyFiles(hasNodes ? 'graph' : 'on', hasNodes ? { coordinator: entry.coordinator, nodes: entry.nodes } : s.seats);
+  return { ok: persisted, id, filesOk };
+});
+ipcMain.handle('strategy:delete', async (e, id) => {
+  migrateStrategies();
+  registry.strategies = strategiesNow().filter((x) => x.id !== id);
+  let filesOk = null;
+  if (registry.activeStrategy === id) { registry.activeStrategy = 'off'; registry.modelStrategy = 'off'; filesOk = await installStrategyFiles('off', null); }
+  const persisted = saveRegistry();
+  return { ok: persisted, active: registry.activeStrategy, filesOk };
 });
 // Default PERMISSION mode for the user's own sessions. Five modes are offered and remembered — Manual (stored
 // under its old name 'default'), Accept edits, Plan, Auto and Bypass permissions — and the app now SHIPS ON
@@ -3433,6 +3531,21 @@ function pollAgentTokens() {
           try { win && win.webContents.send('agent-tokens', { tabId, agentTok: delta }); } catch {}
           rec.agentTokSettled = !rec.busy;   // once we've polled while idle, skip until the next turn flips busy
         });
+      // OBSERVED agents: same cadence and same busy/settled gate as the token sum above, but only
+      // for the FOREGROUND tab — this feeds the visible Agents pane, and a background tab's report would be
+      // recomputed on focus anyway. Ships the per-agent model/effort/usage actually recorded on disk, so the
+      // renderer can stop displaying assumptions (the old card substituted the tab's model on an omitted
+      // Task-call model — an assumption dressed as an observation).
+      if (tabId === fgTabId && (rec.busy || !rec.agentObsSettled)) {
+        runner.runScript('agent-report.sh', `'${sid}'`, { ws: rec.ws, timeout: 10000, maxBuffer: 4 * 1024 * 1024 }).then(({ err, stdout }) => {
+          if (err) return;
+          let list; try { list = JSON.parse(String(stdout).trim() || '[]'); } catch { return; }
+          if (!Array.isArray(list)) return;
+          try { win && win.webContents.send('agent:observed', { tabId, agents: list }); } catch {}
+          rec.agentObsSettled = !rec.busy;
+        });
+      }
+      if (rec.busy) rec.agentObsSettled = false;   // a new turn re-arms the one-more-poll-after-idle rule
     }
   }, 8000));
 }

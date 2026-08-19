@@ -127,6 +127,27 @@
       --ink-name:#788090;
       --flame:#d97757;      /* brand accent — project marker, caret, slider fill, avatar disc */
       --flame-dim:#8a4b34;
+      /* ── who-is-speaking, 8 authors ──────────────────────────────────────────────────────────────────────
+         One hue per person in a live chat: it inks their name and tints the background behind their message
+         at ~6%, so the eye separates speakers without reading a single word. Two rules govern these values.
+         (1) SUBTLE. The tint is a ground, never a face — 6% of a hue over --chrome is a shift you feel and do
+         not name. Anything louder turns a two-person chat into a colour chart.
+         (2) READABLE ANYWAY. Each of these inks the NAME as well, and the name is the only identity cue in a
+         message (the messages are not bubbles — no face, no side, no tail), so every one of these is measured
+         against every theme's --chrome the same way --ink-name is, and clears 4.5:1 for small text. Subtle is
+         a constraint on the BACKGROUND, not a licence to dim the text.
+         --who-1 IS --flame's value, not a reference to it: the host is the brand accent by design, and
+         hard-coding it here keeps all eight in one measurable block rather than one of them drifting with a
+         token that has four other jobs. All four themes are dark-family and share --chrome within a few
+         points of luminance, so one set serves them all — see the measurement note in test/contract.test.js. */
+      --who-1:#d97757;   /* host — the brand orange */
+      --who-2:#6fa8f5;   /* blue   */
+      --who-3:#62c98d;   /* green  */
+      --who-4:#b48cf0;   /* purple */
+      --who-5:#56c8d8;   /* cyan   */
+      --who-6:#ef85b5;   /* pink   */
+      --who-7:#e0b158;   /* amber  */
+      --who-8:#55c9b0;   /* teal   */
     }
     /* ── Themes: FOUR dark-family palettes that re-tint the UI + xterm terminal (Settings → theme).
        Dark = default (no data-theme attr). Every theme now wears the same design: the skin is scoped to
@@ -356,77 +377,272 @@
     .agents-empty{margin:auto;color:var(--ink-faint);font-size:var(--fs-sm);text-align:center;line-height:1.7;max-width:320px}
     .agents-empty-ico{display:block;width:40px;height:40px;margin:0 auto 14px;opacity:.42}
     .agents-empty-ico svg{width:40px;height:40px}
-    /* ── hero telemetry: the swarm read as ONE living system (count · running/done · tokens · progress) ── */
-    .agents-hero{position:relative;display:flex;align-items:center;gap:14px;padding:14px 17px 17px;margin-bottom:16px;border-radius:13px;overflow:hidden;
-      background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));box-shadow:inset 0 1px 0 var(--sheen)}
-    .agents-hero.live{box-shadow:inset 0 1px 0 var(--sheen),0 0 0 1px rgba(224,169,59,.10),0 10px 38px -24px rgba(224,169,59,.55)}
-    .hero-glyph{flex:none;width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:var(--ink-dim);border-radius:11px;background:rgba(255,255,255,.05)}
-    .hero-glyph svg{width:26px;height:26px}
-    .agents-hero.live .hero-glyph{color:var(--warn);animation:micpulse 1.7s ease-in-out infinite}
+    /* the "observed" strip lived here (.agents-observed / .obs-*). Removed 2026-08-19 with its markup:
+       the A4 ledger prints Model on every row, so the strip repeated it. See renderAgents() for the note. */
+    /* the custom-strategy seat editor (Skill & Strategy drawer) */
+    /* ── Strategy Deck: the drawer list + the editor panel ─────────────────────────────── */
+    /* OWNER REVAMP 2026-08-19. The rows wear the SKILLS & PLUGINS card schema (.ext-row) so the three drawers
+       read as one product rather than three dialects: same 180deg #131519 -> --pop-bot ground, same hairline,
+       same 8px radius. Off and the built-in share that border; only a CUSTOM graph is allowed to differ, which
+       is what makes "the one you built" findable in a list. */
+    /* the chassis now comes from .ext-row itself (the rows carry that class), so ONLY the graph-specific bits
+       live here: the row's own spacing and its selected/custom edges. Nothing about the ground is restated —
+       restating it is what let these drift out of step with skills & plugins in the first place. */
+    /* NOTE: .ext-row is declared LATER in this sheet, so at equal specificity it wins. Anything here that must
+       override the shared chassis has to be .strat-row.ext-row (two classes), not .strat-row alone. Alignment
+       is deliberately NOT overridden — flex-start is what skills & plugins use, and matching it is the point. */
+    .strat-row{margin-bottom:6px;cursor:pointer;
+      transition:border-color var(--dur-base) ease,background var(--dur-base) ease}
+    .strat-row:hover{border-color:rgba(255,255,255,.16)}
+    /* SILVER, not accent blue (owner call): a saturated blue edge on the active row shouted next to the calm
+       skills/plugins list. Selection now reads as a brighter hairline of the same family. */
+    .strat-row.on{border-color:rgba(214,220,228,.34)}
+    .strat-row.custom{border-color:rgba(214,220,228,.17)}
+    .strat-row.on:hover{border-color:rgba(214,220,228,.46)}
+    /* name + summary are .ext-name / .ext-desc now — same type, colour and clamping as skills & plugins. The
+       only override: the summary is a dense one-liner here, so it gets the tighter tracking and no clamp. */
+    .strat-row .ext-desc{-webkit-line-clamp:2;letter-spacing:.02em}
+    /* a soft faded rule, not a dash: the dash read as punctuation inside the sentence it was separating. */
+    .strat-sep{display:block;height:1px;margin:5px 0 4px;border:0;
+      background:linear-gradient(90deg,var(--hairline),color-mix(in srgb,var(--hairline) 25%,transparent))}
+    /* the switch is the row's control, so it must not inherit .toggle's uppercase caption metrics; it holds no
+       text, only the .sw pill, which keeps the drawer's own 28x15 sizing. align-self:flex-start keeps it level
+       with the NAME rather than floating to the middle of a two-line row. */
+    .strat-tog{flex:none;gap:0;align-self:flex-start;margin-top:1px}
+    .strat-edit{color:var(--ink-faint);flex:none;background:none;border:none;cursor:pointer;font-size:var(--fs-sm);padding:2px 4px;width:auto}
+    .strat-row:hover .strat-edit{color:var(--ink-dim)}
+    .strat-row.offrow .ext-name{color:var(--ink-dim)}
+    .strat-addrow{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;border:1px dashed rgba(90,168,240,.45);border-radius:9px;padding:8px;margin-bottom:6px;text-align:center;color:var(--accent);font-size:var(--fs-sm);font-weight:600;cursor:pointer;background:rgba(90,168,240,.06)}
+    .strat-addrow:hover{background:rgba(90,168,240,.13);border-color:rgba(90,168,240,.7)}
+    /* +25% on the glyph only (owner call) — line-height:0 keeps the bigger + from growing the button's height */
+    .sa-plus{font-size:calc(var(--fs-sm) * 1.25);line-height:0;position:relative;top:.5px}
+    .strat-notes{list-style:none;margin:9px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+    .strat-notes li{position:relative;padding-left:11px;font-size:var(--fs-xs);color:var(--ink-dim);line-height:1.5}
+    .strat-notes li::before{content:"";position:absolute;left:2px;top:7px;width:3px;height:3px;border-radius:50%;background:var(--ink-faint)}
+    .strat-learn{width:auto;display:inline-flex;align-items:center;gap:5px;margin-top:9px;padding:4px 9px;
+      font-size:var(--fs-xs);color:var(--accent);background:rgba(90,168,240,.07);
+      border:1px solid rgba(90,168,240,.28);border-radius:7px;cursor:pointer}
+    .strat-learn:hover{background:rgba(90,168,240,.14);border-color:rgba(90,168,240,.5)}
+    .strat-learn .sl-arr{font-size:var(--fs-2xs);opacity:.8}
+    /* ── the GRAPH BUILDER overlay (per the approved mock, 1:1) ─────────────────────────────── */
+    #strat-modal{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
+    #strat-modal[hidden]{display:none}
+    /* +15% overall (owner call 2026-08-19): the builder had too much packed into too little. 960 -> 1104 wide,
+       the body 470 -> 540 tall, the library rail 212 -> 244. Everything inside keeps its proportions. */
+    .gbox{width:1104px;max-width:96vw;background:linear-gradient(var(--modal-top),var(--modal-bot));border:1px solid var(--hairline);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column}
+    /* gap 9 -> 6: the footer buttons sat in a loose row that read as three unrelated controls.
+       The header bar also sits a HAIR darker than the dialog body (owner call 2026-08-19) — just enough of a
+       step to read as a title bar rather than as the first row of the canvas. Deliberately barely there. */
+    .gb-head{display:flex;align-items:center;gap:6px;height:44px;padding:0 12px;border-bottom:1px solid var(--hairline);flex:none;
+      background:rgba(0,0,0,.14)}
+    /* the dialog says what it IS in its top-left corner; the name field is no longer doing that job by proxy */
+    .gb-title{font-size:var(--fs-xs);font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-dim);flex:none;white-space:nowrap}
+    /* 220 -> 147 (-1/3): a 40-char cap never needed 220px, and the width made the field the loudest thing in
+       the header. margin-left holds the deliberate gap between the title and the field. */
+    /* height 28 -> 22: at 28px the field towered over the "Graph builder" title beside it and read as the
+       loudest object in the header. 22px sits level with that line of type. */
+    .gb-name{background:var(--panel);border:1px solid var(--hairline);border-radius:6px;color:var(--ink);padding:2px 9px;font-size:var(--fs-sm);width:147px;height:22px;margin-left:4px}
+    .gb-name::placeholder{color:var(--ink-faint)}
+    /* This input carries no type="text", so it never matched input[type=text]{outline:none} and fell through to
+       the global input:focus-visible ring — 1.5px at outline-offset:2px, which draws OUTSIDE the border box and
+       reads as the field growing on click. Its own quiet focus state instead: the border brightens, nothing moves. */
+    .gb-name:focus,.gb-name:focus-visible{outline:none;box-shadow:none;border-color:rgba(255,255,255,.28)}
+    .gb-sp{flex:1}
+    /* sleeker: 13 -> 11px sides, 28 -> 26px tall, 8 -> 7px radius. Read as a set, not as three slabs. */
+    .gb-btn{width:auto;background:var(--raised-hi);border:1px solid var(--hairline);color:var(--ink-dim);font-size:var(--fs-sm);border-radius:7px;padding:4px 11px;height:26px;cursor:pointer;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.35);transition:all .13s ease}
+    .gb-btn:hover{color:var(--ink);transform:translateY(-1px)}
+    .gb-btn:active{transform:translateY(0)}
+    .gb-primary{background:var(--accent);border-color:var(--accent);color:#0b0c10;font-weight:600}
+    .gb-danger:hover{color:var(--live)}
+    .gb-loopwrap{position:relative;display:inline-flex;align-items:center;gap:5px}
+    .gb-loop{display:inline-flex;align-items:center;gap:6px}
+    .gb-loop .gb-arr2{color:var(--ink-faint);font-size:var(--fs-2xs)}
+    /* the same little italic "i" affordance the rest of the app uses, as a "?" — round, quiet, full strength
+       only when reached for. Sits OUTSIDE the button so it never swallows a click meant for the dropdown. */
+    /* +20% visibility (owner call): resting opacity .6 -> .78, ink one step up, and a brighter rim. It is the
+       only explanation of the loop cap in the whole dialog, so it has to be findable without hunting. */
+    .gb-help{width:16px;height:16px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0;
+      border:1px solid rgba(255,255,255,.2);border-radius:50%;background:transparent;color:var(--ink-dim);
+      font:italic 600 var(--fs-xs)/1 Georgia,"Times New Roman",serif;cursor:pointer;opacity:.78;box-shadow:none}
+    .gb-help:hover{opacity:1;color:var(--ink);border-color:rgba(255,255,255,.34);background:transparent}
+    .gb-loop-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:60;width:250px;padding:11px 13px;
+      background:linear-gradient(var(--modal-top),var(--modal-bot));border:1px solid var(--hairline);
+      border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);
+      font-size:var(--fs-xs);line-height:1.55;color:var(--ink-dim);text-align:left;white-space:normal}
+    .gb-loop-pop b{display:block;color:var(--ink);margin-bottom:4px;font-size:var(--fs-sm)}
+    /* Cancel became a BACK button (owner call): same chassis, narrower to fit the arrow rather than a word. */
+    .gb-back{padding:4px 9px;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+    .gb-back .gb-arr{font-size:var(--fs-sm);line-height:1}
+    /* fixed height: the rail and each lane scroll INSIDE themselves */
+    .gb-body{display:flex;height:min(540px,70vh)}
+    .gb-body ::-webkit-scrollbar{width:5px}
+    .gb-body ::-webkit-scrollbar-track{background:transparent}
+    .gb-body ::-webkit-scrollbar-thumb{background:var(--raised-hi);border-radius:3px}
+    /* the worker library sits one further step down again (.16 -> .22): header bar < lanes canvas < this rail,
+       so the three regions separate by depth alone, with no extra borders. */
+    .gb-lib{width:244px;flex:none;border-right:1px solid var(--hairline);padding:11px;overflow-y:auto;background:rgba(0,0,0,.22)}
+    .gb-lgrp{font-size:var(--fs-xs);font-weight:600;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-dim);margin:12px 0 6px;display:flex;align-items:center;gap:7px}
+    .gb-lgrp::after{content:"";flex:1;height:1px;background:var(--hairline)}
+    .gb-lgrp:first-child{margin-top:0}
+    .gb-card{background:var(--raised);border:1px solid var(--hairline);border-radius:8px;padding:6px 9px;margin-bottom:5px;cursor:pointer}
+    .gb-card:hover{background:var(--raised-hi)}
+    .gb-card b{display:block;font-size:var(--fs-sm);font-weight:600}
+    .gb-card i{display:block;font-style:normal;font-size:var(--fs-2xs);color:var(--ink-dim);line-height:1.45}
+    .gb-lanes{flex:1;display:grid;grid-template-columns:1fr 1.2fr 1fr 1fr;padding:11px;overflow-x:auto}
+    .gb-lane{border-right:1px dashed var(--hairline);padding:0 9px;min-width:148px;display:flex;flex-direction:column;min-height:0}
+    .gb-lane:last-child{border-right:none}
+    /* PLAN / WORK / CHECK / DELIVER and their captions, +5% (owner call): these are the lane headings the whole
+       canvas is organised under, and they were the same size as the node titles beneath them. */
+    .gb-lane-h{font-size:calc(var(--fs-sm) * 1.05);font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--ink);text-align:center;margin-bottom:2px}
+    .gb-lane-s{font-size:calc(var(--fs-2xs) * 1.05);color:var(--ink-dim);text-align:center;margin-bottom:8px}
+    .gb-card.dragging{opacity:.45}
+    /* every sub-text in this dialog steps --ink-faint -> --ink-dim: the builder is the one surface where the
+       captions ARE the instructions, and at 9px faint they were being skipped. */
+    .gb-libhint{font-size:var(--fs-2xs);color:var(--ink-dim);line-height:1.5;margin-bottom:2px}
+    .gb-drophint{border:1px dashed var(--hairline);border-radius:10px;padding:16px 8px;text-align:center;color:var(--ink-dim);font-size:var(--fs-2xs);line-height:1.4}
+    .gb-lane.drop-ok{outline:1.5px dashed rgba(90,168,240,.6);outline-offset:-4px;border-radius:10px;background:rgba(90,168,240,.06)}
+    .gb-lane.drop-no{background:rgba(240,96,96,.05)}
+    .gb-nodes{flex:1;min-height:0;overflow-y:auto;padding:1px 2px 4px}
+    /* a touch more room inside each card (owner call): 7/9 -> 9/11 padding, and 4 -> 7px between the node's
+       title and its model/effort dials, which were sitting almost on top of the name. */
+    .gb-node{background:var(--raised);border:1px solid var(--hairline);border-radius:10px;padding:9px 11px;margin-bottom:7px;position:relative;cursor:pointer}
+    .gb-node.sel{border-color:rgba(90,168,240,.55)}
+    .gb-node.mod{border-color:rgba(237,180,74,.35)}
+    /* +15% on the glyph. box-shadow:none/outline:none kills the "phantom outline" the owner reported: this is a
+       <button>, so it was inheriting the global button chassis' inset sheen and focus ring on a bare X. */
+    .gb-node .nx{position:absolute;top:4px;right:8px;color:var(--ink-faint);font-size:calc(var(--fs-sm) * 1.15);line-height:1;cursor:pointer;background:none;border:none;outline:none;box-shadow:none;width:auto;padding:0}
+    .gb-node .nx:hover{color:var(--live);background:none;border:none;box-shadow:none}
+    .gb-node .nx:focus,.gb-node .nx:focus-visible{outline:none;box-shadow:none}
+    .gb-node b{display:block;font-size:var(--fs-sm);font-weight:600;margin-bottom:7px;padding-right:16px}
+    /* second line under a node's name — currently the orchestrator's "always present" */
+    .gb-nsub{display:block;font-size:var(--fs-2xs);color:var(--ink-dim);margin:-5px 0 7px;line-height:1.4}
+    /* the model/effort row was sitting hard against the node's title — a hairline of daylight, owner call */
+    .gb-dials{display:flex;gap:5px;position:relative;flex-wrap:wrap;margin-top:4px}
+    .gb-dial{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:5px;background:var(--raised-hi);border:1px solid var(--hairline);color:var(--ink);border-radius:7px;
+      padding:3px 7px;font-size:var(--fs-2xs);cursor:pointer;white-space:nowrap;overflow:hidden;width:auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+    .gb-dial::after{content:"▾";color:var(--ink-faint);font-size:var(--fs-2xs)}
+    .gb-dial:hover{background:var(--sunken)}
+    .gb-pop{position:absolute;top:calc(100% + 5px);left:0;min-width:118px;z-index:40;background:linear-gradient(var(--modal-top),var(--modal-bot));
+      border:1px solid var(--hairline);border-radius:10px;padding:4px;box-shadow:0 14px 38px rgba(0,0,0,.55)}
+    .gb-pop .opt{display:flex;align-items:center;gap:7px;border-radius:7px;padding:5px 8px;font-size:var(--fs-xs);color:var(--ink-dim);cursor:pointer;white-space:nowrap}
+    .gb-pop .opt:hover{background:var(--raised-hi);color:var(--ink)}
+    .gb-pop .opt.cur{color:var(--ink)}
+    .gb-pop .opt .ck{width:11px;flex:none;color:var(--accent);opacity:0}
+    .gb-pop .opt.cur .ck{opacity:1}
+    .gb-hint{display:block;font-size:var(--fs-2xs);color:var(--ink-faint);margin-top:3px}
+    .gb-hint u{text-decoration:none;color:var(--accent);cursor:pointer}
+    .gb-foot{border-top:1px solid var(--hairline);padding:9px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:none}
+    .gb-readback{font-size:var(--fs-sm);color:var(--ink-dim);flex:1;min-width:240px}
+    .gb-readback b{color:var(--ink)}
+    /* soft rectangles, not circular pills (owner call): every other readout in the app is a 7-9px rounded box,
+       and these two were the only lozenges on screen. */
+    .gb-setup{font-size:var(--fs-sm);color:var(--ink);background:var(--raised);border:1px solid var(--hairline);border-radius:9px;padding:4px 12px;white-space:nowrap}
+    .gb-weight{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-sm);color:var(--ink);background:var(--raised);border:1px solid var(--hairline);border-radius:9px;padding:4px 12px;white-space:nowrap}
+    .gb-weight .wm{display:inline-flex;gap:3px}
+    .gb-weight .wm i{width:8px;height:8px;border-radius:2.5px;background:var(--raised-hi)}
+    .gb-weight .wm i.f{background:var(--accent)}
+    .gb-weight.hot{border-color:rgba(237,180,74,.55);color:var(--warn)}
+    .gb-weight.hot .wm i.f{background:var(--warn)}
+    .strat-seat{display:flex;align-items:center;gap:8px}
+    .strat-seat .sc-name{flex:1;min-width:0;font-size:var(--fs-sm);color:var(--ink)}
+    .strat-seat .sc-name i{display:block;font-style:normal;font-size:var(--fs-xs);color:var(--ink-faint)}
+    .strat-seat select{background:var(--raised);color:var(--ink);border:1px solid var(--hairline);border-radius:7px;padding:4px 6px;font-size:var(--fs-xs)}
+    /* ══ AGENTS OVERVIEW — variant A4, the symmetric ledger (owner-approved mock, 2026-08-19) ══════════════
+       Replaces the tile grid. One row per agent: Agent + five equal, centre-aligned categories (Model ·
+       Elapsed · Tokens · Status · Task) repeated identically down the pane, so a swarm reads as a rhythm
+       rather than as a wall of cards. What the redesign deliberately RETIRES: the leading status dot (Status
+       is a word now), the type-hue rails, the hero's sub-line and progress bar, and the inline .expanded
+       reflow that shoved neighbouring tiles around mid-run. Detail is a side pane instead.
+       Every value here already existed in renderAgents() — this is a re-layout, not a re-plumb. */
+    /* top padding 2 -> 0 and the gap under it 20 -> 16: the observed strip used to sit above this hero, and
+       removing it left the block floating. The pane's own 44px top padding already supplies the breathing room. */
+    .agents-hero{position:relative;display:flex;align-items:center;gap:14px;padding:0 2px 16px;margin-bottom:0}
+    .hero-glyph{flex:none;width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:var(--warn);border-radius:11px;
+      background:rgba(255,255,255,.05);box-shadow:inset 0 1px 0 var(--sheen),0 0 22px -12px var(--warn)}
+    .hero-glyph svg{width:24px;height:24px}
+    .agents-hero.live .hero-glyph svg{animation:micpulse 1.7s ease-in-out infinite}
     .hero-main{flex:1;min-width:0}
-    .hero-title{font-size:var(--fs-lg);font-weight:650;letter-spacing:.01em;color:var(--ink);display:flex;align-items:center;gap:9px}
-    .hero-live-pill{font-size:var(--fs-2xs);font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--warn);display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;background:rgba(224,169,59,.14)}
-    .hero-live-pill .ld{width:6px;height:6px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px -1px var(--warn);animation:micpulse 1s ease-in-out infinite}
-    .hero-sub{margin-top:3px;font-size:var(--fs-xs);color:var(--ink-faint);letter-spacing:.02em}
-    .hero-stats{flex:none;display:flex;gap:8px}
-    .hstat{min-width:54px;text-align:center;padding:6px 11px;border-radius:9px;background:rgba(255,255,255,.04)}
-    .hstat-n{font-size:var(--fs-xl);font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
-    .hstat-l{margin-top:4px;font-size:var(--fs-2xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+    /* BARE title, owner call — no live pill, no sub-line. The stat boxes carry the counts. */
+    .hero-title{font-size:var(--fs-lg);font-weight:700;letter-spacing:-.01em;line-height:1.35;color:var(--ink)}
+    .hero-stats{margin-left:auto;flex:none;display:flex;gap:8px}
+    /* one chic silvery hairline, shared by the stat boxes and the filter segment below. OWNER PASS 2026-08-19:
+       these read too faint against the pane — the fill comes up .04 -> .065 for contrast, the hairline .13 ->
+       .18, and the caption steps off --ink-faint onto --ink-dim. Still a quiet readout, just legible. */
+    .hstat{min-width:58px;text-align:center;padding:7px 12px;border-radius:9px;background:rgba(255,255,255,.065);
+      border:1px solid rgba(219,226,236,.18);box-shadow:inset 0 1px 0 rgba(219,226,236,.11)}
+    .hstat-n{font-size:var(--fs-lg);font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
+    .hstat-l{margin-top:4px;font-size:var(--fs-2xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim)}
     .hstat.run .hstat-n{color:var(--warn)}
     .hstat.done .hstat-n{color:var(--ok)}
     .hstat.tok .hstat-n{color:var(--accent)}
-    .hero-prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.06)}
-    .hero-prog-fill{height:100%;background:linear-gradient(90deg,var(--ok),var(--accent));transition:width .5s cubic-bezier(.4,0,.2,1)}
-    /* ── groups (Running / Done), each a responsive grid so parallelism is VISIBLE at a glance ── */
-    .agents-group{margin-bottom:15px}
-    .agents-group-hd{font-size:var(--fs-2xs);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 9px 2px}
-    .agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(234px,1fr));gap:10px}
-    /* ── agent tile — a living cell you watch think: type-hued, live "now" line, drill-down detail ── */
-    .agent-tile{position:relative;display:flex;flex-direction:column;gap:8px;padding:11px 12px 10px 14px;min-width:0;border-radius:11px;overflow:hidden;
-      background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.007));box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);transition:box-shadow var(--dur-base),transform var(--dur-base)}
-    .agent-tile::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--rail,#8493a6);opacity:.85}   /* type-hued edge = swarm identity at a glance */
-    .agent-tile.rich{cursor:pointer}
-    .agent-tile.rich:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.11),0 8px 24px -18px #000;transform:translateY(-1px)}
-    .agent-tile.running{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--rail,#8493a6) 34%,transparent),0 0 26px -18px var(--rail,#8493a6)}   /* breathing hue glow while working */
-    .agent-tile.running::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;pointer-events:none;opacity:.8;
-      background:linear-gradient(90deg,transparent,var(--rail,#8493a6),transparent);background-size:200% 100%;animation:agentsweep 2.1s linear infinite}
-    .agent-tile.done{opacity:.9}
-    .agent-tile.err::before{background:var(--live)}
-    .agent-tile.expanded{grid-column:1/-1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 14px 34px -22px #000}
-    .tile-top{display:flex;align-items:flex-start;gap:8px}
-    .tile-dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:3px;background:#3a3f47;position:relative}
-    .agent-tile.running .tile-dot{background:var(--warn);box-shadow:0 0 9px -1px var(--warn);animation:micpulse 1s ease-in-out infinite}
-    .agent-tile.running .tile-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--warn);opacity:.5;animation:agentRing 1.4s ease-out infinite}
-    .agent-tile.done .tile-dot{background:var(--ok);box-shadow:0 0 8px -2px var(--ok)}
-    .agent-tile.err .tile-dot{background:var(--live);box-shadow:0 0 8px -2px var(--live)}
-    .tile-name{flex:1;min-width:0;font-size:var(--fs-sm);line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    .tile-type{flex:none;align-self:flex-start;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink);background:color-mix(in srgb,var(--rail,#8493a6) 26%,transparent)}
-    .tile-model{flex:none;align-self:flex-start;font-size:var(--fs-2xs);letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:5px;color:var(--ink-dim);background:var(--raised-hi,rgba(255,255,255,.06))}   /* which brain runs this agent — quieter than the type pill (neutral fill, no hue) so the rail color keeps meaning "type" */
-    /* the "now" line — WHAT this agent is doing right now (the watch-it-think magic) */
-    .tile-now{display:flex;align-items:center;gap:6px;min-width:0;font-size:var(--fs-xs);font-family:ui-monospace,Consolas,monospace;color:var(--ink-dim);white-space:nowrap;overflow:hidden}
-    .tile-now-ind{flex:none;width:5px;height:5px;border-radius:50%;background:var(--ink-faint)}
-    .agent-tile.running .tile-now{color:var(--ink)}
-    .agent-tile.running .tile-now-ind{background:var(--rail,#8493a6);box-shadow:0 0 7px -1px var(--rail,#8493a6);animation:micpulse 1.1s ease-in-out infinite}
-    .tile-now .nm{color:var(--ink);font-weight:600;flex:none}
-    .tile-now .tg{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-faint)}
-    .tile-foot{display:flex;align-items:center;gap:12px;font-size:var(--fs-2xs);color:var(--ink-faint);letter-spacing:.02em;font-variant-numeric:tabular-nums}
-    .tile-foot .fm{display:inline-flex;align-items:center;gap:4px}
-    .tile-foot .fm b{font-weight:650;color:var(--ink-dim)}
-    .tile-foot .fm.tok b{color:var(--accent)}
-    .agent-tile.running .tile-foot .fm.dur b{color:var(--warn)}
-    .tile-foot .fm.err{color:var(--live)}
-    .agent-chev{margin-left:auto;flex:none;color:var(--ink-faint);font-size:var(--fs-md);line-height:1;transition:transform var(--dur-base),color var(--dur-fast)}
-    .agent-tile.rich:hover .agent-chev{color:var(--ink)}
-    .agent-tile.expanded .agent-chev{transform:rotate(180deg)}
-    /* drill-down detail — the agent's task, its full tool-call feed, and its final result */
-    .tile-detail{display:none;margin-top:2px;padding-top:10px;border-top:1px solid var(--hairline-soft)}
-    .agent-tile.expanded .tile-detail{display:block}
-    .agent-task{margin:0 0 9px;font-size:var(--fs-xs);line-height:1.5;color:var(--ink-dim)}
-    .agent-feed{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+    /* ── filter segment: All / Running / Done / Failed. Pure client-side over status + ok — no new data. ── */
+    .ag-filters{display:inline-flex;gap:2px;padding:2px;margin:0 2px 16px;background:var(--chip);
+      border:1px solid rgba(219,226,236,.18);border-radius:9px;box-shadow:inset 0 1px 0 rgba(219,226,236,.11)}
+    .ag-filters button{width:auto;border:none;background:none;color:var(--ink-dim);font-size:var(--fs-xs);font-weight:600;
+      letter-spacing:.06em;text-transform:uppercase;padding:6px 11px;border-radius:6px;cursor:pointer;box-shadow:none}
+    .ag-filters button.on{color:var(--ink);background:linear-gradient(180deg,#22262e,#171a20)}
+    .ag-filters button .n{color:var(--warn);margin-left:5px;font-variant-numeric:tabular-nums}
+    .ag-filters button:disabled{opacity:.4;cursor:default}
+    /* ── the ledger ── */
+    .ag-split{display:grid;grid-template-columns:1fr;gap:12px;align-items:start}
+    .ag-split.haspane{grid-template-columns:minmax(0,1fr) 320px}
+    @media (max-width:900px){.ag-split.haspane{grid-template-columns:1fr}}
+    .ag-grid{display:grid;grid-template-columns:minmax(122px,1.15fr) repeat(5,minmax(64px,1fr));gap:10px;align-items:center}
+    /* pane open → the Task column retires (you are reading THAT agent's task in the pane) and the row
+       re-squares to four categories, so the rhythm survives the width loss instead of crushing. */
+    .ag-split.haspane .ag-grid{grid-template-columns:minmax(122px,1.15fr) repeat(4,minmax(64px,1fr))}
+    .ag-split.haspane .ag-task,.ag-split.haspane .ag-cols span:last-child{display:none}
+    .ag-cols{padding:0 14px 6px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    .ag-cols span{text-align:center}
+    .ag-cols span:first-child{text-align:left}
+    .ag-list{border:1px solid var(--hairline-soft);border-radius:11px;overflow:hidden;background:rgba(255,255,255,.015)}
+    .ag-row{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--hairline-soft)}
+    .ag-row:last-child{border-bottom:none}
+    .ag-row:hover{background:rgba(255,255,255,.028)}
+    .ag-row.sel{background:rgba(255,255,255,.05)}   /* a soft lift only — no rail (rails are extinct here too) */
+    .ag-row > span{text-align:center;min-width:0}
+    .ag-row > .ag-nm{text-align:left}
+    /* ONE type voice across the row — every field the same size; colour and weight still carry the meaning */
+    .ag-row .ag-nm,.ag-el,.ag-tk,.ag-mdl,.ag-task,.ag-status{font-size:var(--fs-sm)}
+    .ag-nm{color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ag-nm small{display:block;color:var(--ink-faint);font-weight:400;font-size:var(--fs-2xs)}
+    .ag-el,.ag-tk{font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+    .ag-el{color:var(--warn)}
+    .ag-row.is-done .ag-el{color:var(--ink)}   /* amber means LIVE; a finished row settles to quiet ink */
+    .ag-tk.none{color:var(--ink-faint);font-weight:400}
+    .ag-mdl{color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ag-task{color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ag-row:hover .ag-task,.ag-row.sel .ag-task{color:var(--ink-dim)}
+    .ag-status{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:600;letter-spacing:.02em}
+    .ag-status i{width:6px;height:6px;border-radius:50%;flex:none}
+    .ag-status.run{color:var(--warn)}
+    .ag-status.run i{background:var(--warn);box-shadow:0 0 7px -1px var(--warn);animation:micpulse 1.2s ease-in-out infinite}
+    .ag-status.done{color:var(--ok)}  .ag-status.done i{background:var(--ok)}
+    .ag-status.fail{color:var(--live)} .ag-status.fail i{background:var(--live)}
+    /* ── detail pane: replaces the inline .expanded reflow ── */
+    .ag-pane{background:rgba(255,255,255,.02);border:1px solid var(--hairline-soft);border-radius:11px;
+      padding:13px 15px;display:flex;flex-direction:column;gap:11px;font-size:var(--fs-sm);animation:agpane .18s ease}
+    @keyframes agpane{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
+    .ag-pane-hd{display:flex;align-items:center;font-size:var(--fs-2xs);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+    .ag-pane-close{margin-left:auto;width:auto;border:none;background:none;box-shadow:none;color:var(--ink-faint);font-size:var(--fs-md);line-height:1;cursor:pointer;padding:0 2px}
+    .ag-pane-close:hover{color:var(--ink);background:none;border:none}
+    .ag-pane-title{font-weight:600;color:var(--ink);display:flex;align-items:center;gap:8px;line-height:1.4}
+    .ag-pane-meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--fs-2xs);color:var(--ink-faint);margin-top:auto}
+    .ag-pane-meta b{color:var(--ink-dim);font-weight:600}
+    /* the recent-history cap, said out loud rather than silently truncating */
+    .ag-more{margin:8px 2px 0;font-size:var(--fs-2xs);letter-spacing:.02em;color:var(--ink-faint)}
+    /* the tile grid (.agents-group / .agents-grid / .agent-tile / .tile-*) was retired 2026-08-19 with the
+       A4 ledger above. The tile chassis, the type-hue rails, the sweep and the .expanded grid-column reflow
+       all went with it; .agent-task / .agent-feed / .agent-result below SURVIVE — the detail PANE reuses them. */
+    /* drill-down detail — the agent's task, its full tool-call feed, and its final result (now in the PANE) */
+    .agent-task{margin:0;font-size:var(--fs-xs);line-height:1.6;color:var(--ink-dim);
+      background:rgba(0,0,0,.25);border-radius:8px;padding:9px 11px;max-height:118px;overflow:auto}
+    .agent-feed{display:flex;flex-wrap:wrap;gap:6px}
     .agent-tool{display:inline-flex;gap:6px;align-items:center;line-height:1.4}
     .agent-tool .agent-tt{min-width:0;max-width:220px;font-size:var(--fs-xs);font-family:ui-monospace,Consolas,monospace;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .agent-result{font-size:var(--fs-xs);line-height:1.55;color:var(--ink);background:rgba(0,0,0,.22);border-radius:8px;padding:9px 11px;max-height:150px;overflow:auto}
-    /* tool badges — colored by kind (shared by the "now" line + the expanded feed) */
+    /* tool badges — colored by kind (the detail pane's feed) */
     .tb{font-size:var(--fs-2xs);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.05);color:var(--ink-dim);white-space:nowrap}
     .tb-sh{color:#e0a93b;background:rgba(224,169,59,.13)}
     .tb-read{color:#6aa6e0;background:rgba(106,166,224,.13)}
@@ -471,7 +687,13 @@
        Same shape as the guest page's banner (share/guest.html): a readable sentence on a soft scrim, NOT a pill
        badge, so the two surfaces read as one product. Identity stays BLUE across the app (matches
        .sess-flair.author); pointer-events:none so it never blocks a click/selection. */
-    .typist-chip{position:absolute;top:6px;right:18px;z-index:6;padding:4px 11px 5px;border-radius:8px;
+    /* top:31px, not 6px. At top:6px this chip rendered UNDERNEATH the Terminal|Agents control and the owner
+       never saw who was typing. The clearance is derived, not eyeballed: .termseg sits at top:5px, and its
+       button is 3.5px padding ×2 + a 1px border ×2 + a ~14px line box at --fs-sm ≈ 23px tall, so the control's
+       bottom edge lands at ≈28px. 31px is the owner's asked-for 2-3px gap. NOTE the border is part of that sum
+       and was added in the same pass that gave these tabs a face — if either the padding or the border changes,
+       this number moves with them. */
+    .typist-chip{position:absolute;top:31px;right:18px;z-index:6;padding:4px 11px 5px;border-radius:8px;
       font-size:var(--fs-sm);letter-spacing:.02em;color:var(--ink-dim);
       background:linear-gradient(180deg,rgba(10,12,16,.94),rgba(10,12,16,.74));
       backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
@@ -517,6 +739,10 @@
        tab's own footprint; both are fixed-size icon tabs, so the constant is stable. */
     .termtab.cmdk-tab{right:50px}
     .termtab.cmdk-tab svg{width:15px;height:15px;display:block}
+    /* the strategy trigger — third square in the commands/git corner row (8 → 50 → 92, same 42px pitch) */
+    .termtab.pb-tab{right:92px}
+    .termtab.pb-tab svg{width:15px;height:15px;display:block}
+    .termtab.pb-tab.stratoff{opacity:.38}   /* strategy off: visible-but-dim, click explains where to turn it on */
     .termtab .lbl{max-width:0;opacity:0;overflow:hidden;white-space:nowrap;font-size:var(--fs-xs);letter-spacing:.08em;
       text-transform:uppercase;transition:max-width var(--dur-slow) ease,opacity var(--dur-slow) ease,margin var(--dur-slow) ease}
     .termtab .ico{width:16px;height:16px;flex:none}
@@ -587,10 +813,14 @@
     .toggle{display:flex;align-items:center;gap:9px;cursor:pointer;
       font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);transition:color var(--dur-fast)}
     .toggle input{display:none}
+    /* the knob rides a spring curve rather than a plain ease — the travel is only 13-16px, and at that distance
+       a linear-ish ease reads as a jump. --ease-pop is the same curve the app's other press affordances use. */
     .toggle .sw{width:34px;height:18px;border-radius:999px;background:#181b20;
-      border:1px solid var(--hairline);position:relative;transition:var(--dur-base);flex:none}
+      border:1px solid var(--hairline);position:relative;flex:none;
+      transition:background var(--dur-base) ease,border-color var(--dur-base) ease}
     .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
-      background:linear-gradient(180deg,#9aa3ae,#5f656d);transition:var(--dur-base)}
+      background:linear-gradient(180deg,#9aa3ae,#5f656d);
+      transition:transform var(--dur-base) var(--ease-pop),background var(--dur-base) ease}
     /* B14: a DISABLED toggle used to be indistinguishable from a working one — the real checkbox is
        display:none, the switch is painted purely from :checked, and cursor stayed pointer. A host clicking a
        locked view-only switch saw a green "ON" swallow the click and concluded their machine was broken. */
@@ -1242,8 +1472,40 @@
     .linkbtn{display:inline;width:auto;padding:0;border:none;background:none;color:var(--accent,#7bb6ee);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
     .linkbtn:hover{color:var(--ink)}
     .linkbtn:disabled{opacity:.5;cursor:default;text-decoration:none}
-    .ws-pick-row{display:flex;align-items:center;gap:7px;font-size:var(--fs-xs);color:var(--ink-dim);margin:2px 0 12px;cursor:pointer;text-align:left}
-    .ws-pick-row input{cursor:pointer}
+    /* ── New project, step 2 ───────────────────────────────────────────────────────────────────────────────
+       The box does NOT resize between steps (owner decision): a dialog that grows under the cursor is the
+       same unsteady feeling the shell spent 0.9.13 removing. Both panes live at the same 344px. */
+    .ws-pick-row{margin:2px 0 12px;text-align:left}
+    .ws-fld-lab{display:block;font-size:var(--fs-xs);color:var(--ink-dim);margin:0 0 6px;text-align:left}
+    .ws-seg{display:flex;gap:7px}
+    .ws-seg-b{
+      flex:1;padding:9px 8px;border-radius:8px;border:1px solid var(--hairline);background:var(--raised);
+      color:var(--ink-dim);font-size:var(--fs-xs);text-align:left;line-height:1.35;cursor:pointer}
+    .ws-seg-b b{display:block;color:var(--ink);font-size:var(--fs-sm);font-weight:550;margin-bottom:2px}
+    .ws-seg-b:hover{background:var(--raised-hi)}
+    .ws-seg-b.on{border-color:var(--flame,var(--accent));background:color-mix(in srgb,var(--flame,var(--accent)) 10%,var(--raised))}
+    .ws-seg-b.on b{color:var(--flame,var(--accent))}
+    .ws-back{
+      display:flex;align-items:center;gap:7px;width:auto;padding:0;margin:0 0 12px;border:0;background:none;
+      color:var(--ink-dim);font-size:var(--fs-xs);cursor:pointer}
+    .ws-back:hover{color:var(--ink);background:none}
+    .ws-back svg{width:13px;height:13px;flex:none}
+    .ws-kindhead{display:flex;align-items:center;gap:9px;text-align:left;margin:0 0 4px}
+    .ws-kindhead h3{margin:0}
+    .ws-kind-ico{width:18px;height:18px;flex:none;color:var(--flame,var(--accent));display:flex}
+    .ws-kind-ico svg{width:18px;height:18px}
+    .ws-kind-desc{font-size:var(--fs-xs);line-height:1.45;color:var(--ink-dim);text-align:left;margin:0 0 12px}
+    /* The transcript disclosure (R2), on the page instead of in a native confirm(). Danger-coloured because
+       it is the one thing here that publishes; ws-create stays disabled until the box is ticked. */
+    .ws-consent{
+      text-align:left;font-size:var(--fs-xs);line-height:1.55;color:var(--ink-dim);
+      background:color-mix(in srgb,var(--live) 7%,transparent);
+      border:1px solid color-mix(in srgb,var(--live) 30%,transparent);
+      border-radius:9px;padding:10px 11px;margin:0 0 12px}
+    .ws-consent b{display:block;color:var(--live-soft);margin-bottom:4px;font-size:var(--fs-sm)}
+    .ws-consent code{font-size:.95em}
+    .ws-consent label{display:flex;gap:7px;align-items:flex-start;margin-top:9px;cursor:pointer;color:var(--ink-dim)}
+    .ws-consent label input{cursor:pointer;flex:none;margin-top:1px}
     .ws-busy.err{color:var(--live-soft)}
     /* share dock pinned at the bottom of the sessions sidebar */
     .share-dock{flex:none;border-top:1px solid var(--hairline);padding:10px 12px 12px;display:flex;flex-direction:column;gap:9px}   /* tightened to the sidebar rhythm */
@@ -1251,7 +1513,9 @@
        top/bottom + margin:auto, NOT a transform: the global button:active{translateY(1px)} would clobber a
        transform-centred button and make it jump on press (the "jiggle" bug). */
     .btnwrap{position:relative}
-    .btnwrap .ws-info{position:absolute;right:10px;top:0;bottom:0;margin:auto 0;z-index:1}
+    /* 2026-08-19: the "i" rides IN THE FLOW as the share button's last child (see the dock markup), so there is
+       no absolute placement to keep centred any more — flexbox centres all three together. */
+    .share-btn .ws-info{flex:none}
     .share-dock .out{margin-top:1px;font-size:var(--fs-xs);line-height:1.55}
     .share-dock .out:empty{display:none}   /* no fluff line when there's no live-share status to show (the hint moved to the button's tooltip) */
     /* standing "hosting but not remotely reachable" warning — amber family matches .ctxbar.warn, persistent (not a toast) because this state strands every guest silently */
@@ -1261,36 +1525,36 @@
     .tunnel-warn .tw-install:disabled{opacity:.6;cursor:default}
     .tunnel-warn.tw-err{background:rgba(229,86,75,.10);border-color:rgba(229,86,75,.35);color:#e58479}
     .tunnel-warn.tw-err .tw-install{border-color:rgba(229,86,75,.4);background:rgba(229,86,75,.12);color:#e58479}
-    /* live collab bar: shows that the session is live + who has joined it */
-    .livebar{display:flex;align-items:center;gap:9px;flex:none;padding:5px 12px;background:rgba(95,180,135,.08);border-bottom:1px solid rgba(95,180,135,.2)}
-    .livebar .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px -1px var(--ok);flex:none;animation:livepulse 2s ease-in-out infinite}
+    /* The live bar above the terminal is gone (owners, 2026-08-15). Its two ALARM states were the part worth
+       keeping, so they moved onto the chat header's dot rather than being deleted with the bar: amber when the
+       mirror is paused, dimmed-and-clickable when the host is off browsing another session. Everything below is
+       scoped to .chat-title so it cannot be resurrected by a stray .livebar element. */
+    .chat-title .live-dot,.liveflag .live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px -1px var(--ok);flex:none;animation:livepulse 2s ease-in-out infinite}
+    /* base fallbacks for the top-bar flag — the skinned rules below are what actually paint */
+    .crumbline{display:inline-flex;align-items:center;gap:8px;min-width:0}
+    .liveflag{display:inline-flex;align-items:center;gap:6px;flex:none;padding:1px 7px;border:1px solid var(--hairline);border-radius:6px;font-size:var(--fs-2xs);letter-spacing:.1em;text-transform:uppercase;color:var(--ok);white-space:nowrap}
     @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.62}}   /* gentler breathe, not a hard blink */
-    .livebar .live-txt{font-size:var(--fs-xs);font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ok);flex:none}
-    /* the host is browsing another session while their live one keeps running — a quiet reminder + a way back */
-    .livebar.elsewhere{background:rgba(95,180,135,.045);border-bottom-color:rgba(95,180,135,.12)}
-    .livebar.elsewhere .live-dot{animation:none;opacity:.75}
-    /* the mirror froze itself because the host tabbed into a workspace they don't share — the SAME bar
-       that says "Live" must say so, or a host who never glances at the chat panel would have no way to tell
-       guests are frozen out. Amber — the warning color this app already uses for caution states. */
-    .livebar.paused{background:rgba(224,169,59,.1);border-bottom-color:rgba(224,169,59,.28)}
-    .livebar.paused .live-dot{background:#e0a93b;box-shadow:0 0 8px -1px #e0a93b;animation:none}
-    .livebar.paused .live-txt{color:#e0a93b}
+    /* the host is browsing another session while their live one keeps running — dim the dot and make the whole
+       title the way back, which is what the bar's "open it" button used to be */
+    .chat-title.elsewhere{cursor:pointer}
+    .chat-title.elsewhere .live-dot{animation:none;opacity:.55}
+    .chat-title.elsewhere:hover{color:var(--ok)}
+    /* the mirror froze itself because the host tabbed into a workspace they don't share — the header that says
+       "Live Session" must say so, or a host would have no way to tell guests are frozen out. Amber — the
+       warning color this app already uses for caution states. */
+    .chat-title.paused .live-dot{background:var(--warn,#e0a93b);box-shadow:0 0 8px -1px var(--warn,#e0a93b);animation:none}
+    .chat-title.paused{color:var(--warn,#e0a93b)}
     /* C-5.2: unmissable while the RUNNING share's real served mode is co-drive (not the checkbox) — paints
        whenever an approved guest can actually type on this machine, and disappears the instant that stops
-       being true (view-only, or the share ends). Compact so it never crowds the roster pills next to it. */
+       being true (view-only, or the share ends). Compact so it never crowds the buttons next to it.
+       THIS BASE RULE DOES NOT PAINT: `class="skin"` is hardcoded and permanent on <html>, so
+       `html.skin .codrive-badge` below always outranks it. It is kept deliberately as a fallback — a safety
+       warning must never degrade to an unstyled span if the skin class is ever lifted — NOT as the live
+       definition. Any test asserting this badge's appearance must target the html.skin rule; a pin anchored
+       here passes while the real rule is deleted, which is exactly the trap that was found and fixed. */
     .codrive-badge{flex:none;font-size:var(--fs-xs);font-weight:800;letter-spacing:.08em;color:#fff;
       background:var(--live);border-radius:5px;padding:2px 7px;cursor:default;
       box-shadow:0 0 10px -3px var(--live)}
-    .live-jump{background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:var(--fs-xs);color:var(--ink-dim,#8b929c);text-align:left}
-    .live-jump:hover{color:var(--ok);text-decoration:underline}
-    .live-members{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--ink-dim);min-width:0}
-    .live-member{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.05);white-space:nowrap}   /* quiet filled pill — no stroke */
-    .live-member.you{background:rgba(95,180,135,.14)}   /* distinguish "you" with a soft green FILL now that the pill has no stroke (border-color alone was inert without a border) */
-    .live-member.gone{opacity:.5;text-decoration:line-through}
-    .live-member .md{width:6px;height:6px;border-radius:50%;flex:none;background:#5a6270}
-    .live-member .md.ok{background:var(--ok)}
-    .live-member .md.idle{background:#e0a93b}
-    .live-member .md.gone{background:var(--live,#e5564b)}
     .name-field{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--chip);color:var(--ink);font:inherit;font-size:var(--fs-sm);outline:none}
     .name-field:focus{border-color:rgba(95,180,135,.5)}
     .share-dock input[type=text]{margin-bottom:0;font-size:var(--fs-xs);padding:9px 10px}
@@ -1320,8 +1584,11 @@
        the icon's zone on the right only, and claw back the width by trimming the button's .06em tracking (~8px on
        this label) and the icon gap. The label now centres in the space LEFT OF the icon, which reads balanced
        because the icon fills the right. Verified by measurement at 228 / 262 / 316px. */
+    /* SYMMETRIC padding, 2026-08-19. The 14/38 split above reserved the right rim for the overlaid "i"; now that
+       the "i" is a real flex child there is nothing to reserve, and an uneven box would push the cluster off
+       centre again — the exact complaint this replaced. */
     .share-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px;
-      padding-left:14px;padding-right:38px;letter-spacing:.02em}
+      padding-left:14px;padding-right:14px;letter-spacing:.02em}
     /* last-resort guard: monospace metrics differ per machine (Consolas / SF Mono / JetBrains Mono are not the
        same width), so the label must be able to ellipsize rather than ever touch the icon again. */
     .sb-label{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -1494,7 +1761,7 @@
       border:1px solid var(--hairline);border-radius:11px;overflow:hidden;box-shadow:inset 0 1px 0 var(--sheen)}
     .body.sharing .chat{display:flex}
     .chat-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--hairline-soft)}
-    .chat-title{font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+    .chat-title{display:inline-flex;align-items:center;gap:7px;flex:none;font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
     .chat-head-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
     /* roster strip — community icon + members inline on ONE line. C-5.9 roster redesign: badges got big enough
        that folding overflow into a "+N" pop-down (the old design) would hide most guests behind a click — the
@@ -1895,18 +2162,14 @@
        become the draft's single hairline. Nothing inside it is touched. */
     html.skin .sidebar{background:var(--chrome);backdrop-filter:none;
       border-right:1px solid var(--hairline-soft);border-radius:0;box-shadow:none}
-    /* the share button: a touch shorter, and centred for real. Its 14/38 padding reserved room for the "i"
-       overlay on the right, which left the icon+label sitting 12px LEFT of the button's centre — measured, not
-       eyeballed. Matching the left padding to the right one centres the content while keeping the reserve. */
-    html.skin .share-btn{height:42px;padding-left:34px;padding-right:34px;gap:8px}
-    /* the "i" is a sibling overlaying the button's right edge. Even with the label truly centred, a full-weight
-       badge on one side tips the button optically — so it sits tighter to the edge and rests quiet, coming up
-       to full strength only when reached for. */
-    /* right:15px is measured, not chosen: the label ends at 169.6 and the button's inside edge is at 214, so
-       the badge's centre wants 191.8 — which puts a 16px badge 15.2px off the right edge. At 8px it sat hard
-       against the border with all the slack on the label side. */
-    html.skin .btnwrap .ws-info{right:15px;width:16px;height:16px;opacity:.5}
-    html.skin .btnwrap .ws-info:hover{opacity:1}
+    /* the share button: a touch shorter, and centred for real — all THREE children as one cluster since the "i"
+       came in-flow (2026-08-19). Padding drops 34 → 12: the row now carries icon + label + badge (~171px at the
+       sidebar clamp floor, inside a ~204px button), and 34px a side would have forced the label to ellipsize. */
+    html.skin .share-btn{height:42px;padding-left:12px;padding-right:12px;gap:8px}
+    /* the badge rests quiet and comes up to full strength only when reached for — a full-weight "i" competes
+       with the label it is subordinate to. */
+    html.skin .share-btn .ws-info{width:16px;height:16px;opacity:.5}
+    html.skin .share-btn .ws-info:hover{opacity:1}
     /* and one notch brighter, so the sidebar's primary action carries against every ground. It follows the
        theme rather than fighting it: --ok is re-declared in each palette, so the wash re-resolves per theme. */
     html.skin .share-btn:not(.live){
@@ -1938,8 +2201,16 @@
        reference you glance at, not decoration to be squinted at. */
     html.skin .crumb{font-family:var(--mono);font-size:var(--fs-row);color:var(--ink-dim);
       padding-left:10px;margin-left:4px;border-left:1px solid var(--hairline);
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42ch;min-width:0}
+      white-space:nowrap;overflow:hidden;max-width:42ch;min-width:0;display:flex;align-items:baseline}
     html.skin .crumb b{color:var(--ink);font-weight:500}   /* the session is the half that changes, so it carries the brighter ink */
+    /* WHICH HALF YIELDS. The cap used to apply to "project / session" as ONE string, so a long project ate the
+       session's room — "a-long-project-name / My-Session" printed as "…My-Sess…" with most of the bar
+       empty. The session is the half being read, so it holds its width (22ch, the owners' number) and the
+       PROJECT is what ellipsises. .crumb-proj keeps white-space:pre because it carries the " / " separator: as
+       two flex items that trailing space would collapse and print "Local /4444" — the exact failure the note
+       just below was written about. */
+    html.skin .crumb-proj{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:pre}
+    html.skin .crumb b{flex:none;max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     /* THE TWO DIVIDERS ARE ONE LINE. The crumb's rule is pinned to --side-w, the same value that sets the
        sidebar's grid column, so it sits directly above the sidebar/terminal seam at any window width instead
        of floating wherever the wordmark happens to end. Absolute, so the brand's width can never push it off.
@@ -1950,9 +2221,35 @@
        left is --side-w MINUS the sidebar's 1px border: that border is drawn INSIDE the column, spanning
        227-228, so a rule at 228 would sit one pixel to its right rather than on it. */
     html.skin .top{position:relative}
-    html.skin:has(.body.with-sessions) .crumb{
-      position:absolute;left:calc(var(--side-w) - 1px);top:50%;transform:translateY(-50%);margin-left:0;max-width:34ch}
+    /* the crumb and the live flag are pinned to the seam as ONE unit, so the flag reads as a suffix to "where
+       you are" rather than drifting to its own corner of the bar. */
+    html.skin .crumbline{display:inline-flex;align-items:center;gap:8px;min-width:0}
+    html.skin:has(.body.with-sessions) .crumbline{
+      position:absolute;left:calc(var(--side-w) - 1px);top:50%;transform:translateY(-50%);max-width:64ch}
+    /* 34 -> 46ch: the old cap could not even hold a 22ch session plus an ordinary project name, so the rule
+       above had nothing to spend. The top bar has the room — it was being clipped by a cap, not by geometry. */
+    html.skin:has(.body.with-sessions) .crumb{margin-left:0;max-width:46ch}
     html.skin .crumb:empty{display:none}   /* no orphan divider rule before the app knows where it is */
+    /* THE LIVE FLAG. Quiet by default — this is a state, not an alarm: mono micro-caps, a hairline outline and
+       the live-green dot, sized to sit inside a 40px bar without touching its edges. It says only "Live" until
+       the share is genuinely co-drive, at which point the CO-DRIVE chip appears beside it wearing the app's
+       danger ink. That escalation is the whole point: "someone is watching" and "someone can type on your
+       machine as you" must not look the same from across the room. */
+    /* OWNER PASS: NO BOX. The outline and ground came off — a dot and a word are already unmistakable in a
+       40px bar, and with the CO-DRIVE chip riding inside it the frame became a box within a box. The INK is
+       untouched, deliberately: the green→red escalation described above is a safety signal, not decoration,
+       and it survives losing its frame. */
+    html.skin .liveflag{display:inline-flex;align-items:center;gap:6px;flex:none;height:20px;padding:0;
+      border:0;border-radius:0;background:none;
+      font-family:var(--mono);font-size:var(--fs-key);letter-spacing:.1em;text-transform:uppercase;
+      color:color-mix(in srgb,var(--ok) 72%,var(--ink));white-space:nowrap}
+    html.skin .liveflag .live-dot{width:6px;height:6px;box-shadow:none}
+    /* co-drive escalates the whole flag, not just the chip riding in it — the ink and the dot go red, so the
+       difference is visible without reading the word. */
+    html.skin .liveflag.codrive{color:color-mix(in srgb,var(--live) 72%,#fff)}
+    html.skin .liveflag.codrive .live-dot{background:var(--live);animation:none}
+    html.skin .liveflag.paused{color:color-mix(in srgb,var(--warn) 78%,var(--ink))}
+    html.skin .liveflag.paused .live-dot{background:var(--warn);animation:none}
     /* .ico — 28px square, no face until hovered, 15px glyph. The base rule is a 31px labelled button with a
        gradient fill; in the draft the top bar's actions are quiet icons, so the fill comes off entirely.
        Scoped to .topbtns, so the sidebar edge-handle (also an .iconbtn) keeps the geometry we gave it. */
@@ -1963,9 +2260,12 @@
     html.skin .top .topbtns .iconbtn{width:28px;height:28px;padding:0;border:0;border-radius:6px;
       background:none;box-shadow:none;color:var(--ink-dim);display:grid;place-items:center;flex:none}
     html.skin .top .topbtns .iconbtn:hover{background:var(--raised-hi);color:var(--ink)}
-    /* 15 → 15.75px (+5%). Same reasoning as the voice glyphs below, applied gently: these sit in the corner
-       furthest from where the eye rests, and they are also icon-only. The button box is unchanged. */
-    html.skin .top .topbtns .iconbtn svg{width:15.75px;height:15.75px}
+    /* 15 → 15.75px (+5%), then 15.75 → 16.54 on a second owner pass (+5% again, ~10% over the original).
+       Same reasoning both times: these sit in the corner furthest from where the eye rests, and they are also
+       icon-only. The 28px button box is unchanged — only the glyph inside it grows.
+       2026-08-19, third owner pass: 16.54 → 17.37 (+5% again). Matches svg ONLY, so the Claude mascot — a
+       raster img sized on its own rule below — is exempt by construction, as the owner asked. */
+    html.skin .top .topbtns .iconbtn svg{width:17.37px;height:17.37px}
     /* All three top-right controls are the SAME square button. The draft's .conn pill was tried here and the
        owners called it: a control shaped differently from the two beside it reads as a different KIND of
        thing, when it is simply the third button in the group. #claude-btn carries .iconbtn, so it takes the
@@ -1973,24 +2273,21 @@
     /* the mascot fills its button the way the two stroked glyphs beside it do. At 15px it was a small picture
        floating in a 28px box while the neighbours' 15px strokes reach their own edges — a filled raster mark
        needs more of the box than a line drawing to read at the same weight. */
-    html.skin .claude-mascot{width:21px;height:21px;border-radius:5px}
+    /* 21 → 22.05px, tracking the +5% the two stroked glyphs beside it just took. Holding it back would leave
+       the mascot visibly smaller than its neighbours — the exact mismatch the note above was written to fix. */
+    html.skin .claude-mascot{width:22.05px;height:22.05px;border-radius:5px}
     html.skin .claude-dot{right:2px;bottom:2px;width:6px;height:6px}
 
-    /* ── LIVE BAR ──────────────────────────────────────────────────────────────────────────────────────────
-       The draft's .livebar / .dot / b / .badge / .who, rule for rule. */
-    html.skin .livebar{height:30px;padding:0 14px;gap:8px;font-size:var(--fs-pill);
-      color:var(--ink-faint);background:color-mix(in srgb,var(--ok) 6%,transparent);
-      border-bottom:1px solid var(--hairline-soft)}
-    html.skin .livebar .live-dot{width:6px;height:6px;box-shadow:none}
-    html.skin .livebar .live-txt{font-size:var(--fs-pill);font-weight:500;letter-spacing:0;
-      text-transform:none;color:var(--ok)}
-    /* the two ALARM states must survive the repaint. This block outranks .livebar.paused / .elsewhere on
-       specificity, so without these three lines a frozen mirror would paint calm green. */
-    html.skin .livebar.elsewhere{background:color-mix(in srgb,var(--ok) 4.5%,transparent)}
-    html.skin .livebar.paused{background:color-mix(in srgb,var(--warn) 12%,transparent);
-      border-bottom-color:color-mix(in srgb,var(--warn) 30%,transparent)}
-    html.skin .livebar.paused .live-dot{background:var(--warn)}
-    html.skin .livebar.paused .live-txt{color:var(--warn)}
+    /* ── LIVE STATE ────────────────────────────────────────────────────────────────────────────────────────
+       The .livebar rules that lived here are gone with the bar itself (owners, 2026-08-15). The dot they
+       carried now sits in the chat header, and the two ALARM states come with it — they are the reason the
+       bar existed at all, and the reason this is a move rather than a deletion. */
+    html.skin .chat-title .live-dot{width:6px;height:6px;box-shadow:none}
+    /* these outrank the unprefixed .chat-title.paused / .elsewhere rules on specificity, so without them a
+       frozen mirror would paint calm green — the exact failure the old block guarded against. */
+    html.skin .chat-title.paused .live-dot{background:var(--warn);box-shadow:none}
+    html.skin .chat-title.paused{color:var(--warn)}
+    html.skin .chat-title.elsewhere .live-dot{background:var(--ok);opacity:.55}
     /* This chip is the only standing notice that an approved guest can run commands on this machine, as the
        user. It keeps the draft's shape — outline, 3px radius, letter-spaced micro-caps, 2px/6px — and changes
        what the shape is SAYING. --flame was wrong for it on meaning, not on brightness: the same token paints
@@ -2006,14 +2303,15 @@
        measurement, and softening the fill moves the text's ground away from red, so contrast rises rather
        than falls. Weight stays 700 — the ask was quieter, not lighter, and weight is what lets the chip be
        found at a glance without a glow. */
-    html.skin .codrive-badge{border:1px solid color-mix(in srgb,var(--live) 55%,transparent);
-      color:color-mix(in srgb,var(--live) 80%,#fff);background:color-mix(in srgb,var(--live) 7%,transparent);
-      font-size:var(--fs-2xs);letter-spacing:.1em;border-radius:3px;padding:2px 6px;box-shadow:none;font-weight:700}
-    /* the draft's .who — a quiet mono line pushed to the right end, not a row of filled pills */
-    html.skin .live-members{margin-left:auto;gap:5px;font-family:var(--mono);
-      font-size:var(--fs-desc);color:var(--ink-dimmer)}
-    html.skin .live-member{background:none;padding:0;font-size:var(--fs-desc)}
-    html.skin .live-member.you{background:none;color:var(--ok)}
+    /* OWNER PASS: the chip's own frame comes off too. It sits INSIDE the live flag, so a bordered chip inside
+       a bordered flag was a box within a box — and with the flag's frame gone (see .liveflag above) a lone
+       chip outline would be the only rectangle in the bar. It becomes text at the flag's own size, joined by a
+       middot: "● LIVE · CO-DRIVE". The red ink and weight 700 stay — that pair is the safety signal, and it
+       was the ink, never the outline, that carried the contrast measurement noted above. */
+    html.skin .codrive-badge{border:0;background:none;border-radius:0;padding:0;box-shadow:none;
+      color:color-mix(in srgb,var(--live) 80%,#fff);
+      font-size:inherit;letter-spacing:.1em;font-weight:700}
+    html.skin .codrive-badge::before{content:'·';margin-right:6px;opacity:.75;font-weight:400}
 
     /* ── CHAT PANEL ────────────────────────────────────────────────────────────────────────────────────────
        The draft's .chat / .chat-h / .mini / .roster / .av / .log / .msg / .chat-in. */
@@ -2021,29 +2319,46 @@
       border-left:1px solid var(--hairline-soft)}
     html.skin .chat-head{height:34px;padding:0 12px;gap:8px;
       border-bottom:1px solid var(--hairline-soft)}
-    html.skin .chat-title{font-family:var(--mono);font-size:var(--fs-key);letter-spacing:.13em;
-      text-transform:uppercase;color:var(--ink-dimmer);font-weight:400}
-    /* .mini — the draft's outline pill. Join voice / Mute / End live are all this one control. */
+    /* the header names the panel, and the panel only exists while sharing — so it reads "Live Session" and
+       carries the dot. One step up from --ink-dimmer: it is a heading now, not a filed-away label, but the
+       colour stays neutral so the DOT is the thing carrying the live signal. */
+    html.skin .chat-title{display:inline-flex;align-items:center;gap:7px;flex:none;
+      font-family:var(--mono);font-size:var(--fs-key);letter-spacing:.13em;
+      text-transform:uppercase;color:var(--ink-dim);font-weight:400}
+    /* .mini — the draft's outline pill. Join voice / Mute / End live are all this one control.
+       OWNER PASS 2026-08-15: the fully-round 22px pill read as a tag rather than a button and its --ink-faint
+       label sat below comfortable reading at 10.5px. Softly rectangular (8px, the radius the rest of the app's
+       buttons use), one size step up, and both the ink and the edge lifted a step — asked for as "a touch
+       larger and a touch more visible", so every move here is one step, not a redesign. */
     html.skin .chat-head-actions .hv-btn,
     html.skin .chat-head-actions .hv-mute,
-    html.skin .chat-head-actions .chat-term{height:22px;min-width:0;padding:0 8px;
-      border-radius:99px;border:1px solid var(--hairline);background:none;color:var(--ink-faint);
-      font-family:var(--ui);font-size:var(--fs-xs);font-weight:400;box-shadow:none}
+    html.skin .chat-head-actions .chat-term{height:26px;min-width:0;padding:0 10px;
+      border-radius:8px;border:1px solid color-mix(in srgb,var(--ink-dimmer) 55%,transparent);
+      background:none;color:var(--ink-dim);
+      font-family:var(--ui);font-size:var(--fs-pill);font-weight:500;box-shadow:none}
     html.skin .chat-head-actions .hv-btn:hover,
-    html.skin .chat-head-actions .hv-mute:hover{color:var(--ink);border-color:var(--ink-dimmer)}
+    html.skin .chat-head-actions .hv-mute:hover{color:var(--ink);border-color:var(--ink-dim)}
     /* …except that ending a share is destructive, and the draft has no equivalent to take a cue from. It keeps
        its red so it can never be mistaken for the button beside it. */
     html.skin .chat-head-actions .chat-term{color:var(--live);
-      border-color:color-mix(in srgb,var(--live) 45%,transparent)}
+      border-color:color-mix(in srgb,var(--live) 60%,transparent)}
     html.skin .roster-strip{padding:9px 12px;gap:8px;border-bottom:1px solid var(--hairline-soft)}
     /* the strip's height is FIXED upstream so showing/hiding its scrollbar can never jump the layout. That
        reserve was sized for 28px badges; the draft's are 19px, so it comes down with them — keeping the
        no-jump guarantee instead of dropping 14px of dead space below the pills. */
-    html.skin .chat-roster{gap:5px;height:24px}
-    /* the draft's .av: a rounded pill whose left cap IS the avatar. The pill's 3px left padding is what makes
-       the disc sit flush inside it. */
-    html.skin .rmember{height:19px;padding:2px 8px 2px 3px;gap:5px;border:0;border-radius:99px;
-      background:var(--raised);box-shadow:none;font-size:var(--fs-xs);color:var(--ink-dim)}
+    html.skin .chat-roster{gap:4px;height:27px}   /* owner pass: a touch less air between names */
+    /* OWNER PASS 2026-08-15: the fully-round 19px pill was its own shape in a header full of soft rectangles.
+       It now wears the same 8px radius and the same height family as Join voice / End Session, so a name badge
+       and a button read as one control language — which is what the roster note asked for originally, before
+       the redesign made them pills. The 3px left padding went with the round cap: at an 8px radius the avatar
+       disc sits INSIDE the shape rather than forming its left edge, so the padding is even.
+       .you and .gone inherit this shape — the state changes the ink, never the geometry. */
+    /* OWNER PASS: NO BOX. The raised ground came off — the avatar disc already anchors each name, so the
+       badge shape was doing nothing but adding weight to a header that carries several of them at once.
+       Padding 9 → 7.5px (-17%) closes the gap the missing face used to justify. .you / .gone / .idle are
+       ink-only states and are untouched, so presence still reads. */
+    html.skin .rmember{height:22px;padding:0 7.5px;gap:6px;border:0;border-radius:8px;
+      background:none;box-shadow:none;font-size:var(--fs-xs);color:var(--ink-dim)}
     html.skin .rmember.you{color:var(--ink)}
     /* .av i — 15px disc carrying the initial. The status dot BECOMES the avatar rather than sitting beside it:
        presence still reads (idle amber, gone faded), and identity is gained, without a second glyph. */
@@ -2054,7 +2369,7 @@
     html.skin .rmember .rdot.idle{background:var(--warn);color:#231705}
     html.skin .rmember .rdot.gone{background:var(--ink-dimmer);color:var(--chrome)}
     html.skin .rmember .rdot .rav{display:block}
-    html.skin .rkick{width:14px;height:14px;border-radius:50%;background:none;color:var(--ink-dimmer)}
+    html.skin .rkick{width:15px;height:15px;border-radius:5px;background:none;color:var(--ink-dimmer)}   /* rounded square, matching the badge it is joined to */
     html.skin .rkick:hover{background:color-mix(in srgb,var(--live) 45%,transparent);color:#fff}
     html.skin .chat-log{padding:11px 12px;gap:11px}
     /* the draft's messages are not bubbles: a mono name, then the text. The face, border, radius and tail all
@@ -2067,11 +2382,39 @@
        job, per theme, so the name reads without turning into a heading. */
     html.skin .chat-msg .who{font-family:var(--mono);font-size:var(--fs-key);letter-spacing:0;
       text-transform:none;color:var(--ink-name);margin-bottom:2px}
+    /* ── who said this: one hue per person ────────────────────────────────────────────────────────────────
+       A message gets data-tint="1".."8" once its author has been assigned a slot (renderer/app.js tintFor);
+       the host is always slot 1. A message whose author cannot be keyed carries NO attribute and keeps
+       --ink-name above — that is a live path, not a dead branch, and it is why --ink-name is still the
+       default ink for this line rather than something the tint replaced.
+       The tint is 6% over --chrome: enough for the eye to group a speaker's messages, not enough to read as
+       a coloured card. The padding exists only because a tint with no room around the glyphs reads as a text
+       highlight instead of a ground. */
+    html.skin .chat-msg[data-tint="1"]{--who-tint:var(--who-1)}
+    html.skin .chat-msg[data-tint="2"]{--who-tint:var(--who-2)}
+    html.skin .chat-msg[data-tint="3"]{--who-tint:var(--who-3)}
+    html.skin .chat-msg[data-tint="4"]{--who-tint:var(--who-4)}
+    html.skin .chat-msg[data-tint="5"]{--who-tint:var(--who-5)}
+    html.skin .chat-msg[data-tint="6"]{--who-tint:var(--who-6)}
+    html.skin .chat-msg[data-tint="7"]{--who-tint:var(--who-7)}
+    html.skin .chat-msg[data-tint="8"]{--who-tint:var(--who-8)}
+    html.skin .chat-msg[data-tint]{padding:6px 9px;border-radius:8px;
+      background:color-mix(in srgb,var(--who-tint) 6%,transparent)}
+    /* OWNER PASS 2026-08-15: the full hue on the name read as a colour chart rather than a cue. It is now 30%
+       hue over the neutral --ink-name — "almost colourless, with a touch of it". That keeps the NAME's job
+       (say who, quietly) and moves the identity work onto the ground tint, which is where a cue you are not
+       meant to read belongs. Mixing toward --ink-name rather than dimming also holds the contrast the sender
+       line was raised to: the result sits within a hair of --ink-name's own measurement instead of below it. */
+    html.skin .chat-msg[data-tint] .who{color:color-mix(in srgb,var(--who-tint) 30%,var(--ink-name))}
     html.skin .chat-copy{background:none;bottom:auto;top:0}
     html.skin .chat-input{padding:0 10px 10px;gap:8px;border-top:0}
+    /* the field sat on --hairline, which at ~5% white is invisible against the panel — the input read as a
+       hole in the surface rather than a control, and there was nothing to aim at. A real outline, one that
+       brightens on focus so the field says when it has the keyboard. */
     html.skin .chat-input input{height:30px;padding:0 10px;border-radius:6px;
-      border:1px solid var(--hairline);background:var(--terminal-bg);font-family:var(--ui);
-      font-size:var(--fs-pill);color:var(--ink-dim)}
+      border:1px solid color-mix(in srgb,var(--ink-dimmer) 60%,transparent);background:var(--terminal-bg);
+      font-family:var(--ui);font-size:var(--fs-pill);color:var(--ink-dim)}
+    html.skin .chat-input input:focus{border-color:color-mix(in srgb,var(--ok) 45%,transparent);outline:none}
     /* the draft has no send button — Enter sends. Ours stays, because removing it would take away the only
        pointer path to send; it just drops to a ghost so the field reads as one control the way the draft's does. */
     html.skin .chat-input button{width:26px;height:26px;border:0;border-radius:99px;
@@ -2084,18 +2427,28 @@
        does not, so it lands 14px from the terminal's own edge rather than from the column's. */
     /* 5px, not 8: it tucks into the terminal's top-right corner. right:14px now the scroll gutter is gone —
        the extra 15px it used to clear no longer exists. */
-    html.skin .termseg{top:5px;right:14px;left:auto;padding:2px;gap:2px;border-radius:6px;
-      background:var(--raised);border:1px solid var(--hairline);box-shadow:none}
+    /* OWNER PASS: NO BOX. Two buttons do not need a frame around them — the .on state's --sunken fill is
+       what tells you which view is active, and that is the only job the container was doing. Dropping its
+       padding also takes ~4px off the overall height; the button padding below is nudged back up so the
+       control lands a touch shorter than before rather than a lot shorter. */
+    html.skin .termseg{top:5px;right:14px;left:auto;padding:0;gap:2px;border-radius:6px;
+      background:none;border:0;box-shadow:none}
     /* wider and a size up, on --ink-dim rather than --ink-faint: this is a tab control you switch views with,
        not a caption, and at 11px faint it was the hardest thing on screen to read. */
-    html.skin .termseg button{padding:2.5px 12px;border-radius:4px;font-family:var(--ui);
-      font-size:var(--fs-sm);letter-spacing:0;text-transform:none;color:var(--ink-dim);background:none}
-    html.skin .termseg button.on{background:var(--sunken);color:var(--ink)}
+    html.skin .termseg button{padding:3.5px 12px;border-radius:4px;font-family:var(--ui);
+      font-size:var(--fs-sm);letter-spacing:0;text-transform:none;color:var(--ink-dim);
+      background:var(--raised);border:1px solid var(--hairline)}
+    /* OWNER PASS 2026-08-19: the container lost its frame above, and the buttons were background:none — so the
+       INACTIVE tab had no surface at all and the pair read as floating text rather than a control you press.
+       The face goes back on the BUTTONS (not the container): --raised + a hairline is the app's quietest button
+       chassis, and .on still wins the "which view" job with the darker --sunken fill. */
+    html.skin .termseg button.on{background:var(--sunken);color:var(--ink);border-color:var(--hairline)}
     /* It floats OVER the terminal, and Claude Code draws a full-width startup panel into exactly these rows —
        so at full strength it eats content it has no business hiding (visible in the owners' screenshot). It
        rests translucent and comes up whole the moment it is reached for or in use. Never below a legible
        contrast, and never pointer-blocking, so this costs nothing but the obstruction. */
-    html.skin .termseg{opacity:.72;transition:opacity var(--dur-base) var(--ease-out)}
+    /* .72 was half of why the control read as a ghost; .86 still yields to a startup panel drawn underneath. */
+    html.skin .termseg{opacity:.86;transition:opacity var(--dur-base) var(--ease-out)}
     html.skin .termseg:hover,html.skin .termseg:focus-within,
     html.skin .termrow:hover .termseg{opacity:1}
     /* ── THE DRAWER PANELS: ONE RHYTHM ─────────────────────────────────────────────────────────────────────
@@ -2206,18 +2559,34 @@
     <!-- WHERE YOU ARE — the draft's breadcrumb: the project, then the open session in brighter ink. Filled by
          paintCrumb() from NODES, never innerHTML: a project or session name can be collaborator-supplied and
          arrives over the wire. It stays empty until there is something to say, and :empty hides its divider. -->
+    <!-- crumb + live flag travel together: the flag reads as a suffix to "where you are", and the pair is what
+         gets pinned to the sidebar seam (see .crumbline below). paintCrumb only ever clears #crumb, so the
+         flag is a SIBLING rather than a child — a child would be wiped on every repaint. -->
+    <span class="crumbline">
     <span class="crumb" id="crumb"></span>
+    <!-- THE LIVE FLAG — the one place both host and guest can see, at a glance and without opening a panel,
+         that this machine is in a shared session AND what the other side is actually allowed to do.
+         C-5.2 lives here now: #codrive-badge used to sit in the chat head, which a host with the panel
+         collapsed never looks at. The mode text is NEVER the #share-ro checkbox — renderLiveState fills it
+         from the running share's real served mode (lastShareReadOnly, or a joined tab's liveReadOnly), the
+         same source and the same conditions as before. Hidden entirely when nothing is live. -->
+    <span class="liveflag" id="liveflag" style="display:none"><span class="live-dot"></span><span class="lf-txt">Live</span><span class="codrive-badge" id="codrive-badge" style="display:none" title="Co-drive is on — an approved guest can run commands on your computer, as you.">CO-DRIVE</span></span>
+    </span>
     <!-- #sessions-btn LEFT the top bar but must still exist: it is the ONLY way to bring the sidebar back
          (#sidebar-close only ever closes it), so deleting it would let you collapse the panel with no way to
          reopen. It is now an edge handle that appears only while the sidebar is closed — same id, same
          listener, no JS change — so the top bar is clean and the panel is still recoverable. -->
     <button class="iconbtn edge-handle" id="sessions-btn" title="Projects">☰</button>
     <div class="topbtns">
-      <!-- Skill &amp; Strategy. An OPEN BOOK: what lives behind it is a library — the skills and plugins Claude can
-           draw on, and the strategy it reads them with. Two mirrored leaves and a spine, all straight strokes
-           and one curve, so it stays legible at 15px beside the clock-arrow and the cog. -->
-      <button class="iconbtn" id="strategy-btn" title="Skill &amp; Strategy — model strategy, skills &amp; plugins" aria-label="Skill and Strategy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h5a3.5 3.5 0 0 1 3.5 3.5V20a3 3 0 0 0-3-2.5H2.5z"/><path d="M21.5 4h-5A3.5 3.5 0 0 0 13 7.5V20a3 3 0 0 1 3-2.5h5.5z"/><path d="M12 7.6V20"/></svg></button>
+      <!-- Owner-set order (2026-08-18): Claude · Graphs · Skills & Plugins · Project History · Settings -->
       <button class="iconbtn claude-btn" id="claude-btn" title="Connect Claude Code — install &amp; sign in"><img class="claude-mascot" src="../assets/claude-mascot.png" alt="Claude" /><span class="claude-dot" id="claude-dot"></span></button>
+      <!-- GRAPHS — the delegation glyph (coordinator fanning out to three seats), same recipe as the terminal
+           trigger so the two surfaces of one feature share one mark. -->
+      <button class="iconbtn" id="graphs-btn" title="Graphs — build and pick the team that runs your big jobs" aria-label="Graphs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.6" r="2.1"/><circle cx="5" cy="15.5" r="2.1"/><circle cx="12" cy="15.5" r="2.1"/><circle cx="19" cy="15.5" r="2.1"/><path d="M12 6.7v2.6M10.6 8.9 6 13.7M13.4 8.9 18 13.7M12 9.3v4.1"/></svg></button>
+      <!-- Skills & Plugins. An OPEN BOOK: the library of skills and plugins Claude can draw on. The strategy
+           section moved out to the Graphs drawer (2026-08-18); the id stays — it is wired everywhere and a
+           rename buys nothing. -->
+      <button class="iconbtn" id="strategy-btn" title="Skills &amp; Plugins — the library Claude draws on" aria-label="Skills and Plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h5a3.5 3.5 0 0 1 3.5 3.5V20a3 3 0 0 0-3-2.5H2.5z"/><path d="M21.5 4h-5A3.5 3.5 0 0 0 13 7.5V20a3 3 0 0 1 3-2.5h5.5z"/><path d="M12 7.6V20"/></svg></button>
       <button class="iconbtn" id="diff-btn" title="Project History — pick a project, see its session history + changes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></button>
       <button class="iconbtn" id="settings-btn" title="Settings — voice, alerts, effort, skills &amp; plugins"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
@@ -2240,11 +2609,14 @@
            render. "New session" is NOT here any more — it is the first item of the project's manage menu. -->
       <div class="sess-list" id="sess-list"></div>
       <div class="share-dock">
-        <!-- The info "i" is a SIBLING overlaying the button's right edge, not a child: a <button> may not contain
-             another <button>. Its own row cost ~27px of height for one glyph; here it costs nothing. -->
+        <!-- OWNER PASS 2026-08-19 — the "i" is now the button's LAST FLEX CHILD, not a sibling overlaying its
+             right edge. The overlay centred icon+label in the full box and then hung the badge off the right
+             rim, so the eye read the three as one cluster sitting left of centre. In flow they centre together
+             and the symmetry is exact at any label width, with no measured offsets to re-derive per string.
+             It is a <span role="button">, not a <button>: a button may not contain another button. Its click
+             and keydown handlers stopPropagation so activating it never also fires the share. -->
         <div class="btnwrap">
-          <button id="share-btn" class="share-btn" title="A web link for people without Claudible"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg><span class="sb-label" id="sb-label">Share a live link</span></button>
-          <button class="ws-info" id="share-info" type="button" aria-label="About sharing a live link" title="About sharing a live link">i</button>
+          <button id="share-btn" class="share-btn" title="A web link for people without Claudible"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg><span class="sb-label" id="sb-label">Share a live link</span><span class="ws-info" id="share-info" role="button" tabindex="0" aria-label="About sharing a live link" title="About sharing a live link">i</span></button>
         </div><!-- the view-only toggle moved into the share dialog (namemodal), colocated with the security warning it governs, so the risk and the control are decided together -->
         <button id="share-reset" class="share-reset" type="button" title="Disconnect all current guests and invalidate the old link" style="display:none">Reset access</button>
         <input type="text" id="share-link" readonly placeholder="live link" style="display:none" title="Click to copy" />
@@ -2271,16 +2643,18 @@
       </div>
     </aside>
     <div class="center">
-      <!-- LIVE bar: shown when this session is live (synced collab) — who's in it -->
-      <div class="livebar" id="livebar" style="display:none">
-        <span class="live-dot"></span><span class="live-txt" id="live-txt">Live</span>
-        <!-- C-5.2: real served mode only — app.js's renderLiveBar keys this off lastShareReadOnly / the
-             joined tab's liveReadOnly (the server's actual mode), never the #share-ro checkbox -->
-        <span class="codrive-badge" id="codrive-badge" style="display:none" title="Co-drive is on — an approved guest can run commands on your computer, as you.">CO-DRIVE</span>
-        <span class="live-members" id="live-members"></span>
-      </div>
+      <!-- The live bar that used to sit here is gone (owners, 2026-08-15): above the terminal it restated
+           something the user already knows — they are the one who went live — and the roster it carried is
+           the chat panel's roster strip, which was always the better home for it. What the bar DID carry
+           that nothing else does has moved into the chat head, not been deleted: the C-5.2 co-drive warning,
+           the paused-mirror alarm (now the header dot going amber), and the "your live session is running
+           elsewhere, click to go back" path (now the header itself). See renderLiveState() in app.js. -->
       <div class="termrow">
       <div id="terminal">
+      <!-- the strategy trigger — a square terminal tab in the commands/git family. Types `/pb ` so
+           the user finishes the sentence; the ACTIVE strategy runs the job. Dimmed (not hidden) while the
+           strategy is off, so the feature stays discoverable. Icon: the delegation — coordinator → three seats. -->
+      <button class="termtab br pb-tab" id="pb-btn" type="button" title="Run a strategy job — click, describe the job, press Enter" aria-label="Run strategy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.6" r="2.1"/><circle cx="5" cy="15.5" r="2.1"/><circle cx="12" cy="15.5" r="2.1"/><circle cx="19" cy="15.5" r="2.1"/><path d="M12 6.7v2.6M10.6 8.9 6 13.7M13.4 8.9 18 13.7M12 9.3v4.1"/></svg></button>
       <button class="termtab br cmdk-tab" id="cmdk-btn" type="button" title="Commands (Ctrl+Shift+P)" aria-label="Commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H7a3 3 0 1 0 3 3v10a3 3 0 1 1-3-3h10a3 3 0 1 1-3 3V7a3 3 0 1 1 3 3H7"/></svg></button>
       <button class="termtab br" id="git-btn" title="Git — push / pull / connect GitHub">
         <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.21 11.16.6.11.82-.26.82-.58 0-.28-.01-1.04-.02-2.04-3.34.72-4.04-1.6-4.04-1.6-.55-1.38-1.34-1.75-1.34-1.75-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.23 1.84 1.23 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.29C24 5.78 18.63.5 12 .5z"/></svg>
@@ -2294,8 +2668,13 @@
       </div><!-- /termrow -->
     </div><!-- /center -->
     <div class="chat" id="chat">
+      <!-- The panel only exists while sharing (`.body.sharing .chat`), so the header can name the thing the
+           panel IS rather than the one control inside it. The dot is not decoration: it carries the two alarm
+           states the deleted live bar used to own — amber when the mirror is paused and guests are frozen
+           out, dimmed when the host is browsing a different session — and when it is dimmed the title itself
+           becomes the click target that jumps back. renderLiveState() owns all three. -->
       <div class="chat-head">
-        <span class="chat-title">Chat</span>
+        <span class="chat-title" id="chat-title"><span class="live-dot" id="live-dot"></span><span id="live-txt">Live</span></span>
         <span class="chat-head-actions">
           <button id="hv-btn" class="hv-btn" title="Talk with your viewers"><span class="hv-ic">🎙</span> Join voice</button>
           <button id="hv-mute" class="hv-mute" style="display:none">Mute</button>
@@ -2520,18 +2899,38 @@
        click from the top bar and read as one subject. Same drawer shell, same scrim, same Escape/outside-click
        behaviour as Settings — and every section moved as a whole node, so #strategy-row, #skills-list and
        #plugins-list are the same elements their loaders have always written to. -->
-  <div class="drawer-scrim" id="strat-scrim"></div>
-  <div class="drawer" id="stratdrawer" aria-hidden="true">
-    <div class="drawer-head"><span>skill &amp; strategy</span><span class="drawer-head-actions"><button id="strat-close" title="Close">×</button></span></div>
+  <!-- GRAPHS drawer: the strategy list moved here whole from the old Skill & Strategy drawer —
+       same shell, same scrim/Escape pattern. Rows are radio picks: the active row's team files are the only
+       ones installed on disk; picking a row swaps them through the allowlisted writer with the truth-telling
+       toast. The built-in can only be duplicated, never edited. -->
+  <div class="drawer-scrim" id="graphs-scrim"></div>
+  <div class="drawer" id="graphsdrawer" aria-hidden="true">
+    <div class="drawer-head"><span>graphs</span><span class="drawer-head-actions"><button id="graphs-close" title="Close">×</button></span></div>
     <div class="panel">
       <div class="sec">
-        <div class="label">model strategy</div>
-        <div class="effort-row" id="strategy-row">
-          <button class="eff-pill" data-strategy="planBigExecSmall">plan big, execute small</button>
-          <button class="eff-pill" data-strategy="off">off</button>
-        </div>
-        <div class="out">off by default · when on, your session plans &amp; synthesizes on your chosen model and subagents that request no model default to Sonnet 5 — an explicitly requested subagent model always wins · ~2.5× cheaper on a Fable/Opus main model at the same rigor (Anthropic cookbook pattern) · a no-op when your main model is already Sonnet · applies to new sessions</div>
+        <div class="label">graph builds</div>
+        <!-- the + is a full row, not a corner glyph: it was shipped as a 14px .collapse button and the owner
+             could not hit it. It sits UNDER the list (owner call, 2026-08-18): the list reads top-down as
+             "pick one of these — or build your own". The SWITCH activates (2026-08-19, replacing the radio
+             dot); the ✎ opens the builder. -->
+        <div id="strategy-list"><div class="ext-empty">loading…</div></div>
+        <button class="strat-addrow" id="strat-new" title="Open the graph builder"><span class="sa-plus">+</span>Custom Graph</button>
+        <!-- three notes, not one run-on line: four unrelated facts chained with middots at one weight gave the
+             eye no entry point, and the whole block read as a small grey wall. -->
+        <ul class="strat-notes">
+          <li>Toggle on a graph to use it in your session</li>
+          <li>Your session's own model and effort are not affected</li>
+          <li>Changes apply to sessions started from then on</li>
+        </ul>
+        <button class="strat-learn" id="strat-learn" type="button">Learn more about graphs and loops<span class="sl-arr">↗</span></button>
       </div>
+    </div>
+  </div>
+
+  <div class="drawer-scrim" id="strat-scrim"></div>
+  <div class="drawer" id="stratdrawer" aria-hidden="true">
+    <div class="drawer-head"><span>skills &amp; plugins</span><span class="drawer-head-actions"><button id="strat-close" title="Close">×</button></span></div>
+    <div class="panel">
 
       <div class="sec" id="sec-skills">
         <div class="label">skills <button class="collapse min" id="skills-add" title="Add from the official marketplace">+</button> <button class="collapse min" id="skills-refresh" title="Refresh">⟳</button></div>
@@ -2661,6 +3060,42 @@
       </button>
   </div>
 
+  <!-- GRAPH BUILDER (per the approved mock, 1:1): the drawer's rows pick; this builds. A fixed-height
+       full-window overlay — library rail on the left (its own thin scroll), four lanes (add pinned on top,
+       nodes scroll beneath), per-node dial POPOVERS (never native selects), a selection-aware footer, and a
+       usage estimate computed from the canvas alone. app.js builds lanes/nodes from G_LIB so nothing here can
+       drift from the files the compiler writes. -->
+  <div id="strat-modal" hidden role="dialog" aria-modal="true" aria-label="Graph builder">
+    <div class="gbox">
+      <div class="gb-head">
+        <span class="gb-title">Graph builder</span>
+        <input class="gb-name" id="strat-name" placeholder="My Custom Graph" maxlength="40" />
+        <span class="gb-sp"></span>
+        <!-- LOOP SETTINGS (owner call 2026-08-19): the send-back dial used to hide on the synthesizer card, so
+             the graph's most consequential setting was three clicks deep. It is a header control now, applying
+             to whichever node delivers the answer. Every option is a FINITE cap — "until done" is capped at 5
+             on purpose; an unbounded loop must never compile (see the send-back guards in the tool). -->
+        <span class="gb-loopwrap">
+          <button type="button" class="gb-btn gb-loop" id="strat-loop">Loop: don’t loop<span class="gb-arr2">▾</span></button>
+          <button type="button" class="gb-help" id="strat-loop-help" aria-label="What is Loop Settings?" title="What is Loop Settings?">?</button>
+        </span>
+        <button class="gb-btn gb-primary" id="strat-save">Save</button>
+        <button class="gb-btn" id="strat-saveuse">Save &amp; use</button>
+        <button class="gb-btn gb-back" id="strat-cancel" title="Back — closes without saving" aria-label="Back"><span class="gb-arr">→</span></button>
+        <button class="gb-btn gb-danger" id="strat-delete">Delete</button>
+      </div>
+      <div class="gb-body">
+        <div class="gb-lib" id="gb-lib"></div>
+        <div class="gb-lanes" id="gb-lanes"></div>
+      </div>
+      <div class="gb-foot">
+        <span class="gb-readback" id="gb-readback"></span>
+        <span class="gb-setup" id="gb-setup"></span>
+        <span class="gb-weight" id="gb-weight"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- COMMAND PALETTE — replaced the 15-pill horizontal scroller. Ctrl/Cmd+Shift+P (NOT Ctrl+K: that is
        readline's kill-to-end-of-line and binding it would break it inside the terminal). -->
   <div class="cmdk-scrim" id="cmdk-scrim"></div>
@@ -2714,45 +3149,96 @@
     </div>
   </div>
 
+  <!-- NEW PROJECT, IN TWO STEPS. It used to ask for a name and a folder location before you had told it what
+       you were making: four tiles, a name field, a repo field, a where-does-the-folder-go tick, a note and two
+       buttons, all stacked in a 344px column. Three of those questions apply to exactly one kind each.
+       Step 1 is the decision. Step 2 asks only what that decision needs. The dialog already worked this way in
+       one place — "add a folder I already have" opens its picker AFTER you commit — so this makes the other
+       three agree with it rather than inventing a pattern. Owner decisions (MK, 2026-08-15): the box does not
+       resize between steps, going back clears the fields, and adopt no longer offers a name box at all. -->
   <div class="approve" id="ws-modal">
     <div class="box">
+      <div class="ws-pane" id="ws-step1">
       <h3>New project</h3>
       <!-- Kept short deliberately: the four tiles below already explain themselves, so the old third clause
            ("or bring your own folder") was restating the tile directly under it. This says only what the tiles
            cannot — what a project IS, and that the private/shared choice is reversible. -->
       <p>A project points Claude at a folder — it works there, you review and revert. Start private or shared; change it later from the ▾ menu.</p>
       <div class="choice-row">
-        <div class="choice sel" id="ch-local" data-kind="local" role="radio" tabindex="0" aria-checked="true">
+        <!-- role=button, not radio: these no longer SELECT a value that some later control acts on — clicking one
+             is the action, and it moves you to step 2. Radio semantics would now be a lie to a screen reader. -->
+        <div class="choice" id="ch-local" data-kind="local" role="button" tabindex="0">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           <div><div class="ct">Local project</div><div class="cd">Start fresh — Claudible creates the folder for you. Private to this machine.</div></div>
         </div>
-        <div class="choice" id="ch-repo" data-kind="repo" role="radio" tabindex="0" aria-checked="false">
+        <div class="choice" id="ch-repo" data-kind="repo" role="button" tabindex="0">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
           <div><div class="ct">Shared GitHub project</div><div class="cd">A private GitHub repo Claude works in — sessions sync with your team from the start, so you can invite people and go live together.</div></div>
         </div>
-        <div class="choice" id="ch-adopt" data-kind="adopt" role="radio" tabindex="0" aria-checked="false">
+        <div class="choice" id="ch-adopt" data-kind="adopt" role="button" tabindex="0">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14l3-3 3 3"/></svg>
           <div><div class="ct">Add a folder I already have</div><div class="cd">Point Claudible at an existing folder — your repo, your code. Nothing is moved, copied, or published, and its commits show up in Project History.</div></div>
         </div>
         <!-- 3b/W1: the fourth kind. `repo` MINTS a brand-new repo and `adopt` takes a folder already on disk —
              neither could clone a repo that already EXISTS on GitHub. The only path that did was invite
              discovery, which requires someone to have invited you, so "I have a repo, work in it" had no route. -->
-        <div class="choice" id="ch-import" data-kind="import" role="radio" tabindex="0" aria-checked="false">
+        <div class="choice" id="ch-import" data-kind="import" role="button" tabindex="0">
           <svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
           <div><div class="ct">Import a GitHub project</div><div class="cd">Clone a repo you already have on GitHub and work in it here. Sessions stay private until you turn sharing on from its ▾ menu.</div></div>
         </div>
       </div>
-      <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dots, dashes, underscores)" />
-      <input type="text" id="ws-repo-in" maxlength="140" placeholder="owner/repo — or paste the GitHub URL" style="display:none" />
-      <label class="ws-pick-row" id="ws-pick-row"><input type="checkbox" id="ws-pick" /> <span>choose where its folder goes (else it goes in ~/.claudible)</span></label>
-      <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
-      <div class="ws-busy" id="ws-busy"></div>
-      <div class="ws-invite-check">Been invited to a shared project? <button type="button" id="ws-discover" class="linkbtn">Check for invites</button></div>
-      <!-- B17 UX: pending (not-yet-accepted) GitHub invites — populated by refreshPendingInvites() in app.js -->
-      <div id="ws-pending-invites"></div>
-      <div class="row">
-        <button id="ws-create">Create</button>
-        <button id="ws-cancel" class="ghost">Cancel</button>
+        <!-- Invites belong to no single kind, so they stay on step 1 — reachable where they always were,
+             and out of the way once a kind is chosen. -->
+        <div class="ws-invite-check">Been invited to a shared project? <button type="button" id="ws-discover" class="linkbtn">Check for invites</button></div>
+        <!-- B17 UX: pending (not-yet-accepted) GitHub invites — populated by refreshPendingInvites() in app.js -->
+        <div id="ws-pending-invites"></div>
+        <div class="row">
+          <button id="ws-cancel" class="ghost">Cancel</button>
+        </div>
+      </div>
+
+      <!-- ── STEP 2 — only what the chosen kind actually needs ──────────────────────────────────────────────
+           Every field below kept its id and its writer. The split is a change of WHEN each question is asked,
+           not of what any of them does: createWorkspace still reads ws-name-in, ws-repo-in and ws-pick.checked
+           exactly as before, and the three backend calls are untouched. -->
+      <div class="ws-pane" id="ws-step2" style="display:none">
+        <button type="button" class="ws-back" id="ws-back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          All project types
+        </button>
+        <div class="ws-kindhead"><span class="ws-kind-ico" id="ws-kind-ico"></span><h3 id="ws-kind-title">New project</h3></div>
+        <p class="ws-kind-desc" id="ws-kind-desc"></p>
+        <input type="text" id="ws-name-in" maxlength="60" placeholder="Project name (letters, numbers, dots, dashes, underscores)" />
+        <input type="text" id="ws-repo-in" maxlength="140" placeholder="owner/repo — or paste the GitHub URL" style="display:none" />
+        <!-- WHERE THE FOLDER GOES, asked only for `local` and only here. It was a tick sitting above the tiles,
+             visible before the kind was chosen and meaningless for three of the four kinds.
+             #ws-pick STAYS A CHECKBOX in the DOM because createWorkspace reads its .checked — only its
+             presentation changed. Default remains unchecked, so an untouched dialog behaves exactly as before. -->
+        <div class="ws-pick-row" id="ws-pick-row">
+          <span class="ws-fld-lab">Where should it live?</span>
+          <div class="ws-seg">
+            <button type="button" class="ws-seg-b on" id="ws-pick-default"><b>Default</b>in ~/.claudible</button>
+            <button type="button" class="ws-seg-b" id="ws-pick-custom"><b>Choose a folder</b>picked after you create</button>
+          </div>
+          <input type="checkbox" id="ws-pick" hidden />
+        </div>
+        <div class="ws-note" id="ws-adopt-note">Claudible keeps its runtime in that folder’s <code>.claude/</code> (git-ignored locally, never committed). If it already has a <code>.claude/settings.json</code>, your copy is saved as <code>settings.json.pre-claudible</code>.</div>
+        <!-- THE TRANSCRIPT DISCLOSURE (R2), moved out of a native confirm() and corrected.
+             It used to say transcripts are committed into "that private repo" — the CODE repo. That has not
+             been true since the sessions split: create-workspace.sh mints a SECOND private repo, <slug>-sessions,
+             writes .claude/ into the code repo's .gitignore, and repo-invite.sh adds collaborators to BOTH.
+             The old wording described the app as leakier than it is and hid the very feature built to prevent
+             that. Acknowledging is a hard precondition of creating — ws-create stays disabled until it is ticked. -->
+        <div class="ws-consent" id="ws-consent">
+          <b>This creates two private repos</b>
+          <span>One for your code, and a separate one — <code id="ws-consent-name">name-sessions</code> — for your conversations. Everything Claude read during a session goes into the conversations repo: file contents, secrets, command output. Anyone you invite gets access to both. If that second repo can’t be created, conversations fall back to the project repo and Claudible tells you.</span>
+          <label><input type="checkbox" id="ws-consent-ok" /> <span>I understand what gets saved</span></label>
+        </div>
+        <div class="ws-busy" id="ws-busy"></div>
+        <div class="row">
+          <button id="ws-create">Create</button>
+          <button id="ws-cancel-2" class="ghost">Cancel</button>
+        </div>
       </div>
     </div>
   </div>

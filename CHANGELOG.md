@@ -4,6 +4,68 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.14] — 2026-08-19
+
+Agents become something you can shape. You can now build, name and save your own execution
+graphs — pick which specialists work on a job, what model and effort each one runs at — and
+start one from a button next to the terminal. The effort, model and permission controls on
+the bottom bar now change the session in front of you, not just the next one you open. The
+agents panel was rebuilt as a ledger that shows one row per agent. As with 0.9.13, everything
+here is covered by the automated test suite only — **nothing in this release has been confirmed
+on real hardware**, which is what keeps it a pre-release.
+
+**New**
+- **Graphs.** A new button in the top bar opens a drawer where your execution graphs live. The
+  builder gives you a library of thirteen specialists, four lanes to place them in, and a model
+  and effort dial on every one, with a running estimate of what the graph will cost to run.
+  Drag a card into a lane, name the graph, save it, and it becomes the one that runs.
+- **"Plan big, execute small" is real now.** It used to be a sentence asking the assistant nicely
+  to delegate. It now installs actual agent definitions, each pinned to its own model and effort,
+  so the delegation is a fact rather than a request. A square button beside Commands starts a run
+  without anyone having to learn a command.
+- **The bottom-bar controls reach the running session.** Change effort, model or permission mode
+  and it applies to the session you are looking at. Previously these only affected the next
+  session you started.
+- **A new-project dialog that asks what you are making first**, then only the questions that
+  choice actually needs.
+- **The agents panel is a ledger.** One row per agent, with its model, how long it has run, tokens,
+  status and what it is working on, plus filters and a detail pane. Where a number is not known
+  yet, the panel prints a dash rather than a zero.
+- **Send-back.** The node that assembles a result can refuse thin material and send work back for
+  another round, with a cap on how many times — set under Loop Settings in the builder.
+- **Live sessions read better.** The chat header says the session is live once instead of repeating
+  it, everyone in the room gets their own colour, and the live flag moved up to the top bar.
+
+**Changed**
+- The bottom bar reads as one set of five controls rather than three different kinds of thing, with
+  lowercase labels and its icon-only buttons given their glyphs back.
+- Session and project names print in full in the top bar and roster, with one less box around them.
+  A long project name no longer eats the space the session name needs.
+- The project that used to be called "Local" is now "Local Default", for people who already had one.
+- The graph list uses switches: clicking a row turns that graph on, clicking the active one turns it
+  off, and the switch responds immediately instead of waiting on a file write.
+- The graph builder is roomier, and the locked planning node is called Orchestrator.
+- Terminal and Agents tabs have proper surfaces, and the typing indicator no longer sits underneath
+  them.
+- On the guest page, co-drive is stated plainly instead of being implied by a read-only badge, and
+  chat sender names now meet the readable contrast floor.
+
+**Fixed**
+- **The terminal no longer shrinks itself on a tab switch.** Switching sessions could hand the
+  terminal a width of around 53 columns for a moment, which is what made formatting break apart
+  while scrolling or moving between sessions.
+- Joining someone's live session no longer invents a name for it in the top bar.
+- The graph builder no longer fails to open, and every row in the graphs drawer opens it.
+- Saving a graph that was already active now takes effect and says so; dial menus open under the
+  dial you clicked rather than the first one in the row; and a graph's name field no longer looks
+  like it changes size when you click into it.
+
+**Known limitations**
+- The model picker and the Plan and Auto permission modes apply on native Windows. Sessions run
+  through WSL, Linux or macOS keep the previous behaviour on those controls.
+- Fixes from 0.9.10 onward are still awaiting confirmation on real machines and are not claimed as
+  proven here.
+
 ## [0.9.13] — 2026-08-15
 
 The frontend redesign. What used to be one opt-in palette is now the app's design in every theme,

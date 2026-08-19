@@ -202,17 +202,11 @@ function main() {
     if (rs.subject) r += ' · last commit: "' + clean(rs.subject, 72) + '"';
     lines.push(r);
   }
-  // "Plan big, execute small" nudge (Anthropic cookbook pattern): the split only pays if the coordinator
-  // actually delegates the token-heavy legs, so tell it its workers are cheap. Gated on an APP-SET env var
-  // (exported by session.sh / injected by win.js — never collaborator data); the pushed text is a static
-  // string with zero interpolated values, so there is nothing for the sanitizer to sanitize.
-  if (process.env.CLAUDIBLE_MODEL_STRATEGY === 'planBigExecSmall') {
-    lines.push('Model strategy: plan big, execute small — DEFAULT your subagents to Sonnet 5 (the cheap tier):'
-      + ' when spawning a subagent without a deliberate model choice, request claude-sonnet-5; when a task'
-      + ' explicitly names a model, honor that exact model — never substitute. Delegate token-heavy legs (bulk'
-      + ' reading, repo sweeps, searches, mechanical edits) to subagents and keep planning/synthesis in the main'
-      + ' loop. Skip delegation for narrow tasks or judgment-heavy analysis a cheap reader could summarize away.');
-  }
+  // The old "plan big, execute small" prompt NUDGE lived here (a static sentence asking the coordinator to
+  // prefer Sonnet subagents). Removed: the strategy is now real agent definitions + the plan-big
+  // skill, installed by the strategy panel — enforcement in frontmatter, not a request in context. The
+  // CLAUDIBLE_MODEL_STRATEGY env var still rides spawns but has no consumer; its plumbing goes with Step 7's
+  // pin rework, not in the same change that deleted the nudge.
 
   // Live-session state — the "am I hosting / joined / did it end, and who's here" half of the ask.
   // Today's main only ever writes role:'hosting' (a joined tab mirrors a PEER's session — no local Claude to

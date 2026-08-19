@@ -195,9 +195,10 @@ ok('app.js: a background tab finishing its turn raises the sidebar pulse',
 ok('app.js: the pulse survives a full sidebar rebuild (painted from the tab record)',
   /sessionNeedsAttention\(s\.id\) \? ' sess-done' : ''/.test(APP));
 ok('app.js: activating a tab clears its pulse', /rec\.attention = false;/.test(APP) && /clearTabAttention\(tabId\);/.test(APP));
-// collabLive is now view-independent, so the "● Live" bar must be gated on actually VIEWING the shared tab —
-// otherwise it claims an unrelated conversation is being shared.
-ok('app.js: the live bar only paints on the shared tab (or a joined mirror)',
+// collabLive is now view-independent, so a plain "● Live Session" must be gated on actually VIEWING the shared
+// tab — otherwise it claims an unrelated conversation is being shared. (The bar this once guarded moved into
+// the chat header on 2026-08-15; the gate is the same gate.)
+ok('app.js: the live state only paints on the shared tab (or a joined mirror)',
   /const onSharedTab = !!\(t && t\.kind !== 'live' && \(\(sharedTabIdR != null && t\.tabId === sharedTabIdR\)/.test(APP)
   && /if \(!\(collabLive && onSharedTab\) && !liveTab\)/.test(APP));
 // Deleting the shared session must end the share, not leave a frozen tunnel pinned to a dead conversation.
@@ -382,8 +383,14 @@ ok('app.js: createWorkspace/adopt open a PARKED tab (never an automatic pty) whe
 ok('app.js: the share ends in exactly one place, called only by End Session + force-end',
   /function endLiveNow\(msg\)/.test(APP)
   && (APP.match(/endLiveNow\(/g) || []).length === 3);   // definition + terminateLive + onShareForceEnd
-ok('app.js: a host browsing elsewhere still sees their live session is running',
-  /bar\.classList\.add\('elsewhere'\)/.test(APP) && /live-jump/.test(APP));
+// the reminder moved from a bar above the terminal into the chat header (owners 2026-08-15): the dot dims and
+// the header itself becomes the way back, which is what the bar's "open it" button was for. Both halves are
+// pinned — a dimmed dot with no click target would be a reminder you cannot act on.
+ok('app.js: a host browsing elsewhere still sees their live session is running, and can get back to it',
+  /title\.classList\.toggle\('elsewhere', elsewhere && !paused\)/.test(APP)
+  && /Your live session is still running in/.test(APP)
+  && /if \(!_ct\.classList\.contains\('elsewhere'\)\) return;/.test(APP)
+  && /const r = sharedTabIdR != null \? tabs\.get\(sharedTabIdR\) : null; if \(r\) setActiveTab\(r\.tabId\);/.test(APP));
 // The chip must ask about liveness in the ROW's OWN project (w && w.id): a tree row checked against the ACTIVE
 // project's peer bucket found nothing and painted "out of sync" onto a session being hosted live on screen.
 ok('app.js: the out-of-sync chip is suppressed on a live session — checked in the row’s own project',

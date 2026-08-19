@@ -32,7 +32,7 @@ function runtimeDir() {
 }
 
 // buildBoot via the shared pure builder (appdir = the native app root).
-function buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort, permMode, modelStrategy); }
+function buildBoot(session, ws, runtimeId, effort, permMode) { return shared.bootStr(APP_ROOT, session, ws, runtimeId, effort, permMode); }
 
 // node-pty backend (same loader as wsl.js; lazy so requiring this module never forces the native load).
 let _pty = undefined;
@@ -61,10 +61,10 @@ function ptyInfo() {
 // non-login `-c` shell risks "claude: command not found" for exactly the users this matters most to. This
 // is also a single spawn per session launch, not the per-call hot path runScript is, so the login-shell
 // cost isn't the problem here.
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
   const pty = ptyInfo();
   if (!pty.mod) return null;
-  return pty.mod.spawn('bash', ['-lc', buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy)], {
+  return pty.mod.spawn('bash', ['-lc', buildBoot(session, ws, runtimeId, effort, permMode)], {
     name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.HOME, env: process.env,
   });
 }

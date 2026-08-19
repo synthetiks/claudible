@@ -152,11 +152,13 @@ function run(payload, appState, extraEnv) {
   ok('injection: the legit tags still bound the block', /^<claudible-runtime>\n[\s\S]*\n<\/claudible-runtime>$/.test(r.ctx));
 }
 
-// ---- "plan big, execute small" nudge (env-gated, static text) ----
+// ---- "plan big, execute small": the prompt NUDGE is DEAD and must stay dead ----
+// The strategy is real agent definitions + the plan-big skill now (strategy-files-tool.js). A nudge line
+// reappearing here would mean the old ask-nicely rail came back alongside the enforced one — two competing
+// mechanisms claiming the same setting. Env var set or not, the hook must emit NO strategy text.
 {
   const on = run({ hook_event_name: 'UserPromptSubmit' }, undefined, { CLAUDIBLE_MODEL_STRATEGY: 'planBigExecSmall' });
-  ok('strategy on → nudge line present', /Model strategy: plan big, execute small/.test(on.ctx));
-  ok('nudge defaults subagents to the cheap tier but never substitutes an explicit model', /DEFAULT your subagents to Sonnet 5 \(the cheap tier\).*never substitute/.test(on.ctx));
+  ok('strategy env set → still no nudge line (the nudge is dead)', !/Model strategy:/.test(on.ctx));
   const off = run({ hook_event_name: 'UserPromptSubmit' });
   ok('strategy absent → no nudge', !/Model strategy:/.test(off.ctx));
   const bogus = run({ hook_event_name: 'UserPromptSubmit' }, undefined, { CLAUDIBLE_MODEL_STRATEGY: 'hax' });

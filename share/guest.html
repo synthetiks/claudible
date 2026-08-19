@@ -20,7 +20,19 @@
       --surface-top:#1e1a17; --surface-bot:#151210;   /* buttons + pills */
       --bar-top:#161310;     --bar-bot:#0e0c0b;       /* the top/bottom bars and sheets */
       --raised-top:#241f1b;  --raised-bot:#1a1613;    /* avatars, action buttons */
-      --field:#0d0b0a; }                              /* text inputs */
+      --field:#0d0b0a;                                /* text inputs */
+      /* the chat sender's NAME, this page's own step. It used to borrow --ink-faint, which is sized for a
+         label you skim past and measured 3.52:1 on the message bubbles — below the readable floor for the one
+         line that says who wrote something. The desktop app grew its own token for exactly this and the guest
+         page never got the same treatment; this is that fix. 5.36:1 plain, 4.77:1 at its worst once an author
+         tint is mixed in. */
+      --ink-name:#9a9086;
+      /* who-is-speaking, 8 authors — the SAME eight values the desktop app uses (renderer/index.html), so a
+         person is the same colour on both sides of the same conversation. Slot 1 is always the host. These
+         ink the sender's name as well as tinting their bubble, so each one clears small-text contrast on this
+         page's ground; subtle is a constraint on the tint, never a licence to dim the name. */
+      --who-1:#d97757; --who-2:#6fa8f5; --who-3:#62c98d; --who-4:#b48cf0;
+      --who-5:#56c8d8; --who-6:#ef85b5; --who-7:#e0b158; --who-8:#55c9b0; }
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;overflow:hidden}        /* lock the page: no page scroll / dead gap — only the terminal & chat-log scroll inside */
     html{background:var(--bg)}                                /* masks any 1px seam during URL-bar transitions (no flash) */
@@ -41,6 +53,9 @@
     .pill{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
       border:1px solid var(--hairline);border-radius:7px;padding:3px 8px}
     .pill.ro{color:var(--amber);border-color:rgba(224,169,59,.4)}
+    /* co-drive wears the danger ink, not the caution ink: read-only is a limit, co-drive is a capability over
+       someone else's machine. The host's flag escalates the same way and for the same reason. */
+    .pill.codrive{color:var(--live);border-color:color-mix(in srgb,var(--live) 45%,transparent);background:color-mix(in srgb,var(--live) 8%,transparent)}
     /* session tracker (same look as host) */
     .trk{margin-left:auto;display:flex;align-items:center;gap:20px}
     .trk-item{display:flex;flex-direction:column;align-items:center;line-height:1.03}
@@ -111,9 +126,25 @@
     .gchat:hover .gchat-log::-webkit-scrollbar-thumb{background:rgba(255,255,255,.13);background-clip:padding-box}
     .gchat-log::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
     .chat-msg{position:relative;max-width:88%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.4;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}
-    .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
+    .chat-msg .who{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-name);margin-bottom:2px}
     .chat-msg.me{align-self:flex-end;background:linear-gradient(180deg,#1c2a22,#142019);border:1px solid #294a39;color:#dfeee6;border-bottom-right-radius:4px}
     .chat-msg.them{align-self:flex-start;background:#14171c;border:1px solid var(--hairline);color:var(--ink);border-bottom-left-radius:4px}
+    /* the panel header names what this page IS — a guest is never on it outside a live session — and the dot
+       is the same live signal the host sees in their own chat header. */
+    .gchat-head .chat-title{display:inline-flex;align-items:center;gap:6px}
+    .gchat-head .live-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;animation:gpulse 2s ease-in-out infinite}
+    @keyframes gpulse{0%,100%{opacity:1}50%{opacity:.62}}
+    /* one hue per person, matching the desktop app. A message whose author cannot be keyed carries no
+       data-tint and keeps the --ink-faint name above — a live fallback, not a dead branch. */
+    .chat-msg[data-tint="1"]{--who-tint:var(--who-1)} .chat-msg[data-tint="2"]{--who-tint:var(--who-2)}
+    .chat-msg[data-tint="3"]{--who-tint:var(--who-3)} .chat-msg[data-tint="4"]{--who-tint:var(--who-4)}
+    .chat-msg[data-tint="5"]{--who-tint:var(--who-5)} .chat-msg[data-tint="6"]{--who-tint:var(--who-6)}
+    .chat-msg[data-tint="7"]{--who-tint:var(--who-7)} .chat-msg[data-tint="8"]{--who-tint:var(--who-8)}
+    /* 30% hue over the neutral name ink — almost colourless, with a touch of it. Matches the desktop app's
+       rule exactly, so the same person is the same quiet shade on both sides. */
+    .chat-msg[data-tint] .who{color:color-mix(in srgb,var(--who-tint) 30%,var(--ink-name))}
+    .chat-msg.them[data-tint]{background:color-mix(in srgb,var(--who-tint) 8%,#14171c);border-color:color-mix(in srgb,var(--who-tint) 22%,transparent)}
+    .chat-msg.me[data-tint]{background:color-mix(in srgb,var(--who-tint) 8%,#142019);border-color:color-mix(in srgb,var(--who-tint) 26%,transparent)}
     .chat-empty{margin:auto;max-width:210px;color:var(--ink-faint);font-size:11px;text-align:center;padding:18px;line-height:1.5}
     .chat-empty::before{content:'';display:block;width:30px;height:23px;margin:0 auto 11px;border:1.5px solid currentColor;border-radius:9px 9px 9px 3px;opacity:.4}
     .chat-sys{align-self:center;font-size:9.5px;letter-spacing:.04em;color:var(--ink-faint);padding:3px 10px;text-align:center;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:999px;margin:1px 0}
@@ -126,9 +157,10 @@
     .nameover button{font-family:inherit;font-size:13px;color:var(--ink);background:linear-gradient(180deg,#1c2a22,#142019);
       border:1px solid #294a39;border-radius:9px;padding:11px 26px;cursor:pointer}
     .gchat-input{display:flex;align-items:center;gap:8px;padding:10px;border-top:1px solid var(--hairline)}
+    /* a real outline: on --hairline the field read as a hole in the panel rather than something to type in */
     .gchat-input input{flex:1;font-family:inherit;font-size:12px;color:var(--ink);background:var(--field);
-      border:1px solid var(--hairline);border-radius:9px;padding:10px 11px}
-    .gchat-input input:focus{outline:none;border-color:rgba(255,255,255,.24)}
+      border:1px solid color-mix(in srgb,var(--ink-faint) 60%,transparent);border-radius:9px;padding:10px 11px}
+    .gchat-input input:focus{outline:none;border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
     .gchat-input button{width:34px;height:34px;flex:none;padding:0;border-radius:50%;font-family:inherit;font-size:0;color:var(--ink-dim);background:linear-gradient(180deg,#191c22,var(--bar-top));border:1px solid var(--hairline);cursor:pointer;display:flex;align-items:center;justify-content:center}
     .gchat-input button::after{content:'→';font-size:15px;line-height:1}
     .gchat-input button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
@@ -282,6 +314,11 @@
          said they were related. One group now reads: SHARED LIVE SESSION: "Name" ● -->
     <span class="sesschip" id="sess-chip" title="Connection — green when live, red if disconnected" style="display:none"><span class="sesslbl">shared live session:</span><b id="sess-chip-text"></b><span class="dot" id="sess-dot"></span></span>
     <span class="pill ro" id="ro" style="display:none">read-only</span>
+    <!-- the counterpart to #ro: the guest is told, in the same spot and the same shape, when they are in the
+         mode that lets them type on someone else's machine. The host sees this as the CO-DRIVE flag in their
+         own top bar; both sides read the same fact off the same server value (msg.readOnly), never a local
+         guess. Exactly one of these two is ever visible. -->
+    <span class="pill codrive" id="codrive" style="display:none" title="Co-drive is on — what you type runs on the host's computer, as them.">co-drive</span>
     <span class="trk" title="host session usage">
       <!-- session cost + token count removed: they are the HOST's billing numbers and mean nothing to a guest
            watching the session. Context is the one figure that tells a viewer how much room is left. -->
@@ -309,7 +346,7 @@
     </div>
     <div class="gchat">
       <div class="gchat-head" id="gchat-head" title="Show / hide chat">
-        <span>Chat</span><span class="cdot" id="chat-unread" aria-label="unread messages"></span>
+        <span class="chat-title"><span class="live-dot"></span><span>Live</span></span><span class="cdot" id="chat-unread" aria-label="unread messages"></span>
         <span class="gchat-sub">with the host</span>
         <span class="zoomctl" id="zoomctl" role="group" aria-label="Terminal text size">
           <button id="zoom-out" type="button" aria-label="Smaller text">−</button>

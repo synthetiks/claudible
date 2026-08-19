@@ -60,35 +60,58 @@ eq('argv bogus effort omitted (bypass)', claudeArgv({ mode: 'fresh' }, HOME, 'tu
 // `manual` (not `default`) is the value on the wire — the CLI's --permission-mode choices do not include
 // `default`, and `manual` is its documented alias.
 eq('argv fresh default = manual, no bypass', claudeArgv({ mode: 'fresh' }, HOME, 'high'),
-  ['--permission-mode', 'manual', '--effort', 'high']);
+  ['--permission-mode', 'manual', '--allow-dangerously-skip-permissions', '--effort', 'high']);
 eq('argv resume own default = manual, no bypass', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'default'),
-  ['--permission-mode', 'manual', '--resume', 's1']);
+  ['--permission-mode', 'manual', '--allow-dangerously-skip-permissions', '--resume', 's1']);
 // 'plan' and 'auto' — the two modes the picker gained, passed straight through as CLI values
 eq('argv fresh plan', claudeArgv({ mode: 'fresh' }, HOME, '', 'plan'),
-  ['--permission-mode', 'plan']);
+  ['--permission-mode', 'plan', '--allow-dangerously-skip-permissions']);
 eq('argv resume own auto+effort', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, 'high', 'auto'),
-  ['--permission-mode', 'auto', '--resume', 's1', '--effort', 'high']);
+  ['--permission-mode', 'auto', '--allow-dangerously-skip-permissions', '--resume', 's1', '--effort', 'high']);
 // …and an unknown mode must fall back to manual, never to silence (which would defer to the settings file)
 eq('argv unknown mode falls back to manual', claudeArgv({ mode: 'fresh' }, HOME, '', 'nonsense'),
-  ['--permission-mode', 'manual']);
+  ['--permission-mode', 'manual', '--allow-dangerously-skip-permissions']);
 // 'acceptEdits' = auto-accept edits, no --add-dir
 eq('argv fresh acceptEdits', claudeArgv({ mode: 'fresh' }, HOME, '', 'acceptEdits'),
-  ['--permission-mode', 'acceptEdits']);
+  ['--permission-mode', 'acceptEdits', '--allow-dangerously-skip-permissions']);
 eq('argv resume own acceptEdits+effort', claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, 'high', 'acceptEdits'),
-  ['--permission-mode', 'acceptEdits', '--resume', 's1', '--effort', 'high']);
+  ['--permission-mode', 'acceptEdits', '--allow-dangerously-skip-permissions', '--resume', 's1', '--effort', 'high']);
 // SECURITY: a FOREIGN session is ALWAYS sandboxed — even when the user's setting is 'bypass'
 eq('argv resume FOREIGN sandboxed even with bypass', claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, 'xhigh', 'bypass'),
   ['--resume', 'f1', '--effort', 'xhigh']);
+
+// ---- --allow-dangerously-skip-permissions: CONSENT, not activation ----
+// It is what lets the perm control drive Claude Code's own mode cycle into bypass without a restart. Without
+// it, selecting bypass mid-session downgrades to default and the control is decorative again.
+ok('a trusted non-bypass launch carries the consent flag, or bypass is unreachable mid-session',
+  claudeArgv({ mode: 'fresh' }, HOME, '', 'default').includes('--allow-dangerously-skip-permissions'));
+ok('the consent flag rides every trusted mode, not just manual',
+  ['acceptEdits', 'plan', 'auto'].every((m) =>
+    claudeArgv({ mode: 'fresh' }, HOME, '', m).includes('--allow-dangerously-skip-permissions')));
+// Bypass already skips every check, so consent is moot there — and adding it would be noise on the one line
+// where the flags are read most carefully.
+ok('a bypass launch does not also carry the consent flag',
+  !claudeArgv({ mode: 'fresh' }, HOME, '', 'bypass').includes('--allow-dangerously-skip-permissions'));
+// THE ONE THAT MATTERS. A synced collaborator transcript is untrusted code. It runs sandboxed today, and the
+// consent flag must not become the crack in that: with it, a foreign session could cycle ITSELF into bypass.
+ok('SECURITY: a FOREIGN session never receives the consent flag (it could otherwise cycle into bypass)',
+  !claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, '', 'bypass').includes('--allow-dangerously-skip-permissions')
+  && !claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, '', 'default').includes('--allow-dangerously-skip-permissions')
+  && !claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, 'high', 'acceptEdits').includes('--allow-dangerously-skip-permissions'));
+// A below-floor CLI predates the flag; sending it would kill the session at spawn, exactly like
+// --permission-mode manual does. Degrade to silence, same rule as the mode flag beside it.
+ok('a below-floor CLI is not handed the consent flag either',
+  !claudeArgv({ mode: 'fresh' }, HOME, '', 'default', '', false).includes('--allow-dangerously-skip-permissions'));
 
 // ---- the chosen model — the 5th argument, and the ORDER it lands in ----------------------------------------
 // The order is not cosmetic: the flags are built as [permission] [--resume id] [--effort] [--model], so the
 // model always closes the line. Pinned as the runner actually orders it.
 eq('argv fresh with a model: permission, effort, then the model last',
   claudeArgv({ mode: 'fresh' }, HOME, 'high', 'default', 'claude-opus-5'),
-  ['--permission-mode', 'manual', '--effort', 'high', '--model', 'claude-opus-5']);
+  ['--permission-mode', 'manual', '--allow-dangerously-skip-permissions', '--effort', 'high', '--model', 'claude-opus-5']);
 eq('argv resume own with a model',
   claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, 'high', 'acceptEdits', 'claude-sonnet-5'),
-  ['--permission-mode', 'acceptEdits', '--resume', 's1', '--effort', 'high', '--model', 'claude-sonnet-5']);
+  ['--permission-mode', 'acceptEdits', '--allow-dangerously-skip-permissions', '--resume', 's1', '--effort', 'high', '--model', 'claude-sonnet-5']);
 // The asymmetry below is deliberate, and this case exists to state it out loud: a session synced from a
 // collaborator drops the permission flag — that omission IS the sandbox — but it still carries the model the
 // user picked, which decides nothing about what tools are allowed to run.
@@ -99,10 +122,10 @@ eq('argv resume FOREIGN keeps the chosen model while still dropping the permissi
 // makes an unset model incapable of changing a launch, and it is the half a wiring mistake breaks first.
 eq('argv fresh with no model chosen carries no --model',
   claudeArgv({ mode: 'fresh' }, HOME, 'high', 'default', ''),
-  ['--permission-mode', 'manual', '--effort', 'high']);
+  ['--permission-mode', 'manual', '--allow-dangerously-skip-permissions', '--effort', 'high']);
 eq('argv resume own with no model chosen carries no --model',
   claudeArgv({ mode: 'resume', id: 's1', foreign: false }, HOME, '', 'acceptEdits'),
-  ['--permission-mode', 'acceptEdits', '--resume', 's1']);
+  ['--permission-mode', 'acceptEdits', '--allow-dangerously-skip-permissions', '--resume', 's1']);
 eq('argv resume FOREIGN with no model chosen carries no --model',
   claudeArgv({ mode: 'resume', id: 'f1', foreign: true }, HOME, '', 'bypass'),
   ['--resume', 'f1']);
@@ -172,15 +195,14 @@ eq('spawnEnv missing runtimeId -> default tab', spawnEnv('', be).CLAUDIBLE_TAB, 
 // an explicit user override in the real env WINS (we only supply a default) — never fight a deliberate setting
 eq('spawnEnv honors a user override of the threshold',
   spawnEnv('t', { CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: '5' }).CLAUDE_CODE_RESUME_THRESHOLD_MINUTES, '5');
-// "plan big, execute small": strategy on → hook-nudge env var only, NEVER the subagent-model env pin (a default
-// must never override an explicit choice: CLAUDE_CODE_SUBAGENT_MODEL was measured, API stamps, overriding explicitly-requested
-// spawn models, so the app must never set it).
-eq('spawnEnv strategy on does NOT pin the subagent model', spawnEnv('t', be, 'planBigExecSmall').CLAUDE_CODE_SUBAGENT_MODEL, undefined);
-eq('spawnEnv strategy on exports the nudge var', spawnEnv('t', be, 'planBigExecSmall').CLAUDIBLE_MODEL_STRATEGY, 'planBigExecSmall');
-ok('spawnEnv strategy off sets neither var', (() => { const e = spawnEnv('t', be, 'off'); return e.CLAUDE_CODE_SUBAGENT_MODEL === undefined && e.CLAUDIBLE_MODEL_STRATEGY === undefined; })());
-ok('spawnEnv strategy absent sets neither var', (() => { const e = spawnEnv('t', be); return e.CLAUDE_CODE_SUBAGENT_MODEL === undefined && e.CLAUDIBLE_MODEL_STRATEGY === undefined; })());
+// "plan big, execute small": the strategy no longer rides the spawn env at all — no nudge var, and
+// NEVER the subagent-model env pin (a default must never override an explicit choice: CLAUDE_CODE_SUBAGENT_MODEL
+// was measured, API stamps, overriding explicitly-requested spawn models). A stale extra argument is ignored.
+ok('spawnEnv sets neither strategy var, even from a stale extra argument',
+  (() => { const e = spawnEnv('t', be, 'planBigExecSmall'); return e.CLAUDE_CODE_SUBAGENT_MODEL === undefined && e.CLAUDIBLE_MODEL_STRATEGY === undefined; })());
+ok('spawnEnv plain sets neither var', (() => { const e = spawnEnv('t', be); return e.CLAUDE_CODE_SUBAGENT_MODEL === undefined && e.CLAUDIBLE_MODEL_STRATEGY === undefined; })());
 eq('a user env CLAUDE_CODE_SUBAGENT_MODEL passes through untouched',
-  spawnEnv('t', { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-haiku-4-5' }, 'planBigExecSmall').CLAUDE_CODE_SUBAGENT_MODEL, 'claude-haiku-4-5');
+  spawnEnv('t', { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-haiku-4-5' }).CLAUDE_CODE_SUBAGENT_MODEL, 'claude-haiku-4-5');
 
 // ---- dependency detection (buildDepReport — the self-bootstrap provisioner's pure core) ----
 const { buildDepReport, semverGte, pickRunnable } = win._internals;

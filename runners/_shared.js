@@ -34,7 +34,7 @@ function wsEnv(ws) {
 
 // The `bash -lc` boot string for the Claude TUI (appdir injected — pure, so a parity test can verify it).
 // 'ultracode' isn't a CLI value: launch at xhigh, main.js injects `/effort ultracode` once it settles.
-function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy) {
+function bootStr(appdir, session, ws, runtimeId, effort, permMode) {
   if (!appdir) return 'echo "[claudible] could not resolve the app path — is the environment set up?"; sleep 8';
   const sel = String(session || '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+/, '');   // strip leading dashes (no flag-lookalike ids)
   const tab = String(runtimeId || 'default').replace(/[^A-Za-z0-9-]/g, '') || 'default';   // interpolated into single-quoted bash → sanitize (defense-in-depth; tab ids are app-generated, but keep parity with sel/slug which are stripped)
@@ -43,12 +43,10 @@ function bootStr(appdir, session, ws, runtimeId, effort, permMode, modelStrategy
   // Only non-default modes are inlined; 'default' (or unset) omits it so session.sh launches Claude's own
   // prompting default. session.sh ALWAYS sandboxes a foreign session regardless of this.
   const perm = ['bypass', 'acceptEdits'].includes(permMode) ? ` CLAUDIBLE_PERMISSION_MODE='${permMode}'` : '';
-  // "Plan big, execute small" (Anthropic cookbook pattern): the main session plans/synthesizes on the user's
-  // chosen model while SUBAGENTS are nudged toward Sonnet 5 via the context hook's delegation text (session.sh
-  // no longer hard-pins CLAUDE_CODE_SUBAGENT_MODEL — a default never overrides an explicit model choice). Allowlist inline: only the one known value
-  // ever reaches the bash string.
-  const strat = modelStrategy === 'planBigExecSmall' ? ` CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall'` : '';
-  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + strat + ' ' + wsEnv(ws) + ' ';
+  // "Plan big, execute small" no longer rides the boot string at all: the strategy is real agent
+  // definition files + the plan-big skill in the guest's ~/.claude, installed by the strategy panel. The old
+  // CLAUDIBLE_MODEL_STRATEGY env var's only consumer was the context-hook nudge, which is deleted.
+  const prefix = (sel ? `CLAUDIBLE_SESSION='${sel}' ` : '') + `CLAUDIBLE_TAB='${tab}'` + eff + perm + ' ' + wsEnv(ws) + ' ';
   return `${prefix}bash '${shq(appdir)}/wsl/session.sh' '${shq(appdir)}'`;
 }
 

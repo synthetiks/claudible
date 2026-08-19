@@ -95,7 +95,13 @@ contextBridge.exposeInMainWorld('claudible', {
   permissionModeGet: () => ipcRenderer.invoke('permissionMode:get'),
   permissionModeSet: (mode) => ipcRenderer.invoke('permissionMode:set', mode),   // 'default' (the stored name for Manual) | 'acceptEdits' | 'plan' | 'auto' | 'bypass'
   modelStrategyGet: () => ipcRenderer.invoke('modelStrategy:get'),
-  modelStrategySet: (v) => ipcRenderer.invoke('modelStrategy:set', v),           // 'planBigExecSmall' (opt-in) | 'off' (default)
+  modelStrategySet: (v, cfg) => ipcRenderer.invoke('modelStrategy:set', v, cfg),   // 'planBigExecSmall' | 'custom' (+ seat cfg) | 'off' (default)
+  modelStrategyCustomGet: () => ipcRenderer.invoke('modelStrategy:customGet'),      // saved custom seat picks {seat:{model,effort}}
+  // named strategies
+  strategyList: () => ipcRenderer.invoke('strategy:list'),                           // {active, list:[{id,name,seats}]}
+  strategyActivate: (id) => ipcRenderer.invoke('strategy:activate', id),             // 'off' | 'pb' | <id>
+  strategySave: (s) => ipcRenderer.invoke('strategy:save', s),                       // {id?, name, seats}
+  strategyDelete: (id) => ipcRenderer.invoke('strategy:delete', id),
   repoInvite: (id, username) => ipcRenderer.invoke('repo:invite', { id, username }),
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsSet: (name, state) => ipcRenderer.invoke('skills:set', { name, state }),
@@ -129,6 +135,9 @@ contextBridge.exposeInMainWorld('claudible', {
   onTabBusy: (cb) => ipcRenderer.on('tab:busy', (_e, { tabId, busy }) => cb(tabId, !!busy)),
   onWorkflowAgents: (cb) => ipcRenderer.on('workflow:agents', (_e, { tabId, workflows }) => cb(tabId, workflows)),
   onAgentTokens: (cb) => ipcRenderer.on('agent-tokens', (_e, { tabId, agentTok }) => cb(tabId, agentTok)),
+  // Per-agent OBSERVED model/effort/usage read from the session's subagents transcripts —
+  // ground truth from disk, never inferred from the Task call or the tab.
+  onAgentObserved: (cb) => ipcRenderer.on('agent:observed', (_e, { tabId, agents }) => cb(tabId, agents)),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),   // s carries s.tabId
   onProvision: (cb) => ipcRenderer.on('provision', (_e, m) => cb(m)),   // first-run voice setup progress {phase,msg}
   // live terminal sharing

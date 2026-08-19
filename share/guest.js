@@ -100,7 +100,18 @@ var readOnly = false, ws = null, retry = 0, denied = false, myName = 'Guest', ho
 // C-5.9 roster redesign: the host is ALWAYS labeled as host — "HOST (name)" once the host has a name, plain
 // "HOST" otherwise — same rule the Electron app's roster/chat use (renderer/app.js), so a guest reading this
 // browser page and a guest reading the app never see the host described two different ways.
-function HOST(name) { var n = String(name || '').trim(); return n ? ('HOST (' + n + ')') : 'HOST'; }
+function HOST(name) { var n = String(name || '').trim(); return n ? ('Host (' + n + ')') : 'Host'; }
+// One colour per person, identical rule and identical palette to the desktop app (renderer/app.js tintFor):
+// slot 1 is always the host, guests take 2..8 in the order they first speak and wrap after seven, keyed
+// case-INSENSITIVELY because the share server dedups names that way. Same person, same colour, both sides.
+var authorTints = {}, authorTintCount = 0;
+function tintFor(name, isHost) {
+  if (isHost) return 1;
+  var k = String(name || '').trim().toLowerCase();
+  if (!k) return 0;                                  // unkeyable author → no tint, keeps the plain name ink
+  if (!authorTints[k]) { authorTints[k] = 2 + (authorTintCount % 7); authorTintCount++; }
+  return authorTints[k];
+}
 var wsPaused = false;   // host-in-private-project pause state (freezes the mirror)
 // end-state bookkeeping: `left` = the guest clicked Disconnect (a FINAL state — never auto-reconnect back in);
 // `wasAdmitted` = we got past approval at least once (so a later dead socket is "the session ended", not "bad link");
@@ -532,6 +543,8 @@ function connect() {
         // OUR own chat bubbles read right AND a later resume reconnects with the unique name (we send it as ?n=).
         if (msg.you && msg.you !== myName) { myName = msg.you; try { sessionStorage.setItem(NAME_KEY, myName); } catch (e) {} }
         $('ro').style.display = readOnly ? '' : 'none';
+        $('codrive').style.display = readOnly ? 'none' : '';   // the guest half of the co-drive disclosure — same server value, opposite branch, never both
+
         document.body.classList.toggle('ro', readOnly);
         applyReadOnlyInput();                                 // read-only: a tap won't raise the soft keyboard
         wsPaused = !!msg.paused;
@@ -563,8 +576,8 @@ function connect() {
         applyStatus(msg.status);
       } else if (msg.type === 'chat') {
         if (msg.role === 'system') addSystemChat(msg.text);
-        else if (msg.role === 'host') addChat(HOST(msg.name || hostName), msg.text, false);
-        else addChat(msg.name || 'viewer', msg.text, false);
+        else if (msg.role === 'host') addChat(HOST(msg.name || hostName), msg.text, false, null, true);
+        else addChat(msg.name || 'viewer', msg.text, false, msg.name || 'viewer', false);
       } else if (msg.type === 'typist') {
         showTypist(msg.name);                                 // host or another guest is typing (the server never echoes your own)
       } else if (msg.type === 'paused') {
@@ -631,10 +644,12 @@ term.onData(function (d) {
 
 // ---- chat with the host & other viewers (human↔human; never reaches Claude/terminal) ----
 var chatLog = $('chat-log'), chatIn = $('chat-in');
-function addChat(who, text, mine) {
+function addChat(who, text, mine, tintKey, isHost) {
   var empty = document.getElementById('chat-empty'); if (empty) empty.parentNode.removeChild(empty);
   var d = document.createElement('div');
   d.className = 'chat-msg ' + (mine ? 'me' : 'them');
+  var tint = tintFor(tintKey !== undefined ? tintKey : who, !!isHost);   // key off the raw NAME, never the rendered label — "Host (mk)" and "mk" must not become two people
+  if (tint) d.setAttribute('data-tint', String(tint));
   var w = document.createElement('span'); w.className = 'who'; w.textContent = who;
   var b = document.createElement('div'); b.textContent = text;   // textContent → no HTML injection
   d.appendChild(w); d.appendChild(b); chatLog.appendChild(d);
@@ -650,7 +665,7 @@ function addSystemChat(text) {
 function sendChat() {
   var text = (chatIn.value || '').trim(); if (!text) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  addChat(myName, text, true);
+  addChat(myName, text, true, myName, false);   // my own colour comes from my name, the same key every other viewer sees me by
   ws.send(JSON.stringify({ type: 'chat', text: text }));
   chatIn.value = '';
 }

@@ -86,19 +86,20 @@ ok('no model reaches this path in any boot shape — no model env, no --model fl
   [
     _bootStr(APP, 'new', legacy, 'main', 'high', 'default'),
     _bootStr(APP, 'sess-7', repo, 'tab2', 'high', 'bypass'),
-    _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass', 'planBigExecSmall'),
   ].every((s) => !/--model/.test(s) && !/CLAUDIBLE_MODEL=/.test(s)));
 
-// model strategy: 'planBigExecSmall' inlines CLAUDIBLE_MODEL_STRATEGY (after PERM); anything else omits it
-eq('boot planBigExecSmall inlines the strategy env',
-  _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass', 'planBigExecSmall'),
-  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_PERMISSION_MODE='bypass' CLAUDIBLE_MODEL_STRATEGY='planBigExecSmall' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
-eq('boot strategy off omits the env',
-  _bootStr(APP, 'new', legacy, 'main', 'high', 'default', 'off'),
-  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
-eq('boot unknown strategy value omitted (allowlist)',
-  _bootStr(APP, 'new', legacy, 'main', 'high', 'default', "hax'; rm -rf /"),
-  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
+// model strategy: the boot string no longer carries it AT ALL — the strategy is agent definition
+// files + the plan-big skill, not an env var. A trailing extra argument must be ignored (dead callers), and
+// CLAUDIBLE_MODEL_STRATEGY reappearing in any boot shape means the deleted rail grew back.
+ok('boot never inlines a strategy env, even from a stale extra argument',
+  [
+    _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass'),
+    _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass', 'planBigExecSmall'),
+    _bootStr(APP, 'new', legacy, 'main', 'high', 'default', "hax'; rm -rf /"),
+  ].every((s) => !/CLAUDIBLE_MODEL_STRATEGY/.test(s)));
+eq('boot shape without the strategy var (bypass)',
+  _bootStr(APP, 'new', legacy, 'main', 'high', 'bypass'),
+  `CLAUDIBLE_SESSION='new' CLAUDIBLE_TAB='main' CLAUDIBLE_EFFORT='high' CLAUDIBLE_PERMISSION_MODE='bypass' CLAUDIBLE_WS_KIND='legacy' bash '${APP}/wsl/session.sh' '${APP}'`);
 
 // ---- runScript / _scriptCmd : every call-site shape (main.js line cited) ----
 // sessions.sh — ws, no args  (main.js:562)

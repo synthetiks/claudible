@@ -11,6 +11,11 @@
 // dead while the write that overwrote it worked. Same class as the usage-gauge TDZ noted around line 750.
 const PREFS_KEY = 'claudible_prefs';
 const $ = (id) => document.getElementById(id);
+// HTML escaping for innerHTML templates: use the file's GLOBAL `escHtml` (a hoisted function declaration,
+// currently near the end of the file) — never a `esc` that happens to be in scope somewhere else. A template
+// calling a helper that only exists in another function's scope is a ReferenceError at CLICK time, not load
+// time; that took down the graph builder and the observed strip on 2026-08-18. The suites cannot see
+// undefined globals — node --check is syntax-only.
 const setDot = (id, cls) => { const e = $(id); if (e) e.className = 'dot' + (cls ? ' ' + cls : ''); };
 const setActive = (id, on) => { const e = $(id); if (e) e.classList.toggle('active', on); };
 // transient toast (button feedback / coming-soon placeholders)
@@ -240,25 +245,6 @@ function sendPaste(t) {
   if (tab && tab.kind === 'live') { if (!tab.liveReadOnly) claudible.livePaste(activeTabId, t); return; }
   sendInput('\x1b[200~' + t + '\x1b[201~');
 }
-// Give back any column the renderer drew outside the viewport. Reads the grid xterm ACTUALLY painted
-// (.xterm-screen) against the box it may paint into (.xterm-viewport) and steps the column count down until it
-// fits. Bounded to 3 attempts: the error is a rounding remainder, never more than a couple of cells, and a
-// runaway loop here would resize the pty repeatedly. Returns the column count now in force.
-function trimOverflowCols(t, cols, rows) {
-  try {
-    for (let i = 0; i < 3; i++) {
-      const el = t.container.querySelector('.xterm-screen');
-      const vp = t.container.querySelector('.xterm-viewport');
-      if (!el || !vp) return cols;
-      const over = el.getBoundingClientRect().width - vp.clientWidth;
-      if (over <= 0.5 || cols <= 20) return cols;                 // fits (or refuses to shrink into uselessness)
-      const cell = el.getBoundingClientRect().width / Math.max(1, t.term.cols);
-      cols = Math.max(20, cols - Math.max(1, Math.ceil(over / cell)));
-      t.term.resize(cols, rows);
-    }
-  } catch (e) {}
-  return cols;
-}
 function sync() {
   const t = AT(); if (!t) return;                              // never fit a hidden tab — only the active one
   if (t.kind === 'live') { fitLiveTab(t); return; }            // a live tab is a fixed-grid remote mirror — never start/resize a local pty
@@ -275,13 +261,13 @@ function sync() {
     const rows = d.rows > 6 ? d.rows - 1 : d.rows;
     const changed = (t.term.cols !== cols || t.term.rows !== rows);
     if (changed) t.term.resize(cols, rows);
-    // …then correct for RENDERER ROUNDING. proposeDimensions divides the available width by a measured cell
-    // width; the renderer then rounds each cell up to whole device pixels, so at some widths the grid it
-    // actually draws is wider than the box it draws into and the last column or two land outside the viewport,
-    // clipped mid-glyph. Claude Code wraps to those columns, so the text there is written and never seen.
-    // The scroll gutter used to cover that overhang, which is why removing it revealed a "dark band" that was
-    // really the edge of an over-wide grid. Measure what was drawn and give the columns back.
-    cols = trimOverflowCols(t, cols, rows);
+    // NO post-fit "overflow trim" here, deliberately. A trim measured .xterm-screen against .xterm-viewport and
+    // stepped cols down; on any FRESH measurement it could never fire (addon-fit already subtracts a 15px
+    // scrollbar the CSS deletes, so the screen always measures ~15px NARROWER than the box). Its only live path
+    // was a STALE one: a hidden tab's renderer is paused, so its painted width is frozen at the last geometry —
+    // setActiveTab reveals and syncs in the same block, the trim divided a frozen width by fresh columns and
+    // walked 144 → 103 → 74 → 53, shipping that to the pty. That was the terminal display glitch. The "dark band"
+    // it claimed to fix is panel shadows plus background bleed (already ruled), not an over-wide grid.
     if (!t.started && !t.parked) { t.started = true; claudible.tabOpen(t.tabId, t.wsId, t.session); claudible.ptyStart(t.tabId, cols, rows); } // spawn at the EXACT fitted size — NEVER for a parked tab (C-4.4): commitParkedTab clears `parked` and calls sync() again to do this exact first spawn once the user actually asks for one
     else if (changed && !t.parked) claudible.ptyResize(t.tabId, cols, rows);   // a pure tab-switch (no size change) is now a no-op resize → one clean repaint, no redundant pty:resize IPC. A parked tab has no pty to resize either — this just fits the (started:false) xterm sitting behind the overlay.
   } catch {}
@@ -339,8 +325,24 @@ function paintCrumb() {
     const real = histSessionName(rec.session);
     if (real && real !== '—') sess = real;
   }
+  // A JOINED live tab is the one case where both resolvers above come back with a placeholder: its label is
+  // stamped 'Live · <who>' at join time, and histSessionName is the LOCAL resolver — it cannot know a peer's
+  // session. So the bar used to read "project / Live · crazy" for a session actually called MK-Sessions.
+  // The flag sitting right beside this crumb already says Live; repeating it here costs the name, which is the
+  // one thing the bar exists to carry. Prefer, in order: the host's broadcast name, the sidebar row that was
+  // clicked (recorded as joinedAsLabel for exactly this), then the host's own name.
+  if (rec && rec.kind === 'live') {
+    const notPlaceholder = (s) => s && !/^Live\s+·/.test(s);
+    sess = (notPlaceholder(rec.curSessionLabel) && rec.curSessionLabel)
+      || (notPlaceholder(rec.joinedAsLabel) && rec.joinedAsLabel)
+      || rec.hostName || sess;
+  }
   el.textContent = '';
-  if (proj) el.appendChild(document.createTextNode(proj + (sess ? ' / ' : '')));
+  // The project half is a SPAN, not a bare text node, so the two halves can be separate flex items and the
+  // session can hold its own width while the project ellipsises (see .crumb-proj). The separator lives inside
+  // the span, and the span preserves whitespace, so "Local / 4444" cannot collapse to "Local /4444" — the
+  // failure the older comment in index.html warns about.
+  if (proj) { const p = document.createElement('span'); p.className = 'crumb-proj'; p.textContent = proj + (sess ? ' / ' : ''); el.appendChild(p); }
   if (sess) { const b = document.createElement('b'); b.textContent = sess; el.appendChild(b); }
   el.title = proj && sess ? (proj + ' / ' + sess) : (proj || sess);   // the full text when it truncates
 }
@@ -355,6 +357,7 @@ function setActiveTab(tabId) {
   term = rec.term;
   try { if (!typingElsewhere()) rec.term.focus(); } catch {}   // focus the terminal SYNCHRONOUSLY (guarded: never steal from an open modal/text field). The deferred focus below alone leaves a window where the just-clicked sidebar row (role=button, tabIndex=0) still holds DOM focus; xterm 5.5.0 delivers Space ONLY via the native keypress event, which never fires if that keydown landed on the row instead of the textarea — so a stray Space silently scrolls the sidebar rather than typing. Focusing here closes that window; the focusTermSoon stays as a layout-timing fallback.
   if (rec.kind !== 'live') { try { claudible.tabForeground(tabId); } catch {} }   // guests + main's active-workspace follow the foreground tab — a live tab must NOT (it would hijack your own outgoing mirror)
+  refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined) — FIRST, before any fit: this toggles the .sharing panel, i.e. it CHANGES the terminal's width by ~470px. Running it after sync() meant every fit measured the geometry of the tab being LEFT and then moved the goalposts, shipping one pty resize 40-60 columns wrong that the ResizeObserver reversed a frame later.
   sync();                                          // fit the now-visible tab + (re)start/resize its pty (or fit the live mirror)
   paintCreateOverlay(rec);                          // C-4.4: show/hide the create-a-session overlay for THIS tab — a no-op unless rec.parked
   scheduleFit();                                    // …and re-fit once layout settles (the container just became visible)
@@ -363,7 +366,6 @@ function setActiveTab(tabId) {
   _agentsSig = '';                                 // force an agents rebuild for THIS tab (the sig guard is module-global)
   renderAgents();                                  // …and its agents into the agents pane
   paintCrumb();                                    // …and the top bar names the project + session you just moved to
-  refreshCollabSurfaces();                          // chat/roster/live-bar/voice follow the active tab's context (host-share vs joined)
   if ($('tts-in')) $('tts-in').value = rec.lastReply || '';   // the Speak box shows THIS tab's latest reply (per-tab, never another tab's — the lastReply bleed fix)
   try { updateVoiceOutBtn(); } catch {}
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
@@ -908,7 +910,7 @@ function renderUsagePop() {
     .filter((k) => _ownRate[k] && typeof _ownRate[k].used_percentage === 'number')
     .sort((a, b) => ((ORDER.indexOf(a) + 1) || 99) - ((ORDER.indexOf(b) + 1) || 99));
   pop.innerHTML = '<div class="glab">Plan usage</div>'
-    + keys.map((k) => row(esc(NICE[k] || k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())),
+    + keys.map((k) => row(escHtml(NICE[k] || k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())),
       _ownRate[k].used_percentage, _ownRate[k].resets_at)).join('')
     + (keys.length ? '' : '<p>No limit data reported yet.</p>');
 }
@@ -1543,6 +1545,14 @@ claudible.onAgentTokens((tabId, agentTok) => {
   t.agentTok = agentTok || 0;
   if (t.tabId === activeTabId) repaintTracker(t);
 });
+// OBSERVED agents: per-agent model/effort/usage read from the session's subagents transcripts.
+// This is ground truth from disk — the only place a subagent's ACTUAL model and effort are recorded — and it
+// is what replaced the old card's tab-model guess. Keyed per tab; the strip renders in the Agents pane.
+claudible.onAgentObserved((tabId, agents) => {
+  const t = tabs.get(tabId); if (!t) return;
+  t.observed = Array.isArray(agents) ? agents : [];
+  if (t.tabId === activeTabId) renderAgents();
+});
 // Workflow/swarm agents (read WSL-side from the session's subagents dir, since they emit no Task hooks).
 claudible.onWorkflowAgents((tabId, workflows) => {
   const t = tabs.get(tabId); if (!t) return;
@@ -1555,12 +1565,20 @@ claudible.onWorkflowAgents((tabId, workflows) => {
 
 // ---------- Agents tab: live view of Task subagents (PER TAB; paired by tool_use_id) ----------
 let agentsView = false;
+let stratNow = 'off';   // mirror of the saved strategy, kept current by the panel's paint() — read by the once-ever hint below
 function onAgentStart(t, o) {
+  // The once-ever hint, at the exact moment it applies — a session just spawned its 3rd
+  // subagent with no strategy on. One toast, then never again (persisted). Not a nag: the number 3 means
+  // this user already runs multi-agent jobs, which is precisely who the strategy is for.
+  if (stratNow === 'off' && t.agents.size === 2 && !loadPrefs().pbHintShown) {
+    savePrefs({ pbHintShown: true });
+    toast('This job is using several agents — a strategy could run the heavy legs on a cheaper model. See Skill & Strategy.');
+  }
   const id = o.tool_use_id || ('a' + t.agents.size + '-' + Date.now());
   const ti = o.tool_input || {};
   t.agents.set(id, { id: id, desc: String(ti.description || ti.subagent_type || 'subagent'), type: String(ti.subagent_type || ''),
     prompt: String(ti.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 600),   // the agent's task → shown in the expanded card
-    model: String(ti.model || '') || (t.model || ''),   // explicit override wins; else the agent inherits the tab's model AT SPAWN TIME (a later /model switch mustn't relabel old agents)
+    model: String(ti.model || ''),   // ONLY what the Task call actually named. No tab-model fallback: that displayed an assumption as an observation — the observed data below carries the truth from disk
     status: 'running', startedAt: Date.now(), durationMs: null, ok: true });
   if (t.tabId === activeTabId) { renderAgents(); if (!agentsView) { const s = $('seg-agents'); if (s) s.classList.add('has-badge'); } }   // badge while you're on the terminal
 }
@@ -1597,7 +1615,10 @@ function fmtDur(sec) {
   return m + 'm' + (s ? ' ' + s + 's' : '');
 }
 const SWARM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="16" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M12 7.2v3.2M10.3 12.1 6.7 14.3M13.7 12.1l3.6 2.2"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>';
-const expandedAgents = new Set();   // agent ids the user has drilled into — re-applied across rebuilds so live updates don't collapse them
+// A4 (2026-08-19) replaced click-to-expand with a side pane, so this is ONE id, not a set: the pane shows one
+// agent at a time and the ledger never reflows. Re-applied across rebuilds so live updates don't close it.
+let selectedAgent = null;
+let agentsFilter = 'all';           // all | running | done | failed — client-side only, over data already held
 // Categorize a tool name → a color-coded badge class (forward-compatible: unknown tools fall to 'misc' + their name).
 function toolCat(name) {
   const n = String(name || '');
@@ -1609,15 +1630,9 @@ function toolCat(name) {
   if (/^(Task|Agent)/i.test(n)) return 'agent';
   return 'misc';
 }
-function typeHue(type) {   // the agent-type → left-rail hue (gives the swarm visual identity)
-  const t = String(type || '').toLowerCase();
-  if (t.includes('explore')) return '#5fb487';
-  if (t.includes('plan')) return '#e0a93b';
-  if (t.includes('review')) return '#cf625a';
-  if (t.includes('code')) return '#b48ce0';
-  if (t.includes('research') || t.includes('general')) return '#6aa6e0';
-  return '#8493a6';
-}
+// typeHue() lived here: agent-type → left-rail colour. The A4 ledger retired the rails (2026-08-19), and it
+// had no other caller, so it went with them. The agent's type is still shown — as the sub-label under its
+// name, and in the detail pane's meta line.
 function toolBadge(t) { const b = document.createElement('span'); b.className = 'tb tb-' + toolCat(t.name); b.textContent = t.name; if (t.target) b.title = t.name + ' ' + t.target; return b; }
 // One TILE per agent — a living cell in the swarm grid. Face: status dot · task name · type pill · a live "now" line
 // (the tool it's running right now) · metrics (elapsed · tokens · tools). Click a rich tile to drill into the full
@@ -1631,69 +1646,83 @@ function fmtModel(s) {
   s = s.toLowerCase().replace(/^claude-/, '').replace(/-\d{8}$/, '');        // strip vendor prefix + date stamp
   return s.replace(/-(\d)/g, ' $1').replace(/(\d) (\d)/g, '$1.$2').replace(/-/g, ' ');   // opus-4-8 → opus 4.8
 }
-function agentTile(a, nowSec) {
-  const running = a.status === 'running';
+// The agent's STATE as one word — A4 retires the leading dot, so this column is the only place state is said.
+function agentState(a) { return a.status === 'running' ? 'run' : (a.ok === false ? 'fail' : 'done'); }
+const AGENT_STATE_WORD = { run: 'Working', done: 'Done', fail: 'Failed' };
+// The TASK column repurposes by state (owner-approved A4 note): while running it is the live action; on a done
+// row the result's first words; on a failed row whatever came back. Same text the old tile's "now" line built.
+function agentTaskText(a) {
   const tools = Array.isArray(a.tools) ? a.tools : [];
-  const rich = tools.length > 0 || !!(a.result && a.result.length) || (a.tokens || 0) > 0 || !!(a.prompt && a.prompt.trim());
-  const tile = document.createElement('div');
-  tile.className = 'agent-tile ' + (running ? 'running' : (a.ok === false ? 'err' : 'done')) + (rich ? ' rich' : '') + (expandedAgents.has(a.id) ? ' expanded' : '');
-  if (a.type) tile.style.setProperty('--rail', typeHue(a.type));
+  if (a.status === 'running') {
+    const lt = tools.length ? tools[tools.length - 1] : null;   // workflow agents carry a live feed; latest = now
+    return lt ? (lt.name + (lt.target ? ' ' + lt.target : '')) : 'working…';   // Task subagents report tools only at the end
+  }
+  if (a.result && a.result.trim()) return a.result.trim();
+  const tc = a.toolCount || tools.length;
+  return tc ? (tc + ' tool call' + (tc === 1 ? '' : 's')) : (a.ok === false ? 'failed' : 'done');
+}
+// ONE ledger row: Agent + five equal categories. The elapsed cell keeps the data-start contract that lets
+// renderAgents() tick timers in place instead of rebuilding the pane every second.
+function agentRow(a, nowSec) {
+  const st = agentState(a);
+  const r = document.createElement('div');
+  r.className = 'ag-row ag-grid' + (st !== 'run' ? ' is-done' : '') + (selectedAgent === a.id ? ' sel' : '');
   const label = a.desc || a.label || 'agent';
-  // top row: status dot · task name · type pill
-  const top = document.createElement('div'); top.className = 'tile-top';
-  const dot = document.createElement('span'); dot.className = 'tile-dot'; top.appendChild(dot);
-  const name = document.createElement('div'); name.className = 'tile-name'; name.textContent = label; name.title = label; top.appendChild(name);
-  if (a.type) { const tp = document.createElement('span'); tp.className = 'tile-type'; tp.textContent = a.type; top.appendChild(tp); }
-  // model chip — WHICH brain is running this agent (raw id from a workflow transcript, display name or the
-  // Agent-tool override for hook agents). Users deliberately mix tiers (cheap sweeps on sonnet, judges on
-  // opus); the cockpit must show the mix.
+  const nm = document.createElement('span'); nm.className = 'ag-nm'; nm.textContent = label; nm.title = label;
+  if (a.type) { const s = document.createElement('small'); s.textContent = a.type; nm.appendChild(s); }
+  r.appendChild(nm);
   const mdl = fmtModel(a.model);
-  if (mdl) { const mp = document.createElement('span'); mp.className = 'tile-model'; mp.textContent = mdl; mp.title = 'model: ' + a.model; top.appendChild(mp); }
-  tile.appendChild(top);
-  // "now" line: the current action — pulses while running (the watch-it-think magic)
-  const now = document.createElement('div'); now.className = 'tile-now';
-  const ind = document.createElement('span'); ind.className = 'tile-now-ind'; now.appendChild(ind);
-  if (running) {
-    const lt = tools.length ? tools[tools.length - 1] : null;   // workflow agents carry a live tool feed; latest = what it's doing now
-    if (lt) { const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = lt.name; now.appendChild(nm);
-      const tg = document.createElement('span'); tg.className = 'tg'; tg.textContent = lt.target || ''; now.appendChild(tg); }
-    else { const tg = document.createElement('span'); tg.className = 'tg'; tg.textContent = 'working…'; now.appendChild(tg); }   // Task subagents report tools only at the end → show a live "working…"
-  } else {
-    const tg = document.createElement('span'); tg.className = 'tg';
-    tg.textContent = (a.result && a.result.trim()) ? a.result.trim() : ((a.toolCount || 0) ? (a.toolCount + ' tool calls') : 'done');
-    now.appendChild(tg);
-  }
-  tile.appendChild(now);
-  // metrics foot: elapsed · tokens · tools (+ a chevron on rich tiles)
-  const foot = document.createElement('div'); foot.className = 'tile-foot';
-  const fm = (cls, html, ds) => { const e = document.createElement('span'); e.className = 'fm ' + cls; e.innerHTML = html; if (ds != null) e.dataset.start = ds; foot.appendChild(e); };
+  const md = document.createElement('span'); md.className = 'ag-mdl'; md.textContent = mdl || '—'; if (mdl) md.title = 'model: ' + a.model; r.appendChild(md);
+  const el = document.createElement('span'); el.className = 'ag-el';
   const startSec = a.start || (a.startedAt ? a.startedAt / 1000 : null);
-  if (running) fm('dur', '<b>' + (startSec ? fmtDur(nowSec - startSec) : '0s') + '</b>', startSec || '');
-  else { const d = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : ''); if (d) fm('dur', '<b>' + d + '</b>'); }
-  if ((a.tokens || 0) > 0) fm('tok', '<b>' + fmtK(a.tokens) + '</b> tok');
-  const tc = a.toolCount || tools.length; if (tc > 0) fm('tool', '<b>' + tc + '</b> ' + (tc === 1 ? 'tool' : 'tools'));
-  if (a.ok === false) fm('err', 'failed');
-  if (rich) { const chev = document.createElement('span'); chev.className = 'agent-chev'; chev.textContent = '⌄'; foot.appendChild(chev); }
-  tile.appendChild(foot);
-  // drill-down detail: task · full tool feed · result
-  if (rich) {
-    const det = document.createElement('div'); det.className = 'tile-detail';
-    const taskText = (a.prompt && a.prompt.trim()) || (label !== 'agent' ? label : '');
-    if (taskText) { const task = document.createElement('div'); task.className = 'agent-task'; task.textContent = taskText; det.appendChild(task); }
-    if (tools.length) {
-      const feed = document.createElement('div'); feed.className = 'agent-feed';
-      tools.forEach((t) => { const r = document.createElement('span'); r.className = 'agent-tool';
-        r.appendChild(toolBadge(t)); if (t.target) { const s = document.createElement('span'); s.className = 'agent-tt'; s.textContent = t.target; r.appendChild(s); } feed.appendChild(r); });
-      det.appendChild(feed);
-    }
-    if (!running && a.result) { const res = document.createElement('div'); res.className = 'agent-result'; res.textContent = a.result; det.appendChild(res); }
-    tile.appendChild(det);
-    tile.addEventListener('click', () => {
-      if (expandedAgents.has(a.id)) { expandedAgents.delete(a.id); tile.classList.remove('expanded'); }
-      else { expandedAgents.add(a.id); tile.classList.add('expanded'); }
-    });
+  if (st === 'run') { el.textContent = startSec ? fmtDur(nowSec - startSec) : '0s'; el.dataset.start = startSec || ''; }
+  else el.textContent = (a.durationMs != null) ? fmtDur(a.durationMs / 1000) : ((a.start && a.last) ? fmtDur(a.last - a.start) : '—');
+  r.appendChild(el);
+  // tokens arrive with the completion payload for Task subagents, so a RUNNING one legitimately has none yet.
+  // "—" not "0": an empty cell must read as "not reported yet", never as "used nothing".
+  const tk = document.createElement('span'); tk.className = 'ag-tk' + ((a.tokens || 0) > 0 ? '' : ' none');
+  tk.textContent = (a.tokens || 0) > 0 ? fmtK(a.tokens) : '—'; r.appendChild(tk);
+  const stEl = document.createElement('span'); stEl.className = 'ag-status ' + st;
+  stEl.appendChild(document.createElement('i')); stEl.appendChild(document.createTextNode(AGENT_STATE_WORD[st])); r.appendChild(stEl);
+  const tsk = document.createElement('span'); tsk.className = 'ag-task';
+  const tt = agentTaskText(a); tsk.textContent = tt; tsk.title = tt; r.appendChild(tsk);
+  r.addEventListener('click', () => { selectedAgent = (selectedAgent === a.id) ? null : a.id; _agentsSig = ''; renderAgents(); });
+  return r;
+}
+// The detail pane — what the inline .expanded block used to hold, without the grid reflow that shoved
+// neighbouring tiles around mid-run. NOTE: no per-tool timestamps here. Tool entries carry {name,target}
+// only, and Task subagents do not report individual calls at all (they arrive as aggregated counts, see
+// onAgentDone) — so the mock's timed step feed has no backing data and is deliberately not faked.
+function agentPane(a) {
+  const tools = Array.isArray(a.tools) ? a.tools : [];
+  const st = agentState(a);
+  const p = document.createElement('div'); p.className = 'ag-pane';
+  const hd = document.createElement('div'); hd.className = 'ag-pane-hd'; hd.appendChild(document.createTextNode('Selected agent'));
+  const cl = document.createElement('button'); cl.type = 'button'; cl.className = 'ag-pane-close'; cl.title = 'Close'; cl.textContent = '×';
+  cl.addEventListener('click', (ev) => { ev.stopPropagation(); selectedAgent = null; _agentsSig = ''; renderAgents(); });
+  hd.appendChild(cl); p.appendChild(hd);
+  const ti = document.createElement('div'); ti.className = 'ag-pane-title';
+  const dot = document.createElement('span'); dot.className = 'ag-status ' + st; dot.appendChild(document.createElement('i'));
+  ti.appendChild(dot); ti.appendChild(document.createTextNode(a.desc || a.label || 'agent')); p.appendChild(ti);
+  const taskText = (a.prompt && a.prompt.trim()) || '';
+  if (taskText) { const t = document.createElement('div'); t.className = 'agent-task'; t.textContent = taskText; p.appendChild(t); }
+  if (tools.length) {
+    const feed = document.createElement('div'); feed.className = 'agent-feed';
+    tools.forEach((t) => { const row = document.createElement('span'); row.className = 'agent-tool';
+      row.appendChild(toolBadge(t));
+      if (t.target) { const s = document.createElement('span'); s.className = 'agent-tt'; s.textContent = t.target; row.appendChild(s); }
+      feed.appendChild(row); });
+    p.appendChild(feed);
   }
-  return tile;
+  if (st !== 'run' && a.result) { const res = document.createElement('div'); res.className = 'agent-result'; res.textContent = a.result; p.appendChild(res); }
+  const meta = document.createElement('div'); meta.className = 'ag-pane-meta';
+  const mi = (v, l) => { const s = document.createElement('span'); const b = document.createElement('b'); b.textContent = v; s.appendChild(b); if (l) s.appendChild(document.createTextNode(' ' + l)); meta.appendChild(s); };
+  if (a.type) mi(a.type, '');
+  const mdl = fmtModel(a.model); if (mdl) mi(mdl, '');
+  const tc = a.toolCount || tools.length; if (tc) mi(String(tc), tc === 1 ? 'tool' : 'tools');
+  if ((a.tokens || 0) > 0) mi(fmtK(a.tokens), 'tok');
+  if (meta.childElementCount) p.appendChild(meta);
+  return p;
 }
 let _agentsSig = '';
 function renderAgents() {
@@ -1707,7 +1736,7 @@ function renderAgents() {
   const all = [];
   wfs.forEach((wf) => (wf.agents || []).forEach((a) => all.push(a)));
   taskAgents.forEach((a) => all.push(a));
-  { const liveIds = new Set(all.map((a) => a.id)); for (const id of expandedAgents) if (!liveIds.has(id)) expandedAgents.delete(id); }   // prune expand state for swarms that dropped out — no leak, no stale pre-expand
+  { const liveIds = new Set(all.map((a) => a.id)); if (selectedAgent && !liveIds.has(selectedAgent)) selectedAgent = null; }   // the selected agent dropped out of the feed → close the pane rather than hold a dead id
   const running = all.filter((a) => a.status === 'running');
   const doneAll = all.filter((a) => a.status !== 'running');
   const endSec = (a) => a.last || (a.startedAt ? (a.startedAt + (a.durationMs || 0)) / 1000 : (a.start || 0));
@@ -1716,54 +1745,86 @@ function renderAgents() {
   // Rebuild the DOM only when membership/status actually changes — NOT on every 1s tick (avoids re-flashing the
   // CSS entry animations). When unchanged, just advance the running timers in place.
   // toolCount + tokens in the sig → the cockpit rebuilds as a running agent does work (new tool calls / tokens),
-  // not just on membership changes. Expanded rows survive it (expandedAgents set); entry animation removed so no flash.
+  // not just on membership changes. The selected row survives it (selectedAgent id); no entry animation, no flash.
   const totalTok = all.reduce((s, a) => s + (a.tokens || 0), 0);
   const totalTools = all.reduce((s, a) => s + (a.toolCount || (Array.isArray(a.tools) ? a.tools.length : 0)), 0);
   // Rebuild only when membership/status/work changes — NOT every 1s tick. The latest tool per RUNNING agent is in the
-  // sig so the "now" line updates live as it works; totalTok too so the hero re-reads. Between rebuilds, only the
-  // running elapsed timers tick in place (below). Expanded tiles survive (expandedAgents set).
+  // sig so the Task column updates live as it works; totalTok too so the hero re-reads. Between rebuilds, only the
+  // running elapsed timers tick in place (below). The selected row survives (selectedAgent id).
+  // The filter and the selection are in the sig too: both change what is on screen without any data changing,
+  // and a click that only flips local state must still repaint. (Their handlers also clear _agentsSig.)
   const latestTool = (a) => (a.tools && a.tools.length) ? (a.tools[a.tools.length - 1].name + (a.tools[a.tools.length - 1].target || '')) : '';
-  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '') + (a.toolCount || 0) + (a.tokens || 0) + latestTool(a)), done.map((a) => (a.desc || a.label || '') + a.status + (a.toolCount || 0)), doneAll.length, totalTok]);
+  const obs = (at && at.observed) || [];                                       // ground truth from the subagents transcripts
+  const sig = JSON.stringify([running.map((a) => (a.desc || a.label || '') + (a.id || '') + (a.toolCount || 0) + (a.tokens || 0) + latestTool(a)), done.map((a) => (a.desc || a.label || '') + a.status + (a.toolCount || 0)), doneAll.length, totalTok, obs.map((a) => a.id + a.model + a.effort + a.out), agentsFilter, selectedAgent]);
   if (sig === _agentsSig) {
     el.querySelectorAll('[data-start]').forEach((m) => { const b = m.querySelector('b') || m; b.textContent = fmtDur(nowSec - parseFloat(m.dataset.start)); });   // tick the running elapsed timers in place
     return;
   }
   _agentsSig = sig;
-  if (!all.length) {
+  if (!all.length && !obs.length) {
     el.innerHTML = '<div class="agents-empty"><span class="agents-empty-ico">' + SWARM_SVG + '</span>'
       + 'No agents running.<br>When Claude spawns subagents or a workflow swarm, they light up here — live.</div>';
     return;
   }
   el.innerHTML = '';
-  // ── hero telemetry: the swarm as ONE living system ──
+  // The "observed" strip (model/effort read from each subagent transcript, plus the re-pricing
+  // saving line) was REMOVED here on 2026-08-19 by owner call: with the A4 ledger showing Model per row it
+  // said the same thing twice. `obs` is still read above and still keeps the empty-state honest — a tab
+  // whose only evidence is on-disk transcripts must not claim "No agents running".
+  // ── AGENTS OVERVIEW hero — BARE title (owner call): no live pill, no sub-line, no progress bar. The four
+  //    stat boxes carry every count the retired sub-line used to spell out. ──
   const live = running.length > 0;
   const hero = document.createElement('div'); hero.className = 'agents-hero' + (live ? ' live' : '');
   hero.innerHTML = '<span class="hero-glyph">' + SWARM_SVG + '</span>';
-  const hm = document.createElement('div'); hm.className = 'hero-main';
-  const ht = document.createElement('div'); ht.className = 'hero-title'; ht.appendChild(document.createTextNode('Agent Swarm'));
-  if (live) { const pill = document.createElement('span'); pill.className = 'hero-live-pill'; pill.innerHTML = '<span class="ld"></span>' + running.length + ' live'; ht.appendChild(pill); }
-  const hs = document.createElement('div'); hs.className = 'hero-sub';
-  hs.textContent = all.length + (all.length === 1 ? ' agent' : ' agents') + ' · ' + doneAll.length + ' done' + (totalTools ? ' · ' + totalTools + ' tool calls' : '');
-  hm.appendChild(ht); hm.appendChild(hs); hero.appendChild(hm);
+  const ht = document.createElement('div'); ht.className = 'hero-title'; ht.textContent = 'Agents Overview';
+  hero.appendChild(ht);
   const stats = document.createElement('div'); stats.className = 'hero-stats';
-  const hstat = (cls, n, l) => { const s = document.createElement('div'); s.className = 'hstat ' + cls; s.innerHTML = '<div class="hstat-n">' + n + '</div><div class="hstat-l">' + l + '</div>'; stats.appendChild(s); };
-  hstat('run', running.length, 'running');
-  hstat('done', doneAll.length, 'done');
-  if (totalTok > 0) hstat('tok', fmtK(totalTok), 'tokens');
+  const hstat = (cls, n, l) => { const s = document.createElement('div'); s.className = 'hstat ' + cls; s.innerHTML = '<div class="hstat-n"></div><div class="hstat-l"></div>'; s.querySelector('.hstat-n').textContent = n; s.querySelector('.hstat-l').textContent = l; stats.appendChild(s); };
+  hstat('run', running.length, 'Running');
+  hstat('done', doneAll.length, 'Done');
+  hstat('tok', totalTok > 0 ? fmtK(totalTok) : '—', 'Tokens');
+  hstat('', String(totalTools), totalTools === 1 ? 'Tool call' : 'Tool calls');
   hero.appendChild(stats);
-  const prog = document.createElement('div'); prog.className = 'hero-prog';
-  const pf = document.createElement('div'); pf.className = 'hero-prog-fill'; pf.style.width = (all.length ? Math.round((doneAll.length / all.length) * 100) : 0) + '%'; prog.appendChild(pf); hero.appendChild(prog);
   el.appendChild(hero);
-  // ── groups: Running (the live action) then Done, each a responsive grid so parallelism is visible ──
-  const group = (title, list) => {
-    if (!list.length) return;
-    const g = document.createElement('div'); g.className = 'agents-group';
-    const hd = document.createElement('div'); hd.className = 'agents-group-hd'; hd.textContent = title; g.appendChild(hd);
-    const grid = document.createElement('div'); grid.className = 'agents-grid'; list.forEach((a) => grid.appendChild(agentTile(a, nowSec))); g.appendChild(grid);
-    el.appendChild(g);
-  };
-  group('Running · ' + running.length, running);
-  group('Done · ' + doneAll.length + (doneAll.length > done.length ? ' (showing ' + done.length + ')' : ''), done);
+  // ── filters: pure client-side over state already held. A bucket with nothing in it is disabled rather than
+  //    hidden, so the row of options never reflows as agents come and go. ──
+  const failedAll = all.filter((a) => a.status !== 'running' && a.ok === false);
+  const BUCKETS = [['all', 'All', all.length], ['running', 'Running', running.length], ['done', 'Done', doneAll.length], ['failed', 'Failed', failedAll.length]];
+  if (!BUCKETS.some((b) => b[0] === agentsFilter && b[2] > 0)) agentsFilter = 'all';   // the bucket you were in just emptied
+  const fbar = document.createElement('div'); fbar.className = 'ag-filters';
+  BUCKETS.forEach(([key, label, n]) => {
+    const b = document.createElement('button'); b.type = 'button';
+    b.className = agentsFilter === key ? 'on' : ''; b.disabled = n === 0 && key !== 'all';
+    b.appendChild(document.createTextNode(label));
+    if (n > 0) { const c = document.createElement('span'); c.className = 'n'; c.textContent = String(n); b.appendChild(c); }
+    b.addEventListener('click', () => { agentsFilter = key; _agentsSig = ''; renderAgents(); });
+    fbar.appendChild(b);
+  });
+  el.appendChild(fbar);
+  // ── the ledger. Running first, then most-recently-finished — the same order the two groups used to impose,
+  //    now carried by sort order instead of by section headings. ──
+  const visible = (agentsFilter === 'running' ? running
+    : agentsFilter === 'done' ? done
+      : agentsFilter === 'failed' ? failedAll.slice(0, 20)
+        : running.concat(done));
+  const sel = selectedAgent ? visible.find((a) => a.id === selectedAgent) : null;
+  if (selectedAgent && !sel) selectedAgent = null;                                   // filtered out of view → close the pane
+  const split = document.createElement('div'); split.className = 'ag-split' + (sel ? ' haspane' : '');
+  const left = document.createElement('div');
+  const cols = document.createElement('div'); cols.className = 'ag-cols ag-grid';
+  ['Agent', 'Model', 'Elapsed', 'Tokens', 'Status', 'Task'].forEach((c) => { const s = document.createElement('span'); s.textContent = c; cols.appendChild(s); });
+  left.appendChild(cols);
+  const list = document.createElement('div'); list.className = 'ag-list';
+  visible.forEach((a) => list.appendChild(agentRow(a, nowSec)));
+  left.appendChild(list);
+  if (doneAll.length > done.length && (agentsFilter === 'all' || agentsFilter === 'done')) {
+    const more = document.createElement('div'); more.className = 'ag-more';
+    more.textContent = 'showing the ' + done.length + ' most recent of ' + doneAll.length + ' finished';
+    left.appendChild(more);
+  }
+  split.appendChild(left);
+  if (sel) split.appendChild(agentPane(sel));
+  el.appendChild(split);
 }
 function setAgentsView(on) {
   agentsView = on;
@@ -1898,16 +1959,16 @@ function refreshChatPanel() {
 function refreshCollabSurfaces() {
   refreshChatPanel();
   if (chatPanelShown) { renderChatLog(); renderRoster(); }   // context changed → repaint chat + roster for the new tab
-  renderLiveBar(); repaintVoiceForActive(); updateSessionCtrlBtn();
+  renderLiveState(); repaintVoiceForActive(); updateSessionCtrlBtn();
 }
 // presence roster in the chat header: you + each viewer with a green(here)/amber(AFK)/red(closed-tab) light
 // Your collab display name (settings) — what teammates see when you're in a synced session. Falls back to the
-// web-share name then a generic label. Used for the live bar, your roster chip, advertising, and joining.
+// web-share name then a generic label. Used for the chat header, your roster chip, advertising, and joining.
 function collabName() { return (loadPrefs().collabName || '').trim(); }
 function youName() {
   const t = AT();
   if (t && t.kind === 'live') return t.liveYou || collabName() || 'You';   // on a joined session you appear by the name the host registered (disambiguated if it collided), falling back to your collab name
-  return collabLive ? (collabName() || 'You') : (hostDisplayName || collabName() || 'You');
+  return advertisedHostName() || 'You';   // hosting: the name your guests are actually shown, never a local variant
 }
 // The "who's here" members for the ACTIVE context: your guests (host-share), or — on a joined tab — the host plus
 // every other participant from that session's roster (you're rendered separately as the "you" chip).
@@ -1925,16 +1986,25 @@ function activeRosterMembers() {
 // I'm the HOST of a live session (so I may terminate it / kick guests) when I'm NOT viewing someone else's joined
 // tab AND I'm sharing one of my own sessions (or a manual web link). A guest must never see these controls.
 function amHostingLive() { const t = AT(); return !(t && t.kind === 'live') && (!!sharedSessionId || webShare); }
-// C-5.9 roster redesign — the host is ALWAYS labeled as host: "HOST (name)" once a name is set, plain "HOST"
+// C-5.9 roster redesign — the host is ALWAYS labeled as host: "Host (name)" once a name is set, plain "Host"
 // otherwise. ONE function, used by the roster (renderRoster, below) AND every chat "who" line, so the same
-// person never reads as the bare name in one place and "HOST" in the other (that mismatch was the owners'
-// note). Always feed it the SAME name value that's actually advertised over the wire (hostDisplayName here,
-// t.hostName / p.name for a guest) rather than collabName() directly — collabName() can be empty while the
-// advertised name already fell back to the 'Host' placeholder (ensureTunnel's `nm`), and feeding the two
-// different sources would make the host's own view say plain "HOST" while every guest sees "HOST (Host)":
-// exactly the cross-side mismatch this rule exists to kill. share/guest.js carries an identical copy of this
-// function for the browser guest page — it has no shared module with the renderer to import this from.
-function HOST(name) { const n = String(name || '').trim(); return n ? `HOST (${n})` : 'HOST'; }
+// person never reads as the bare name in one place and "Host" in the other (that mismatch was the owners'
+// note). share/guest.js carries an identical copy of this function for the browser guest page — it has no
+// shared module with the renderer to import this from.
+// 2026-08-15: the owners chose sentence case over the original all-caps HOST — the redesign's chat is a quiet
+// mono column and a shouted label was the loudest thing in it. The RULE is unchanged; only the casing is.
+function HOST(name) { const n = String(name || '').trim(); return n ? `Host (${n})` : 'Host'; }
+// The host's name AS ADVERTISED OVER THE WIRE — the single source every host label must read from, and the
+// fix for "the top says Host (crazy) but the chat says Host (Host)".
+// What went wrong: hostDisplayName was declared as the literal string 'Host' and only ever reassigned inside
+// doStartSharing(). A COLLAB share never runs that path, so it kept the placeholder — while ensureTunnel
+// advertised `collabName() || …`, i.e. the real username. The roster read one, sendChat read the other, and a
+// placeholder that looks exactly like a real name rendered as "Host (Host)".
+// The fix is not to pick a winner but to delete the ambiguity: this returns the same expression ensureTunnel
+// puts on the wire, and returns EMPTY rather than a placeholder when there is genuinely no name — so HOST()
+// falls through to plain "Host", which is what C-5.9 asks for in that case. No caller may read hostDisplayName
+// directly for a label again.
+function advertisedHostName() { return collabName() || hostDisplayName || ''; }
 // The single session-control button in the chat head: the HOST sees "End Session" (terminate for everyone); a
 // JOINER (viewing a peer's live tab) sees "Leave Session" (disconnect + fall back to their own view). Mutually
 // exclusive — neither ever sees the other's button.
@@ -1947,7 +2017,7 @@ function updateSessionCtrlBtn() {
 }
 // Is my outgoing mirror frozen right now? Never guessed locally — assigned only from main's share:paused push
 // (claudible.onSharePaused below), because the pause is automatic: it flips when the host tabs into a workspace
-// that isn't shareable, and back when they return. The live bar reads this to say "Paused" instead of "Live".
+// that isn't shareable, and back when they return. The chat header reads this to say "Paused" instead of "Live Session".
 let sharePaused = false;
 // The cockpit skin paints .rdot as the draft's 15px avatar disc, so the disc carries the person's initial.
 // The letter is a CHILD of the same dot rather than a second element beside it: the dot already carries the
@@ -1967,7 +2037,7 @@ function renderRoster(roster) {
   const you = document.createElement('span'); you.className = 'rmember you';
   you.dataset.name = youName();                                       // voice-state projection matches pills by this (textContent also holds the ✕ kick glyph)
   const yd = document.createElement('span'); yd.className = 'rdot ok'; yd.appendChild(rosterAvatar(youName())); you.appendChild(yd);
-  you.appendChild(document.createTextNode(hosting ? HOST(youName()) : youName()));   // you're the host → say so, same rule as the guest pill below
+  you.appendChild(document.createTextNode(hosting ? HOST(advertisedHostName()) : youName()));   // you're the host → say so, same rule as the guest pill below. advertisedHostName() NOT youName(): youName()'s last resort is the literal 'You', which would render "Host (You)" instead of the plain "Host" C-5.9 asks for when no name is set
   el.appendChild(you);
   activeRosterMembers().forEach((g) => {
     const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
@@ -2043,72 +2113,81 @@ if (claudible.onShareForceEnd) claudible.onShareForceEnd((p) => endLiveNow((p &&
   ? 'That tab was live-shared — the live session ended with it'
   : 'That project was deleted — the live session ended with it'));
 // C-5.2: the loud "Co-drive is on" warning used to vanish the moment sharing actually started — it only ever
-// showed in the pre-share dialog. This paints the SAME truth into the live bar for as long as a co-drive share
+// showed in the pre-share dialog. This paints the SAME truth into the chat header for as long as a co-drive share
 // is genuinely running: lastShareReadOnly for a share we're hosting (the exact source renderShareWarn reads
 // when locked — B14's point stands here too, the #share-ro checkbox can lie about what's actually being served),
 // or the joined tab's liveReadOnly (set from the host's onLiveHello) for a session we joined. Never the checkbox.
 function paintCoDriveBadge(show) {
   const b = $('codrive-badge'); if (b) b.style.display = show ? '' : 'none';
+  const f = $('liveflag'); if (f) f.classList.toggle('codrive', !!show);   // the whole flag escalates with the chip: "being watched" and "can type on your machine as you" must not look alike from across the room
 }
-// The cockpit LIVE bar: visible whenever this session is live (synced collab) — shows you + everyone who's joined.
+// The live STATE, painted onto the chat header (owners, 2026-08-15 — this used to paint a bar above the
+// terminal). The bar's roster is gone because the chat panel's own roster strip already lists everyone, with
+// avatars and the host's kick ✕; restating it above the terminal told the user something they went out of
+// their way to make true. What the bar carried that nothing else does is kept here, all three of it:
+//   · the C-5.2 co-drive warning — same element, same badge, same decision rule, moved into the chat head;
+//   · the PAUSED alarm — a frozen mirror turns the dot amber and the label reads "Paused", because a host who
+//     is told "Live Session" while their guests are frozen out has been lied to;
+//   · the ELSEWHERE reminder — browsing another session dims the dot and makes the header itself the way back,
+//     which is what the bar's "open it" button was for. Hiding it outright is what once made "I clicked away"
+//     look like "it ended".
+// The panel only exists while sharing (`.body.sharing .chat`), so the header does not need to hide itself.
 let lastRoster = [];
-function renderLiveBar() {
-  const bar = $('livebar'); if (!bar) return;
+function renderLiveState() {
+  const title = $('chat-title'); if (!title) return;
   const t = AT(), liveTab = !!(t && t.kind === 'live');
-  // collabLive now means "a session of mine is shared", independent of what I'm looking at (that's what keeps the
-  // tunnel up while I work elsewhere). The BAR, though, describes the session ON SCREEN — so the full "who's here"
-  // bar paints only on the shared tab, else it would claim an unrelated conversation is live. (Before main's pin
-  // lands, match by session.)
+  // collabLive means "a session of mine is shared", independent of what I'm looking at (that's what keeps the
+  // tunnel up while I work elsewhere). The live STATE, though, describes the session ON SCREEN — so a plain
+  // "Live Session" paints only on the shared tab, else it would claim an unrelated conversation is live.
+  // (Before main's pin lands, match by session.)
   const onSharedTab = !!(t && t.kind !== 'live' && ((sharedTabIdR != null && t.tabId === sharedTabIdR) || (sharedSessionId && t.session === sharedSessionId)));
-  bar.classList.remove('elsewhere');
-  // sharePaused only ever reflects MY OWN outgoing share (never set on a joined/liveTab), so the live bar is
+  const elsewhere = !liveTab && collabLive && !onSharedTab && !!sharedSessionId;
+  // sharePaused only ever reflects MY OWN outgoing share (never set on a joined/liveTab), so this header is
   // where the host learns their mirror is frozen — same rule as the co-drive badge.
-  bar.classList.toggle('paused', !liveTab && sharePaused);
-  const liveTxt = $('live-txt'); if (liveTxt) liveTxt.textContent = (!liveTab && sharePaused) ? 'Paused' : 'Live';
-  // …but a host browsing another session must still SEE that their live session is running. Hiding the bar
-  // outright is what made "I clicked away" look like "it ended". Show a compact, unmistakable reminder that
-  // jumps back to it. (Only for a session share — a manual web link has no session tab to return to.)
-  if (!liveTab && collabLive && !onSharedTab && sharedSessionId) {
-    bar.style.display = 'flex'; bar.classList.add('elsewhere');
-    // Browsing elsewhere doesn't pause the share — a co-drive guest can still run commands on this machine
-    // right now, so the reminder must carry the same badge, not just the quiet "still running" note.
-    paintCoDriveBadge(tunnelUp && lastShareReadOnly === false);
-    const mem0 = $('live-members'); if (!mem0) return;
-    mem0.innerHTML = '';
+  const paused = !liveTab && sharePaused;
+  title.classList.toggle('paused', paused);
+  title.classList.toggle('elsewhere', elsewhere && !paused);
+  const liveTxt = $('live-txt'); if (liveTxt) liveTxt.textContent = paused ? 'Paused' : 'Live';
+  // the top-bar flag: visible for the whole time this machine is in a shared session, including while the host
+  // is off in another project — that is exactly when a chat-panel-only signal is invisible and someone can
+  // still be typing on this machine. paintCoDriveBadge adds the .codrive escalation on top.
+  const flag = $('liveflag');
+  if (flag) {
+    const anyLive = liveTab || collabLive;
+    flag.style.display = anyLive ? '' : 'none';
+    flag.classList.toggle('paused', paused);
+    const lf = flag.querySelector('.lf-txt'); if (lf) lf.textContent = paused ? 'Paused' : 'Live';
+    flag.title = paused ? 'Your guests are frozen out — the mirror paused because this workspace is not shared.'
+      : (liveTab ? 'You are in a live session hosted by someone else.' : 'Your session is live — others can see it.');
+  }
+  if (elsewhere && !paused) {
     const n = activeRosterMembers().filter((g) => g.state !== 'gone').length;
-    const jump = document.createElement('button');
-    jump.className = 'live-jump';
-    jump.textContent = 'in “' + (sharedSessionLabel() || 'another session') + '”' + (n ? ' · ' + n + ' watching' : '') + ' — open it';
-    jump.title = 'Your live session is still running. Click to go back to it.';
-    jump.addEventListener('click', () => { const r = sharedTabIdR != null ? tabs.get(sharedTabIdR) : null; if (r) setActiveTab(r.tabId); });
-    mem0.appendChild(jump);
+    title.title = 'Your live session is still running in “' + (sharedSessionLabel() || 'another session') + '”'
+      + (n ? ' · ' + n + ' watching' : '') + '. Click to go back to it.';
+    // Browsing elsewhere doesn't pause the share — a co-drive guest can still run commands on this machine
+    // right now, so the reminder must carry the same badge, not just a quiet "still running" note.
+    paintCoDriveBadge(tunnelUp && lastShareReadOnly === false);
     return;
   }
-  if (!(collabLive && onSharedTab) && !liveTab) { paintCoDriveBadge(false); bar.style.display = 'none'; return; }   // show while viewing the session I host, OR a joined one
-  bar.style.display = 'flex';
+  title.title = paused ? 'Your guests are frozen out — the mirror paused because this workspace is not shared.' : '';
+  if (!(collabLive && onSharedTab) && !liveTab) { paintCoDriveBadge(false); return; }   // live while viewing the session I host, OR a joined one
   // liveTab (guest): the host's onLiveHello stamped the REAL served mode onto the tab (rec.liveReadOnly) —
   // read that, not any local assumption. Hosting (onSharedTab): lastShareReadOnly is the running share's
   // actual mode, gated on tunnelUp so a dropped tunnel doesn't keep flashing a warning for a share that isn't
   // actually being served to anyone right now.
   paintCoDriveBadge(liveTab ? (t.liveReadOnly === false && t.liveState !== 'paused' && !LIVE_DEAD.has(t.liveState || '')) : (tunnelUp && lastShareReadOnly === false));
-  const mem = $('live-members'); if (!mem) return;
-  mem.innerHTML = '';
-  const you = document.createElement('span'); you.className = 'live-member you';
-  const yd = document.createElement('span'); yd.className = 'md ok'; you.appendChild(yd);
-  you.appendChild(document.createTextNode(youName())); mem.appendChild(you);
-  activeRosterMembers().forEach((g) => {            // just you until someone joins — no "waiting…" filler
-    const cls = g.state === 'active' ? 'ok' : (g.state === 'idle' ? 'idle' : 'gone');
-    const m = document.createElement('span'); m.className = 'live-member' + (g.state === 'gone' ? ' gone' : '');
-    m.title = g.host ? 'host' : (g.state === 'active' ? 'here' : (g.state === 'idle' ? 'away / AFK' : 'left'));
-    const d = document.createElement('span'); d.className = 'md ' + cls;
-    m.appendChild(d); m.appendChild(document.createTextNode(g.name)); mem.appendChild(m);
-  });
 }
-claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveBar(); });
+// the header IS the way back when the host is browsing elsewhere — the .elsewhere class is the only state in
+// which it is clickable, and renderLiveState is the only thing that sets it.
+{ const _ct = $('chat-title'); if (_ct) _ct.addEventListener('click', () => {
+  if (!_ct.classList.contains('elsewhere')) return;
+  const r = sharedTabIdR != null ? tabs.get(sharedTabIdR) : null; if (r) setActiveTab(r.tabId);
+}); }
+claudible.onShareRoster((roster) => { lastRoster = roster || []; renderRoster(roster); renderLiveState(); });
 // Fires on EVERY pause transition — the host tabbing into a private workspace and back (main's syncShare and
-// respawnPty derive it). This is the ONLY place sharePaused is assigned, so the live bar can never drift from
+// respawnPty derive it). This is the ONLY place sharePaused is assigned, so the header can never drift from
 // what the share server is actually doing.
-if (claudible.onSharePaused) claudible.onSharePaused((p) => { sharePaused = !!(p && p.paused); renderLiveBar(); });
+if (claudible.onSharePaused) claudible.onSharePaused((p) => { sharePaused = !!(p && p.paused); renderLiveState(); });
 claudible.onCoauthorSkipped((p) => {   // C-10.6: a visible note instead of a silently fabricated Co-authored-by email
   const names = (p && Array.isArray(p.names)) ? p.names.filter(Boolean) : [];
   if (names.length) toast(`No known email/GitHub login for ${names.join(', ')} — left off commit co-authors`);
@@ -2128,7 +2207,7 @@ claudible.onShareTunnelDown(() => {   // the public cloudflared tunnel dropped m
   tunnelUp = false; lastShareUrl = ''; lastShareRemote = false; lastShareNote = 'the tunnel dropped';
   toast('Live link dropped — the tunnel went down. Reconnecting in the background…');   // main's armTunnelRetry keeps dialing; no manual toggle needed anymore
   syncShareRoLock();   // B14c: tunnelUp just went false — without this the view-only switch stays dead forever
-  renderLiveBar(); refreshChatPanel(); renderTunnelWarn();
+  renderLiveState(); refreshChatPanel(); renderTunnelWarn();
 });
 if (claudible.onShareTunnelUp) claudible.onShareTunnelUp((p) => {   // a fresh share, or the background self-heal recovered the tunnel
   const wasDown = lastShareRemote === false;   // only a genuine recovery toasts — an ordinary fresh share already reported remote:true via shareStart's return
@@ -2356,7 +2435,9 @@ function showLink(url) {
   shareLink.value = url; shareLink.style.display = 'block'; shareLink.style.opacity = '1';
   shareLink.title = 'Click to copy';
 }
-let hostDisplayName = 'Host';
+// EMPTY, never the literal 'Host' — a placeholder that reads exactly like a real name is what produced
+// "Host (Host)" in the chat for a year. Read it through advertisedHostName(), never directly, for any label.
+let hostDisplayName = '';
 shareBtn.addEventListener('click', async () => {
   if (webShare) {                                   // stop the WEB link only — collab keeps the tunnel if it still needs it
     shareBtn.disabled = true;
@@ -2407,7 +2488,7 @@ function renderShareWarn() {
 { const ro = $('share-ro'); if (ro) ro.addEventListener('change', renderShareWarn); }
 async function doStartSharing() {
   const typed = ($('host-name-in').value || '').trim().slice(0, 40);
-  hostDisplayName = typed || collabName() || 'Host';
+  hostDisplayName = typed || collabName() || '';   // '' not 'Host' — see the declaration; labels resolve via advertisedHostName()
   if (typed) savePrefs({ collabName: typed });   // one identity: editing the share name updates your Claudible username
   $('namemodal').classList.remove('show');
   // B13 — REFUSE rather than publish the wrong session. There is ONE share server and ONE pin (main's
@@ -2521,7 +2602,10 @@ function paintAboutUpdateLine(mine, latest, newer) {
   el.textContent = mine ? ("you're on " + mine + ' · ' + (newer ? latest + ' is available' : 'latest is ' + (latest || mine))) : '';
 }
 // The version line's ↗ — straight to the repo, for when someone wants to check what a build actually contains.
-// openExternal hands it to the real browser and refuses anything that is not an https://github.com/… URL.
+// openExternal hands it to the real browser. NOTE (corrected 2026-08-19): this comment used to claim the bridge
+// refuses anything that is not an https://github.com/… URL. It does not — main.js:3647 accepts any http(s) URL
+// and rejects every other protocol. The allowlisting that DOES exist is per-call-site and is enforced by
+// contract pins on the two gh device-flow handlers, which must open one fixed literal URL each.
 if ($('repo-link')) $('repo-link').addEventListener('click', () => { try { claudible.openExternal('https://github.com/synthetiks/claudible'); } catch (e) {} });
 async function refreshAboutRow() {
   paintAboutRow();
@@ -2538,11 +2622,20 @@ function openDrawer(open) {
 // they share the scrim treatment and a second drawer open behind the first would trap Escape on the wrong one.
 const stratDrawer = $('stratdrawer'), stratScrim = $('strat-scrim');
 function openStrat(open) {
-  if (open) openDrawer(false);
+  if (open) { openDrawer(false); openGraphs(false); }
   stratDrawer.classList.toggle('open', open);
   stratScrim.classList.toggle('open', open);
   stratDrawer.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (open) { loadSkills(); loadPlugins(); }   // the inventory scans follow their sections — same call, new opener
+  if (!open) focusTermSoon(0);
+}
+// GRAPHS drawer: same shell as the other two; opening one closes the others so drawers never stack.
+const graphsDrawer = $('graphsdrawer'), graphsScrim = $('graphs-scrim');
+function openGraphs(open) {
+  if (open) { openDrawer(false); openStrat(false); }
+  graphsDrawer.classList.toggle('open', open);
+  graphsScrim.classList.toggle('open', open);
+  graphsDrawer.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (!open) focusTermSoon(0);
 }
 // ---------- Skills + Plugins managers (drawer sections; opened from the top-bar icons too) ----------
@@ -2740,6 +2833,131 @@ wireCockpitPop('perm-chip');
 wireCockpitPop('eff-chip');
 wireCockpitPop('model-chip');
 wireCockpitPop('voice-chip');
+// ---------- live-apply for the cockpit selectors ----------
+// model / effort / permission-mode all wrote the registry and rode a flag into the NEXT spawn, so moving a
+// control changed nothing about the session in front of you. For model and effort that is one command away:
+// Claude Code accepts `/model <id>` and `/effort <level>` as SINGLE LINES — no picker, no menu to drive — and
+// this app has been relying on that since ultracode shipped (armUltracode in main.js types `/effort ultracode`
+// into a settled pty). So the selectors now send the same command to the running session AND keep writing the
+// registry: this session changes now, the next one inherits it.
+//
+// PERMISSION MODE IS NOT IN THIS CLUB and must never be added to it. Bypass rides
+// --dangerously-skip-permissions at spawn (runners/win.js) — a launch flag with no mid-session equivalent;
+// `/permissions` edits RULES rather than the mode; Shift+Tab cycles only manual/acceptEdits/plan. There is
+// nothing to send, so the perm selector below stays registry-only on purpose, not by oversight.
+//
+// Whether a live send is possible RIGHT NOW. The toast reads this too, so it can promise what actually
+// happened instead of guessing — keep the guards here and nowhere else.
+function canApplyToLiveSession() {
+  const t = AT();
+  if (!t) return false;              // the drawer can be open with no tab focused
+  if (t.parked) return false;        // C-4.4 parked tab: no pty exists yet (pty:input would no-op anyway)
+  if (!t.started) return false;      // the tab exists but claude has not spawned into it
+  // THE GUARD THAT MATTERS. sendInput routes a live tab's bytes to claudible.liveInput — the HOST's pty on the
+  // HOST's machine. A guest dragging their own effort slider must never type into somebody else's session: a
+  // guest's registry is their own, their view is a mirror. A settings control does not reach across the wire.
+  if (t.kind === 'live') return false;
+  return true;
+}
+// send() leads with ESC on purpose (see its own note): it closes any open TUI menu AND guarantees the command
+// lands on a clean input line. The cost is real and is the accepted trade — a half-typed prompt is cleared
+// rather than concatenated into `hello there/effort high`, which would be worse than losing the draft.
+function applyToLiveSession(cmd) {
+  if (!cmd || !canApplyToLiveSession()) return false;
+  send(cmd);
+  return true;
+}
+// ---------- the strategy trigger: the square terminal tab nobody has to learn a command for ----------
+// Third button in the commands/git corner row. Types `/pb ` (ESC-led, NO Enter) into the pty and hands the
+// keyboard back, so the user finishes the sentence in their own words; the ACTIVE strategy runs the job.
+// Same rail and same guards as the effort/model sends; mousedown+preventDefault so the first press registers
+// while the terminal holds focus (the same focus-war fix as send()).
+(() => {
+  const pb = $('pb-btn'); if (!pb) return;
+  const arm = () => {
+    if (stratNow === 'off') { toast('No strategy is active — pick one in Skill & Strategy (top bar, the open book)'); return; }
+    if (!canApplyToLiveSession()) { toast('The team runs in your own live session — this tab is joined, parked, or not started'); return; }
+    sendInput('\x1b');                                  // clear a half-typed line / close any open menu (accepted trade)
+    setTimeout(() => sendInput('/pb '), 120);           // no \r — the user types the job and presses Enter themselves
+    focusTermSoon(150);
+    toast('Describe the job and press Enter — the team takes it from there');
+  };
+  pb.addEventListener('mousedown', (e) => { e.preventDefault(); arm(); });
+  pb.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); arm(); } });
+})();
+// The effort slider clicks its pill on EVERY intermediate value while dragging, so low→max would fire four
+// commands at the session. Coalesce the keystrokes on a trailing timer. The registry write stays immediate and
+// undebounced — it is idempotent, and the chip has to repaint as you drag.
+let liveApplyTimer = null, liveApplyPending = '';
+function applyToLiveSessionSoon(cmd) {
+  liveApplyPending = cmd || '';
+  clearTimeout(liveApplyTimer);
+  liveApplyTimer = setTimeout(() => { applyToLiveSession(liveApplyPending); liveApplyPending = ''; }, 400);
+}
+// ---------- permission mode: driving Claude Code's OWN mode cycle ----------
+// Effort and model reach the running session with a COMMAND. Permission mode has none — `/permissions` edits
+// allow/deny RULES, not the mode, and the CLI's full bindable command list has `chat:cycleMode` and no setter.
+// The only door is Shift+Tab, a CYCLE. So this control presses it, and looks at the screen after every press.
+//
+// Looking is what makes it safe rather than a guess. Claude Code runs on the ALTERNATE SCREEN (see the long
+// note where the scroll gutter used to live): a bare rows x cols grid, always fully painted, with the mode
+// indicator anchored to the bottom rows — and xterm hands us that grid. So we never count presses blind and
+// never assume a cycle order: press once, read, stop when it matches. The order is Claude Code's business and
+// may change between versions; nothing here depends on it.
+//
+// Bypass additionally needs consent AT LAUNCH (--allow-dangerously-skip-permissions, see runners/win.js): a
+// session started without it downgrades bypass to default. Foreign sessions never get that flag.
+const PERM_INDICATORS = [
+  ['bypass permissions', 'bypass'],
+  ['accept edits', 'acceptEdits'],
+  ["don't ask", 'dontAsk'],
+  ['plan mode', 'plan'],
+];
+const PERM_CYCLE_MAX = 8;          // one full ring (six modes) plus slack — a cap, never a target
+// The mode Claude Code is ACTUALLY in, read off its own status chrome. Returns null when the screen could not
+// be read at all — the caller must treat null as "do not press", never as "probably default".
+function readPermModeFromScreen(t) {
+  try {
+    const b = t && t.term && t.term.buffer && t.term.buffer.active;
+    if (!b) return null;
+    const rows = t.term.rows || 0;
+    if (!rows) return null;
+    let tail = '';
+    // The indicator lives in the last few rows with the input box and the status line. Six rows is the same
+    // neighbourhood sync() reserves space for (see the "leave ~1 row" note) — wide enough to survive a
+    // one-row shift, narrow enough that ordinary conversation text cannot wander into it.
+    for (let i = Math.max(0, rows - 6); i < rows; i++) {
+      const line = b.getLine(b.baseY + i);
+      if (line) tail += ' ' + line.translateToString(true);
+    }
+    tail = tail.toLowerCase();
+    for (const [needle, mode] of PERM_INDICATORS) if (tail.includes(needle)) return mode;
+    return 'default';              // rows READ fine and carried no indicator — that is Manual, not a failure
+  } catch (e) { return null; }
+}
+// Press Shift+Tab until the screen says `target`, or give up honestly. Returns the mode we ended on, or null
+// if nothing was sent. Never throws — every caller toasts from the return value.
+async function cyclePermTo(target) {
+  // Same guards as the effort/model sends, for the same reasons — including the one that matters: a joined
+  // live tab's bytes go to the HOST's pty, and a guest must never drive somebody else's permission mode.
+  if (!canApplyToLiveSession()) return null;
+  const t = AT();
+  // BUSY IS A HARD GATE, and it is specific to this control. Reaching one mode can pass THROUGH others on the
+  // way round the ring — bypass among them. Mid-turn that transit is a window where a tool call could run
+  // under a mode the user never chose. Idle, there is no call in flight and the transit is inert.
+  if (!t || t.busy) return null;
+  let now = readPermModeFromScreen(t);
+  if (now === null) return null;                       // unreadable → fail closed, never press blind
+  if (now === target) return now;                      // already there: no keystroke, no toast lie
+  for (let i = 0; i < PERM_CYCLE_MAX; i++) {
+    sendInput('\x1b[Z');                               // Shift+Tab (CSI Z), the same byte the keyboard sends
+    await new Promise((res) => setTimeout(res, 180));  // let the TUI repaint before believing the screen
+    now = readPermModeFromScreen(t);
+    if (now === null) return null;
+    if (now === target) return now;
+  }
+  return now;                                          // cap hit — we still KNOW where we are, so say so
+}
 // Default MODEL for new sessions. Same shape as the effort selector below and the same rail underneath:
 // registry key → spawnClaude option → a --model flag. '' means pass nothing and let Claude Code decide, which
 // is exactly what every session did before this existed.
@@ -2756,10 +2974,18 @@ wireCockpitPop('voice-chip');
   paint(cur || '');
   pills().forEach((b) => b.addEventListener('click', async () => {
     const v = b.dataset.model || '';
+    const prev = cur;                                  // what the session is already on — see the no-op note below
     let r = null; try { r = await claudible.modelSet(v); } catch {}
-    const set = (r && typeof r.model === 'string') ? r.model : v; paint(set);
+    const set = (r && typeof r.model === 'string') ? r.model : v; paint(set); cur = set;
+    // '' (Auto) has NO single-line form — bare `/model` opens the picker, which this app refuses to drive.
+    // Choosing Auto mid-session therefore degrades honestly to next-session-only, and says so.
+    // Re-clicking the pill that is ALREADY on sends nothing: the send leads with ESC, and clearing someone's
+    // half-typed prompt to re-apply a setting it already has is pure loss.
+    const live = !!set && set !== prev && canApplyToLiveSession();
+    if (live) applyToLiveSessionSoon('/model ' + set);
     // A failed persist must not toast like a success — it holds for this run and resets on relaunch.
     if (r && r.ok === false) toast('Model: ' + (LBL[set] || set) + ' — set for THIS run, but SAVING FAILED');
+    else if (live) toast('Model: ' + (LBL[set] || set) + ' — applied to this session and saved as default');
     else toast(set ? ('Model: ' + (LBL[set] || set) + ' — applies to new sessions') : 'Model: auto — Claude Code chooses');
   }));
 })();
@@ -2772,7 +2998,7 @@ wireCockpitPop('voice-chip');
   const pills = () => rows.reduce((a, r) => a.concat([...r.querySelectorAll('.eff-pill')]), []);
   const chip = $('sb-eff');
   // The cockpit renders these five as a Faster→Smarter slider. It is a VIEW of the same buttons, not a second
-  // control: moving it clicks the level it lands on, so there is still exactly one path to the backend.
+  // control: RELEASING it clicks the level it settled on, so there is still exactly one path to the backend.
   const ORDER = ['medium', 'high', 'xhigh', 'max', 'ultracode'];
   const slider = $('eff-slider'), effNow = $('eff-now');
   const paint = (v) => {
@@ -2789,12 +3015,24 @@ wireCockpitPop('voice-chip');
     if (knob) knob.style.left = `calc(${pct}% - 8px)`;
   };
   if (slider) {
-    slider.addEventListener('input', () => {
-      const want = ORDER[Number(slider.value)] || 'high';
+    // Drag is PREVIEW, release is CHOICE (owner ruling, this session, on hardware: a drag from max to medium
+    // fired /effort at every notch it paused on — the debounce coalesces fast passes but not a human's
+    // hesitation, and nobody dragging max→medium means "briefly set xhigh on the way"). So `input` (every
+    // notch) only paints — knob, fill, label and pill highlight track the finger, nothing commits — and
+    // `change` (fires once on release) does the pill click that writes the registry, sends /effort, toasts.
+    // Keyboard arrows fire input+change PER STEP with no release to wait for; there the per-step clicks are
+    // exactly what the 400ms debounce in applyToLiveSessionSoon exists to coalesce, so that path stays sane.
+    const sliderLevel = () => ORDER[Number(slider.value)] || 'high';
+    slider.addEventListener('input', () => paint(sliderLevel()));
+    slider.addEventListener('change', () => {
+      const want = sliderLevel();
+      // Settled back on the level it started at: repaint and commit NOTHING — same no-op contract as
+      // re-clicking the pill that is already lit.
+      if (want === cur) { paint(cur); return; }
       const target = pills().find((b) => (b.dataset.eff || '') === want);
-      if (!target) return;
+      if (!target) { paint(cur); return; }
       target.click();
-      // Choosing from a LIST should dismiss the menu; dragging a slider should not — you are still adjusting.
+      // Choosing from a LIST should dismiss the menu; a slider release should not — you may adjust again.
       // The click above goes through the normal pill path, which closes the chip, so re-arm it here.
       const chipEl = $('eff-chip');
       if (chipEl) { chipEl.classList.add('open'); chipEl.setAttribute('aria-expanded', 'true'); }
@@ -2804,9 +3042,16 @@ wireCockpitPop('voice-chip');
   paint(cur || '');
   pills().forEach((b) => b.addEventListener('click', async () => {
     const v = b.dataset.eff || '';
+    const prev = cur;                                  // see the no-op note in the model selector above
     let r = null; try { r = await claudible.effortSet(v); } catch {}
-    const set = (r && r.ok) ? r.effort : v; paint(set);
-    toast(set ? ('Default effort: ' + set + ' — applies to new sessions') : 'Default effort cleared');
+    const set = (r && r.ok) ? r.effort : v; paint(set); cur = set;
+    // Every level on this row has a single-line form, ultracode included — that is exactly the command
+    // armUltracode already types post-settle. Clearing effort ('') does not, so it stays next-session-only.
+    const live = !!set && set !== prev && canApplyToLiveSession();
+    if (live) applyToLiveSessionSoon('/effort ' + set);
+    if (!set) toast('Default effort cleared');
+    else if (live) toast('Effort: ' + set + ' — applied to this session and saved as default');
+    else toast('Default effort: ' + set + ' — applies to new sessions');
   }));
 })();
 // default permission-mode selector — ships as 'default' (Claude asks); 'accept edits' / 'bypass' are opt-in + remembered
@@ -2841,28 +3086,389 @@ wireCockpitPop('voice-chip');
     let r = null; try { r = await claudible.permissionModeSet(v); } catch {}
     const set = (r && r.permissionMode) ? r.permissionMode : v; paint(set); paintChip(set);
     // A failed persist must NOT toast like a success — the mode holds for THIS run but resets on relaunch.
-    if (r && r.ok === false) toast('Permission: ' + (LBL[set] || set) + ' — set for THIS run, but SAVING FAILED (' + (r.error || 'disk error') + ')');
+    if (r && r.ok === false) { toast('Permission: ' + (LBL[set] || set) + ' — set for THIS run, but SAVING FAILED (' + (r.error || 'disk error') + ')'); return; }
+    // Then drive the RUNNING session's mode through Claude Code's own cycle. Every way this can decline —
+    // parked/joined/not-started tab, a turn in flight, an unreadable screen — returns null and lands on the
+    // unchanged next-session toast, which is exactly what the control did before this existed.
+    const landed = await cyclePermTo(set);
+    if (landed === set) toast('Permission: ' + (LBL[set] || set) + ' — applied to this session and saved as default');
+    else if (landed) toast('Permission: saved as default, but this session is on ' + (LBL[landed] || landed) + ' — press Shift+Tab to change it');
     else toast('Permission: ' + (LBL[set] || set) + ' — applies to new sessions');
   }));
 })();
 // model-strategy selector — "plan big, execute small" (Anthropic cookbook pattern): OFF by default — only an explicit
 // 'planBigExecSmall' enables it. When on, Sonnet 5 is only the DEFAULT for subagents that request no model — an
 // explicitly requested model always wins (advisory nudge, never an env override).
+// ---------- Strategy Deck: the drawer picks, the panel edits ----------
+// The drawer holds compact radio rows (340px leaves no room for editors); creating/editing opens
+// #strat-modal, one more member of the app's centered-dialog family. Only the ACTIVE strategy's team files
+// exist on disk — picking a row swaps them, with the truth-telling toast. The built-in row can only be
+// duplicated: the doctrine card keeps meaning something.
 (async () => {
-  const row = $('strategy-row'); if (!row) return;
-  // Every fallback here is 'off' — the main-process default is OFF, so an unreadable/failed IPC must
-  // NOT paint the opt-in pill as active or the UI would claim a strategy the session never got.
-  const paint = (v) => row.querySelectorAll('.eff-pill').forEach((b) => b.classList.toggle('on', (b.dataset.strategy || 'off') === (v || 'off')));
-  let cur = 'off'; try { cur = await claudible.modelStrategyGet(); } catch {}
-  paint(cur || 'off');
-  row.querySelectorAll('.eff-pill').forEach((b) => b.addEventListener('click', async () => {
-    const v = b.dataset.strategy || 'off';
-    let r = null; try { r = await claudible.modelStrategySet(v); } catch {}
-    const set = (r && r.modelStrategy) ? r.modelStrategy : v; paint(set);
-    const lbl = set === 'off' ? 'off — subagents inherit your main model' : 'plan big, execute small — subagents default to Sonnet 5';
-    if (r && r.ok === false) toast('Model strategy: ' + lbl + ' — set for THIS run, but SAVING FAILED (' + (r.error || 'disk error') + ')');
-    else toast('Model strategy: ' + lbl + ' — applies to new sessions');
-  }));
+  const listEl = $('strategy-list'); if (!listEl) return;
+  const SEAT_DEFS = [
+    ['coordinator', 'plans & delegates', 'claude-fable-5', 'high'],
+    ['research', 'judgment legwork', 'claude-sonnet-5', 'medium'],
+    ['mechanical', 'builds · tests · rote work', 'claude-sonnet-5', 'low'],
+    ['verifier', 'checks each claim', 'claude-sonnet-5', 'high'],
+    ['synthesis', 'fresh-context final answer', 'claude-fable-5', 'xhigh'],
+  ];
+  const S_MODELS = [['claude-fable-5', 'Fable 5'], ['claude-opus-5', 'Opus 5'], ['claude-sonnet-5', 'Sonnet 5'], ['claude-haiku-4-5', 'Haiku 4.5']];
+  const NICE = Object.fromEntries(S_MODELS);
+  const S_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const PB_SEATS = Object.fromEntries(SEAT_DEFS.map(([k, , m, ef]) => [k, { model: m, effort: ef }]));
+  let deck = { active: 'off', list: [] };
+  const activeName = () => deck.active === 'pb' ? 'Plan big, execute small' : ((deck.list.find((s) => s.id === deck.active) || {}).name || '');
+  const short = (m) => (NICE[m] || m).replace(/^Claude /, '').split(' ')[0].toLowerCase();
+  const summary = (entry) => {
+    if (entry && Array.isArray(entry.nodes)) {   // node-built graph: coordinator → distinct worker models · N nodes
+      const co = (entry.coordinator && entry.coordinator.model) || 'claude-fable-5';
+      const coEff = (entry.coordinator && entry.coordinator.effort) || 'high';
+      const grunts = [...new Set(entry.nodes.map((n) => short(n.model || '')))].filter(Boolean).slice(0, 3).join('+') || '—';
+      return short(co) + '·' + coEff + ' → ' + grunts + ' · ' + (entry.nodes.length + 1) + ' nodes';
+    }
+    const s = (entry && entry.seats) || PB_SEATS; const c = s.coordinator || PB_SEATS.coordinator;
+    const grunts = [...new Set(['research', 'mechanical'].map((k) => short((s[k] || PB_SEATS[k]).model)))].join('+');
+    return short(c.model) + '·' + (c.effort || 'high') + ' → ' + grunts + ' · 5 seats';
+  };
+  const paintPb = () => {
+    stratNow = deck.active === 'off' ? 'off' : 'on';   // module mirror (first-run hint + trigger)
+    const pb = $('pb-btn'); if (!pb) return;
+    pb.classList.toggle('stratoff', deck.active === 'off');
+    pb.title = deck.active === 'off' ? 'Graph tool is turned off' : 'Run a job with "' + activeName() + '" — click, describe the job, press Enter';
+  };
+  // The last graph that was ON, so toggling "Off" back on has something to restore. Persisted, because the
+  // obvious expectation after a restart is that flipping the switch brings back the graph you were using.
+  let lastOn = (loadPrefs().lastGraph || 'pb');
+  const rowEls = new Map();   // id -> row element, so a toggle repaints IN PLACE (see paintRows)
+  // Paint every row from deck.active WITHOUT rebuilding the DOM. This is what makes the switch feel instant:
+  // a rebuilt node starts life in its final state, so the .sw knob never animates and the control reads as a
+  // jump rather than a slide. Same reason the click flips the switch BEFORE awaiting the disk write.
+  const paintRows = () => {
+    rowEls.forEach((el, id) => {
+      const on = deck.active === id;
+      el.classList.toggle('on', on);
+      const cb = el.querySelector('input[type=checkbox]'); if (cb) cb.checked = on;
+    });
+    paintPb();
+  };
+  const render = () => {
+    listEl.innerHTML = '';
+    rowEls.clear();
+    // Owner-set interaction: the ROW toggles — every row is a switch, including Off (2026-08-19). The PENCIL is
+    // still the only door into the builder. Rows carry the SKILLS & PLUGINS classes themselves (.ext-row /
+    // .ext-main / .ext-name / .ext-desc) rather than a copy of their declarations, so the three drawers cannot
+    // drift apart again — that copy is exactly what made these look almost-but-not-quite the same.
+    const row = (id, name, sub, editGlyph, editTitle, custom) => {
+      const r = document.createElement('div');
+      r.className = 'ext-row strat-row' + (deck.active === id ? ' on' : '') + (id === 'off' ? ' offrow' : '') + (custom ? ' custom' : '');
+      const tg = document.createElement('span'); tg.className = 'toggle strat-tog';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = deck.active === id; cb.tabIndex = -1; cb.setAttribute('aria-hidden', 'true');
+      const sw = document.createElement('span'); sw.className = 'sw';
+      tg.appendChild(cb); tg.appendChild(sw);
+      const main = document.createElement('div'); main.className = 'ext-main';
+      const nm = document.createElement('div'); nm.className = 'ext-name'; nm.textContent = name; main.appendChild(nm);
+      const sep = document.createElement('span'); sep.className = 'strat-sep'; main.appendChild(sep);
+      const sb = document.createElement('div'); sb.className = 'ext-desc'; sb.textContent = sub; main.appendChild(sb);
+      r.appendChild(tg); r.appendChild(main);
+      if (editGlyph) {
+        const eb = document.createElement('button'); eb.className = 'strat-edit'; eb.title = editTitle; eb.textContent = editGlyph;
+        eb.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (id === 'pb') openEditor(null, PB_SEATS, '');
+          else openEditor(deck.list.find((s) => s.id === id));
+        });
+        r.appendChild(eb);
+      }
+      r.addEventListener('click', () => toggleRow(id));
+      listEl.appendChild(r); rowEls.set(id, r);
+    };
+    row('off', 'Off', 'Graphs are off by default and the trigger is disabled');
+    row('pb', 'Plan big, execute small', summary({ seats: PB_SEATS }), '⧉', 'Built-in — opens as a copy you can save');
+    deck.list.forEach((s) => row(s.id, s.name, summary(s), '✎', 'Edit in the builder', true));
+    paintPb();
+  };
+  // EVERY row is a switch (owner call 2026-08-19) — a radio group that could only ever be turned ON left the
+  // owner unable to switch graphs off by the control that looks like an off switch. Three cases:
+  //   a row that is not active  -> activate it
+  //   the ACTIVE graph          -> back to off (and remembered, so Off can restore it)
+  //   Off, while already off    -> back on, to whatever ran last (falling back to the built-in)
+  const toggleRow = (id) => {
+    if (id === 'off' && deck.active === 'off') return activate(lastOn && lastOn !== 'off' ? lastOn : 'pb');
+    if (id === deck.active) return activate('off');
+    return activate(id);
+  };
+  const activate = async (id) => {
+    if (id === deck.active) return;
+    const prev = deck.active;
+    if (prev && prev !== 'off') { lastOn = prev; try { savePrefs({ lastGraph: prev }); } catch (e) {} }
+    // Paint FIRST, await after: the switch must move under the finger, not after a file write returns.
+    deck.active = id; paintRows();
+    let r = null; try { r = await claudible.strategyActivate(id); } catch {}
+    if (r) deck.active = r.active;
+    paintRows();
+    if (!r || r.ok === false) { toast('Graph tool: SAVING FAILED — applies to this run only'); return; }
+    if (deck.active === 'off') toast(r.filesOk ? 'Graph tool is turned off — the trigger is disabled' : 'Graph tool is turned off — but removing the trigger FAILED');
+    else toast(r.filesOk ? '"' + (r.name || activeName()) + '" installed — the trigger runs it now; team changes apply to sessions started from here on' : 'Graph saved — but INSTALLING THE TEAM FAILED; sessions will run without it');
+  };
+  // ---- the GRAPH BUILDER (per the approved mock): library rail · four lanes · per-node dial popovers ----
+  const modal = $('strat-modal');
+  // client-side mirror of the compiler's LIB — type, lane, label, blurb, doctrine defaults. The compiler
+  // re-validates every value, so drift here can only reject loudly, never write a wrong file.
+  const G_LIB = [
+    ['web-researcher', 'work', 'Web researcher', 'finds facts online, every claim with its source', 'claude-sonnet-5', 'medium'],
+    ['codebase-scout', 'work', 'Codebase scout', 'maps where things live before changing them', 'claude-sonnet-5', 'medium'],
+    ['bug-hunter', 'work', 'Bug hunter', 'reads code looking for what’s wrong', 'claude-sonnet-5', 'medium'],
+    ['analyzer', 'work', 'Analyzer', 'weighs options into a recommendation', 'claude-sonnet-5', 'medium'],
+    ['writer', 'work', 'Writer', 'drafts prose from gathered material', 'claude-sonnet-5', 'medium'],
+    ['test-runner', 'work', 'Test runner', 'builds, tests, lint — reports verbatim', 'claude-sonnet-5', 'low'],
+    ['mechanical-editor', 'work', 'Mechanical editor', 'renames, conversions, repeated edits', 'claude-sonnet-5', 'low'],
+    ['data-extractor', 'work', 'Data extractor', 'pulls info into exactly the shape you ask', 'claude-sonnet-5', 'low'],
+    ['claim-verifier', 'check', 'Claim verifier', 'checks each claim against its sources', 'claude-sonnet-5', 'high'],
+    ['code-reviewer', 'check', 'Code reviewer', 'reads a change for correctness', 'claude-sonnet-5', 'high'],
+    ['skeptic', 'check', 'Skeptic', 'tries to knock the conclusion down', 'claude-sonnet-5', 'high'],
+    ['synthesizer', 'deliver', 'Synthesizer', 'assembles the verified final answer', 'claude-fable-5', 'xhigh'],
+    ['judge', 'deliver', 'Judge', 'picks between competing options, says why', 'claude-fable-5', 'high'],
+  ];
+  const GT = Object.fromEntries(G_LIB.map((x) => [x[0], { lane: x[1], label: x[2], blurb: x[3], model: x[4], effort: x[5] }]));
+  const LANE_DEFS = [['plan', 'runs first, delegates'], ['work', 'all of these run in parallel'], ['check', 'runs on the work’s output'], ['deliver', 'one node assembles the answer']];
+  const PRICE_TIER = { 'claude-fable-5': 4, 'claude-opus-5': 3, 'claude-sonnet-5': 2, 'claude-haiku-4-5': 1 };
+  const EFF_STEP = { low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
+  let gNodes = [];        // [{type, model, effort}] in canvas order
+  let gCoord = { model: 'claude-fable-5', effort: 'high' };
+  let gSel = -1;          // selected node index; -2 = coordinator; -1 = none
+  let gDragType = null;   // library type mid-drag — dragover cannot read dataTransfer, so it lives here
+  let editing = null;
+  // seats → nodes, for editing legacy entries and duplicating the built-in
+  const seatsToNodes = (seats) => {
+    const map = { research: 'web-researcher', mechanical: 'mechanical-editor', verifier: 'claim-verifier', synthesis: 'synthesizer' };
+    const out = [];
+    for (const [seat, type] of Object.entries(map)) { const sv = (seats || {})[seat] || {}; out.push({ type, model: sv.model || GT[type].model, effort: sv.effort || GT[type].effort }); }
+    return out;
+  };
+  const openEditor = (s, seedSeats, seedName) => {
+    editing = s || { id: '' };
+    // A NEW graph opens EMPTY so the ghost hint shows (owner call 2026-08-19) — it used to arrive with the
+    // literal text "Custom Graph" already typed, which you had to select and delete before naming anything.
+    // Editing an existing graph still arrives with its real name.
+    $('strat-name').value = s ? (s.name || '') : (seedName || '');
+    $('strat-delete').style.display = (s && s.id) ? '' : 'none';
+    if (s && s.nodes) { gNodes = s.nodes.map((n) => ({ type: n.type, model: n.model || GT[n.type].model, effort: n.effort || GT[n.type].effort, sendback: n.sendback || 0 })); gCoord = Object.assign({ model: 'claude-fable-5', effort: 'high' }, s.coordinator || {}); }
+    else { gNodes = seatsToNodes((s && s.seats) || seedSeats || PB_SEATS); gCoord = { model: ((s && s.seats) || seedSeats || PB_SEATS).coordinator ? (((s && s.seats) || seedSeats || PB_SEATS).coordinator.model || 'claude-fable-5') : 'claude-fable-5', effort: 'high' }; }
+    gSel = -1;
+    renderLib(); renderLanes(); paintLoop();
+    modal.hidden = false; $('strat-name').focus();
+  };
+  const closeEditor = () => { modal.hidden = true; editing = null; closePop(); };
+  const renderLib = () => {
+    const el = $('gb-lib'); if (!el || el.childElementCount) return;
+    const hint = document.createElement('div'); hint.className = 'gb-libhint'; hint.textContent = 'Click to place or drag & drop'; el.appendChild(hint);
+    const grp = (title, filter) => {
+      const h = document.createElement('div'); h.className = 'gb-lgrp'; h.textContent = title; el.appendChild(h);
+      G_LIB.filter(filter).forEach(([type, , label, blurb, dm, de]) => {
+        const c = document.createElement('div'); c.className = 'gb-card'; c.title = 'Add to the graph — default ' + (NICE[dm] || dm) + ' · ' + de;
+        c.innerHTML = '<b></b><i></i>'; c.querySelector('b').textContent = label; c.querySelector('i').textContent = blurb;
+        c.addEventListener('click', () => { gNodes.push({ type, model: dm, effort: de }); gSel = gNodes.length - 1; renderLanes(); });
+        c.draggable = true;
+        c.addEventListener('dragstart', (ev) => { gDragType = type; ev.dataTransfer.setData('text/plain', type); ev.dataTransfer.effectAllowed = 'copy'; c.classList.add('dragging'); });
+        c.addEventListener('dragend', () => { gDragType = null; c.classList.remove('dragging'); document.querySelectorAll('.gb-lane.drop-ok, .gb-lane.drop-no').forEach((l) => l.classList.remove('drop-ok', 'drop-no')); });
+        el.appendChild(c);
+      });
+    };
+    grp('work · judgment', (x) => x[1] === 'work' && x[5] === 'medium');
+    grp('work · mechanical', (x) => x[1] === 'work' && x[5] === 'low');
+    grp('check', (x) => x[1] === 'check');
+    grp('deliver', (x) => x[1] === 'deliver');
+  };
+  let popEl = null;
+  const closePop = () => { if (popEl) { popEl.remove(); popEl = null; } };
+  const openPop = (anchor, opts, cur, onPick) => {
+    closePop();
+    popEl = document.createElement('div'); popEl.className = 'gb-pop';
+    opts.forEach(([v, label]) => {
+      const o = document.createElement('div'); o.className = 'opt' + (v === cur ? ' cur' : '');
+      o.innerHTML = '<span class="ck">✓</span>'; o.appendChild(document.createTextNode(label));
+      o.addEventListener('click', (ev) => { ev.stopPropagation(); closePop(); onPick(v); });
+      popEl.appendChild(o);
+    });
+    const host = anchor.parentElement;
+    host.appendChild(popEl);
+    // .gb-pop is absolutely positioned inside that host with a fixed left:0, which parked EVERY dial's menu
+    // under the FIRST dial in the row — so the effort menu opened under the model dial, to its left. Anchor it
+    // to the dial that actually opened it, then clamp so a menu near the right edge of a narrow lane folds back
+    // inside instead of hanging off it.
+    let x = anchor.offsetLeft;
+    const over = (x + popEl.offsetWidth) - host.clientWidth;
+    if (over > 0) x = Math.max(0, x - over);
+    popEl.style.left = x + 'px';
+  };
+  const renderLanes = () => {
+    const el = $('gb-lanes'); if (!el) return;
+    closePop();
+    el.innerHTML = '';
+    LANE_DEFS.forEach(([lane, sub]) => {
+      const L = document.createElement('div'); L.className = 'gb-lane';
+      L.innerHTML = '<div class="gb-lane-h">' + lane + '</div><div class="gb-lane-s">' + sub + '</div>';
+      // types are lane-bound (the compiler validates lane by type) — a card only drops into its own lane
+      L.addEventListener('dragover', (ev) => {
+        if (!gDragType) return;
+        const ok = lane !== 'plan' && GT[gDragType].lane === lane;
+        L.classList.toggle('drop-ok', ok); L.classList.toggle('drop-no', !ok);
+        if (ok) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; }
+      });
+      L.addEventListener('dragleave', (ev) => { if (!L.contains(ev.relatedTarget)) L.classList.remove('drop-ok', 'drop-no'); });
+      L.addEventListener('drop', (ev) => {
+        ev.preventDefault(); L.classList.remove('drop-ok', 'drop-no');
+        const t = gDragType; gDragType = null;
+        if (!t || GT[t].lane !== lane) return;
+        gNodes.push({ type: t, model: GT[t].model, effort: GT[t].effort }); gSel = gNodes.length - 1; renderLanes();
+      });
+      const box = document.createElement('div'); box.className = 'gb-nodes'; L.appendChild(box);
+      const mkDial = (val, opts, onPick) => { const d = document.createElement('button'); d.type = 'button'; d.className = 'gb-dial'; d.textContent = opts.find((o) => o[0] === val)[1]; d.addEventListener('click', (ev) => { ev.stopPropagation(); openPop(d, opts, val, onPick); }); return d; };
+      const MODEL_OPTS = S_MODELS, EFF_OPTS = S_EFFORTS.map((x) => [x, x]);
+      // send-back moved OFF the node card and into the header's Loop Settings (owner call 2026-08-19) — see
+      // LOOP_OPTS / paintLoop below. It is still a deliver-lane-only value; the compiler rejects it elsewhere.
+      if (lane === 'plan') {
+        const nd = document.createElement('div'); nd.className = 'gb-node' + (gSel === -2 ? ' sel' : '');
+        // "always present" drops to its own line (owner call): it is a fact ABOUT the node, not part of its name.
+        nd.innerHTML = '<b>Orchestrator</b><span class="gb-nsub">always present</span>';
+        const dl = document.createElement('div'); dl.className = 'gb-dials';
+        dl.appendChild(mkDial(gCoord.model, MODEL_OPTS, (v) => { gCoord.model = v; renderLanes(); }));
+        dl.appendChild(mkDial(gCoord.effort, EFF_OPTS, (v) => { gCoord.effort = v; renderLanes(); }));
+        nd.appendChild(dl);
+        nd.addEventListener('click', () => { gSel = -2; renderLanes(); });
+        box.appendChild(nd);
+      } else {
+        const seen = {};
+        gNodes.forEach((n, i) => {
+          if (GT[n.type].lane !== lane) return;
+          seen[n.type] = (seen[n.type] || 0) + 1;
+          const mod = n.model !== GT[n.type].model || n.effort !== GT[n.type].effort;
+          const nd = document.createElement('div'); nd.className = 'gb-node' + (gSel === i ? ' sel' : '') + (mod ? ' mod' : '');
+          const x = document.createElement('button'); x.className = 'nx'; x.title = 'Remove'; x.textContent = '×';
+          x.addEventListener('click', (ev) => { ev.stopPropagation(); gNodes.splice(i, 1); if (gSel === i) gSel = -1; renderLanes(); });
+          const ttl = document.createElement('b'); ttl.textContent = GT[n.type].label + (seen[n.type] > 1 ? ' #' + seen[n.type] : '');
+          nd.appendChild(x); nd.appendChild(ttl);
+          const dl = document.createElement('div'); dl.className = 'gb-dials';
+          dl.appendChild(mkDial(n.model, MODEL_OPTS, (v) => { n.model = v; renderLanes(); }));
+          dl.appendChild(mkDial(n.effort, EFF_OPTS, (v) => { n.effort = v; renderLanes(); }));
+          nd.appendChild(dl);
+          const hint = document.createElement('span'); hint.className = 'gb-hint';
+          if (mod) { hint.innerHTML = 'changed — default: ' + (NICE[GT[n.type].model] || '') + ' · ' + GT[n.type].effort + ' <u>reset</u>'; hint.querySelector('u').addEventListener('click', (ev) => { ev.stopPropagation(); n.model = GT[n.type].model; n.effort = GT[n.type].effort; renderLanes(); }); }
+          else hint.textContent = 'default: ' + (NICE[GT[n.type].model] || '') + ' · ' + GT[n.type].effort;
+          nd.appendChild(hint);
+          nd.addEventListener('click', () => { gSel = i; renderLanes(); });
+          box.appendChild(nd);
+        });
+        if (!gNodes.some((n) => GT[n.type].lane === lane)) {
+          const gh = document.createElement('div'); gh.className = 'gb-drophint'; gh.textContent = 'drag an agent here from the library';
+          box.appendChild(gh);
+        }
+      }
+      el.appendChild(L);
+    });
+    renderFoot();
+  };
+  const renderFoot = () => {
+    // left: whatever is selected, in one sentence; nothing selected → the whole graph
+    const rb = $('gb-readback');
+    if (gSel === -2) rb.innerHTML = '<b>Orchestrator</b> — plans the job and delegates to every node · ' + escHtml(NICE[gCoord.model] || '') + ' · ' + escHtml(gCoord.effort);
+    else if (gSel >= 0 && gNodes[gSel]) { const n = gNodes[gSel]; rb.innerHTML = '<b>' + escHtml(GT[n.type].label) + '</b> — ' + escHtml(GT[n.type].blurb) + ' · runs in the ' + GT[n.type].lane.toUpperCase() + ' lane · ' + escHtml(NICE[n.model] || '') + ' · ' + escHtml(n.effort) + (n.sendback ? ' · can send incomplete work back for another round, at most ×' + n.sendback : ''); }
+    else {
+      const work = gNodes.filter((n) => GT[n.type].lane === 'work').length, check = gNodes.filter((n) => GT[n.type].lane === 'check').length, del = gNodes.filter((n) => GT[n.type].lane === 'deliver').length;
+      rb.innerHTML = '<b>' + escHtml((NICE[gCoord.model] || '').split(' ')[0]) + ' plans</b> · ' + work + ' worker' + (work === 1 ? '' : 's') + ' in parallel · ' + (check ? check + ' checker' + (check === 1 ? '' : 's') : '<span style="color:var(--warn)">no one checks this graph’s work</span>') + ' · ' + (del ? 'a fresh node assembles the answer' : 'the orchestrator assembles the answer');
+    }
+    // right: the setup, counted — and the usage estimate (model tier × effort step, bucketed; pure arithmetic)
+    const all = gNodes.concat([{ model: gCoord.model, effort: gCoord.effort }]);
+    const mix = {}; all.forEach((n) => { const k = (n.model || '').replace('claude-', '').replace(/-5$|-4-5$/, ''); mix[k] = (mix[k] || 0) + 1; });
+    $('gb-setup').textContent = all.length + ' nodes · ' + Object.entries(mix).map(([m, c]) => c + '× ' + m).join(' · ');
+    const score = all.reduce((s, n) => s + (PRICE_TIER[n.model] || 2) * (EFF_STEP[n.effort] || 2), 0) / all.length;
+    const bucket = score < 5 ? 0 : score < 8 ? 1 : score < 12 ? 2 : 3;
+    const words = ['light', 'moderate', 'heavy', '⚠ very heavy — this will burn usage fast, even on small jobs'];
+    const w = $('gb-weight');
+    w.className = 'gb-weight' + (bucket === 3 ? ' hot' : '');
+    w.innerHTML = '<span style="font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-faint)">est. usage</span><span class="wm">' + [0, 1, 2, 3].map((i2) => '<i class="' + (i2 <= bucket ? 'f' : '') + '"></i>').join('') + '</span>' + words[bucket];
+    paintLoop();   // the header's Loop control tracks the lanes: adding/removing a deliver node arms or greys it
+  };
+  modal.addEventListener('click', (e) => { if (!e.target.closest('.gb-pop') && !e.target.closest('.gb-dial')) closePop(); if (e.target === modal) closeEditor(); if (!e.target.closest('.gb-node') && !e.target.closest('.gb-pop') && gSel !== -1 && e.target.closest('.gb-body')) { gSel = -1; renderLanes(); } });
+  const save = async (useAfter) => {
+    const name = $('strat-name').value.trim();
+    if (!name) { toast('Give the graph a name first'); $('strat-name').focus(); return; }
+    if (!gNodes.length) { toast('Add at least one node from the library'); return; }
+    let r = null; try { r = await claudible.strategySave({ id: editing && editing.id, name, nodes: gNodes, coordinator: gCoord }); } catch {}
+    if (!r || r.ok === false) { toast('Could not save: ' + ((r && r.error) || 'disk error')); return; }
+    closeEditor();
+    let l = null; try { l = await claudible.strategyList(); } catch {}
+    if (l) deck = l;
+    // BUGFIX 2026-08-19: activate() early-returns when the id is ALREADY active, so re-saving the active graph
+    // through "Save & use" reached neither its render() nor its toast — the click looked like it did nothing,
+    // and a rename left the stale name in the list. The edits did land (strategy:save re-installs the active
+    // graph, main.js), which is why this read as a dead button rather than as lost work. Fall through to the
+    // plain-save feedback in that case; only a genuine SWITCH goes through activate().
+    if (useAfter && r.id !== deck.active) { await activate(r.id); return; }
+    render();
+    toast('"' + name + '" saved' + (r.filesOk === false ? ' — but RE-INSTALLING it failed' : ''));
+  };
+  // ---- LOOP SETTINGS (header control; was the synthesizer's third dial) ----------------------------------
+  // Every option is a FINITE cap. "Until done" is 5, not unlimited, on owner sign-off: the compiler allowlists
+  // send-back values precisely so a runaway loop can never compile, and that guard is worth more than the word
+  // "unlimited". 1 stays valid in the tool for graphs saved before this control existed, but is not offered.
+  const LOOP_OPTS = [[0, 'don’t loop'], [2, 'loop ×2'], [3, 'loop ×3'], [5, 'loop until done (max 5)']];
+  const loopLabel = (v) => (LOOP_OPTS.find((o) => o[0] === v) || LOOP_OPTS[0])[1];
+  // The value lives on the deliver-lane nodes, which is where the compiler wants it. Read = whatever the first
+  // deliver node carries; write = all of them, so two deliver nodes can never disagree about the cap.
+  const loopGet = () => { const d = gNodes.find((n) => GT[n.type] && GT[n.type].lane === 'deliver'); return (d && d.sendback) || 0; };
+  const loopSet = (v) => { gNodes.forEach((n) => { if (GT[n.type] && GT[n.type].lane === 'deliver') n.sendback = v; }); };
+  const paintLoop = () => {
+    const b = $('strat-loop'); if (!b) return;
+    const hasDeliver = gNodes.some((n) => GT[n.type] && GT[n.type].lane === 'deliver');
+    b.innerHTML = ''; b.appendChild(document.createTextNode('Loop: ' + loopLabel(loopGet())));
+    const a = document.createElement('span'); a.className = 'gb-arr2'; a.textContent = '▾'; b.appendChild(a);
+    // nothing delivers the answer -> nothing can send work back; say so rather than offering a dead menu
+    b.disabled = !hasDeliver; b.style.opacity = hasDeliver ? '' : '.45';
+    b.title = hasDeliver ? 'How many times the deliver node may send thin work back for another round'
+      : 'Add a node to the DELIVER lane first — looping is that node’s decision';
+  };
+  { const b = $('strat-loop'); if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); if (b.disabled) return; openPop(b, LOOP_OPTS, loopGet(), (v) => { loopSet(v); paintLoop(); renderLanes(); }); }); }
+  { const h = $('strat-loop-help'); let hp = null;
+    const closeHelp = () => { if (hp) { hp.remove(); hp = null; document.removeEventListener('mousedown', outside, true); } };
+    function outside(e) { if (hp && !hp.contains(e.target) && e.target !== h) closeHelp(); }
+    if (h) h.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (hp) { closeHelp(); return; }
+      hp = document.createElement('div'); hp.className = 'gb-loop-pop';
+      hp.innerHTML = '<b>Loop settings</b>Sets how many times the node that delivers your answer may send thin work back for another round before it has to answer with the gaps flagged. Higher means more thorough and more usage. Capped so a graph can never loop forever.';
+      h.parentElement.appendChild(hp);
+      setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+    });
+  }
+  // The faded hint clears the moment you click in and comes back if you leave the field empty — the same
+  // behaviour the collab-name field in Settings has, so the two name inputs teach one habit.
+  { const nmi = $('strat-name'); const PH = nmi ? nmi.placeholder : '';
+    if (nmi) { nmi.addEventListener('focus', () => { nmi.placeholder = ''; }); nmi.addEventListener('blur', () => { nmi.placeholder = PH; }); } }
+  $('strat-save').addEventListener('click', () => save(false));
+  $('strat-saveuse').addEventListener('click', () => save(true));
+  // Owner-chosen reading for the drawer's fourth note. openExternal hands it to the real browser (main.js
+  // validates the protocol); nothing about graphs is explained inside the app at this depth.
+  { const lm = $('strat-learn'); if (lm) lm.addEventListener('click', () => { try { claudible.openExternal('https://www.youtube.com/watch?v=mBePcvqLX88'); } catch (e) {} }); }
+  $('strat-cancel').addEventListener('click', closeEditor);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeEditor(); });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) closeEditor(); });
+  $('strat-delete').addEventListener('click', async () => {
+    if (!editing || !editing.id) return;
+    const nm = $('strat-name').value.trim() || 'this strategy';
+    const okGo = await confirmModal('Delete ' + nm + '?', 'Removes the saved strategy. If it is active, the trigger turns off. The built-in strategy is not affected.', 'Delete');
+    if (!okGo) return;
+    let r = null; try { r = await claudible.strategyDelete(editing.id); } catch {}
+    closeEditor();
+    let l = null; try { l = await claudible.strategyList(); } catch {}
+    if (l) deck = l; render();
+    toast(r && r.ok ? 'Deleted' : 'Delete failed');
+  });
+  $('strat-new').addEventListener('click', () => openEditor(null));
+  // load — every fallback is 'off': an unreadable IPC must not paint a strategy the session never got
+  try { const l = await claudible.strategyList(); if (l) deck = l; } catch {}
+  render();
 })();
 // theme selector — load the saved theme, highlight it, persist + apply (UI + terminal) instantly on click
 (function () {
@@ -2898,7 +3504,7 @@ wireCockpitPop('voice-chip');
     if (!v) { showView(); return; }                       // empty → just go back to whatever was saved
     const had = !!saved, changed = v !== saved;
     saved = v; savePrefs({ collabName: v });
-    renderRoster(lastRoster); renderLiveBar();
+    renderRoster(lastRoster); renderLiveState();
     if (advertisedSession) { try { claudible.liveAdvertise(advertisedSession, v, sharedWsId || activeWsId); } catch (e) {} }   // rename → re-stamp presence on the SAME project the share belongs to
     showView();
     if (changed) { try { toast(had ? 'Username changed' : 'Username saved'); } catch (e) {} }
@@ -2917,6 +3523,10 @@ $('strategy-btn').addEventListener('click', () => openStrat(!stratDrawer.classLi
 $('strat-close').addEventListener('click', () => openStrat(false));
 stratScrim.addEventListener('click', () => openStrat(false));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && stratDrawer.classList.contains('open')) openStrat(false); });
+$('graphs-btn').addEventListener('click', () => openGraphs(!graphsDrawer.classList.contains('open')));
+$('graphs-close').addEventListener('click', () => openGraphs(false));
+graphsScrim.addEventListener('click', () => openGraphs(false));
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && graphsDrawer.classList.contains('open')) openGraphs(false); });
 // C-3.6 — the trash icon (left of the settings X) and the settings drawer's own Open trash button do the exact
 // same thing: hand the recoverable trash folder straight to the OS file manager. A basic function on purpose —
 // no in-app browsing, just get the user to the folder.
@@ -3429,6 +4039,22 @@ function chatReset() {
     (chatCtx() ? 'Chat with everyone in this live session — Claude never sees these messages.'
                : 'Messages here go only between you and your viewer — Claude never sees them.') + '</div>';
 }
+// One colour per person in a chat: it inks their name and tints the ground behind their messages, so the eye
+// groups a speaker without reading a word. Slot 1 is ALWAYS the host (the brand orange); guests take 2..8 in
+// the order they first speak and wrap after seven, which is the point at which two people sharing a hue is
+// less confusing than eight hues nobody can tell apart. Keyed case-INSENSITIVELY because the share server
+// dedups names that way (its nameTaken/eqCI) — matching it is what stops "MK" and "mk" being two people with
+// two colours. An author we cannot key returns 0 and the message ships with no data-tint at all, keeping the
+// plain --ink-name ink; that fallback is live, not decorative.
+const authorTints = new Map();
+function tintFor(name, isHost) {
+  if (isHost) return 1;
+  const k = String(name || '').trim().toLowerCase();
+  if (!k) return 0;
+  let slot = authorTints.get(k);
+  if (!slot) { slot = 2 + (authorTints.size % 7); authorTints.set(k, slot); }
+  return slot;
+}
 // Repaint the single #chat-log from the ACTIVE context's buffer (on every new message + on tab switch).
 function renderChatLog() {
   const buf = chatBufFor(chatCtx());
@@ -3436,8 +4062,14 @@ function renderChatLog() {
   chatLog.innerHTML = '';
   buf.forEach((m) => {
     if (m.sys) { const d = document.createElement('div'); d.className = 'chat-sys'; d.textContent = m.text; chatLog.appendChild(d); return; }
+    // A host label is resolved HERE, not frozen into the buffer when the message was sent. Baking the string
+    // at send time is what let "Host (Host)" survive forever on a message composed a moment before the name
+    // resolved — a repaint could never correct it, because there was nothing left to correct.
+    const whoText = m.host ? HOST(m.hostName != null ? m.hostName : advertisedHostName()) : m.who;
     const d = document.createElement('div'); d.className = 'chat-msg ' + (m.mine ? 'me' : 'them');
-    const w = document.createElement('span'); w.className = 'who'; w.textContent = m.who;
+    const tint = tintFor(m.host ? (m.hostName != null ? m.hostName : advertisedHostName()) : m.who, !!m.host);
+    if (tint) d.dataset.tint = String(tint);
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = whoText;
     const body = document.createElement('div'); body.textContent = m.text;   // textContent → no HTML injection
     const cp = document.createElement('button'); cp.className = 'chat-copy'; cp.title = 'Copy message'; cp.setAttribute('aria-label', 'Copy message');
     cp.dataset.text = m.text;   // copy the raw text → paste straight into Claude
@@ -3460,7 +4092,7 @@ function sendChat() {
   const text = chatIn.value.trim(); if (!text) return;
   const ctx = chatCtx();
   if (ctx) { chatAppend(chatBufFor(ctx), { who: youName(), text, mine: true }, true); claudible.liveChatSend(ctx.tabId, text); }   // → the joined session
-  else { chatAppend(hostChat, { who: HOST(hostDisplayName), text, mine: true }, true); claudible.shareSendChat(text); }             // → your guests, always labeled as host (C-5.9)
+  else { chatAppend(hostChat, { host: true, text, mine: true }, true); claudible.shareSendChat(text); }             // → your guests, always labeled as host (C-5.9). `host:true` rather than a baked string: renderChatLog resolves the label at paint time, so a name that arrives late still corrects itself
   chatIn.value = '';
 }
 $('chat-send').addEventListener('click', sendChat);
@@ -3477,7 +4109,7 @@ claudible.onLiveChat((p) => {
   if (!p) return; const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
   const buf = chatBufFor(rec), onScreen = activeTabId === p.tabId;
   if (p.role === 'system') chatAppend(buf, { sys: true, text: p.text }, onScreen);
-  else if (p.text) { chatAppend(buf, { who: p.role === 'host' ? HOST(p.name || rec.hostName) : (p.name || 'viewer'), text: p.text, mine: false }, onScreen); if (chimeOn) playChime(); }   // chime even if the live tab is backgrounded (parity with host chat)
+  else if (p.text) { chatAppend(buf, p.role === 'host' ? { host: true, hostName: p.name || rec.hostName || '', text: p.text, mine: false } : { who: p.name || 'viewer', text: p.text, mine: false }, onScreen); if (chimeOn) playChime(); }   // chime even if the live tab is backgrounded (parity with host chat). hostName is THEIR advertised name — never resolved from our own, which is a different person on this path
 });
 // A JOINED session's Session-History feed (the host pushes its log over the live channel) → held on the live
 // tab's record; the Repo Review drawer renders it view-only when that tab is active (see refreshHistoryFeed).
@@ -3898,7 +4530,7 @@ async function ensureTunnel() {
   try {
     if (want) {
       const ro = (!collabLive && webShare) ? !!$('share-ro').checked : false;   // collab is always co-drive
-      const nm = collabName() || hostDisplayName || 'Host';   // one Claudible username, used hosting + joining
+      const nm = advertisedHostName() || 'Host';   // one Claudible username, used hosting + joining. The 'Host' fallback is a WIRE value (the server needs a non-empty name); labels never render it — advertisedHostName() returns '' there and HOST() prints plain "Host"
       const r = await claudible.shareStart({ readOnly: ro, name: nm });
       lastShareReason = (r && r.reason) || null;          // 'missing' = cloudflared genuinely absent; anything else must NOT offer an install button
       if (r && r.ok) {
@@ -3934,7 +4566,7 @@ async function ensureTunnel() {
 // Collaboration follows the per-workspace "Sync sessions" toggle: a synced repo session means a collaborator can
 // Join live, automatically — no manual sharing. Recomputed whenever the active workspace/session/sync changes.
 function updateCollab() {
-  if (AT() && AT().kind === 'live') { renderLiveBar(); return; }   // viewing a peer's session — DON'T recompute your own share off the live tab's (null) session, or you'd drop your own tunnel + guests
+  if (AT() && AT().kind === 'live') { renderLiveState(); return; }   // viewing a peer's session — DON'T recompute your own share off the live tab's (null) session, or you'd drop your own tunnel + guests
   // Keyed on the SHARED session + ITS workspace, not the viewed tab's. This is the whole "work in another
   // session while a guest keeps watching the shared one" guarantee: every tab switch runs refreshSessions →
   // updateCollab, and keying this on activeSession made an ordinary sidebar click tear the tunnel down
@@ -3943,7 +4575,7 @@ function updateCollab() {
   const aw = workspaces.find((w) => w.id === (sharedWsId || activeWsId));
   collabLive = !!(aw && aw.kind === 'repo' && sharedSessionId);   // explicit: tunnel only when I've chosen to Share a session
   ensureTunnel();
-  renderLiveBar();                                  // show/hide the in-session "● Live · who's here" bar
+  renderLiveState();                                  // show/hide the in-session "● Live · who's here" bar
   renderTunnelWarn();
 }
 // Toggle live-sharing of a session from the ▾ menu. Sharing streams the live pty, so the session must be the
@@ -4557,15 +5189,15 @@ claudible.onLiveHello((p) => {
   if (liveVoiceTabId === p.tabId && rec.liveWasLost) { try { liveVoice.leave(); liveVoice.join().catch(() => {}); } catch {} }
   rec.liveWasLost = false;
   setLiveState(rec, p.paused ? 'paused' : 'live');
-  if (p.tabId === activeTabId) { fitLiveTab(rec); refreshCollabSurfaces(); if (!rec.liveReadOnly) { try { if (!typingElsewhere()) rec.term.focus(); } catch {} } }   // guarded: a hello can arrive mid-rename/mid-prompt — never steal the keyboard from typing
+  if (p.tabId === activeTabId) { refreshCollabSurfaces(); fitLiveTab(rec); if (!rec.liveReadOnly) { try { if (!typingElsewhere()) rec.term.focus(); } catch {} } }   // guarded: a hello can arrive mid-rename/mid-prompt — never steal the keyboard from typing
 });
 claudible.onLiveRoster((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
   rec.roster = Array.isArray(p.list) ? p.list : [];
-  if (activeTabId === p.tabId) { renderRoster(); renderLiveBar(); }
+  if (activeTabId === p.tabId) { renderRoster(); renderLiveState(); }
 });
 claudible.onLiveSize((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') { rec.hostCols = p.cols || rec.hostCols; rec.hostRows = p.rows || rec.hostRows; if (p.tabId === activeTabId) fitLiveTab(rec); } });
-claudible.onLivePaused((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') { setLiveState(rec, p.paused ? 'paused' : 'live'); if (p.tabId === activeTabId) renderLiveBar(); } });   // C-5.2: paused suspends co-drive too (C-5.6) — the badge must drop with it, not just on hello/roster ticks
+claudible.onLivePaused((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') { setLiveState(rec, p.paused ? 'paused' : 'live'); if (p.tabId === activeTabId) renderLiveState(); } });   // C-5.2: paused suspends co-drive too (C-5.6) — the badge must drop with it, not just on hello/roster ticks
 claudible.onLiveState((p) => { const rec = tabs.get(p.tabId); if (rec && rec.kind === 'live') setLiveState(rec, p.state, p.reason); });
 claudible.onLiveStatus((p) => {
   const rec = tabs.get(p.tabId); if (!rec || rec.kind !== 'live') return;
@@ -5841,11 +6473,11 @@ function renderWsChips() {
     if (dotOn) dot.title = [w.shared ? 'screen-share ON' : '', w.syncSessions ? 'session-sync ON' : ''].filter(Boolean).join(' · ');
     chip.appendChild(dot);
     const nm = document.createElement('span'); nm.className = 'ws-name'; nm.textContent = w.label; chip.appendChild(nm);
-    if (isLastLocal(w)) {                                              // a tiny "default" tag on the sole local workspace (the protected home)
-      const tag = document.createElement('span'); tag.textContent = 'default';
-      tag.style.cssText = 'flex:none;font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-left:4px';
-      chip.appendChild(tag);
-    } else if (w.kind === 'repo' && w.needsClone) {                    // invited but not cloned yet → click to choose where it saves
+    // The sole local workspace used to get a faded "default" tag here. It was minted when that project was
+    // still labelled "Local"; the label is now "Local Default" (main.js:329), so the tag rendered the word
+    // twice — "Local Default  DEFAULT". Removed 2026-08-19 by owner call: the label stands on its own.
+    // isLastLocal() is unchanged and still guards delete below — only the duplicated badge is gone.
+    if (w.kind === 'repo' && w.needsClone) {                           // invited but not cloned yet → click to choose where it saves
       const tag = document.createElement('span'); tag.textContent = 'invited';   // a FILLED green pill (was an 8px whisper nobody noticed) so an accepted invite reads at a glance
       tag.style.cssText = 'flex:none;font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ok,#5fb487);background:color-mix(in srgb,var(--ok) 16%,transparent);border:1px solid color-mix(in srgb,var(--ok) 34%,transparent);border-radius:999px;padding:1px 7px;margin-left:6px';
       chip.appendChild(tag);
@@ -6090,7 +6722,17 @@ function openShareInfo() {
   shareInfoPop = pop;
   setTimeout(() => { document.addEventListener('mousedown', onShareInfoOutside, true); document.addEventListener('keydown', onShareInfoKey, true); }, 0);
 }
-(function () { const b = $('share-info'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); openShareInfo(); }); })();
+// #share-info is a <span role="button"> INSIDE #share-btn (a button may not contain a button), so it gets no
+// native keyboard activation and its events would otherwise bubble into the share action. Both handlers
+// stopPropagation: pressing the badge must explain sharing, never start it.
+(function () {
+  const b = $('share-info'); if (!b) return;
+  b.addEventListener('click', (e) => { e.stopPropagation(); openShareInfo(); });
+  b.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault(); e.stopPropagation(); openShareInfo();
+  });
+})();
 // workspace drag-reorder (mirrors session rows) + right-click delete
 let wsdrag = null;
 function onWsPointerDown(e, chip, w) {
@@ -7017,37 +7659,79 @@ let wsNameCheck = null;
 // attach() mirrors workspace:upgrade). The later ▾-menu flows (upgradeWorkspace / inviteToLocal / openSyncModal)
 // stay fully alive for projects that start private.
 const WS_KINDS = ['local', 'repo', 'adopt', 'import'];   // 3b: 'import' clones an EXISTING GitHub repo — see workspace:import in main.js
+// The shared-project consent is a SECOND precondition on the same button the charset validator drives.
+// wireNameValidator's check() sets `btn.disabled = bad.length > 0` from the NAME ALONE, so a valid name would
+// re-enable Create and walk straight past the disclosure. This only ever tightens — it can disable, never
+// enable — so it composes with the validator instead of fighting it, whichever ran last.
+function syncWsCreateGate() {
+  const btn = $('ws-create'); if (!btn) return;
+  if (wsChoiceKind !== 'repo') return;                       // only the publishing kind has a consent gate
+  const ok = $('ws-consent-ok');
+  if (!ok || !ok.checked) btn.disabled = true;
+}
+// Step 1 → step 2. Everything this used to do on tile SELECTION it now does on tile COMMIT; the per-kind
+// field work below is unchanged in substance, it simply runs once the choice is real.
 function selectWsKind(kind) {
   wsChoiceKind = kind;
-  WS_KINDS.forEach((k) => {
-    const el = $('ch-' + (k === 'adopt' ? 'adopt' : k)); if (!el) return;
-    el.classList.toggle('sel', kind === k);
-    el.setAttribute('aria-checked', kind === k ? 'true' : 'false');   // keep the radio state screen-reader-truthful
-  });
+  const tile = $('ch-' + kind);
+  // The pane header is built FROM the tile the user just clicked — same icon, same words — so the second step
+  // reads as a continuation of the first rather than a new dialog, and the two can never drift apart in copy.
+  const ico = $('ws-kind-ico'), ttl = $('ws-kind-title'), dsc = $('ws-kind-desc');
+  if (tile && ico) { const svg = tile.querySelector('svg'); ico.innerHTML = ''; if (svg) ico.appendChild(svg.cloneNode(true)); }
+  if (tile && ttl) { const t = tile.querySelector('.ct'); ttl.textContent = t ? t.textContent : 'New project'; }
+  if (tile && dsc) { const d = tile.querySelector('.cd'); dsc.textContent = d ? d.textContent : ''; }
   const pr = $('ws-pick-row'); if (pr) pr.style.display = (kind === 'local') ? '' : 'none';   // custom folder is local-only
   const nt = $('ws-adopt-note'); if (nt) nt.style.display = (kind === 'adopt') ? 'block' : 'none';
+  const cs = $('ws-consent'); if (cs) cs.style.display = (kind === 'repo') ? 'block' : 'none';
   // Import names itself from the repo, so it swaps the name field for the owner/repo field entirely — asking
   // for both would invite them to disagree, and the folder + every transcript key off the repo slug anyway.
+  // Adopt now does the same and takes the FOLDER's name (owner decision): its name box was optional, sat above
+  // a button that opens a picker, and asked you to name a thing before you had said which thing it was.
+  // createWorkspace already tolerates an empty name for adopt, so nothing downstream changes.
   const nm = $('ws-name-in');
   const rp = $('ws-repo-in');
-  if (nm) nm.style.display = (kind === 'import') ? 'none' : '';
+  const namable = (kind !== 'import' && kind !== 'adopt');
+  if (nm) nm.style.display = namable ? '' : 'none';
   if (rp) rp.style.display = (kind === 'import') ? '' : 'none';
-  if (nm) nm.placeholder = (kind === 'adopt') ? 'Project name (optional — defaults to the folder’s name)' : 'Project name (letters, numbers, dots, dashes, underscores)';
   const btn = $('ws-create'); if (btn) btn.textContent = (kind === 'adopt') ? 'Choose folder…' : (kind === 'import') ? 'Clone' : 'Create';
-  // Import doesn't use ws-name-in at all (own field, own parsing) — re-run the validator so switching TO import
-  // can't leave ws-create stuck disabled by leftover bad characters in a field that's now hidden and irrelevant,
-  // and switching AWAY from it re-validates whatever's actually there.
-  if (kind === 'import') { if (btn) btn.disabled = false; closeNameCharPop(); } else if (wsNameCheck) wsNameCheck();
+  // Neither import nor adopt uses ws-name-in — re-run the validator so switching TO one of them can't leave
+  // ws-create stuck disabled by leftover bad characters in a field that's now hidden and irrelevant.
+  if (!namable) { if (btn) btn.disabled = false; closeNameCharPop(); } else if (wsNameCheck) wsNameCheck();
+  syncWsCreateGate();
+  const s1 = $('ws-step1'), s2 = $('ws-step2');
+  if (s1) s1.style.display = 'none';
+  if (s2) s2.style.display = 'block';
+  setTimeout(() => { const f = namable ? nm : (kind === 'import' ? rp : null); if (f) f.focus(); else if (btn) btn.focus(); }, 40);
+}
+// Step 2 → step 1. Clears every field on the way (owner decision): a name typed for a Local project should not
+// be waiting in the box when you come back as a Shared one, and clearing is the only version of this with no
+// stale-value cases to reason about.
+function wsShowKindChoice() {
+  wsChoiceKind = null;
+  $('ws-name-in').value = ''; if ($('ws-repo-in')) $('ws-repo-in').value = '';
+  if ($('ws-pick')) $('ws-pick').checked = false;
+  wsSetPick(false);
+  if ($('ws-consent-ok')) $('ws-consent-ok').checked = false;
+  $('ws-busy').textContent = ''; $('ws-busy').classList.remove('err');
+  closeNameCharPop();
+  if (wsNameCheck) wsNameCheck();
+  const s1 = $('ws-step1'), s2 = $('ws-step2');
+  if (s2) s2.style.display = 'none';
+  if (s1) s1.style.display = 'block';
+}
+// The two folder options are the face of #ws-pick, which STAYS a checkbox because createWorkspace reads its
+// .checked. Presentation only — an untouched dialog still submits pick=false, exactly as before.
+function wsSetPick(custom) {
+  const cb = $('ws-pick'); if (cb) cb.checked = !!custom;
+  const d = $('ws-pick-default'), c = $('ws-pick-custom');
+  if (d) d.classList.toggle('on', !custom);
+  if (c) c.classList.toggle('on', !!custom);
 }
 function openWsModal() {
-  selectWsKind('local');
-  $('ws-name-in').value = ''; $('ws-busy').textContent = ''; $('ws-busy').classList.remove('err');
-  if ($('ws-repo-in')) $('ws-repo-in').value = '';
-  if ($('ws-pick')) $('ws-pick').checked = false;
-  if (wsNameCheck) wsNameCheck();                            // fresh value → clears any stale disabled/popup state
+  wsShowKindChoice();
   $('ws-modal').classList.add('show');
-  setTimeout(() => $('ws-name-in').focus(), 60);
   refreshPendingInvites();   // B17 UX: opening "New project" is the natural moment to surface a pending invite too — see its own comment above
+  setTimeout(() => { const t = $('ch-local'); if (t) t.focus(); }, 60);
 }
 function closeWsModal() { $('ws-modal').classList.remove('show'); firstRunActive = false; closeNameCharPop(); }
 async function createWorkspace() {
@@ -7080,10 +7764,24 @@ async function createWorkspace() {
   }
   if (!name && !adopt) { busy.textContent = 'enter a name first'; busy.classList.add('err'); return; }   // adopt names itself from the folder
   const pick = wsChoiceKind === 'local' && $('ws-pick') && $('ws-pick').checked;   // custom folder (local only)
-  // Creating SHARED publishes from birth (a private GitHub repo + session sync) — the same action the ▾-menu
+  // Creating SHARED publishes from birth (two private GitHub repos + session sync) — the same action the ▾-menu
   // flows gate behind an honest transcript disclosure (R2), so the tile carries the identical consent. The old
   // pre-476630e tile had NO consent dialog; that gap is deliberately not restored.
-  if (wsChoiceKind === 'repo' && !confirm('Create "' + name + '" as a shared project?\n\nThis creates a PRIVATE GitHub repo for it (you need GitHub connected) and turns on session sync, so people you invite can see, resume, and join this project’s conversations.\n\nHeads up: session sync commits your Claude transcripts — including anything Claude read during them (file contents, secrets, command output) — into that private repo’s history.')) return;
+  //
+  // The disclosure moved out of a native confirm() and onto the page (#ws-consent), for two reasons. It is the
+  // most consequential sentence in this flow and it was being delivered in the one surface people click past.
+  // And it was WRONG: it said transcripts land in "that private repo" — the code repo. They have not since the
+  // sessions split. create-workspace.sh mints a SECOND private repo, <slug>-sessions, gitignores .claude/ out of
+  // the code repo, and repo-invite.sh adds collaborators to both. The old text described the app as leakier than
+  // it is and hid the feature built to stop exactly that.
+  //
+  // This check is the same hard precondition the confirm() was, not a formality: #ws-create is already disabled
+  // until the box is ticked, but Enter reaches this function past a disabled button (see the in-flight guard at
+  // the top), so the rule is enforced HERE, where nothing can route around it.
+  if (wsChoiceKind === 'repo') {
+    const ack = $('ws-consent-ok');
+    if (!ack || !ack.checked) { busy.textContent = 'tick the box to confirm you understand what gets saved'; busy.classList.add('err'); return; }
+  }
   busy.textContent = (adopt || pick) ? 'choose a folder…' : (wsChoiceKind === 'repo' ? 'creating private repo on GitHub…' : 'creating folder…');
   $('ws-create').disabled = true;
   let r = null;
@@ -7187,7 +7885,9 @@ if ($('ws-discover')) $('ws-discover').addEventListener('click', async () => {
   else if (r && r.reason === 'gh-missing') toast('The GitHub CLI isn’t installed — run the System check to set it up, then try again');
   else toast('Couldn’t check for invites');
 });
-// keyboard access for the radio-style picker: Enter/Space selects; arrows move through the group (standard radiogroup keys)
+// Keyboard access for the kind list. Arrows MOVE FOCUS only; Enter/Space commits and opens step 2. They used to
+// be a radiogroup, where arrowing also changed the value — harmless when the value just tinted a tile, wrong now
+// that committing navigates: arrowing through four tiles would have walked you into four different second steps.
 WS_KINDS.forEach((k, i) => {
   const el = $('ch-' + k); if (!el) return;
   el.addEventListener('click', () => selectWsKind(k));
@@ -7197,12 +7897,16 @@ WS_KINDS.forEach((k, i) => {
     else if (step) {
       e.preventDefault();
       const nk = WS_KINDS[(i + step + WS_KINDS.length) % WS_KINDS.length];
-      selectWsKind(nk); $('ch-' + nk).focus();
+      $('ch-' + nk).focus();
     }
   });
 });
 $('ws-create').addEventListener('click', createWorkspace);
 $('ws-cancel').addEventListener('click', closeWsModal);
+if ($('ws-cancel-2')) $('ws-cancel-2').addEventListener('click', closeWsModal);
+if ($('ws-back')) $('ws-back').addEventListener('click', wsShowKindChoice);
+if ($('ws-pick-default')) $('ws-pick-default').addEventListener('click', () => wsSetPick(false));
+if ($('ws-pick-custom')) $('ws-pick-custom').addEventListener('click', () => wsSetPick(true));
 $('ws-name-in').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); createWorkspace(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeWsModal(); }
@@ -7210,6 +7914,14 @@ $('ws-name-in').addEventListener('keydown', (e) => {
 // C-3.4 — createWorkspace() itself already refuses while $('ws-create').disabled (the in-flight guard above),
 // so wiring the validator to disable that SAME button also blocks the Enter-key path above, not just a click.
 wsNameCheck = wireNameValidator($('ws-name-in'), () => $('ws-create'));
+// …and the consent gate re-applies AFTER it. Both listen to 'input' on the same field; this one is registered
+// second, so it runs last and its tightening survives. Ticking the box re-runs the charset check first, so the
+// button lands on the AND of the two rather than on whichever fired most recently.
+$('ws-name-in').addEventListener('input', syncWsCreateGate);
+if ($('ws-consent-ok')) $('ws-consent-ok').addEventListener('change', () => {
+  if (wsNameCheck) wsNameCheck();
+  syncWsCreateGate();
+});
 // The import field gets the same keys — a paste-and-Enter is the whole interaction for that kind, and a field
 // where Enter does nothing while its sibling submits is the sort of inconsistency nobody reports but everyone feels.
 if ($('ws-repo-in')) $('ws-repo-in').addEventListener('keydown', (e) => {

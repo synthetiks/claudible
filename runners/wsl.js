@@ -74,7 +74,7 @@ function runtimeDir() { return path.join(APP_ROOT, 'runtime'); }
 // Command construction (wsEnv + the boot string) is OS-agnostic and lives in _shared.js (also used by
 // posix.js); this backend only adds the wsl.exe wrapper + wslpath app-dir. buildBoot injects the
 // resolved guest app-dir into the shared pure builder.
-function buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy) { return shared.bootStr(appDirGuest(), session, ws, runtimeId, effort, permMode, modelStrategy); }
+function buildBoot(session, ws, runtimeId, effort, permMode) { return shared.bootStr(appDirGuest(), session, ws, runtimeId, effort, permMode); }
 
 // --- node-pty backend (was main.js:156-161) ------------------------------------------------------
 let _pty = undefined;
@@ -95,7 +95,7 @@ function ptyInfo() {
 // main.js owns the rec/handlers/armUltracode lifecycle around it. ConPTY (default Win11) preserves
 // the dim ANSI attribute; its AttachConsole crash is neutralized by patches/node-pty + the
 // uncaughtException net in main.js.
-function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode, modelStrategy } = {}) {
+function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMode } = {}) {
   const pty = ptyInfo();
   if (!pty.mod) return null;
   // `-lc`, KEPT (unlike runScript below): session.sh execs `claude` bare (wsl/session.sh:295/297/349), with
@@ -103,7 +103,7 @@ function spawnClaude(tabId, { cols, rows, session, ws, effort, runtimeId, permMo
   // PATH is genuinely needed there — a non-login `-c` shell risks "claude: command not found" for exactly the
   // users this matters most to. This is also a single spawn per session launch, not the per-call hot path
   // runScript is, so the login-shell cost isn't the problem here.
-  return pty.mod.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, runtimeId, effort, permMode, modelStrategy)], {
+  return pty.mod.spawn('wsl.exe', ['-e', 'bash', '-lc', buildBoot(session, ws, runtimeId, effort, permMode)], {
     name: 'xterm-256color', cols: cols || 120, rows: rows || 32, cwd: process.env.USERPROFILE, env: process.env,
   });
 }
