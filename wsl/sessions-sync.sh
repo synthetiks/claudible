@@ -26,7 +26,7 @@ emit() { printf '%s\n' "$1"; }
 fail() { emit "{\"ok\":false,\"error\":\"$1\"}"; exit 0; }
 
 op="${1:-status}"
-case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|relay-cred|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list|lineage-set) ;; *) fail "bad op" ;; esac
+case "$op" in init|push|pull|sync|status|delete|resolve|remote-head|relay-cred|presence-set|presence-starting|presence-clear|presence-list|title-set|title-list|lineage-set|fact-append|fact-list) ;; *) fail "bad op" ;; esac
 
 # --- workspace must be a repo workspace (only those have a GitHub remote to sync over) ---
 WS_KIND="${CLAUDIBLE_WS_KIND:-legacy}"
@@ -368,9 +368,26 @@ pull_branch() {
   # reset loses nothing real — EXCEPT tombstones (deletion markers aren't re-derivable). Snapshot any local
   # tombstones and re-apply them after the reset, so a not-yet-pushed "delete everywhere" survives the conflict
   # instead of resurrecting the session for collaborators.
+  # SESSION FACTS SURVIVE THE RESET TOO, for the same reason tombstones do and with the same urgency:
+  # a rename, a clear or a delete recorded here and not yet pushed exists NOWHERE else on earth. The
+  # reset would quietly undo a decision the user already made and watched take effect. Snapshot our
+  # own facts file (only this author ever writes it) and union it back afterwards.
   gitwt merge --abort >/dev/null 2>&1
   local keep; keep="$(tombstone_ids 2>/dev/null)"
-  gitwt reset --hard "$SREM/$BR" >/dev/null 2>&1 || return 1
+  local fsnap=""
+  if [ -n "$author" ] && [ -e "$WT/facts/$author.jsonl" ]; then
+    fsnap="$HOME/.claudible/.facts-snapshot.$$"   # PID-unique: a background sync and a foreground one must not clobber each other's snapshot
+    mkdir -p "$HOME/.claudible" 2>/dev/null
+    cp -f "$WT/facts/$author.jsonl" "$fsnap" 2>/dev/null || fsnap=""
+  fi
+  gitwt reset --hard "$SREM/$BR" >/dev/null 2>&1 || { [ -n "$fsnap" ] && rm -f "$fsnap" 2>/dev/null; return 1; }
+  if [ -n "$fsnap" ]; then
+    mkdir -p "$WT/facts" 2>/dev/null
+    (unset MSYS_NO_PATHCONV; CL_FILE="$WT/facts/$author.jsonl" CL_SAVED="$fsnap" node "$HERE/sessions-sync-tool.js" fact-restore) >/dev/null 2>&1 || true
+    rm -f "$fsnap" 2>/dev/null
+    gitwt add -A -- "facts" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: preserve local session facts across conflict reset" >/dev/null 2>&1
+  fi
   if [ -n "$keep" ]; then
     mkdir -p "$WT/sessions/.tombstones" 2>/dev/null
     local t; for t in $keep; do case "$t" in *[!A-Za-z0-9-]*) continue ;; esac; : > "$WT/sessions/.tombstones/$t"; done
@@ -796,6 +813,38 @@ case "$op" in
       | (unset MSYS_NO_PATHCONV; node "$HERE/sessions-sync-tool.js" presence-filter)
     )"
     [ -n "$result" ] && emit "$result" || emit "{\"ok\":true,\"op\":\"presence-list\",\"peers\":[]}"   # node absent/failed → still emit a valid (empty) list so the renderer never chokes
+    ;;
+  fact-append)
+    # Record ONE thing that happened to a session — a rename, a clear, a delete — in my OWN
+    # facts/<login>.jsonl (one file per author => disjoint paths => conflict-free, exactly like
+    # sessions/<author>/, meta/ and live/). The fact arrives base64 in $2, already minted by the app:
+    # it carries its own unique id and its own timestamp from the app's clock, because this shell is
+    # the wrong place for both — an id invented twice would make two machines' records eat each
+    # other, and the clock out here drifts after a host sleep (the same reason the live-presence
+    # writes take their stamp from the app; see presence-set).
+    ensure_worktree || fail "could not set up the sessions branch"
+    fb64="${2:-}"
+    case "$fb64" in '' | *[!A-Za-z0-9+/=]*) fail "bad fact" ;; esac
+    [ -n "$author" ] || fail "no author"
+    pull_branch || fail "pull failed"
+    mkdir -p "$WT/facts" 2>/dev/null
+    # win-native: subshell unsets MSYS_NO_PATHCONV so git-bash converts node's /c/.. script path (the gitwt push below still needs it for the $BR refspec)
+    (unset MSYS_NO_PATHCONV; CL_FILE="$WT/facts/$author.jsonl" CL_B64="$fb64" node "$HERE/sessions-sync-tool.js" fact-append) || fail "fact write failed"
+    gitwt add -- "facts/$author.jsonl" >/dev/null 2>&1
+    gitwt diff --cached --quiet >/dev/null 2>&1 || gitwt commit -m "claudible: session facts $author" >/dev/null 2>&1
+    pushed=0; for i in 1 2 3; do gitwt push "$SREM" "$BR" >/dev/null 2>&1 && { pushed=1; break; }; pull_branch || break; done
+    # A push failure is NOT a lost fact: it is already committed locally and rides the next successful
+    # push, and the conflict path in pull_branch is what keeps it through a reset.
+    [ "$pushed" = 1 ] && emit "{\"ok\":true,\"op\":\"fact-append\"}" || emit "{\"ok\":false,\"op\":\"fact-append\",\"error\":\"push failed\"}"
+    ;;
+  fact-list)
+    # Every author's session facts, straight off origin via fetch + show — NO worktree merge, like
+    # presence-list and title-list, so this read never fights the background sync's merge. Emitted
+    # unmerged and unordered on purpose: the app merges with the same function on both machines, so
+    # the resulting view cannot depend on which side did the reading.
+    ensure_worktree || fail "could not set up the sessions branch"
+    git -C "$WT" fetch "$SREM" "$BR" >/dev/null 2>&1
+    (unset MSYS_NO_PATHCONV; CL_WT="$WT" CL_BR="$BR" node "$HERE/sessions-sync-tool.js" fact-read) || fail "fact read failed"
     ;;
   title-set)
     # Share a session's display NAME across the workspace: merge {id:{title,ts}} into my OWN meta/<author>.json

@@ -1787,6 +1787,10 @@ ipcMain.handle('title:set', (e, { id, name, wsId }) => new Promise((resolve) => 
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!sid) return resolve({ ok: false });
   const b64 = Buffer.from(String(name == null ? '' : name)).toString('base64');
+  // Recorded in the shared append-only record as well as the per-author name map. Both, for now, and
+  // deliberately: the map is what an older build reads, so it keeps being written for the whole
+  // transition — a machine that has not updated yet must not stop seeing its collaborator's renames.
+  recordSessionFact(_wsById(wsId) || activeWorkspace, 'session.renamed', { sessionId: sid, title: String(name == null ? '' : name) });
   runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }), _wsById(wsId) || activeWorkspace);   // the RENAMED row's workspace — while a joined live tab is on screen, activeWorkspace is a different ws and the title would publish to the wrong repo's branch
 }));
 ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {}), _wsById(wsId) || activeWorkspace); }));   // titles for the workspace the SIDEBAR shows, not whatever main is on
@@ -1799,6 +1803,9 @@ ipcMain.handle('lineage:set', (e, { id, from, wsId }) => new Promise((resolve) =
   const sid = String(id || '').replace(/[^A-Za-z0-9-]/g, '');
   const oid = String(from || '').replace(/[^A-Za-z0-9-]/g, '');
   if (!sid || !oid || sid === oid) return resolve({ ok: false });
+  // Same dual-write as the rename above: the shared record gets the fact, the older per-author map
+  // keeps getting the link, until every machine reads facts.
+  recordSessionFact(_wsById(wsId) || activeWorkspace, 'session.cleared', { sessionId: sid, continuesFrom: oid });
   runPresence(`lineage-set '${sid}' '${oid}'`, (r) => resolve(r || { ok: false }), _wsById(wsId) || activeWorkspace);
 }));
 
@@ -1827,6 +1834,9 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
     try { parsed = JSON.parse(String(stdout).trim() || '[]'); } catch { return fail('unparseable output'); }
     if (parsed && !Array.isArray(parsed) && parsed.error) return fail(parsed.error);
     resolve(Array.isArray(parsed) ? parsed : []);
+    // The sidebar already has its list. Only now, and at most once every few minutes per project,
+    // check what the shared record would have produced and write down any disagreement.
+    if (Array.isArray(parsed)) shadowCompareSessions(ws, parsed);
   });
 }));
 // Re-point an existing tab at 'new' | <session-id>. guardBusy: main refuses to kill a mid-turn Claude (ok:false → the
@@ -1872,6 +1882,12 @@ ipcMain.handle('session:delete', (e, arg) => new Promise((resolve) => {
       _syncQ.run((ws && ws.id) || 'ws', () => runner.runScript('sessions-sync.sh', `delete '${sid}'`, { ws, timeout: 45000 })).then(({ err: err2, stdout: out2 }) => {
           if (err2) { console.error('[claudible] delete-session everywhere:', err2.message); return resolve({ ok: false, error: 'exec', localDone: true }); }
           let r = {}; try { r = JSON.parse((out2 || '').trim() || '{}'); } catch {}
+          // Record the deletion in the shared append-only record too — written into THIS author's own
+          // file, which is what makes it reach the other machine at all. The existing marker only
+          // removes the transcript everywhere; the name for a deleted session could survive in a
+          // collaborator's own map, because no author may write into another's file. A fact needs no
+          // such reach: every machine unions every author's record and computes the same answer.
+          if (r.ok) recordSessionFact(ws, 'session.deleted', { sessionId: sid });
           resolve(r.ok ? { ok: true, everywhere: true } : { ok: false, error: (r.error || 'sync failed'), localDone: true });
         });
     });
@@ -4258,7 +4274,91 @@ ipcMain.handle('diff:discard', (e, a) => diffAction('discard', typeof a === 'str
 const _hist = require('./lib/history.js');
 const _identity = require('./lib/identity.js');
 const _histStore = require('./lib/historyStore.js');
+const _facts = require('./lib/sessionFacts.js');
+const _derive = require('./lib/deriveSessions.js');
 const _os = require('os');
+
+// Record one thing that happened TO a session — a rename, a clear, a delete — into the shared,
+// append-only record every machine computes its session list from (lib/sessionFacts.js, wsl's
+// fact-append). Minted HERE, and only here, because this is where the two things a fact cannot be
+// correct without both live: a unique id, and the app's own clock.
+//
+//   THE ID must be unique across every machine forever. Two machines that mint the same id make one
+//   record silently swallow the other, and neither user ever sees a sign of it.
+//   THE CLOCK must be this process's. The sync shell's clock drifts after the host sleeps — the same
+//   defect the live-presence stamps were moved off it to fix — and here a drifted stamp would decide
+//   which of two renames wins.
+//
+// Fire-and-forget by design: the rename, clear or delete has ALREADY happened and been shown to the
+// user by the time this runs, so a failure to record it must never turn completed work into an
+// error. A fact that cannot be pushed is still committed locally and rides the next successful push.
+function recordSessionFact(ws, type, data) {
+  try {
+    const fact = _facts.makeFact({
+      id: require('crypto').randomUUID(),
+      type,
+      ts: Date.now(),
+      author: (readSettings().username || ''),
+      machine: _identity.machineRecord({ savedId: _machineId(), host: _os.hostname(), os: process.platform }),
+      data,
+    });
+    if (!fact) return;                                       // refused at the door rather than written malformed
+    const b64 = Buffer.from(_facts.serializeFact(fact), 'utf8').toString('base64');
+    runPresence(`fact-append '${b64}'`, () => {}, ws);        // rides the same per-workspace chain as every other branch write
+  } catch (e) {}   // recording is never allowed to break the thing it records
+}
+
+// --- shadow comparison: prove the computed list before anything is computed FROM it ---------------
+// The session list is still produced exactly as it always was. This reads the shared record as well,
+// computes what the list WOULD be, and writes down where the two disagree. Nothing on screen changes
+// and nothing here can fail a sync — the point is to collect evidence on real machines, doing real
+// work, before the sidebar starts believing the computed answer.
+//
+// Why this is worth a whole release on its own: a session fix that looked correct in review has
+// already shipped and then failed on a collaborator's machine. Reading a mismatch counter for a few
+// days of ordinary use is a cheaper way to find that out than another field report.
+//
+// THROTTLED HARD. Reading the shared record costs a network fetch, and the session list is asked for
+// constantly — so at most one comparison per workspace per interval, and never on the path that
+// returns the list to the sidebar (the list resolves first; this happens afterwards).
+const SHADOW_EVERY_MS = 5 * 60 * 1000;
+const _shadowLast = new Map();
+function _shadowLog() { return path.join(PERSIST, 'session-shadow.log'); }
+function shadowCompareSessions(ws, painted) {
+  try {
+    if (!ws || ws.kind !== 'repo' || !Array.isArray(painted) || !painted.length) return;
+    const key = ws.id || 'ws';
+    const now = Date.now();
+    if ((now - (_shadowLast.get(key) || 0)) < SHADOW_EVERY_MS) return;
+    _shadowLast.set(key, now);
+    runPresence('fact-list', (r) => {
+      try {
+        if (!r || r.ok !== true || !Array.isArray(r.facts)) return;    // no record yet, or the read failed — nothing to compare against
+        const facts = _facts.mergeFacts(r.facts, []);
+        const blocked = _facts.unreadable(facts);                      // a newer machine recorded something this build must not guess about
+        const rows = _derive.deriveSessions({
+          transcripts: painted.map((s) => ({ id: s && s.id, title: (s && s.title) || '' })),
+          facts,
+          liveState: {},
+        });
+        const shown = new Set(painted.map((s) => s && s.id).filter(Boolean));
+        const computed = new Set(rows.map((x) => x.id));
+        const onlyPainted = [...shown].filter((id) => !computed.has(id));
+        const onlyComputed = [...computed].filter((id) => !shown.has(id));
+        const renamed = rows.filter((x) => {
+          const src = painted.find((s) => s && s.id === x.id);
+          return src && (src.title || '') !== (x.title || '');
+        }).length;
+        const line = JSON.stringify({
+          ts: now, ws: key, facts: facts.length, painted: shown.size, computed: computed.size,
+          extraOnScreen: onlyPainted.length, missingFromScreen: onlyComputed.length, titleDiffs: renamed,
+          unreadable: blocked.length,
+        });
+        try { fs.appendFileSync(_shadowLog(), line + '\n'); } catch {}
+      } catch (e) {}   // a comparison that throws is a bug in the comparison, never in the sidebar
+    }, ws);
+  } catch (e) {}   // never reaches the user
+}
 function _histEnabled() { return readSettings().sessionHistory !== false; }   // default ON (shipped after the multiplayer sync + smoke pass); explicit false = off. Must mirror the renderer's toggle-init read.
 function _machineId() {
   try {

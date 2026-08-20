@@ -10,6 +10,10 @@
 //       Merges {newId: {..., continuesFrom: oldId}} last-writer-wins into the same CL_FILE title-write uses.
 //   subcommand "index-write": env CL_META, CL_SESSDIR, CL_OUT  (CLEAR-DRIFT-PATCH-PLAN FIX C2)
 //       Generates a human-readable Markdown session index (title + lineage) for one author's transcripts.
+//   subcommand "fact-append": env CL_FILE, CL_B64
+//       Appends ONE already-minted session fact (rename/clear/delete) to this author's facts/<login>.jsonl.
+//   subcommand "fact-read":   env CL_WT, CL_BR
+//       Prints every author's session facts from origin/<br> as one JSON line, unmerged and unordered.
 //
 // CommonJS on purpose (the repo's package.json has no "type":"module").
 
@@ -711,6 +715,104 @@ function liveHolder() {
   process.stdout.write(JSON.stringify({ ok: false, op: 'presence-set', error: 'already-live', by: holder.name || holder.login, login: holder.login }) + '\n');
 }
 
+// --- session facts: the append-only record of renames, clears and deletes ----------------------
+// The app mints each fact (lib/sessionFacts.js) where the unique id and the app's own clock live,
+// and hands it here already serialized. This side stays a DUMB APPENDER on purpose: it validates
+// that what it was given is one well-formed line and adds it to the end of the file. It never
+// rewrites, never merges, and never decides anything — every decision has already been made by the
+// time a fact reaches disk, and a writer that could rewrite is a writer that could lose a fact.
+
+// subcommand "fact-append": env CL_FILE (facts/<author>.jsonl), CL_B64 (base64 of the fact's JSON).
+// Base64 because a fact carries a display name, which is arbitrary user text that must survive the
+// shell intact — the same reason title-set takes its name that way.
+// APPEND, never read-modify-write: the cost of adding a fact stays constant no matter how long the
+// record grows, and a file that is only ever appended to cannot be mistaken for one that was
+// rewritten (which is the ambiguity the transcript exporter stamps exist to resolve).
+function factAppend() {
+  const f = process.env.CL_FILE;
+  const b64 = process.env.CL_B64 || '';
+  if (!f) { process.stderr.write('fact-append: no file\n'); process.exit(1); }
+  const raw = pyB64Decode(b64);
+  if (!raw) { process.stderr.write('fact-append: empty fact\n'); process.exit(1); }
+  const line = String(raw).replace(/[\r\n]+/g, ' ').trim();   // one fact per line is the whole format; a newline inside would split it in two
+  let parsed = null;
+  try { parsed = JSON.parse(line); } catch (e) { process.stderr.write('fact-append: not json\n'); process.exit(1); }
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'string' || !parsed.id) {
+    process.stderr.write('fact-append: no id\n'); process.exit(1);       // an id-less fact would break the merge for everyone, so refuse it at the door
+  }
+  if (!Number.isFinite(Number(parsed.ts))) { process.stderr.write('fact-append: no timestamp\n'); process.exit(1); }
+  try {
+    fs.mkdirSync(f.replace(/[\\/][^\\/]*$/, ''), { recursive: true });
+    fs.appendFileSync(f, line + '\n');
+  } catch (e) {
+    process.stderr.write('fact-append: write failed\n'); process.exit(1);
+  }
+}
+
+// subcommand "fact-read": env CL_WT, CL_BR. Reads every author's facts/*.jsonl straight off
+// origin/<br> — no worktree merge, like title-read — and prints the union as one JSON line.
+// Ordering and de-duplication are deliberately NOT done here: the app merges with the same function
+// both machines use, so the answer cannot depend on which side did the reading.
+function factRead() {
+  const wt = process.env.CL_WT;
+  const br = process.env.CL_BR;
+  const git = (...a) => {
+    const r = spawnSync('git', ['-C', wt, ...a], { encoding: 'utf8' });
+    return r.stdout || '';
+  };
+  const paths = git('ls-tree', '-r', '--name-only', 'origin/' + br, '--', 'facts/')
+    .split('\n')
+    .filter((p) => p.endsWith('.jsonl'));
+  const out = [];
+  for (const p of paths) {
+    const text = git('show', 'origin/' + br + ':' + p) || '';
+    for (const l of text.split('\n')) {
+      const t = l.trim();
+      if (!t) continue;
+      let o = null;
+      try { o = JSON.parse(t); } catch (e) { continue; }   // one torn line must not cost the reader the other facts in the file
+      if (!o || typeof o !== 'object' || typeof o.id !== 'string' || !o.id) continue;
+      if (!Number.isFinite(Number(o.ts))) continue;
+      out.push(o);
+    }
+  }
+  process.stdout.write(JSON.stringify({ ok: true, op: 'fact-read', facts: out }) + '\n');
+}
+
+// subcommand "fact-restore": env CL_FILE (this author's facts file), CL_SAVED (a snapshot of it).
+// Used only by the conflict path in sessions-sync.sh. A hard reset to origin is how that path stops
+// a merge conflict from wedging sync forever, and everything else it discards is re-derivable from
+// this machine — but a fact is not. A rename or a delete recorded here and not yet pushed exists
+// NOWHERE else, so the reset would silently undo a decision the user already made and saw take
+// effect. Unions the snapshot back over whatever origin had, keeping one copy per id.
+function factRestore() {
+  const f = process.env.CL_FILE;
+  const saved = process.env.CL_SAVED;
+  if (!f || !saved) return;
+  const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch (e) { return ''; } };
+  const seen = new Set();
+  const lines = [];
+  // Origin's copy first so its ordering is preserved, then anything of ours it did not have.
+  for (const src of [read(f), read(saved)]) {
+    for (const l of src.split('\n')) {
+      const t = l.trim();
+      if (!t) continue;
+      let o = null;
+      try { o = JSON.parse(t); } catch (e) { continue; }
+      if (!o || typeof o.id !== 'string' || !o.id || seen.has(o.id)) continue;
+      seen.add(o.id);
+      lines.push(t);
+    }
+  }
+  if (!lines.length) return;
+  try {
+    fs.mkdirSync(f.replace(/[\\/][^\\/]*$/, ''), { recursive: true });
+    const tmp = f + '.tmp';
+    fs.writeFileSync(tmp, lines.join('\n') + '\n');
+    fs.renameSync(tmp, f);
+  } catch (e) {}   // best effort: the conflict path has already decided not to fail the whole sync
+}
+
 const sub = process.argv[2];
 if (sub === 'title-write') {
   titleWrite();
@@ -720,6 +822,12 @@ if (sub === 'title-write') {
   lineageWrite();
 } else if (sub === 'meta-evict') {
   metaEvict();
+} else if (sub === 'fact-append') {
+  factAppend();
+} else if (sub === 'fact-read') {
+  factRead();
+} else if (sub === 'fact-restore') {
+  factRestore();
 } else if (sub === 'index-write') {
   indexWrite();
 } else if (sub === 'presence-filter') {
