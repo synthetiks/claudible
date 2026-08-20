@@ -2948,6 +2948,7 @@ ipcMain.handle('workspace:adopt', (e, payload) => new Promise((resolve) => {
           kind: 'local', slug, adopted: true, path: r.path,
           repoId: m ? `${m[1]}/${m[2]}` : undefined, createdAt: Date.now() };
         registry.workspaces.push(ws); registry.activeId = ws.id; activeWorkspace = ws; saveRegistry();
+        recordSessionFact(ws, 'workspace.adopted', { workspaceId: ws.id });   // recorded, not yet read — same reasoning as the dismissal below
         resolve(Object.assign({ ok: true, workspace: ws, repo: !!r.repo, claudeTracked: !!r.claudeTracked, excluded: !!r.excluded },
           openWorkspaceInTab(ws, targetTab)));
       });
@@ -3029,6 +3030,11 @@ ipcMain.handle('workspace:rename', async (e, payload) => {
   }
 
   ws.label = label; saveRegistry();
+  // The project's new name goes into the shared record as well as this machine's own registry. The
+  // registry is machine-local and always will be — it holds paths and window state that mean nothing
+  // on another machine — but the NAME is a fact about the project rather than about this install, and
+  // recording it is what lets a collaborator's view be computed rather than guessed at.
+  recordSessionFact(ws, 'workspace.renamed', { workspaceId: ws.id, label });
   syncShare();
   return { ok: true, label, repoRenamed, repoUrl, notice };
 });
@@ -3097,6 +3103,11 @@ function workspaceDeleteCore(id, force, keepFolder) { return new Promise((resolv
     {
       const keys = repoTombstoneKeys(ws);
       if (keys.length) registry.dismissedRepos = Array.from(new Set([...(registry.dismissedRepos || []), ...keys]));
+      // Recorded, but read by nobody yet, and deliberately so: whether dismissing a project HERE
+      // should hide it on the other machine is a product question nobody has answered. Writing the
+      // fact now costs nothing, is additive, and means the answer can be applied later without
+      // needing a history that was never kept. Reading it is a separate decision from recording it.
+      recordSessionFact(ws, 'workspace.dismissed', { workspaceId: ws.id });
       if (!Number.isFinite(ws.ghId) && ws.owner && (ws.repoName || ws.slug)) {
         const snap = { owner: ws.owner, repoName: ws.repoName, slug: ws.slug, ghId: ws.ghId };
         backfillRepoIdentity(snap).then((got) => {

@@ -147,5 +147,27 @@ ok('continuations are applied to the list',
 ok('the older link is still written, so a machine on the previous build keeps working',
   /runPresence\(`lineage-set/.test(MAIN_NC) && /runPresence\(`title-set/.test(MAIN_NC));
 
+// ---- project-level facts ----
+// WHAT IS AND IS NOT WORTH MOVING, since this was nearly a much larger refactor: the workspace
+// registry is machine-local and never synced — it holds paths, window state and clone flags that mean
+// nothing on another machine — so its ~39 in-place writes have exactly ONE writer each. Editing
+// single-writer local state in place is not the defect this work exists to remove; two machines
+// editing their own copy of a SHARED value is. So only the genuinely shared project fact moves: its
+// NAME. The rest stay exactly where they are, and pinning them would have been churn guarding
+// nothing.
+ok('renaming a project records the new name as a fact',
+  /recordSessionFact\(ws, 'workspace\.renamed', \{ workspaceId: ws\.id, label \}\)/.test(MAIN_NC));
+ok('the local registry is still written too — it holds machine-local things the record must not own',
+  /ws\.label = label; saveRegistry\(\);/.test(MAIN_NC));
+ok('adopting a project is recorded',
+  /recordSessionFact\(ws, 'workspace\.adopted'/.test(MAIN_NC));
+ok('dismissing a project is recorded',
+  /recordSessionFact\(ws, 'workspace\.dismissed'/.test(MAIN_NC));
+// Recorded is not the same as READ. Whether dismissing a project here should hide it on the other
+// machine is a product question nobody has answered, and applying an unanswered decision would be
+// worse than waiting. The projection is deliberately not looking at these yet.
+ok('project facts are recorded but not yet applied to what is shown',
+  !/f\.type === 'workspace\./.test(MAIN_NC));
+
 console.log(`session-facts-wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
