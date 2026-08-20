@@ -21,9 +21,13 @@ const APP = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
 const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 // Comment-free views. The ORDERING assertions below cap the distance between two statements, and every one of
 // them has broken at least once because an explanatory COMMENT grew between them — the code was always correct.
-// Stripping comments first measures the thing the check is actually about. ([^:] keeps https:// intact.)
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-const MAIN_NC = stripComments(MAIN), APP_NC = stripComments(APP);
+// Stripping comments first measures the thing the check is actually about.
+// The stripper lives in test/_strip-comments.js and is literal-aware: the two-regex version this used to
+// inline treated a `/*` inside a LINE comment (main.js:549's `setup/**` glob) as a block-comment opener, and
+// the first real `/* … */` added anywhere below it deleted 305KB of main.js before these pins ran. stripCode
+// also refuses to return a corpus that lost most of its bytes, so the next variant of that fails loudly.
+const { stripCode } = require('./_strip-comments.js');
+const MAIN_NC = stripCode(MAIN, 'main.js'), APP_NC = stripCode(APP, 'renderer/app.js');
 
 let pass = 0, fail = 0;
 const ok = (label, c) => c ? pass++ : (fail++, console.error('  FAIL ' + label));
