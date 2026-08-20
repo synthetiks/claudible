@@ -58,17 +58,11 @@ ok('nowMs falls back to local time for a standalone run',
 
 // ---- reading: the record decides what is shown ----
 ok('the session list drops what the record says was deleted',
-  /applyFactDeletions/.test(MAIN_NC) && /resolve\(known \? applyFactDeletions\(parsed, known\) : parsed\)/.test(MAIN_NC));
+  /resolve\(known \? applySessionFacts\(parsed, known\) : parsed\)/.test(MAIN_NC));
 ok('names resolve with the record winning over the older map',
   /resolve\(known \? applyFactTitles\(titles, known\) : titles\)/.test(MAIN_NC));
-ok('a cold cache paints exactly as before and fetches for next time',
-  /if \(!known\) refreshSessionFacts\(ws\);/.test(MAIN_NC));
-// Continuations are recorded but still resolved the old way. Two mechanisms folding the same row
-// would leave no way to tell which one was wrong.
-ok('only renames and deletions are applied to the list so far',
-  /applyFactDeletions[\s\S]{0,700}?f\.type === 'session\.renamed' \|\| f\.type === 'session\.deleted'/.test(MAIN_NC));
 ok('a projection that throws returns the list untouched rather than blanking the sidebar',
-  /function applyFactDeletions[\s\S]{0,900}?catch \(e\) \{ return list; \}/.test(MAIN_NC));
+  /function applySessionFacts[\s\S]{0,1000}?catch \(e\) \{ return list; \}/.test(MAIN_NC));
 
 // ---- the record must never be pruned or rewritten ----
 ok('appending a fact is an append, never a read-modify-write',
@@ -95,6 +89,63 @@ ok('a changed handle still re-arms the socket',
   /console\.log\('\[live\] host cleared onto a new handle[\s\S]{0,400}?claudible\.liveConnect\(rec\.tabId, moved, collabName\(\)\)/.test(APP_NC));
 ok('the auto-close for a genuinely ended host is still reachable',
   /if \(pollOk && rec\.peerWsId === activeWsId && LIVE_RECONNECTABLE\.has\(rec\.liveState\)\) ended\.push\(rec\.tabId\);/.test(APP_NC));
+
+// ---- facts reach a connected peer over the socket, not by waiting for the next sync ----
+// The record travels by git sync, which measured about five minutes in the field. Anything a person
+// is watching for has to ride the channel that is already open.
+const SRV = fs.readFileSync(path.join(ROOT, 'share/server.js'), 'utf8');
+const SRV_NC = stripCode(SRV, 'share/server.js');
+ok('the server can push one fact and a snapshot',
+  /function pushFact\(fact\)/.test(SRV_NC) && /function pushFacts\(list\)/.test(SRV_NC));
+ok('both are exported',
+  /pushFacts, pushFact,/.test(SRV_NC));
+ok('a fact is unioned by id, never replacing another',
+  /function pushFact[\s\S]{0,400}?lastFacts\.some\(\(f\) => f && f\.id === fact\.id\)/.test(SRV_NC));
+// Same privacy rule as scrollback, status and history: a private workspace's session NAMES must not
+// leak, and the cache must not survive to replay at a later joiner.
+ok('nothing is pushed while the mirror is paused',
+  /function pushFact\(fact\) \{\s*\n\s*if \(paused/.test(SRV_NC) && /function pushFacts\(list\)[\s\S]{0,200}?if \(paused\) \{ lastFacts = \[\]; return; \}/.test(SRV_NC));
+ok('pausing drops the cached facts',
+  /if \(paused\) \{ ring = Buffer\.alloc\(0\); lastStatus = null; lastHistory = \[\]; lastFacts = \[\]; \}/.test(SRV_NC));
+ok('a late joiner is replayed what already happened',
+  /if \(!paused && lastFacts\.length\) ws\.send/.test(SRV_NC));
+ok('recording a fact also streams it to guests',
+  /seedSessionFact\(ws, fact\);[\s\S]{0,200}?share\.pushFact\(fact\)/.test(MAIN_NC));
+ok('recording a fact also seeds this machine, so the host does not wait on its own sync',
+  /function seedSessionFact/.test(MAIN_NC));
+// A seeded fact must take effect at once WITHOUT making a stale cache look freshly read — otherwise a
+// rename made here would suppress the sync that carries the collaborator's.
+ok('seeding preserves the last fetch time',
+  /_factCache\.set\(key, \{ ts: \(cur && cur\.ts\) \|\| 0, facts: merged \}\)/.test(MAIN_NC));
+ok('what we have and when to refresh are separate questions',
+  /function sessionFactsNow/.test(MAIN_NC) && /function sessionFactsStale/.test(MAIN_NC));
+// BOTH readers, counted — not "at least one". The first version of this pin matched either call
+// site, so breaking one of the two left it green: a session list that stopped refreshing while the
+// title list still did would have shipped with the suite reporting nothing wrong.
+ok('both readers refresh on staleness, not on emptiness',
+  (MAIN_NC.match(/if \(sessionFactsStale\(ws\)\) refreshSessionFacts\(ws\);/g) || []).length === 2);
+ok('no reader still refreshes only when it has nothing at all',
+  !/if \(!known\) refreshSessionFacts\(ws\);/.test(MAIN_NC));
+ok('a joined guest accepts streamed facts',
+  /case 'session-fact': acceptStreamedFact\(r, m\.fact\); break;/.test(MAIN_NC) && /case 'session-facts':/.test(MAIN_NC));
+ok('a streamed fact is normalised before it can reach the projection',
+  /function acceptStreamedFact[\s\S]{0,400}?_facts\.makeFact\(raw\)[\s\S]{0,200}?if \(!f\) return;/.test(MAIN_NC));
+ok('streamed facts are unioned, not appended blindly',
+  /_streamedFacts = _facts\.mergeFacts\(_streamedFacts, \[f\]\)/.test(MAIN_NC));
+ok('streamed facts are bounded',
+  /_streamedFacts\.length > 500/.test(MAIN_NC));
+ok('streamed facts are folded into what the projection reads',
+  /function sessionFactsNow[\s\S]{0,400}?_facts\.mergeFacts\(own, _streamedFacts\)/.test(MAIN_NC));
+ok('a guest joining midway gets a snapshot, not only what happens next',
+  /function _pushFactsToShare[\s\S]{0,400}?share\.pushFacts\(known \|\| \[\]\)/.test(MAIN_NC));
+ok('the snapshot is gated on the workspace being shareable',
+  /function _pushFactsToShare[\s\S]{0,300}?isShareable\(ws\)/.test(MAIN_NC));
+
+// ---- the projection now folds a clear, which is what removes the guest's duplicate row ----
+ok('continuations are applied to the list',
+  /function applySessionFacts[\s\S]{0,700}?f\.type === 'session\.cleared'/.test(MAIN_NC));
+ok('the older link is still written, so a machine on the previous build keeps working',
+  /runPresence\(`lineage-set/.test(MAIN_NC) && /runPresence\(`title-set/.test(MAIN_NC));
 
 console.log(`session-facts-wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -946,6 +946,18 @@ function syncShare() {
   try { setSharePaused(derivePaused(mirrorWs())); } catch {}   // pause tracks the SHARED tab's workspace, so the host merely focusing a private tab can't pause (or unpause) the mirror
   try { share.setWorkspaces(grantedList()); } catch {}
   try { _pushHistoryToShare(); } catch {}                  // guests' Session-History feed follows the live workspace (share start / foreground / ws switches all route through here)
+  try { _pushFactsToShare(); } catch {}                    // and the shared record's recent facts, gated identically
+}
+// The recent session facts for the SHARED workspace, pushed on the same transitions as history and
+// gated by the same rule: only a shareable workspace's names leave this machine, and the server drops
+// its cache while paused. A guest who joins midway gets this snapshot instead of only what happens
+// from now on — without it, a clear that occurred a minute before they arrived would still be
+// waiting on their own sync, which is the delay this whole channel exists to remove.
+function _pushFactsToShare() {
+  if (!share.status().running) return;
+  const ws = mirrorWs();
+  const known = (ws && ws.id && isShareable(ws)) ? sessionFactsNow(ws) : null;
+  share.pushFacts(known || []);
 }
 // History over the live channel (SESSION-HISTORY.md chose live-channel over git): push the ACTIVE workspace's
 // log to guests — a full snapshot on syncShare transitions, per-entry increments on append/stat-stamp. Gated
@@ -1279,6 +1291,18 @@ function openLiveSocket(tabId) {
         }
         break;
       }
+      // Session facts streamed by the host we joined: a rename, a clear or a delete arriving the
+      // moment it happens instead of whenever the next sync gets round to it. These are an
+      // ACCELERATOR and never the record — the same facts reach this machine through its own sync
+      // and are unioned by id, so one seen twice collapses and one seen only here is replaced by the
+      // identical copy later. Normalised through makeFact so a skewed or hostile host cannot hand the
+      // projection a shape it does not expect; anything malformed is dropped without comment.
+      case 'session-facts': {
+        const list = Array.isArray(m.facts) ? m.facts.slice(-500) : [];
+        for (const f of list) acceptStreamedFact(r, f);
+        break;
+      }
+      case 'session-fact': acceptStreamedFact(r, m.fact); break;
       default: break;   // workspaces / ws-sessions / ws-transcript / rtc: unused by the native joined tab
     }
   });
@@ -1798,7 +1822,7 @@ ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => {
   runPresence('title-list', (r) => {
     const titles = (r && r.titles) || {};
     const known = sessionFactsNow(ws);
-    if (!known) refreshSessionFacts(ws);
+    if (sessionFactsStale(ws)) refreshSessionFacts(ws);
     resolve(known ? applyFactTitles(titles, known) : titles);
   }, ws);
 }));
@@ -1846,8 +1870,8 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
     // still has the file — the decision outranks the leftover. Applied only when the record is
     // already in hand; a cold cache paints exactly as before and fetches for next time.
     const known = sessionFactsNow(ws);
-    resolve(known ? applyFactDeletions(parsed, known) : parsed);
-    if (!known) refreshSessionFacts(ws);
+    resolve(known ? applySessionFacts(parsed, known) : parsed);
+    if (sessionFactsStale(ws)) refreshSessionFacts(ws);
     // The sidebar already has its list. Only now, and at most once every few minutes per project,
     // check what the whole projection would have produced and write down any disagreement.
     shadowCompareSessions(ws, parsed);
@@ -4319,7 +4343,31 @@ function recordSessionFact(ws, type, data) {
     if (!fact) return;                                       // refused at the door rather than written malformed
     const b64 = Buffer.from(_facts.serializeFact(fact), 'utf8').toString('base64');
     runPresence(`fact-append '${b64}'`, () => {}, ws);        // rides the same per-workspace chain as every other branch write
+
+    // Everyone who can see it, sees it NOW. The write above is the RECORD and it travels by git sync,
+    // which measured about five minutes to reach the other machine — fine for durability, useless for
+    // anything a person is watching happen. So the fact also goes straight down the live socket that
+    // is already open, and into this machine's own cache so the host's sidebar does not wait on its
+    // own sync either. Neither shortcut is authoritative: both sides still hold the same record and
+    // still compute their own view from it, and a fact that arrives by both routes is unioned by id.
+    seedSessionFact(ws, fact);
+    try { if (share.status().running) share.pushFact(fact); } catch (e) {}
   } catch (e) {}   // recording is never allowed to break the thing it records
+}
+
+// Put a fact into this machine's cache immediately, however it arrived — recorded here, or streamed
+// from a host we are joined to. Keeps the cache a merge rather than a replace, so a fact arriving by
+// socket and later by sync collapses to one.
+function seedSessionFact(ws, fact) {
+  try {
+    if (!fact || !fact.id) return;
+    const key = (ws && ws.id) || 'ws';
+    const cur = _factCache.get(key);
+    const merged = _facts.mergeFacts((cur && cur.facts) || [], [fact]);
+    // Keep the existing fetch age: a seeded fact must not make a stale cache look freshly read, or a
+    // rename made here would suppress the sync that carries the collaborator's.
+    _factCache.set(key, { ts: (cur && cur.ts) || 0, facts: merged });
+  } catch (e) {}
 }
 
 // --- reading the shared record ---------------------------------------------------------------
@@ -4335,9 +4383,38 @@ function recordSessionFact(ws, type, data) {
 const FACTS_TTL_MS = 20 * 1000;
 const _factCache = new Map();
 const _factFetching = new Set();
+// WHAT WE HAVE, versus WHEN TO GO LOOKING — deliberately two questions. Whatever facts are already
+// in hand are always used: they are decisions somebody has already made, and declining to apply a
+// known one because the last fetch was a minute ago would be throwing away the truth to punish the
+// clock. Age only decides whether to refresh, so a fact seeded from the live socket takes effect at
+// once without making a stale cache look freshly read.
+// Facts streamed to us by a host we are joined to. Held apart from the per-workspace cache on
+// purpose: a joined tab knows which HOST it is talking to, not which of our own projects their
+// session belongs to. Keeping one pool sidesteps that mapping entirely and is safe because a
+// session id is unique everywhere — a fact about a session this machine does not have is simply
+// inert, and the projection only ever acts on transcripts that are actually here.
+let _streamedFacts = [];
+function acceptStreamedFact(r, raw) {
+  try {
+    if (!raw || typeof raw !== 'object') return;
+    const f = _facts.makeFact(raw);
+    // An unrecognised or malformed fact is dropped rather than guessed at. It costs nothing: this
+    // channel is only ever a head start, and the same fact reaches us properly through our own sync.
+    if (!f) return;
+    _streamedFacts = _facts.mergeFacts(_streamedFacts, [f]);
+    if (_streamedFacts.length > 500) _streamedFacts = _streamedFacts.slice(-500);
+  } catch (e) {}
+}
+
 function sessionFactsNow(ws) {
   const e = _factCache.get((ws && ws.id) || 'ws');
-  return (e && (Date.now() - e.ts) < FACTS_TTL_MS) ? e.facts : null;
+  const own = (e && e.facts) || [];
+  if (!own.length && !_streamedFacts.length) return null;
+  return _streamedFacts.length ? _facts.mergeFacts(own, _streamedFacts) : own;
+}
+function sessionFactsStale(ws) {
+  const e = _factCache.get((ws && ws.id) || 'ws');
+  return !e || (Date.now() - e.ts) >= FACTS_TTL_MS;
 }
 function refreshSessionFacts(ws) {
   const key = (ws && ws.id) || 'ws';
@@ -4358,13 +4435,17 @@ function refreshSessionFacts(ws) {
 // writes it into its OWN record, every machine unions every record, and all of them reach the same
 // answer without anyone touching anyone else's file.
 //
-// Only renames and deletions are applied here. Continuations are recorded but still resolved the way
-// they always were — moving that too is its own change, with its own proof, and doing both at once
-// would mean two mechanisms folding the same row and no way to tell which one was wrong.
-function applyFactDeletions(list, facts) {
+// CONTINUATIONS ARE APPLIED HERE TOO, as of this phase. They were withheld at first on purpose —
+// two mechanisms folding the same row would have left no way to tell which one was wrong — and the
+// field settled it: with the fold still waiting on the older link to arrive by sync, a guest kept a
+// duplicate row for minutes after the host cleared, and clicking any other session repainted it
+// straight back from the same stale state. The older link is still written and still read by builds
+// that predate the record, so nothing regresses for a machine behind on versions; this simply stops
+// waiting for it where the record already knows the answer.
+function applySessionFacts(list, facts) {
   try {
     if (!Array.isArray(list) || !facts || !facts.length) return list;
-    const usable = facts.filter((f) => f && (f.type === 'session.renamed' || f.type === 'session.deleted'));
+    const usable = facts.filter((f) => f && (f.type === 'session.renamed' || f.type === 'session.deleted' || f.type === 'session.cleared'));
     if (!usable.length) return list;
     const rows = _derive.deriveSessions({ transcripts: list.map((s) => ({ id: s && s.id })), facts: usable });
     const keep = new Set(rows.map((r) => r.id));

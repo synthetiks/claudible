@@ -175,6 +175,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
   let ring = Buffer.alloc(0);
   let lastStatus = null;
   let lastHistory = [];   // the active workspace's session-history log (host-pushed) — replayed to late joiners like lastStatus
+let lastFacts = [];     // the shared record's recent session facts (renames/clears/deletes) — same replay + privacy rules as lastHistory
   let paused = false;            // host is in a NON-granted workspace → stream nothing to guests
   let workspaces = [];           // granted workspace library shown to guests: [{id,label,kind,live}]
   const clients = new Set();
@@ -395,6 +396,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
       // Never replay status/scrollback/history while paused — the live workspace is private (belt-and-suspenders with the setPaused clear).
       if (!paused && lastStatus) ws.send(JSON.stringify({ type: 'status', status: lastStatus }));
       if (!paused && lastHistory.length) ws.send(JSON.stringify({ type: 'history', entries: lastHistory }));
+      if (!paused && lastFacts.length) ws.send(JSON.stringify({ type: 'session-facts', facts: lastFacts }));   // a late joiner gets what already happened, not only what happens next
       if (!paused && ring.length) ws.send(ring);
     } catch {}
     if (mode === 'link') systemChat(name + ' joined');   // only on a fresh join, not on reconnect
@@ -573,7 +575,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
     requireApproval = opts.requireApproval !== false;
     hostName = cleanName(opts.name, 'Host');
     linkToken = newToken(); resumeTokens.clear();
-    ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; paused = false; workspaces = [];
+    ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; lastFacts = []; paused = false; workspaces = [];
     server = http.createServer((req, res) => {
       // Identity marker on EVERY response, including the 403 and the 404. The tunnel self-check
       // (share/cloudflared.js verifyTunnel) dials our own public URL and requires this header before it will
@@ -692,7 +694,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
   // The private workspace NAME is deliberately NOT broadcast (guests show a generic "private" message).
   function setPaused(p) {
     paused = !!p;
-    if (paused) { ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; }   // history is per-workspace content, same privacy rule as scrollback/status
+    if (paused) { ring = Buffer.alloc(0); lastStatus = null; lastHistory = []; lastFacts = []; }   // history is per-workspace content, same privacy rule as scrollback/status
     const s = JSON.stringify({ type: 'paused', paused });
     for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
   }
@@ -703,6 +705,30 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
     lastHistory = Array.isArray(entries) ? entries.slice(-200) : [];
     if (paused) { lastHistory = []; return; }
     const s = JSON.stringify({ type: 'history', entries: lastHistory });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  }
+  // Session facts over the live channel — the same shape as history above, for the same reason and
+  // then one more. WHY THIS EXISTS: a rename, a clear or a delete is written to the shared record and
+  // travels between machines by git sync, which in the field took about FIVE MINUTES to arrive. That
+  // is unusable for anything a person is watching for, and it is why a guest kept seeing a duplicate
+  // row after the host cleared. The socket is already open and already carries the session's status;
+  // a fact is a few hundred bytes on it. Git stays the path for peers who are not connected, and for
+  // catching up on everything that happened while they were away — so this is an accelerator, never
+  // the record itself. Nothing here is authoritative: every machine still computes its own view from
+  // its own copy of the record, and a fact that arrives twice is unioned by id on the far side.
+  // Privacy is the same rule as scrollback, status and history: nothing while paused, and the cache
+  // is dropped so a private workspace's session names can never replay to someone who joins later.
+  function pushFacts(list) {
+    lastFacts = Array.isArray(list) ? list.slice(-500) : [];
+    if (paused) { lastFacts = []; return; }
+    const s = JSON.stringify({ type: 'session-facts', facts: lastFacts });
+    for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
+  }
+  function pushFact(fact) {
+    if (paused || !fact || typeof fact !== 'object' || !fact.id) return;
+    if (!lastFacts.some((f) => f && f.id === fact.id)) lastFacts.push(fact);   // union by id: a fact is one occurrence and never replaces another
+    if (lastFacts.length > 500) lastFacts = lastFacts.slice(-500);
+    const s = JSON.stringify({ type: 'session-fact', fact });
     for (const ws of clients) { if (ws.readyState === ws.OPEN) { try { ws.send(s); } catch {} } }
   }
   function pushHistoryEntry(entry) {
@@ -749,7 +775,7 @@ function createShareServer({ onInput, onPaste, onGuests, onRoster, onApprovalReq
     return { running: !!server, port, token: linkToken, readOnly, requireApproval, guests: clients.size, hostName, paused };
   }
 
-  return { start, stop, broadcast, broadcastStatus, broadcastChat, systemChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
+  return { start, stop, broadcast, broadcastStatus, broadcastChat, systemChat, broadcastTypist, setSize, setPaused, setWorkspaces, pushHistory, pushHistoryEntry, pushFacts, pushFact, resetRing, resetStatus, regenerateLink, kickGuest, decideApproval, status, hostVoiceSet, audioFromHost };
 }
 
 module.exports = { createShareServer, uniqueName, cleanName, stripCtrlV, sanitizePaste, isTypingBytes };
