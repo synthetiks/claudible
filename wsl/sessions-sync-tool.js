@@ -361,7 +361,7 @@ function titleWrite() {
     ? pairs[idx][1].__pairs.slice()
     : [];
   setPair(entryPairs, 'title', n);
-  setPair(entryPairs, 'ts', Date.now());
+  setPair(entryPairs, 'ts', nowMs());
   const entry = obj(entryPairs);
   if (idx !== -1) pairs[idx][1] = entry; else pairs.push([i, entry]);
 
@@ -369,6 +369,23 @@ function titleWrite() {
   const tmp = f + '.tmp';
   fs.writeFileSync(tmp, outStr); // json.dump writes no trailing newline
   fs.renameSync(tmp, f); // os.replace == atomic rename
+}
+
+// The clock a shared stamp is written with must be the SAME one every peer reads it against, and it
+// must not be this process's. Node here runs on the sync side, whose clock drifts after the host
+// sleeps — the defect that made live rows read stale until the presence stamps were moved off it.
+// A rename's stamp decides which of two collaborators' names wins, so a drifted one silently hands
+// the argument to whoever slept longest.
+// MILLISECONDS, deliberately: the app injects CLAUDIBLE_NOW in whole seconds for the presence
+// arbiter, and reusing it here would drop this stamp back to second precision — which is exactly the
+// resolution that used to let two renames inside one second tie and leave the two machines
+// disagreeing permanently. So the app injects a millisecond companion and this reads that; an absent
+// or malformed value falls back to the local clock, which is what a direct or standalone invocation
+// gets and is no worse than what this did before.
+function nowMs() {
+  const env = Number(process.env.CLAUDIBLE_NOW_MS);
+  if (Number.isFinite(env) && env > 0) return env;
+  return Date.now();
 }
 
 // Replace-in-place-or-append a [key, value] pair inside an ordered __pairs array (mutates + returns nothing).

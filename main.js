@@ -1548,7 +1548,7 @@ function runPresence(args, cb, ws, opts) {
   // process's clock (Electron = Windows/NTP, the exact domain the renderer reads) so write and read share a time
   // base. Computed inside exec (RUN time) so a coalesced/queued beat stays as fresh as one issued now;
   // sessions-sync.sh + sessions-sync-tool.js fall back to local time when it's unset (direct CLI / non-main callers).
-  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), onSpawn: opts && opts.onSpawn, extraEnv: `CLAUDIBLE_NOW=${Math.floor(Date.now() / 1000)} ` + ((opts && opts.extraEnv) || '') }).then(({ err, stdout }) => {
+  const exec = () => runner.runScript('sessions-sync.sh', `${args}`, { ws: w, timeout: 45000, detach: !!(opts && opts.detach), onSpawn: opts && opts.onSpawn, extraEnv: `CLAUDIBLE_NOW=${Math.floor(Date.now() / 1000)} CLAUDIBLE_NOW_MS=${Date.now()} ` + ((opts && opts.extraEnv) || '') }).then(({ err, stdout }) => {
       if (err) return cb && cb(null);
       let r = null; try { r = JSON.parse((stdout || '').trim() || '{}'); } catch {}
       cb && cb(r);
@@ -1793,7 +1793,15 @@ ipcMain.handle('title:set', (e, { id, name, wsId }) => new Promise((resolve) => 
   recordSessionFact(_wsById(wsId) || activeWorkspace, 'session.renamed', { sessionId: sid, title: String(name == null ? '' : name) });
   runPresence(`title-set '${sid}' '${b64}'`, (r) => resolve(r || { ok: false }), _wsById(wsId) || activeWorkspace);   // the RENAMED row's workspace — while a joined live tab is on screen, activeWorkspace is a different ws and the title would publish to the wrong repo's branch
 }));
-ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => { runPresence('title-list', (r) => resolve((r && r.titles) || {}), _wsById(wsId) || activeWorkspace); }));   // titles for the workspace the SIDEBAR shows, not whatever main is on
+ipcMain.handle('title:list', (e, wsId) => new Promise((resolve) => {
+  const ws = _wsById(wsId) || activeWorkspace;   // titles for the workspace the SIDEBAR shows, not whatever main is on
+  runPresence('title-list', (r) => {
+    const titles = (r && r.titles) || {};
+    const known = sessionFactsNow(ws);
+    if (!known) refreshSessionFacts(ws);
+    resolve(known ? applyFactTitles(titles, known) : titles);
+  }, ws);
+}));
 // CLEAR-DRIFT-PATCH-PLAN FIX C1: /clear mints a new session id, and the renderer's drift handler is the only
 // place that ever sees BOTH ids. Record the link as an additive `continuesFrom` field on the NEW id's entry in
 // the SAME meta/<login>.json map title:set merges into — no new branch layout, no new file. Same workspace rule
@@ -1833,10 +1841,16 @@ ipcMain.handle('session:list-ws', (e, wsId) => new Promise((resolve) => {
     let parsed;
     try { parsed = JSON.parse(String(stdout).trim() || '[]'); } catch { return fail('unparseable output'); }
     if (parsed && !Array.isArray(parsed) && parsed.error) return fail(parsed.error);
-    resolve(Array.isArray(parsed) ? parsed : []);
+    if (!Array.isArray(parsed)) return resolve([]);
+    // A session the shared record says was deleted everywhere is not shown, even when this machine
+    // still has the file — the decision outranks the leftover. Applied only when the record is
+    // already in hand; a cold cache paints exactly as before and fetches for next time.
+    const known = sessionFactsNow(ws);
+    resolve(known ? applyFactDeletions(parsed, known) : parsed);
+    if (!known) refreshSessionFacts(ws);
     // The sidebar already has its list. Only now, and at most once every few minutes per project,
-    // check what the shared record would have produced and write down any disagreement.
-    if (Array.isArray(parsed)) shadowCompareSessions(ws, parsed);
+    // check what the whole projection would have produced and write down any disagreement.
+    shadowCompareSessions(ws, parsed);
   });
 }));
 // Re-point an existing tab at 'new' | <session-id>. guardBusy: main refuses to kill a mid-turn Claude (ok:false → the
@@ -4306,6 +4320,78 @@ function recordSessionFact(ws, type, data) {
     const b64 = Buffer.from(_facts.serializeFact(fact), 'utf8').toString('base64');
     runPresence(`fact-append '${b64}'`, () => {}, ws);        // rides the same per-workspace chain as every other branch write
   } catch (e) {}   // recording is never allowed to break the thing it records
+}
+
+// --- reading the shared record ---------------------------------------------------------------
+// Reading costs a network fetch, and the sidebar asks for its list constantly, so the record is
+// cached briefly per workspace. A stale-but-recent answer is the right trade here: every fact is a
+// decision somebody already made and saw take effect locally, so the only thing the cache delays is
+// how fast the OTHER machine notices — and that was previously "never" for a delete.
+//
+// Deliberately NOT blocking: if the cache is cold the list resolves exactly as it always did and the
+// record is fetched for next time. A sidebar that is a few seconds behind is a much smaller problem
+// than a sidebar that waits on the network to paint, which is the failure the last-good-list rule
+// upstream exists to avoid.
+const FACTS_TTL_MS = 20 * 1000;
+const _factCache = new Map();
+const _factFetching = new Set();
+function sessionFactsNow(ws) {
+  const e = _factCache.get((ws && ws.id) || 'ws');
+  return (e && (Date.now() - e.ts) < FACTS_TTL_MS) ? e.facts : null;
+}
+function refreshSessionFacts(ws) {
+  const key = (ws && ws.id) || 'ws';
+  if (!ws || ws.kind !== 'repo' || _factFetching.has(key)) return;
+  _factFetching.add(key);
+  runPresence('fact-list', (r) => {
+    _factFetching.delete(key);
+    try {
+      if (r && r.ok === true && Array.isArray(r.facts)) _factCache.set(key, { ts: Date.now(), facts: _facts.mergeFacts(r.facts, []) });
+    } catch (e) {}
+  }, ws);
+}
+
+// Drop the sessions the shared record says are gone. THE POINT: deleting "everywhere" already removed
+// the transcript from every author's directory, but the NAME could survive in a collaborator's own
+// map, because no author may write into another author's file — so the other machine kept showing a
+// row for a conversation that no longer existed. A fact needs no such reach: the deleting machine
+// writes it into its OWN record, every machine unions every record, and all of them reach the same
+// answer without anyone touching anyone else's file.
+//
+// Only renames and deletions are applied here. Continuations are recorded but still resolved the way
+// they always were — moving that too is its own change, with its own proof, and doing both at once
+// would mean two mechanisms folding the same row and no way to tell which one was wrong.
+function applyFactDeletions(list, facts) {
+  try {
+    if (!Array.isArray(list) || !facts || !facts.length) return list;
+    const usable = facts.filter((f) => f && (f.type === 'session.renamed' || f.type === 'session.deleted'));
+    if (!usable.length) return list;
+    const rows = _derive.deriveSessions({ transcripts: list.map((s) => ({ id: s && s.id })), facts: usable });
+    const keep = new Set(rows.map((r) => r.id));
+    const out = list.filter((s) => s && s.id && keep.has(s.id));
+    return out.length === list.length ? list : out;
+  } catch (e) { return list; }   // a projection that throws must never blank the sidebar
+}
+
+// Resolve display names with the shared record winning over the older per-author map. Both are still
+// WRITTEN — a machine that has not updated yet reads only the map, and must keep seeing its
+// collaborator's renames — but where the record has an opinion it is the newer mechanism and the one
+// both machines compute identically, so it decides.
+function applyFactTitles(titles, facts) {
+  try {
+    if (!titles || typeof titles !== 'object' || !facts || !facts.length) return titles || {};
+    for (const f of facts) {
+      if (!f || f.type !== 'session.renamed') continue;
+      const sid = f.data && f.data.sessionId;
+      if (!sid || typeof sid !== 'string') continue;
+      const prev = titles[sid];
+      const prevTs = (prev && typeof prev === 'object' && Number(prev.ts)) || 0;
+      if (Number(f.ts) < prevTs) continue;                       // the map holds something newer — leave it
+      const cf = (prev && typeof prev === 'object' && prev.cf) || undefined;
+      titles[sid] = cf ? { n: String(f.data.title || ''), ts: Number(f.ts), cf } : { n: String(f.data.title || ''), ts: Number(f.ts) };
+    }
+    return titles;
+  } catch (e) { return titles || {}; }
 }
 
 // --- shadow comparison: prove the computed list before anything is computed FROM it ---------------

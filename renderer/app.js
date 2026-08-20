@@ -4643,6 +4643,30 @@ function reconcileJoinedTabs(pollOk) {
       // tunnel is spawning) — that's the opposite of "host ended". Hold the auto-close; the full stamp is
       // seconds away and the re-arm branch below will pick it up, or the short starting TTL clears it.
       if (peersForWs(rec.peerWsId).some((p) => p.session === rec.peer.session && p.starting)) continue;
+      // THE HOST CLEARED, they did not leave. /clear mints a NEW session id, so the lookup above —
+      // which asks for the id this tab joined with — finds nothing and everything downstream reads
+      // that as "host ended": the tab can auto-close, and until it does rec.peer.session names a
+      // conversation that no longer exists, which is what makes the mismatch flag fire and a second
+      // row appear for the id now being advertised.
+      // Same host, same project, different session = a continuation. Follow it.
+      const moved = rec.peer.login && peersForWs(rec.peerWsId).find((p) => p.login === rec.peer.login && p.url && p.token && p.session && p.session !== rec.peer.session);
+      if (moved) {
+        // The tunnel does NOT restart on a clear, so the handle is usually identical. Re-pointing the
+        // record is the whole fix in that case — re-dialling a socket that is already connected to
+        // the right host would drop a working session to fix a bookkeeping error.
+        if (moved.url === rec.peer.url && moved.token === rec.peer.token) {
+          console.log('[live] host cleared — following joined tab', rec.tabId, rec.peer.session, '→', moved.session);
+          rec.peer = moved;
+          continue;
+        }
+        console.log('[live] host cleared onto a new handle — re-arming joined tab', rec.tabId, '→', moved.url);
+        rec.peer = moved;
+        setLiveState(rec, 'connecting');
+        claudible.liveConnect(rec.tabId, moved, collabName())
+          .then((r) => { if (!r || !r.ok) setLiveState(rec, 'offline'); })
+          .catch((err) => { console.error('[live] re-arm rejected:', err); setLiveState(rec, 'offline'); });
+        continue;
+      }
       // The host stopped advertising = they ENDED the session. If our tab has already given up (offline) or is
       // futilely retrying (reconnecting) AND the presence poll genuinely succeeded, auto-leave back to the
       // single-person view instead of sitting on a dead "ended" tab. pollOk guards a transient fetch error;
