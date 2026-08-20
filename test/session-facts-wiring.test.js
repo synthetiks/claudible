@@ -169,5 +169,28 @@ ok('dismissing a project is recorded',
 ok('project facts are recorded but not yet applied to what is shown',
   !/f\.type === 'workspace\./.test(MAIN_NC));
 
+// ---- one projection, both machines ----
+// A guest is not a special case. Its sidebar is computed by the SAME handler, from the same record,
+// through the same function as the host's — that is the whole point of computing rather than storing,
+// and a second guest-only path would be two implementations of one answer, which is where the
+// original disagreement came from. Pinned as a single call site so nobody adds a parallel one.
+ok('exactly one place turns the record into rows',
+  (MAIN_NC.match(/applySessionFacts\(parsed, known\)/g) || []).length === 1);
+ok('the guest feeds streamed facts into that same path, not a private one',
+  /function sessionFactsNow[\s\S]{0,400}?_streamedFacts/.test(MAIN_NC) && !/deriveSessions\(/.test(APP_NC));
+
+// ---- the dual-write must not be removed by accident ----
+// The older per-author name map is what a machine on a previous release reads; it knows nothing about
+// the record. Cutting these writes is the last step of this work and it CANNOT be gated by any
+// runtime check — a collaborator who is simply not connected right now is undetectable, and the
+// sessions branch outlives any one session. It is a deliberate release-time decision, made once both
+// owners have confirmed, and until then these two lines are load-bearing for someone else's machine.
+ok('renames are still written to the older per-author map',
+  /runPresence\(`title-set '\$\{sid\}' '\$\{b64\}'`/.test(MAIN_NC));
+ok('continuations are still written to the older per-author map',
+  /runPresence\(`lineage-set '\$\{sid\}' '\$\{oid\}'`/.test(MAIN_NC));
+ok('neither write is behind a condition',
+  !/if \([^)]*\)\s*runPresence\(`title-set/.test(MAIN_NC) && !/if \([^)]*\)\s*runPresence\(`lineage-set/.test(MAIN_NC));
+
 console.log(`session-facts-wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
