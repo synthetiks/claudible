@@ -371,6 +371,11 @@ function setActiveTab(tabId) {
   activeSession = (rec.session && rec.session !== 'new') ? rec.session : null;
   rec.attention = false;                              // you're looking at it now — drop any "finished while away" pulse
   if (sidebarReady) {   // guard: the sessions/workspace section's consts aren't initialized during the boot tab
+    // Paint the highlight NOW, on the rows already on screen. activeSession is set two lines up, so everything
+    // needed to know which row is current is in hand; waiting for the refresh below only adds its IPC round-trip
+    // to what the eye reads as the click's response time. The refresh still runs and still wins — this only
+    // stops the row looking unresponsive while it does.
+    paintRowHighlights();
     // The sidebar follows the tab's project — and for a JOINED tab that is its HOME project (peerWsId). A live
     // tab has no local wsId, so the scope never moved and the pinned joined row landed under whatever project
     // happened to be active ("the live session jumped from MK-Crazy to my local project", Crazy's 07-19 report —
@@ -5761,6 +5766,18 @@ let _sessSig = '';
 // of workspaces whose re-check is already pending/spent, so a project that truly emptied still paints its notice.
 let _sessRecheckTimer = null;
 const _sessEmptyRechecked = new Set();
+// Move the highlight onto whatever is active RIGHT NOW, without rebuilding anything. Only toggles classes on
+// rows that already exist, so it is cheap, synchronous, and safe to call straight from a click handler — which
+// is the point: the full refresh below cannot paint until its IPC call returns, and on a large project that is
+// long enough to feel like the click was dropped. Callers paint first and let the refresh confirm.
+function paintRowHighlights() {
+  if (!sessListEl) return;
+  Array.prototype.forEach.call(sessListEl.querySelectorAll('.sess'), (row) => {
+    const sid = row.dataset.id, tb = row.dataset.tab, lv = row.dataset.livetab;
+    if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('sess-done', sessionNeedsAttention(sid)); row.classList.toggle('busy', sessionBusyInTab(sid)); }
+    if (tb || lv) row.classList.toggle('active', (tb || lv) === activeTabId);
+  });
+}
 async function refreshSessions() {
   paintCrumb();                                                                     // the bar names where the work is; every path that renames a session or moves a tab already lands here
   if (sessListEl && sessListEl.querySelector('.sess-rename')) return;              // a rename input is focused → defer the whole refresh so a background poll can't wipe the in-progress edit; commit() re-runs refreshSessions when done
@@ -5929,11 +5946,8 @@ async function refreshSessions() {
     sh: sharedSessionId || '',
   });
   if (sig === _sessSig && sessListEl.querySelector('.sess')) {                       // structure unchanged → just move the highlight (no flicker)
-    Array.prototype.forEach.call(sessListEl.querySelectorAll('.sess'), (row) => {
-      const sid = row.dataset.id, tb = row.dataset.tab, lv = row.dataset.livetab;
-      if (sid) { row.classList.toggle('active', sid === activeSession); row.classList.toggle('sess-done', sessionNeedsAttention(sid)); row.classList.toggle('busy', sessionBusyInTab(sid)); }
-      if (tb || lv) row.classList.toggle('active', (tb || lv) === activeTabId);
-    });
+    paintRowHighlights();                                                            // …the same pass the click already ran optimistically; re-running it confirms rather than changes
+
     syncRowFlairs();                                                                // …and reconcile the non-active trees' rails, which this early return would otherwise skip
     updateCollab(); pollTitles(); return;
   }

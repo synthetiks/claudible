@@ -255,6 +255,27 @@ none('the build no longer excludes native-module build debris',
   /iobj|ipdb|tlog|lastbuildstate/.test(fileRules) ? [] : ['no exclusion matches the debris the toolchain emits']);
 
 // ---------------------------------------------------------------------------------------------------------
+// 7f. Clicking a session moves the highlight immediately. The sidebar's full refresh cannot paint until its
+//    IPC call returns, which on a large project is long enough that the click reads as dropped — so the row
+//    highlight is painted synchronously first and the refresh confirms it afterwards. Three things have to
+//    hold for that to keep working: the paint helper must be reachable from the tab switch, the tab switch
+//    must stay synchronous (an `await` anywhere above the paint puts the delay straight back), and the
+//    refresh's no-structural-change short-circuit must still exist, or every click rebuilds the whole list.
+// ---------------------------------------------------------------------------------------------------------
+const setActiveTabBody = (APP.match(/function setActiveTab\([\s\S]*?\n}/) || [''])[0];
+none('the tab switch does not paint the row highlight itself',
+  /paintRowHighlights\(\)/.test(setActiveTabBody) ? [] : ['setActiveTab never calls paintRowHighlights']);
+none('the tab switch became asynchronous — the optimistic paint is behind an await again',
+  /async function setActiveTab/.test(APP) || /await/.test(setActiveTabBody)
+    ? ['setActiveTab is async or awaits before painting'] : []);
+const paintBody = (APP.match(/function paintRowHighlights\([\s\S]*?\n}/) || [''])[0];
+none('the highlight paint is no longer a synchronous class-only pass',
+  paintBody && !/await|sessionListWs|innerHTML/.test(paintBody)
+    ? [] : ['paintRowHighlights awaits, fetches, or rebuilds DOM']);
+none('the sidebar refresh lost its no-structural-change short-circuit',
+  /sig === _sessSig/.test(APP) ? [] : ['every refresh now rebuilds the list']);
+
+// ---------------------------------------------------------------------------------------------------------
 // 8. "The active tab always has a sidebar row." A tab can adopt a promptless session by a non-'new' path (an
 //    explicitly-opened session goes unresumable and the pty falls back to a fresh id) — bornNew is false, the
 //    session has 0 messages, so it lands in neither the saved list nor the draft bucket and the ACTIVE tab
