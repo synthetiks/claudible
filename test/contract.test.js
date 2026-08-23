@@ -276,6 +276,28 @@ none('the sidebar refresh lost its no-structural-change short-circuit',
   /sig === _sessSig/.test(APP) ? [] : ['every refresh now rebuilds the list']);
 
 // ---------------------------------------------------------------------------------------------------------
+// 7g. Deleting a session evicts it from the cached answer the drift guard reads. That guard decides whether a
+//    continuation's parent still exists by asking this project's session cache; while the cache still lists a
+//    just-deleted id it ACQUITS a parent that is gone, and a link to a ghost is written and published. So the
+//    delete must remove the id from `ids` AND its row from `list`. It must NOT refresh `ts`: the guard treats
+//    a recent timestamp as evidence, and stamping this stale snapshot fresh would launder it for every other
+//    id it still holds — a fix that traded one wrong answer for a larger set of them.
+// ---------------------------------------------------------------------------------------------------------
+const delBody = (APP.match(/async function deleteSession\([\s\S]*?\n}/) || [''])[0];
+const evictSeg = (delBody.match(/const c = _wsSessCache\.get\(myWs\);[\s\S]{0,400}/) || [''])[0];
+none('deleting a session leaves it in the cache the drift guard reads',
+  evictSeg ? [] : ['deleteSession never evicts from _wsSessCache']);
+none('the delete eviction does not drop the id from both the id set and the row list',
+  /c\.ids = c\.ids\.filter/.test(evictSeg) && /c\.list = c\.list\.filter/.test(evictSeg)
+    ? [] : ['eviction touches only one of ids/list']);
+none('the delete eviction restamps the cache timestamp, laundering a stale snapshot as fresh',
+  /c\.ts\s*=/.test(evictSeg) ? ['eviction assigns c.ts'] : []);
+// …and the guard it protects must still be the one asking, on the unfiltered ids.
+none('the drift guard no longer judges on the cached id set',
+  /const parentGone = \(id\) => \{[\s\S]{0,600}?c\.ids\.includes\(id\)/.test(APP)
+    ? [] : ['parentGone no longer reads c.ids']);
+
+// ---------------------------------------------------------------------------------------------------------
 // 8. "The active tab always has a sidebar row." A tab can adopt a promptless session by a non-'new' path (an
 //    explicitly-opened session goes unresumable and the pty falls back to a fresh id) — bornNew is false, the
 //    session has 0 messages, so it lands in neither the saved list nor the draft bucket and the ACTIVE tab

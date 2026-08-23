@@ -5626,6 +5626,19 @@ async function deleteSession(id, scope, force) {
     // it, the CLI refuses, and the tab comes up on an unopenable session. savePrefs is a synchronous file write,
     // so this lands even if the app is closed a second later.
     if (lastSessionFor(myWs) === id) forgetLastSession(myWs);
+    // …and take the deleted id out of this project's cached answer. The drift guard (`:733`) decides whether a
+    // continuation's parent still exists by asking this cache, and a cache that still lists what was just
+    // deleted ACQUITS a parent that is gone: seconds after a delete, a fresh conversation gets recorded as
+    // continuing from it, and that link is published to everyone. Evict the id and its row and nothing else —
+    // `ts` is deliberately left alone, because refreshing it would pass this stale snapshot off as a fresh
+    // answer for every OTHER id it still lists, which is the opposite of the fix.
+    try {
+      const c = _wsSessCache.get(myWs);
+      if (c) {
+        if (Array.isArray(c.ids)) c.ids = c.ids.filter((x) => x !== id);
+        if (Array.isArray(c.list)) c.list = c.list.filter((s) => !s || s.id !== id);
+      }
+    } catch {}
   }
   if (scope === 'everywhere') { try { toast(r && r.ok ? 'Deleted everywhere' : 'Deleted here — GitHub removal failed, try Sync'); } catch {} }
   refreshSessions();
