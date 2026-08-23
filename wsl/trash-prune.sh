@@ -56,8 +56,18 @@ zap() {
     g="$p"; [ -d "$p/.git" ] || g=""
     if [ -n "$g" ]; then
       dirty="$(git -C "$g" status --porcelain 2>/dev/null)"
-      ahead="$(git -C "$g" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
-      case "$ahead" in ''|*[!0-9]*) ahead=0 ;; esac
+      # "No upstream" and "nothing to push" are NOT the same answer, and `|| echo 0` used to say both
+      # with the same word. A repo that was never given a remote - or that sits on a detached HEAD -
+      # cannot resolve @{u}, so it read as fully-pushed and was deleted, taking commits that existed
+      # nowhere else. Ask whether an upstream exists FIRST, and only then how far ahead of it we are.
+      if git -C "$g" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+        ahead="$(git -C "$g" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+        case "$ahead" in ''|*[!0-9]*) ahead=0 ;; esac
+      elif git -C "$g" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+        ahead=1        # commits, but nowhere to have pushed them: every one of them is unique to this copy
+      else
+        ahead=0        # no commits at all - there is nothing here to lose, so the caps still apply
+      fi
       if [ -n "$dirty" ] || [ "$ahead" -gt 0 ]; then
         kept_dirty=$((kept_dirty+1))
         return 0

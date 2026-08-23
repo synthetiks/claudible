@@ -205,6 +205,25 @@ none('the wrapper\'s mode error message lists a different set than the wrapper a
     ? [] : [`says "${modeErrModes.join('|')}", accepts "${acceptedModes.join('|')}"`]);
 
 // ---------------------------------------------------------------------------------------------------------
+// 7c. The trash sweep must not read "this repo has no upstream" as "this repo has nothing to push". Those are
+//    different answers, and a `|| echo 0` fallback used to give them the same word: a trashed repo that was
+//    never given a remote, or one on a detached HEAD, resolved no upstream, counted as 0 ahead, and was
+//    deleted along with commits that existed nowhere else. The retention block must therefore PROBE for an
+//    upstream before counting, and must have a branch that keeps a repo which has commits but no upstream.
+//    Deliberately NOT asserted: that a repo with no commits at all is kept — an empty directory is exactly
+//    what the age and size caps exist to reclaim.
+// ---------------------------------------------------------------------------------------------------------
+const PRUNE = read('wsl/trash-prune.sh');
+none('the trash sweep counts commits ahead without first checking an upstream exists',
+  /rev-parse\s+--abbrev-ref\s+--symbolic-full-name\s+'@\{u\}'/.test(PRUNE)
+    ? [] : ['no `@{u}` existence probe in trash-prune.sh']);
+none('the trash sweep has no branch keeping a repo whose commits have nowhere to have been pushed',
+  /rev-parse\s+--verify\s+-q\s+HEAD/.test(PRUNE) ? [] : ['no HEAD-exists branch in trash-prune.sh']);
+// The probe is only worth anything if a nonzero count still means KEEP.
+none('the trash sweep no longer retains on a nonzero ahead-count',
+  /\[\s*"\$ahead"\s*-gt\s*0\s*\]/.test(PRUNE) ? [] : ['the `ahead -gt 0` retention test is gone']);
+
+// ---------------------------------------------------------------------------------------------------------
 // 8. "The active tab always has a sidebar row." A tab can adopt a promptless session by a non-'new' path (an
 //    explicitly-opened session goes unresumable and the pty falls back to a fresh id) — bornNew is false, the
 //    session has 0 messages, so it lands in neither the saved list nor the draft bucket and the ACTIVE tab
