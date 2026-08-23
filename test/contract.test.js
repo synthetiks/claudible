@@ -179,6 +179,32 @@ none('the node-path guard is vacuous — it matched fewer than 8 node-invoking s
   nodeUsers.length >= 8 ? [] : [`only ${nodeUsers.length} matched: ${nodeUsers.join(' ')}`]);
 
 // ---------------------------------------------------------------------------------------------------------
+// 7b. The strategy installer's mode set matches the wrapper that receives it. main.js picks the mode string it
+//    sends; strategy-files.sh allowlists what it accepts. Nothing type-checks that seam — and when a third mode
+//    was added to the app but not to the wrapper, the feature failed at its very first step for everyone, with
+//    a well-formed error nobody surfaced. Both ends must name the SAME modes. The rejection message counts too:
+//    it is the only place a user ever sees this list, and a stale one sends them hunting the wrong bug.
+// ---------------------------------------------------------------------------------------------------------
+const SFSH = read('wsl/strategy-files.sh');
+const installerBody = (MAIN.match(/async function installStrategyFiles\([\s\S]*?\n}/) || [''])[0];
+const modePick = (installerBody.match(/\bconst m = [^;]+;/) || [''])[0];
+const sentModes = uniq(matches(modePick, /'([a-z]+)'/g)).sort();
+const acceptedModes = ((SFSH.match(/^case "\$MODE" in ([^)]+)\)/m) || [, ''])[1])
+  .split('|').map((s) => s.trim()).filter(Boolean).sort();
+none('the strategy installer sends a mode the wrapper rejects',
+  sentModes.filter((m) => !acceptedModes.includes(m)).map((m) => `main.js sends '${m}', strategy-files.sh rejects it`));
+none('the strategy wrapper accepts a mode nothing sends',
+  acceptedModes.filter((m) => !sentModes.includes(m)).map((m) => `strategy-files.sh accepts '${m}', main.js never sends it`));
+none('the strategy mode guard is vacuous — fewer than 3 modes read off either end',
+  sentModes.length >= 3 && acceptedModes.length >= 3
+    ? [] : [`main.js: ${sentModes.join(',') || 'none'} · strategy-files.sh: ${acceptedModes.join(',') || 'none'}`]);
+const modeErrModes = ((SFSH.match(/"error":"mode must be ([^"]+)"/) || [, ''])[1])
+  .split('|').map((s) => s.trim()).filter(Boolean).sort();
+none('the wrapper\'s mode error message lists a different set than the wrapper accepts',
+  modeErrModes.join(',') === acceptedModes.join(',')
+    ? [] : [`says "${modeErrModes.join('|')}", accepts "${acceptedModes.join('|')}"`]);
+
+// ---------------------------------------------------------------------------------------------------------
 // 8. "The active tab always has a sidebar row." A tab can adopt a promptless session by a non-'new' path (an
 //    explicitly-opened session goes unresumable and the pty falls back to a fresh id) — bornNew is false, the
 //    session has 0 messages, so it lands in neither the saved list nor the draft bucket and the ACTIVE tab
