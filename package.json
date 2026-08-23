@@ -75,6 +75,7 @@
     "productName": "Claudible",
     "copyright": "Copyright Ã‚Â© 2026 the_crazydev",
     "asar": false,
+    "electronLanguages": ["en-US"],
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -101,6 +102,7 @@
       "!**/.git*",
       "!**/.DS_Store",
       "!**/*.{o,obj,gyp,gypi}",
+      "!**/*.{iobj,ipdb,tlog,exp,lib,filters,vcxproj,recipe,lastbuildstate}",
       "!**/node_modules/.cache/**",
       "LICENSE",
       "THIRD-PARTY-LICENSES.md"

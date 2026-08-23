@@ -4532,7 +4532,12 @@ function shadowCompareSessions(ws, painted) {
           extraOnScreen: onlyPainted.length, missingFromScreen: onlyComputed.length, titleDiffs: renamed,
           unreadable: blocked.length,
         });
-        try { fs.appendFileSync(_shadowLog(), line + '\n'); } catch {}
+        // Size-capped like the live-timing journal (`:2231`), and for the same reason: this appends once per
+        // sidebar computation, for as long as the shadow comparison stays switched on, with nothing anywhere
+        // that would ever shorten it. What it is for is spotting a disagreement in the recent past, so the
+        // oldest lines are the ones worth losing.
+        try { const f = _shadowLog(); try { if (fs.statSync(f).size > 256 * 1024) fs.truncateSync(f, 0); } catch {}
+          fs.appendFileSync(f, line + '\n'); } catch {}
       } catch (e) {}   // a comparison that throws is a bug in the comparison, never in the sidebar
     }, ws);
   } catch (e) {}   // never reaches the user

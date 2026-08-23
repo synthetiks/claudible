@@ -224,6 +224,37 @@ none('the trash sweep no longer retains on a nonzero ahead-count',
   /\[\s*"\$ahead"\s*-gt\s*0\s*\]/.test(PRUNE) ? [] : ['the `ahead -gt 0` retention test is gone']);
 
 // ---------------------------------------------------------------------------------------------------------
+// 7d. Every rolling diagnostic journal is size-capped. These files are appended to on a hot path — one per
+//    live-collab stage, one per sidebar computation — and nothing anywhere shortens them, so an uncapped one
+//    grows without limit on a machine that leaves the feature on. Both must check their size and truncate
+//    before appending. Asserted as a pair so a third journal added next to them is an obvious omission.
+// ---------------------------------------------------------------------------------------------------------
+const cappedBefore = (openerRe) => {
+  const m = MAIN.match(openerRe);
+  if (!m) return 'the write site is gone or was renamed';
+  const seg = MAIN.slice(m.index, MAIN.indexOf('appendFileSync', m.index));
+  return /truncateSync/.test(seg) && /statSync\([^)]*\)\.size/.test(seg) ? '' : 'appends without a size check';
+};
+none('the live-collab timing journal is not size-capped before it appends',
+  [cappedBefore(/const f = path\.join\(RT, 'live-timing\.log'\)/)].filter(Boolean));
+none('the sidebar shadow-comparison log is not size-capped before it appends',
+  [cappedBefore(/const f = _shadowLog\(\)/)].filter(Boolean));
+
+// ---------------------------------------------------------------------------------------------------------
+// 7e. The packaged build ships one locale and no build debris. Electron bundles 50-odd locale .pak files by
+//    default; this app has no i18n code at all — the only locale-aware calls are date formatting — so every
+//    one but en-US is dead weight the user downloads. The native-module build leaves its own litter, and the
+//    exclusion that was meant to catch it listed extensions the toolchain does not actually produce.
+// ---------------------------------------------------------------------------------------------------------
+const PKG = JSON.parse(read('package.json'));
+const langs = (PKG.build && PKG.build.electronLanguages) || null;
+none('the build ships every Electron locale',
+  Array.isArray(langs) && langs.length ? [] : ['no build.electronLanguages — all ~55 locale .pak files ship']);
+const fileRules = ((PKG.build && PKG.build.files) || []).join('\n');
+none('the build no longer excludes native-module build debris',
+  /iobj|ipdb|tlog|lastbuildstate/.test(fileRules) ? [] : ['no exclusion matches the debris the toolchain emits']);
+
+// ---------------------------------------------------------------------------------------------------------
 // 8. "The active tab always has a sidebar row." A tab can adopt a promptless session by a non-'new' path (an
 //    explicitly-opened session goes unresumable and the pty falls back to a fresh id) — bornNew is false, the
 //    session has 0 messages, so it lands in neither the saved list nor the draft bucket and the ACTIVE tab
