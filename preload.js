@@ -94,9 +94,6 @@ contextBridge.exposeInMainWorld('claudible', {
   modelSet: (id) => ipcRenderer.invoke('model:set', id),   // '' = let Claude Code choose; otherwise rides --model into the NEXT session
   permissionModeGet: () => ipcRenderer.invoke('permissionMode:get'),
   permissionModeSet: (mode) => ipcRenderer.invoke('permissionMode:set', mode),   // 'default' (the stored name for Manual) | 'acceptEdits' | 'plan' | 'auto' | 'bypass'
-  modelStrategyGet: () => ipcRenderer.invoke('modelStrategy:get'),
-  modelStrategySet: (v, cfg) => ipcRenderer.invoke('modelStrategy:set', v, cfg),   // 'planBigExecSmall' | 'custom' (+ seat cfg) | 'off' (default)
-  modelStrategyCustomGet: () => ipcRenderer.invoke('modelStrategy:customGet'),      // saved custom seat picks {seat:{model,effort}}
   // named strategies
   strategyList: () => ipcRenderer.invoke('strategy:list'),                           // {active, list:[{id,name,seats}]}
   strategyActivate: (id) => ipcRenderer.invoke('strategy:activate', id),             // 'off' | 'pb' | <id>

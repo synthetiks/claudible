@@ -4986,10 +4986,9 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
 //   context-hook nudge text instead, and modelStrategyNow() defaults OFF (opt-in only).
 // ---------------------------------------------------------------------------------------------------------
 {
-  // (reinstated with the fix/modelstrategy reapply; renumbering dropped — the checksums branch claims 114/115)
-  none('main.js: modelStrategyNow no longer defaults OFF (must require an exact allowlisted opt-in)',
-    /function modelStrategyNow\(\) \{ return \['planBigExecSmall', 'custom'\]\.includes\(registry\.modelStrategy\) \? registry\.modelStrategy : 'off'; \}/.test(MAIN)
-      ? [] : ['modelStrategyNow does not gate on the explicit planBigExecSmall|custom allowlist']);
+  // The pin that asserted modelStrategyNow()'s opt-in allowlist retired with the function itself — the drawer's
+  // strategy:activate path owns the stored mode now. What replaces it is the pin below asserting the whole
+  // three-pill channel STAYS deleted; the opt-in default it guarded is no longer expressible.
   const SESSSH = read('wsl/session.sh');
   const WIN = read('runners/win.js');
   none('wsl/session.sh: a hard CLAUDE_CODE_SUBAGENT_MODEL pin has crept back in (a default must never override an explicit model choice)',
@@ -5027,10 +5026,21 @@ none('the single-instance lock is gone (a double-launch races voice/pollers/sync
     none('strategy-files-tool: seat overrides are no longer allowlisted (unknown values must reject, never interpolate)',
       /MODELS\.includes\(v\.model\)/.test(TOOL) && /EFFORTS\.includes\(v\.effort\)/.test(TOOL) ? [] : ['the model/effort allowlist checks are gone']);
   }
-  // (d) The toggle must keep REPORTING whether the files really landed (a real readback) — a return without
-  //     filesOk turns the honest toast back into a guess.
-  none('main.js: modelStrategy:set no longer reports filesOk (the toast would claim installs it cannot see)',
-    /return \{ ok: true, modelStrategy: now, filesOk \}/.test(MAIN) ? [] : ['the set handler return dropped filesOk']);
+  // (d) The ACTIVE path must keep REPORTING whether the files really landed (a real readback) — a return
+  //     without filesOk turns the honest toast back into a guess. This moved from the retired
+  //     `modelStrategy:set` to `strategy:activate`, which is the only handler that installs anything now.
+  none('main.js: strategy:activate no longer reports filesOk (the toast would claim installs it cannot see)',
+    /return \{ ok: persisted, filesOk, active: registry\.activeStrategy/.test(MAIN)
+      ? [] : ['the activate handler return dropped filesOk']);
+  // (d2) …and the three-pill channel it replaced stays DELETED. Three handlers and three preload bridges with
+  //      zero callers were carried for a whole release; a re-added one is dead weight that looks load-bearing.
+  none('the retired three-pill modelStrategy channel is back',
+    ['modelStrategy:get', 'modelStrategy:set', 'modelStrategy:customGet']
+      .filter((ch) => MAIN.includes(`'${ch}'`) || PRELOAD.includes(`'${ch}'`)));
+  // …while the stored key itself must SURVIVE: strategy:activate mirrors into it for builds predating the drawer.
+  none('the legacy modelStrategy registry key was removed along with its dead handlers',
+    /registry\.modelStrategy = registry\.activeStrategy === 'off'/.test(MAIN)
+      ? [] : ['strategy:activate no longer mirrors the legacy key']);
   // (e) The old env rail stays DEAD: CLAUDIBLE_MODEL_STRATEGY must not reappear in any spawn path. Two
   //     competing mechanisms claiming one setting is how the original cosmetic-control bug family started.
   {

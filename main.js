@@ -3227,14 +3227,12 @@ ipcMain.handle('model:set', (e, id) => {
 // chosen model while SUBAGENTS (the token-heavy leg: bulk reading, sweeps, workflows) are nudged toward
 // Sonnet 5 via the context-hook text (see hooks/context-hook.js). DEFAULT OFF — a default only, never an
 // override: CLAUDE_CODE_SUBAGENT_MODEL was measured (API stamps) overriding explicit spawn-time models, so we no
-// longer hard-pin it — absent/unknown registry value means disabled; only explicit opt-in ('planBigExecSmall')
-// enables the nudge. Applies to the NEXT session each tab launches.
-function modelStrategyNow() { return ['planBigExecSmall', 'custom'].includes(registry.modelStrategy) ? registry.modelStrategy : 'off'; }
-ipcMain.handle('modelStrategy:get', () => modelStrategyNow());
-// The custom strategy's saved seat picks. The renderer's editor reads this to paint; the
-// values are re-validated by strategy-files-tool.js's allowlist on every write, so a stale/hand-edited
-// registry can never smuggle text into a generated file.
-ipcMain.handle('modelStrategy:customGet', () => (registry.customStrategy && typeof registry.customStrategy === 'object') ? registry.customStrategy : {});
+// longer hard-pin it — absent/unknown registry value means disabled; only explicit opt-in enables the nudge.
+// Applies to the NEXT session each tab launches.
+//
+// The three-pill era's own channels are GONE — the named-strategy drawer below replaced them and nothing in the
+// renderer ever called them again. `registry.modelStrategy` itself is NOT gone: it is still written and read as
+// the legacy mirror of `activeStrategy`, for builds that predate the drawer.
 // ONE installer for every strategy path. mode 'off' removes the trigger; 'on' installs the team,
 // with optional seat overrides. The tool allowlists every value; a single quote anywhere in the JSON rejects
 // the config rather than risk breaking out of the bash single-quoted argument. Returns filesOk — a real
@@ -3248,20 +3246,6 @@ async function installStrategyFiles(mode, cfg) {
   let fr = null; try { fr = JSON.parse(String((files && files.stdout) || '').trim() || 'null'); } catch {}
   return !!(fr && fr.ok) && !(files && files.err);
 }
-ipcMain.handle('modelStrategy:set', async (e, v, cfg) => {
-  registry.modelStrategy = ['planBigExecSmall', 'custom'].includes(v) ? v : 'off';
-  if (v === 'custom' && cfg && typeof cfg === 'object') registry.customStrategy = cfg;
-  const persisted = saveRegistry();
-  // The toggle CAUSES its effect — ON installs the five team agents + the plan-big skill
-  // into the guest's ~/.claude (custom = same files, the user's seat picks); OFF removes only the skill (the
-  // trigger), leaving the inert agent files. The skill hot-loads into running sessions; agent definitions load
-  // at session START — the renderer's toast carries that split honestly. A script failure downgrades the
-  // answer rather than lying about it.
-  const now = modelStrategyNow();
-  const filesOk = await installStrategyFiles(now === 'off' ? 'off' : 'on', now === 'custom' ? ((registry.customStrategy && typeof registry.customStrategy === 'object') ? registry.customStrategy : {}) : null);
-  if (!persisted) return { ok: false, error: 'could not write workspaces.json — applies to THIS run only', modelStrategy: now, filesOk };
-  return { ok: true, modelStrategy: now, filesOk };
-});
 // ---- named strategies: the drawer picks, the panel edits ----
 // registry.strategies = [{id, name, seats}], registry.activeStrategy = 'off' | 'pb' | <id>.
 // Only the ACTIVE strategy's files exist on disk; activation swaps them. One-time migration folds the old
