@@ -1,7 +1,7 @@
 {
   "name": "claudible",
-  "version": "0.9.14",
-  "description": "Multiplayer cockpit for Claude Code: invite anyone into your live session to watch, talk, and co-drive. Fully-local push-to-talk voice, live telemetry, an agents cockpit, session history with one-click revert. Windows (WSL2 or native) Ã‚Â· Linux Ã‚Â· macOS.",
+  "version": "0.9.15",
+  "description": "Multiplayer cockpit for Claude Code: invite anyone into your live session to watch, talk, and co-drive. Fully-local push-to-talk voice, live telemetry, an agents cockpit, session history with one-click revert. Windows (WSL2 or native) · Linux · macOS.",
   "license": "MIT",
   "author": "the_crazydev",
   "homepage": "https://github.com/synthetiks/claudible#readme",
@@ -73,7 +73,7 @@
   "build": {
     "appId": "dev.thecrazydev.claudible",
     "productName": "Claudible",
-    "copyright": "Copyright Ã‚Â© 2026 the_crazydev",
+    "copyright": "Copyright © 2026 the_crazydev",
     "asar": false,
     "electronLanguages": ["en-US"],
     "directories": {

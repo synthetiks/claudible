@@ -4,6 +4,48 @@ All notable changes to Claudible are documented here.
 
 ## [Unreleased]
 
+## [0.9.15] — 2026-08-24
+
+A debugging release. Two bugs in here could destroy work or corrupt your session history,
+and both had already shipped. The rest is speed: the sidebar no longer re-reads every
+conversation you have ever had each time you click one. Unlike 0.9.13 and 0.9.14, this
+release **was** exercised on both maintainers' machines before it was cut — though the
+automated suite still checks the code's wiring rather than driving the app.
+
+**Fixed**
+- **The trash sweep could delete a repository whose every commit was unpushed.** The guard
+  meant to protect unpushed work asked how many commits were ahead of the upstream, and
+  treated "this repo has no upstream at all" as "nothing left to push" — so a repository
+  whose work existed nowhere else was the case it deleted most confidently. It now keeps
+  anything with commits and no upstream, and anything on a detached HEAD.
+- **Custom agent graphs never worked.** Selecting one failed at the first step for everyone,
+  since the feature shipped, with an error nothing surfaced — so it simply did nothing.
+  They work now.
+- **A deleted conversation could be recorded as the parent of a new one.** Deleting a session
+  and then starting a fresh one within about half a minute could write a permanent link to
+  the conversation you had just removed, and share it with your collaborators.
+- **A collaborator's imported conversation no longer claims to be from "just now".** It now
+  shows when it was actually worked in.
+
+**Faster**
+- **The session list stopped re-reading everything, every time.** Opening the sidebar parsed
+  every conversation in the project on every single click. It now re-reads only what changed:
+  measured on a project with 68 MB of history, a click went from ~355 ms to ~42 ms. The
+  effect grows with how much history you have.
+- **Clicking a session highlights it immediately** instead of waiting for the list to reload.
+- **The installer is roughly 61 MB smaller** — it was shipping language files for fifty-odd
+  languages the app has no translations for, plus build leftovers.
+
+**Changed**
+- A diagnostic log that could grow without limit is now capped.
+- Removed three unused internal channels left over from the older strategy switcher.
+
+**Known issues**
+- After the host clears a session, collaborators see the old conversation listed alongside
+  its replacement for a few minutes, until the new transcript finishes syncing.
+- A conversation worked in from two machines during a shared live session can end up with a
+  different copy on each, and syncing will not reconcile them.
+
 ## [0.9.14] — 2026-08-19
 
 Agents become something you can shape. You can now build, name and save your own execution
