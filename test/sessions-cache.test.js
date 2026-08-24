@@ -82,11 +82,34 @@ for (const f of fs.readdirSync(cacheDir)) {
 }
 ok(rec(run(), ID).preview, 'omega', 'a well-keyed but wrong-shaped cache entry was trusted');
 
+// --- 6b. a foreign session's activity clock ignores the import's mtime ---------------------------------------
+//     An import's mtime says when the file LANDED, never when anyone worked in it. Folding it into `used` made
+//     a collaborator's old conversation read "just now" the moment it arrived. The content timestamps survive
+//     an import untouched, so a foreign row still gets a real clock — just not the wrong one.
+{
+  const FID = 'bbbbbbbb-1111-2222-3333-444444444444';
+  const FF = path.join(proj, FID + '.jsonl');
+  const OLD = '2020-05-05T10:00:00.000Z';
+  const oldTs = Math.trunc(new Date(OLD).getTime() / 1000);
+  fs.writeFileSync(FF, turn('an old conversation', OLD));   // content says 2020; the file itself is brand new
+  fs.writeFileSync(path.join(proj, '.claudible-foreign'), FID + '\n');
+  const wt = path.join(tmp, 'wt');
+  fs.mkdirSync(path.join(wt, 'sessions', 'someone'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'sessions', 'someone', FID + '.jsonl'), '');
+  const out = JSON.parse(cp.execFileSync(process.execPath, [TOOL, '--with-authors', proj, wt], {
+    env: Object.assign({}, process.env, { CLAUDIBLE_CACHE_DIR: cacheDir }), encoding: 'utf8',
+  }));
+  const r = out.find((x) => x.id === FID) || {};
+  ok(r.author, 'someone', 'the foreign session was not recognised as imported');
+  ok(r.used, oldTs, 'a foreign row took its clock from the import time instead of its own content');
+}
+
 // --- 6. a deleted transcript leaves the cache ----------------------------------------------------------------
 fs.unlinkSync(F);
 run();
 const left = JSON.parse(fs.readFileSync(path.join(cacheDir, fs.readdirSync(cacheDir)[0]), 'utf8'));
-ok(Object.keys(left.e || {}).length, 0, 'a deleted session stayed in the cache');
+ok(Object.prototype.hasOwnProperty.call(left.e || {}, ID), false, 'a deleted session stayed in the cache');
+ok(Object.keys(left.e || {}).length > 0, true, 'the eviction check is vacuous — nothing else was cached');
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
 console.log(`sessions-cache: ${pass} passed, ${fail} failed`);

@@ -303,12 +303,19 @@ function main() {
     //   · the activation stamp session.sh drops in .claudible-used/<id> when it actually resumes the
     //     session (opening a conversation to READ it appends nothing to the .jsonl — without the stamp its
     //     row sits at "9d ago" forever no matter how often it's opened),
-    //   · the fs mtime (still the freshest signal for a local file mid-write).
+    //   · the fs mtime (still the freshest signal for a local file mid-write) — but ONLY for a session this
+    //     machine authored. An imported transcript's mtime says when the IMPORT happened, never when anyone
+    //     worked in it, so folding it in made a collaborator's week-old conversation read "just now" the
+    //     moment it landed. renderer/app.js:5934 already names this leak by name. The content timestamps and
+    //     the activation stamp both survive an import untouched, so a foreign row still gets a real clock.
+    //     NOTE this does not make the year-2000 import stamp removable: it remains the last-ditch ordering
+    //     guard on the raw-mtime fallbacks (session.sh:406, app.js:5943) for the case where the foreign
+    //     sidecar itself is missing, and those paths decide whether an untrusted transcript can auto-resume.
     // Emitted only in --with-authors mode, like `author`: the unflagged (parity-oracle) shape is untouched.
     if (WITH_AUTHORS) {
       let act = 0;
       try { act = Math.trunc(fs.statSync(path.join(proj, '.claudible-used', sid)).mtimeMs / 1000); } catch (e) {}
-      rec.used = Math.max(lastTs, act, mtime);
+      rec.used = foreign.has(sid) ? Math.max(lastTs, act) : Math.max(lastTs, act, mtime);
     }
     if (tombs.has(sid) && !kept.has(sid)) rec.deletedRemote = true;
     if (diverged.has(sid)) rec.diverged = true;
