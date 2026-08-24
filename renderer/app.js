@@ -908,7 +908,8 @@ function renderUsagePop() {
   // and nothing else — checked against every status.json on this machine — so there is no per-model figure to
   // show here: claude.ai's usage page breaks the week down by model, the CLI's rate_limits payload does not.
   // Iterating means the day it starts reporting one, the row appears with no change here.
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // (No local `esc` here: this file escapes through the global `escHtml` — see the note at the top. A
+  //  function-scoped copy is the shadowing hazard that note exists to prevent, and this one had no callers.)
   const NICE = { five_hour: '5-hour limit', seven_day: 'This week' };
   const ORDER = ['five_hour', 'seven_day'];
   const keys = Object.keys(_ownRate)
