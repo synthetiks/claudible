@@ -276,6 +276,27 @@ none('the sidebar refresh lost its no-structural-change short-circuit',
   /sig === _sessSig/.test(APP) ? [] : ['every refresh now rebuilds the list']);
 
 // ---------------------------------------------------------------------------------------------------------
+// 7h. The transcript parse cache lives OUTSIDE every git tree. Correctness of the cache is proved
+//    behaviourally in test/sessions-cache.test.js; what cannot be tested there is the one design decision that
+//    would quietly undo it — putting the cache beside the transcripts or inside the sync worktree. A synced
+//    cache re-imports the my-own-rewrite-looks-like-a-fork bug class: two machines would exchange each other's
+//    parse results as if they were their own. It must be keyed under the user's home and nowhere else.
+//    Also pinned: readdir stays the sole truth about which sessions exist, so a cache can never invent or hide
+//    a row — it may only make an existing one cheaper.
+// ---------------------------------------------------------------------------------------------------------
+{
+  const STOOL = read('wsl/sessions-tool.js');
+  none('the transcript cache no longer lives under the user home',
+    /os\.homedir\(\)[^\n]*'\.claudible'[^\n]*'cache'/.test(STOOL)
+      ? [] : ['the cache path is not homedir/.claudible/cache']);
+  none('the transcript cache was moved beside the transcripts or into the sync worktree',
+    /cachePath[\s\S]{0,400}?path\.join\((?:proj|wt)\b/.test(STOOL)
+      ? ['cachePath builds a path from proj or wt'] : []);
+  none('readdir is no longer the sole enumeration of which sessions exist',
+    /names = fs\.readdirSync\(proj\)/.test(STOOL) ? [] : ['the project readdir was replaced']);
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // 7g. Deleting a session evicts it from the cached answer the drift guard reads. That guard decides whether a
 //    continuation's parent still exists by asking this project's session cache; while the cache still lists a
 //    just-deleted id it ACQUITS a parent that is gone, and a link to a ghost is written and published. So the

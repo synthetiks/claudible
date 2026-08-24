@@ -4,6 +4,56 @@
 // argv: [node, sessions-tool.js, <proj>, <wt?>]  — mirrors `python3 - "$PROJ" "$WT"`.
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+
+// --- parse cache -------------------------------------------------------------------------------------
+// preview/msgs/created/lastTs are derived from a transcript's BYTES and nothing else, so a file whose
+// identity has not changed can be answered from memory instead of re-read and re-parsed. On a project with a
+// long history that is the difference between reading tens of megabytes on EVERY session-list call and
+// reading none of it. Everything else in a record still comes from a fresh stat, and readdir remains the sole
+// truth about which sessions exist — a cache can make this faster, never wronger about what is there.
+//
+// THE KEY IS (size, mtimeMs, ctimeMs) AT FULL PRECISION — deliberately not the second-truncated mtime the
+// output carries. ctimeMs is load-bearing, not belt-and-braces: sessions-sync.sh stamps every imported
+// collaborator transcript `touch -d '2000-01-01T00:00:00'` so the auto-resume heuristic can never pick a
+// foreign file, which means for those sessions mtime is pinned at the sentinel FOREVER and a key without
+// ctime would degenerate to size-only. ctime moves on every import (the copy lands on a fresh inode and is
+// renamed into place), which is precisely when the content changed.
+//
+// The cache lives under the user's home, NOT beside the transcripts and NOT inside any git tree: a cache that
+// synced between machines would re-import the my-own-rewrite-looks-like-a-fork bug class. A missing, corrupt,
+// stale or unwritable cache costs one full parse — today's behaviour exactly — and never an error.
+const CACHE_VER = 1;
+// CLAUDIBLE_CACHE_DIR exists so the suite can point this at a scratch directory. It is the ONLY way to
+// sandbox it: os.homedir() reads USERPROFILE on Windows and ignores $HOME, so a test that set HOME would
+// silently write into the real cache instead. Never set in normal operation.
+function cachePath() {
+  try {
+    const h = crypto.createHash('sha1').update(path.resolve(proj)).digest('hex').slice(0, 16);
+    const base = process.env.CLAUDIBLE_CACHE_DIR || path.join(os.homedir(), '.claudible', 'cache');
+    return path.join(base, 'sessions-' + h + '.json');
+  } catch (e) { return ''; }
+}
+function loadCache() {
+  const p = cachePath();
+  if (!p) return {};
+  try {
+    const o = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (!o || o.v !== CACHE_VER || !o.e || typeof o.e !== 'object') return {};   // a version bump invalidates wholesale
+    return o.e;
+  } catch (e) { return {}; }
+}
+function saveCache(entries) {
+  const p = cachePath();
+  if (!p) return;
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const tmp = p + '.tmp.' + process.pid;                    // atomic: a torn cache must never be readable
+    fs.writeFileSync(tmp, JSON.stringify({ v: CACHE_VER, e: entries }));
+    fs.renameSync(tmp, p);
+  } catch (e) { /* a cache we cannot write is simply a cache we do not have */ }
+}
 
 // --with-authors (opt-in flag set by sessions.sh) additionally stamps each FOREIGN session with the
 // collaborator who created it, derived from the sync worktree's sessions/<author>/<id>.jsonl layout.
@@ -164,20 +214,33 @@ function main() {
   const files = names.filter(n => !n.startsWith('.') && n.endsWith('.jsonl'));
 
   const out = [];
+  const cacheIn = loadCache();
+  const cacheOut = {};              // rebuilt from the files present NOW, so a deleted session evicts itself
   for (const name of files) {
     const f = path.join(proj, name);
     const sid = name.slice(0, -6); // os.path.basename(f)[:-6] strips ".jsonl"
     let mtime;
+    let st = null;
     try {
-      mtime = Math.trunc(fs.statSync(f).mtimeMs / 1000);
+      st = fs.statSync(f);
+      mtime = Math.trunc(st.mtimeMs / 1000);
     } catch (e) {
       mtime = 0;
     }
+    // One stat already ran; the identity key costs nothing more than reading three fields off it.
+    const ckey = st ? (st.size + ':' + st.mtimeMs + ':' + st.ctimeMs) : '';
     let preview = '';
     let msgs = 0;
     let created = 0;
     let lastTs = 0;   // newest content timestamp — the "last real conversation activity" clock (see `used` below)
-    try {
+    const c = ckey ? cacheIn[sid] : null;
+    // Types are checked, not trusted: a hand-edited or half-written cache must fall back to a real parse
+    // rather than emit a record of the wrong shape. Wrong-but-well-formed is the failure mode worth fearing.
+    const hit = c && c.k === ckey && typeof c.p === 'string'
+      && typeof c.m === 'number' && typeof c.c === 'number' && typeof c.l === 'number' ? c : null;
+    if (hit) {
+      preview = hit.p; msgs = hit.m; created = hit.c; lastTs = hit.l;
+    } else try {
       const content = fs.readFileSync(f, 'utf8');
       for (const rawLine of content.split('\n')) {
         const line = rawLine.trim();
@@ -225,6 +288,7 @@ function main() {
     } catch (e) {
       // pass — keep whatever we accumulated
     }
+    if (ckey) cacheOut[sid] = { k: ckey, p: preview, m: msgs, c: created, l: lastTs };
     const rec = {
       id: sid,
       mtime: mtime,
@@ -257,6 +321,9 @@ function main() {
     const kb = b.created || b.mtime;
     return kb - ka;
   });
+  // Written AFTER the answer is fully assembled and BEFORE it is printed, so a cache write that fails cannot
+  // affect what the caller receives. saveCache never throws.
+  saveCache(cacheOut);
   process.stdout.write(dumpArr(out) + '\n');
 }
 
